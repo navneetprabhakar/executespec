@@ -43,7 +43,7 @@ python3 /home/admin_executespec_ai/executespec/infra/benchmark/scripts/swe-pro-i
   --tag swepro-iter1-s100 \
   --limit 100 \
   --seed 42 \
-  --concurrency 8 \
+  --concurrency 4 \
   --score-workers 8
 ```
 
@@ -56,9 +56,14 @@ python3 /home/admin_executespec_ai/executespec/infra/benchmark/scripts/swe-pro-i
   --model deepseek-v4-pro-native \
   --tag swepro-iter1-s100 \
   --set-file /home/admin_executespec_ai/swebench-bench/swepro-iter1-s100.instances.txt \
-  --concurrency 8 \
+  --concurrency 4 \
   --score-workers 8
 ```
+
+DeepSeek generation uses runner concurrency `4` after the invalid 2026-07-04 04:38 UTC Flash
+attempt showed repeated `api.deepseek.com` HTTP connect timeouts at feed concurrency `8`. Keep the
+server hard cap at `8`; it remains a safety ceiling, not the required feed rate for every provider.
+Scoring still uses `8` workers because it is local/docker verifier work, not provider API traffic.
 
 ## Polling and RCA rule
 

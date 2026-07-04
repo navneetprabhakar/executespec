@@ -82,6 +82,43 @@ def login() -> str:
     return token
 
 
+def start_tracking_run(token: str, provider: str, model: str, tag: str, total: int) -> str:
+    run = call(
+        "/api/v2/test/benchmark/start",
+        {
+            "suite": "SWE_BENCH",
+            "dataset": tag,
+            "provider": provider,
+            "model": model,
+            "k": 1,
+            "totalTasks": total,
+            "harborJobName": f"{tag}-{model}",
+        },
+        token,
+    )
+    run_id = run["id"]
+    print(f"[tracking] run_id={run_id}")
+    return run_id
+
+
+def post_tracking_event(token: str, run_id: str, body: dict) -> None:
+    call(f"/api/v2/test/benchmark/{run_id}/event", body, token)
+
+
+def fail_tracking_run(token: str, run_id: str, message: str) -> None:
+    try:
+        post_tracking_event(
+            token,
+            run_id,
+            {
+                "type": "RUN_FAILED",
+                "message": message[:1000],
+            },
+        )
+    except Exception as e:
+        print(f"[tracking] RUN_FAILED post failed: {type(e).__name__}: {e}", flush=True)
+
+
 def load_instances(path: str, limit: int, seed: int, set_file: str | None) -> list[str]:
     if set_file:
         return [line.strip() for line in Path(set_file).read_text().splitlines() if line.strip()]
@@ -162,11 +199,17 @@ def generate_one(instance: str, provider: str, model: str, token: str) -> dict:
     return row
 
 
-def generate_all(instances: list[str], provider: str, model: str, tag: str, concurrency: int) -> Path:
+def generate_all(
+    instances: list[str],
+    provider: str,
+    model: str,
+    tag: str,
+    concurrency: int,
+    token: str,
+) -> Path:
     manifest = BENCH_DIR / f"{tag}-{model}.manifest.jsonl"
     done = read_manifest(manifest)
     todo = [i for i in instances if i not in done]
-    token = login()
     preflight_backend_instances(instances, token)
     print(f"[generate] model={model} selected={len(instances)} done={len(done)} todo={len(todo)} concurrency={concurrency}", flush=True)
 
@@ -255,24 +298,11 @@ def publish(
     provider: str,
     model: str,
     tag: str,
+    token: str,
+    run_id: str,
 ) -> str:
-    token = login()
     by_instance = read_manifest(manifest)
     results = json.load(open(result_file))
-    run = call(
-        "/api/v2/test/benchmark/start",
-        {
-            "suite": "SWE_BENCH",
-            "dataset": tag,
-            "provider": provider,
-            "model": model,
-            "k": 1,
-            "totalTasks": len(instances),
-            "harborJobName": f"{tag}-{model}",
-        },
-        token,
-    )
-    run_id = run["id"]
     for inst in instances:
         row = by_instance.get(inst, {})
         scored = inst in results
@@ -285,8 +315,9 @@ def publish(
             outcome, reason = "NOT_SCORED", row.get("outcome")
         else:
             outcome, reason = ("RESOLVED" if reward else "UNRESOLVED"), row.get("outcome")
-        call(
-            f"/api/v2/test/benchmark/{run_id}/event",
+        post_tracking_event(
+            token,
+            run_id,
             {
                 "type": "TASK_SCORED",
                 "taskName": inst,
@@ -297,13 +328,8 @@ def publish(
                 "outcome": outcome,
                 "reason": reason,
             },
-            token,
         )
-    call(
-        f"/api/v2/test/benchmark/{run_id}/event",
-        {"type": "RUN_DONE", "message": f"{tag} scored"},
-        token,
-    )
+    post_tracking_event(token, run_id, {"type": "RUN_DONE", "message": f"{tag} scored"})
     print(f"[publish] {model} -> {run_id} resolved={sum(1 for v in results.values() if v)}/{len(instances)}")
     return run_id
 
@@ -352,11 +378,31 @@ def main() -> None:
     set_path.write_text("\n".join(instances) + "\n")
     print(f"[set] {set_path} count={len(instances)}")
 
-    manifest = generate_all(instances, args.provider, args.model, args.tag, args.concurrency)
-    patches, patch_instances = build_patches(manifest, instances, args.model, args.tag)
-    result = score(patches, args.tag, args.model, args.raw_sample_path, args.harness_dir, args.score_workers)
-    run_id = publish(instances, manifest, result, patch_instances, args.provider, args.model, args.tag)
-    write_summary(args.tag, args.model, instances, manifest, result, run_id)
+    token = login()
+    run_id = start_tracking_run(token, args.provider, args.model, args.tag, len(instances))
+    try:
+        manifest = generate_all(
+            instances, args.provider, args.model, args.tag, args.concurrency, token
+        )
+        patches, patch_instances = build_patches(manifest, instances, args.model, args.tag)
+        result = score(
+            patches, args.tag, args.model, args.raw_sample_path, args.harness_dir, args.score_workers
+        )
+        publish(
+            instances,
+            manifest,
+            result,
+            patch_instances,
+            args.provider,
+            args.model,
+            args.tag,
+            token,
+            run_id,
+        )
+        write_summary(args.tag, args.model, instances, manifest, result, run_id)
+    except BaseException as e:
+        fail_tracking_run(token, run_id, f"{type(e).__name__}: {e}")
+        raise
 
 
 if __name__ == "__main__":
