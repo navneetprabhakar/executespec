@@ -53,6 +53,12 @@ public class ToolRegistry {
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
   /**
+   * Task 10 — capability-profile lookups for provider-aware worker binds. Nullable in unit tests
+   * (null ⇒ no profile tools).
+   */
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
+
+  /**
    * Tools the worker agent must NOT call directly. Workspace persistence (git commit + push)
    * happens at run-end via {@code ScmPushService.pushMultiRepo} — having gitCommit in the worker's
    * bind set causes runaways: the worker observes that its writeFile didn't auto-commit, tries to
@@ -155,21 +161,43 @@ public class ToolRegistry {
    * per-task git-plumbing loop.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
+    return bindForWorker(ctx, null);
+  }
+
+  /**
+   * Provider-aware worker bind (task 10). A provider's capability profile may list flag-gated
+   * tool NAMES in {@code optionalTools} — those bind for that provider even while the tool's
+   * global flag is OFF (per-provider re-enablement; the global OFF continues to protect
+   * schema-sensitive providers). Null provider / no profile ⇒ global flag gating only.
+   */
+  public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider) {
     // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
     // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
             && !isRemoteRun(ctx);
+    final java.util.Set<String> profileTools = profileOptionalTools(provider);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
-        .filter(this::isToolBound)
+        .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)
                     new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
+  }
+
+  private java.util.Set<String> profileOptionalTools(String provider) {
+    if (provider == null || modelRegistry == null) return java.util.Set.of();
+    try {
+      var profile = modelRegistry.capabilityProfileFor(provider);
+      if (profile == null || profile.getOptionalTools() == null) return java.util.Set.of();
+      return new java.util.HashSet<>(profile.getOptionalTools());
+    } catch (Exception e) {
+      return java.util.Set.of();
+    }
   }
 
   /**

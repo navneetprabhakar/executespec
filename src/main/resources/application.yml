@@ -210,6 +210,21 @@ managed-ai:
       rate-limits-enabled: false
 
 model-matrix:
+  # Harness-resolution task 10 — per-provider capability profiles (mechanical affordances only).
+  # optional-tools: flag-gated tool NAMES that bind for THIS provider even while the tool's global
+  # flag is OFF — per-provider re-enablement for schema-robust providers while the global OFF
+  # keeps protecting schema-sensitive ones (RL-2026-05-061). stagnation-*: per-provider worker
+  # thresholds (consumed with progress-v2).
+  # SHIPPED DARK: entries below are commented out until each passes its k>=3 gate vs the Phase-0
+  # baseline (see infra/benchmark/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
+  # the graduation act — do not do it without the eval evidence.
+  capability-profiles: {}
+  #  anthropic:
+  #    optional-tools: [runWorkspaceTests, readCodeOutline, verifyBoot]
+  #  openai:
+  #    optional-tools: [runWorkspaceTests, readCodeOutline, verifyBoot]
+  #  deepseek:
+  #    optional-tools: []   # lean schema stays — the V217 stall class
   providers:
     # RL-2026-06-052 — LIGHTWEIGHT is now a genuinely cheaper model per provider (was all-flagship
     # since 2026-06-02). It serves the genuinely-light NON-worker agents (classifier / chat
