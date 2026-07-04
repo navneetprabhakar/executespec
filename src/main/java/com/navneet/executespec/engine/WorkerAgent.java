@@ -423,6 +423,8 @@ public class WorkerAgent {
     final java.util.Map<String, Integer> failedSignatureStreaks = new java.util.HashMap<>();
     int textOnlyForcedRetries = 0;
     boolean forceToolChoiceNextCall = false;
+    // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
+    int overflowRecoveries = 0;
     // v2: PATCH pre-first-edit exploration ceiling (total iterations; see constant javadoc).
     final int explorationNudgeAfter =
         Math.max(PROGRESS_V2_EXPLORATION_NUDGE_AFTER, progressWarnAfter * 3);
@@ -654,7 +656,12 @@ public class WorkerAgent {
       if (workerHistoryCompactor != null) {
         history =
             workerHistoryCompactor.compactIfNeeded(
-                history, req.provider(), req.context(), lastInputTokens, req.userPrompt());
+                history,
+                req.provider(),
+                req.model(),
+                req.context(),
+                lastInputTokens,
+                req.userPrompt());
       }
 
       // progress-v2 — one-shot tool_choice=required after a repeated text-only stop. Consumed
@@ -698,6 +705,38 @@ public class WorkerAgent {
               e.getMessage());
           iter--; // retry the same logical iteration without the forced choice
           continue;
+        }
+        // task 9 — context-overflow recovery: a length-rejection is the ONE router error that is
+        // fully recoverable (the transcript is too big, not broken). Attempt 1: emergency
+        // compaction (bypasses flag + trigger). Attempt 2: deterministic hard-trim. Only then
+        // ERROR. Pre-task-9 behavior: instant dead run.
+        if (isContextLengthError(e) && overflowRecoveries < 2) {
+          overflowRecoveries++;
+          List<Message> recovered = null;
+          if (overflowRecoveries == 1 && workerHistoryCompactor != null) {
+            recovered =
+                workerHistoryCompactor.compactNow(
+                    history, req.provider(), req.model(), req.context(), req.userPrompt());
+            if (recovered == history) recovered = null; // compactor no-op → fall to hard trim
+          }
+          if (recovered == null) {
+            recovered = hardTrimHistory(history);
+          }
+          if (recovered != null && recovered.size() < history.size()) {
+            log.warn(
+                "WorkerAgent CONTEXT_OVERFLOW_RECOVERY run={} task={} iter={} attempt={} {}msg →"
+                    + " {}msg",
+                runId,
+                req.context().taskId(),
+                iter,
+                overflowRecoveries,
+                history.size(),
+                recovered.size());
+            toolLog.add("CONTEXT_OVERFLOW → recovered (attempt " + overflowRecoveries + ")");
+            history = recovered;
+            iter--; // retry the same logical iteration with the smaller transcript
+            continue;
+          }
         }
         log.error("WorkerAgent router failure at iter={}", iter, e);
         recordTerminal(WorkerResult.Outcome.ERROR, req, iter);
@@ -2414,6 +2453,62 @@ public class WorkerAgent {
         + " different result.\n"
         + "4. If you are genuinely stuck, name the single most likely file+function and inspect"
         + " exactly that — new evidence, not a re-read of what you already saw.";
+  }
+
+  /**
+   * task 9 — is this router failure a context-length rejection? Providers phrase it differently;
+   * match the stable substrings across Anthropic / OpenAI-wire / Gemini error bodies.
+   */
+  public static boolean isContextLengthError(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      String m = t.getMessage();
+      if (m == null) continue;
+      String lower = m.toLowerCase(java.util.Locale.ROOT);
+      if (lower.contains("context length")
+          || lower.contains("context window")
+          || lower.contains("context_length_exceeded")
+          || lower.contains("maximum context")
+          || lower.contains("prompt is too long")
+          || lower.contains("input is too long")
+          || lower.contains("too many tokens")
+          || lower.contains("exceeds the maximum number of tokens")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * task 9 — deterministic overflow fallback when emergency compaction is unavailable or no-ops:
+   * keep the system prompt + the original task message + the most recent turns from a safe
+   * AssistantMessage boundary, with an explicit gap note. Loses middle evidence — strictly better
+   * than losing the run.
+   */
+  static List<Message> hardTrimHistory(List<Message> history) {
+    if (history == null || history.size() < 12) return null;
+    final int n = history.size();
+    int cut = -1;
+    for (int i = n - 8; i >= 3; i--) {
+      if (history.get(i) instanceof AssistantMessage) {
+        cut = i;
+        break;
+      }
+    }
+    if (cut <= 2) return null;
+    List<Message> out = new ArrayList<>(n - cut + 2);
+    out.add(history.get(0)); // system
+    String task =
+        history.get(1) instanceof UserMessage um && um.getText() != null ? um.getText() : "";
+    out.add(
+        new UserMessage(
+            task
+                + "\n\n--- NOTE: "
+                + (cut - 2)
+                + " earlier conversation turns were DROPPED to recover from a context-window"
+                + " overflow. Re-read any file you are no longer sure about before editing it."
+                + " ---"));
+    out.addAll(history.subList(cut, n));
+    return out;
   }
 
   /**
