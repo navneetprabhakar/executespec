@@ -23,11 +23,15 @@ flows** to measure + publicly showcase ExecuteSpec's code-gen system. Supersedes
    the same single-task worker seam used by PATCH-mode product orchestration. Only the *sandbox*
    (cleanroom container, blind issue→spec input, diff capture, external scoring) is
    benchmark-specific.
-2. **Blind.** The agent sees ONLY the issue `problem_statement` + offline/environment context —
-   never the hidden `FAIL_TO_PASS`/`PASS_TO_PASS` ids or the gold `test_patch`. Those are applied
-   **at scoring time, outside the agent**, by the external scorer. This is what makes the number
-   leaderboard-comparable. The old adapter violated this (it injected the gold test into the
-   prompt → oracle setting → non-publishable).
+2. **Blind.** The agent sees ONLY the official task inputs — the issue `problem_statement`
+   plus, for SWE-bench Pro, the annotator-written `requirements` and `interface` dataset fields
+   (added 2026-07-04; the official evaluation setting includes all three in the agent prompt,
+   arXiv:2509.16941, so injecting them is leaderboard-legal, and omitting them made our runs
+   strictly harder than every leaderboard entry) — never the hidden `FAIL_TO_PASS`/`PASS_TO_PASS`
+   ids or the gold `test_patch`. Those are applied **at scoring time, outside the agent**, by the
+   external scorer. This is what makes the number leaderboard-comparable. The old adapter violated
+   this (it injected the gold test into the prompt → oracle setting → non-publishable).
+   `BenchmarkBlindSpecTest` pins both directions (sections present; held-out signals absent).
 
 ## Codegen path = `CodeGenEngine` (single active benchmark path)
 

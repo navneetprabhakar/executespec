@@ -430,11 +430,25 @@ public class BenchmarkGenerationService {
           + " errors.\n"
           + "   - Confirm the files you edited still parse/compile (build or import the changed"
           + " module); a patch that does not compile scores zero regardless of logic.\n"
-          + "   - Re-read the issue's stated expected behavior and confirm your change produces"
+          + "   - Re-read the issue's stated expected behavior — and EVERY item in the"
+          + " Requirements section when one is present — and confirm your change produces"
           + " exactly that, not merely a plausible-looking edit.\n";
 
-  /** Blind spec — issue + offline/existing-repo framing only. NO held-out tests. */
-  private String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
+  /**
+   * Blind spec — issue + offline/existing-repo framing only. NO held-out tests.
+   *
+   * <p>For SWE-bench Pro instances this also injects the annotator-written {@code requirements}
+   * and {@code interface} dataset fields. This is the OFFICIAL evaluation setting — "models are
+   * evaluated in the setting without any ambiguity — the problem statement, requirements and
+   * interface specification are included in the agent prompt" (arXiv:2509.16941). Requirements
+   * pin the exact expected behavior; interface pins exact class/function signatures that
+   * dependent code (including the held-out tests) will reference. Omitting them (the pre-2026-07
+   * behavior) made our runs strictly harder than every leaderboard entry. Blindness is
+   * unchanged: FAIL_TO_PASS / PASS_TO_PASS / test_patch / patch are still never injected.
+   */
+  String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
+    boolean hasInterface = i.interfaceName() != null && !i.interfaceName().isBlank();
+    boolean hasRequirements = i.requirements() != null && !i.requirements().isBlank();
     StringBuilder sb = new StringBuilder();
     String language = i.repoLanguage();
     if (language == null || language.isBlank()) language = "software";
@@ -451,46 +465,58 @@ public class BenchmarkGenerationService {
         "- The environment is offline (no network) and all dependencies are pre-installed. Do not"
             + " pip install / curl / git fetch.\n");
     sb.append(
-            "- Edit only non-test source files. Do NOT modify or add test files. Your submission is"
-                + " the git diff of ")
+            "- Edit only non-test source files. Do NOT modify or add test files (writing a"
+                + " throwaway reproduction script under /tmp to debug is fine — it is not part of"
+                + " your submission). Your submission is the git diff of ")
         .append(workdirFor(i))
         .append(" against its base commit.\n\n");
     sb.append("# Repository\n- Repo: ")
         .append(i.repo())
         .append("\n- Working directory: ")
         .append(workdirFor(i))
-        .append("\n");
-    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
-      sb.append("- Interface: ").append(i.interfaceName()).append("\n");
-    }
-    sb.append("\n");
+        .append("\n\n");
     sb.append("# Issue\n\n").append(i.problemStatement()).append("\n\n");
+    if (hasRequirements) {
+      sb.append("# Requirements\n\n");
+      sb.append(
+          "The fix must satisfy ALL of the following requirements. They specify the expected"
+              + " behavior precisely — treat them as the acceptance contract, senior to any"
+              + " interpretation of the issue text above.\n\n");
+      sb.append(i.requirements()).append("\n\n");
+    }
+    if (hasInterface) {
+      sb.append("# Interface\n\n");
+      sb.append(
+          "New or changed classes/functions the fix is expected to introduce or conform to. Use"
+              + " these EXACT names and signatures — other code depends on them by name. This is"
+              + " a contract, not a complete file list.\n\n");
+      sb.append(i.interfaceName()).append("\n\n");
+    }
     sb.append("# How to work\n");
     sb.append(
         "1. Investigate with listFiles / searchFiles / readFile to locate the relevant source.\n");
     sb.append(
-        "2. Pin down the EXACT expected behavior BEFORE editing, and check whether the fix belongs"
-            + " in a shared mechanism (callers, serialization/storage layers, sibling modules) vs."
-            + " a single call site — match the codebase's conventions.\n");
-    if (i.interfaceName() != null && !i.interfaceName().isBlank()) {
+        "2. Pin down the EXACT expected behavior BEFORE editing"
+            + (hasRequirements ? " (the Requirements section above is authoritative)" : "")
+            + ", and check whether the fix belongs in a shared mechanism (callers,"
+            + " serialization/storage layers, sibling modules) vs. a single call site — match the"
+            + " codebase's conventions.\n");
+    if (hasInterface) {
       sb.append(
-          "3. The Interface above is a contract, not a complete file list. Inspect every named"
-              + " path, then search for production callers/consumers of those methods/functions and"
-              + " patch all code required for the issue's visible behavior. Do not stop after only"
-              + " adding helper methods if controllers, sockets, templates, schemas, or messages"
-              + " must use them.\n");
+          "3. Implement every symbol in the Interface section with the exact given name and"
+              + " signature. Inspect every named path, then search for production"
+              + " callers/consumers of those methods/functions and patch all code required for"
+              + " the issue's visible behavior. Do not stop after only adding helper methods if"
+              + " controllers, sockets, templates, schemas, or messages must use them.\n");
       sb.append("4. Make a minimal, targeted fix across the required production files.\n");
-      sb.append(
-          "5. Run the repository's EXISTING tests for the module you changed to confirm no"
-              + " regression, then call completeTask.\n");
-      sb.append(BENCH_VERIFY_CHECKLIST);
     } else {
       sb.append("3. Make a minimal, targeted fix.\n");
-      sb.append(
-          "4. Run the repository's EXISTING tests for the module you changed to confirm no"
-              + " regression, then call completeTask.\n");
-      sb.append(BENCH_VERIFY_CHECKLIST);
+      sb.append("4. Re-check the fix against the issue's stated expected behavior.\n");
     }
+    sb.append(
+        "5. Run the repository's EXISTING tests for the module you changed to confirm no"
+            + " regression, then call completeTask.\n");
+    sb.append(BENCH_VERIFY_CHECKLIST);
     return sb.toString();
   }
 
