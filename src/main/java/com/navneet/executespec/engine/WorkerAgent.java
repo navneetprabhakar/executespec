@@ -200,6 +200,13 @@ public class WorkerAgent {
   public static final int PROGRESS_V2_TEXT_ONLY_FORCED_RETRIES = 2;
 
   /**
+   * auto-verify (flag {@code worker.auto-verify.enabled}) — max server-side test runs per task.
+   * Bounds loop latency on slow suites; the VBC completeTask gate still runs at the end
+   * regardless, so the cap never lets a red suite complete unnoticed.
+   */
+  public static final int AUTO_VERIFY_MAX_RUNS_PER_TASK = 4;
+
+  /**
    * V182 layer-3 — within how many iterations of {@code completeTask} must a successful {@code
    * runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()} is true,
    * the dispatch loop refuses {@code completeTask} unless the agent ran tests within this window. 5
@@ -419,6 +426,15 @@ public class WorkerAgent {
     // v2: PATCH pre-first-edit exploration ceiling (total iterations; see constant javadoc).
     final int explorationNudgeAfter =
         Math.max(PROGRESS_V2_EXPLORATION_NUDGE_AFTER, progressWarnAfter * 3);
+    // auto-verify (harness-resolution Phase 2, flag worker.auto-verify.enabled, default OFF):
+    // server-run tests after each edit burst; result injected as an observation. Schema-free.
+    final boolean autoVerifyOn =
+        Boolean.TRUE.equals(req.autoVerify())
+            && workspaceTestRunner != null
+            && !toolRegistry.isRemoteRun(req.context());
+    int editsSinceAutoVerify = 0;
+    boolean lastIterHadWrite = false;
+    int autoVerifyRuns = 0;
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
     // the next failure terminates (force threshold, or another text-only stop).
@@ -1297,6 +1313,36 @@ public class WorkerAgent {
         }
       } else {
         itersSinceProgress++;
+      }
+      // auto-verify: fire when an edit burst just ended — the previous iteration wrote, this one
+      // did not — so the model gets ground truth exactly when it has (implicitly) moved on to the
+      // next thing. Bounded per task; green results are one line, red results carry the failing
+      // tail so the fix is grounded in real output, not a re-guess.
+      final boolean rawWriteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
+      if (autoVerifyOn) {
+        if (rawWriteThisIter) {
+          for (AssistantMessage.ToolCall tc : calls) {
+            if (isWriteTool(tc.name())) editsSinceAutoVerify++;
+          }
+        } else if (lastIterHadWrite
+            && editsSinceAutoVerify > 0
+            && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
+          autoVerifyRuns++;
+          String observation = autoVerifyObservation(req.context(), editsSinceAutoVerify);
+          if (observation != null) {
+            editsSinceAutoVerify = 0;
+            history.add(new UserMessage(observation));
+            toolLog.add("AUTO_VERIFY → " + observation.lines().findFirst().orElse(""));
+            log.info(
+                "WorkerAgent AUTO_VERIFY run={} task={} iter={} runsUsed={}/{}",
+                req.context().runId(),
+                req.context().taskId(),
+                iter,
+                autoVerifyRuns,
+                AUTO_VERIFY_MAX_RUNS_PER_TASK);
+          }
+        }
+        lastIterHadWrite = rawWriteThisIter;
       }
       // v2 — worst current same-signature failure streak (0 when off/empty).
       final int worstFailureStreak =
@@ -2566,21 +2612,81 @@ public class WorkerAgent {
     if (workspaceTestRunner == null) return null; // not wired → fail-open
     if (toolRegistry.isRemoteRun(ctx)) return null; // remote/TB: Tier-1 inert → fail-open
     try {
-      Optional<TestExecutionSummary> opt =
-          workspaceTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());
+      Optional<com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult> opt =
+          workspaceTestRunner.runTestsDetailed(ctx.runId(), ctx.workspaceRoot());
       if (opt.isEmpty()) return null; // no runner / unparseable → fail-open
-      TestExecutionSummary s = opt.get();
+      TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0) return null; // nothing ran → fail-open
       if (s.getFailed() == 0 && s.getErrors() == 0) return null; // green
+      // Harness-resolution task 8: the refusal is a REPAIR message, not a bare gate — carry the
+      // failing output so the worker can fix against the actual failures instead of re-guessing.
+      String tail = opt.get().outputTail();
+      String detailTail =
+          tail == null || tail.isBlank()
+              ? ""
+              : "\n\nTest output (tail):\n"
+                  + (tail.length() > 1_500 ? tail.substring(tail.length() - 1_500) : tail);
       return s.getFailed()
           + " failed / "
           + s.getErrors()
           + " errored of "
           + s.getTotalTests()
-          + " tests";
+          + " tests (command: "
+          + opt.get().command()
+          + ")"
+          + detailTail;
     } catch (Exception e) {
       log.debug("VBC gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
       return null; // fail-open
+    }
+  }
+
+  /**
+   * auto-verify observation (harness-resolution Phase 2): run the resolved suite server-side and
+   * render the result for injection. Null ⇒ nothing to inject (no runner / zero tests / error —
+   * fail-open and silent so an unresolvable stack costs nothing).
+   */
+  private String autoVerifyObservation(ExecutionContext ctx, int editsInBurst) {
+    try {
+      Optional<com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult> opt =
+          workspaceTestRunner.runTestsDetailed(ctx.runId(), ctx.workspaceRoot());
+      if (opt.isEmpty()) return null;
+      TestExecutionSummary s = opt.get().summary();
+      if (s.getTotalTests() == 0) return null;
+      if (s.getFailed() == 0 && s.getErrors() == 0) {
+        return "AUTO-VERIFY — the platform ran `"
+            + opt.get().command()
+            + "` after your last "
+            + editsInBurst
+            + " edit(s): "
+            + s.getPassed()
+            + "/"
+            + s.getTotalTests()
+            + " passed (exit 0). Tests are green — continue.";
+      }
+      String tail = opt.get().outputTail();
+      String detail =
+          tail == null || tail.isBlank()
+              ? ""
+              : "\nFailing output (tail):\n"
+                  + (tail.length() > 1_200 ? tail.substring(tail.length() - 1_200) : tail);
+      return "AUTO-VERIFY — the platform ran `"
+          + opt.get().command()
+          + "` after your last "
+          + editsInBurst
+          + " edit(s): "
+          + s.getFailed()
+          + " failed / "
+          + s.getErrors()
+          + " errored of "
+          + s.getTotalTests()
+          + "."
+          + detail
+          + "\nFix these failures (or, if one is genuinely pre-existing and unrelated to your"
+          + " change, say so explicitly) before moving on.";
+    } catch (Exception e) {
+      log.debug("auto-verify failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return null;
     }
   }
 

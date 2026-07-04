@@ -117,6 +117,9 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         // (stagnationDisabled), so v2's repetition trigger is the ONLY loop protection a
         // benchmark PATCH run gets.
         .progressV2(featureFlagService.isEnabled("worker.progress-v2.enabled"))
+        // auto-verify (V255, default OFF): server-side edit-burst test runs with failure-output
+        // injection — the schema-free replacement for the reverted V209/V217 pair.
+        .autoVerify(featureFlagService.isEnabled("worker.auto-verify.enabled"))
         .build();
   }
 

@@ -57,10 +57,26 @@ public class WorkspaceTestRunner {
   private final SwebenchContainerStore swebenchContainers;
 
   /**
+   * Detailed run result (harness-resolution task 8): the parsed counts PLUS the raw output tail
+   * and command, so callers (VBC refusals, the auto-verify observation) can show the model WHAT
+   * failed instead of only how many. {@code outputTail} is bounded to {@value #DETAIL_TAIL_CHARS}
+   * chars.
+   */
+  public record DetailedResult(
+      TestExecutionSummary summary, String outputTail, String command, int exitCode) {}
+
+  static final int DETAIL_TAIL_CHARS = 3_000;
+
+  /**
    * Resolve, validate, run, and parse the workspace test suite. Never throws — every failure mode
    * collapses to {@link Optional#empty()}.
    */
   public Optional<TestExecutionSummary> runTests(String runId, Path workspaceRoot) {
+    return runTestsDetailed(runId, workspaceRoot).map(DetailedResult::summary);
+  }
+
+  /** Detailed sibling of {@link #runTests} — same fail-safe contract. */
+  public Optional<DetailedResult> runTestsDetailed(String runId, Path workspaceRoot) {
     if (workspaceRoot == null) return Optional.empty();
 
     Optional<TestCommand> resolved = resolver.resolve(workspaceRoot);
@@ -148,7 +164,11 @@ public class WorkspaceTestRunner {
           parsed
               .map(s -> s.getPassed() + "/" + s.getTotalTests() + " passed")
               .orElse("unparseable (fallback to LLM coverage)"));
-      return parsed;
+      final String tail =
+          output.length() <= DETAIL_TAIL_CHARS
+              ? output
+              : "... [head omitted] ...\n" + output.substring(output.length() - DETAIL_TAIL_CHARS);
+      return parsed.map(s -> new DetailedResult(s, tail, cmd.command(), exit));
     } catch (IOException e) {
       log.warn(
           "WorkspaceTestRunner run={} IO error — fallback to coverage: {}", runId, e.getMessage());
