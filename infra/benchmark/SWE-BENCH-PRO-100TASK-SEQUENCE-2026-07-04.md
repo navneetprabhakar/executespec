@@ -13,7 +13,10 @@ Before launch:
 2. The benchmark backend must run a build that includes `BenchmarkGenerationService` generate-path
    concurrency enforcement.
 3. `SWEBENCH_MAX_CONCURRENT_RUNS` must be set to the intended cap, default `8`.
-4. The selected 100-task instance set must be identical for Flash and Pro.
+4. `SWEBENCH_INSTANCES_FILE` must point at `/var/swebench/swebench_pro_full.json`, not the
+   sample20 file. The runner must preflight `/api/admin/benchmark/instances` and selected
+   `/preview/{instanceId}` rows before generation.
+5. The selected 100-task instance set must be identical for Flash and Pro.
 
 ## Confirmed concurrency model
 
