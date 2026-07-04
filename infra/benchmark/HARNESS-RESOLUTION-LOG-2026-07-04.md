@@ -36,8 +36,8 @@ Source: resolution path in the assessment doc. Statuses live here; update as you
 |---|---|---|
 | 1 | Setup: handoff log + assessment docs in repo | ✅ DONE (this file + docs/plans copies) |
 | 2 | B.1: inject `requirements`+`interface` into Pro blind spec (SwebenchInstanceLoader + BenchmarkGenerationService.synthesizeBlindSpec) + blindness test | ✅ DONE |
-| 3 | B.2: RCA scripts — stagnation-outcome count (**against DB dump — VM being torn down**) + gold-patch exclusion-glob audit | ⏳ NEXT |
-| 4 | Phase 0: k-eval wrapper + canary suite + flag triage (§3) | ☐ |
+| 3 | B.2: RCA scripts — stagnation-outcome count (**against DB dump — VM being torn down**) + gold-patch exclusion-glob audit | ✅ DONE (scripts committed; RUN them when the DB dump + dataset JSON are available) |
+| 4 | Phase 0: k-eval wrapper + canary suite + flag triage (§3) | ⏳ NEXT |
 | 5 | Phase 1: worker loop — novelty progress, repetition stagnation, no text-stop kills, nudge copy (flag `worker.progress-v2.enabled`) | ☐ |
 | 6 | Phase 1: language-aware `runTests` via resolver + honest schema + remote contract fix | ☐ |
 | 7 | Phase 1: lean toolset binding (T1/T2, flag `worker.lean-toolset.enabled`) + gitDiff budget (T3) + writeFile overwrite-with-read-recency (T4) | ☐ |
@@ -79,3 +79,4 @@ New flags introduced by this build (ALL default OFF; graduation = k=3 gate vs Ph
 4. All new behavior behind the flags listed in §3 — defaults OFF, so the benchmark branch stays byte-identical in behavior until eval flips them.
 5. Do NOT push, deploy, or touch the original repo/VM without founder approval. Commit locally on this branch as you complete tasks (no Co-Authored-By trailer).
 6. Eval spend: $20 cap (D3), DeepSeek only, and only after tasks 2–7 compile clean — coordinate VM access with the founder.
+| 2026-07-04 | Claude (Fable 5) | **B.2 DONE (scripts)** | `infra/benchmark/scripts/rca-stagnation-outcomes.py` — outcome counts from `pipeline_run.status_reason='BENCH_GEN:<OUTCOME>'` per model, joined to `benchmark_task_result.reward` when present; targets any Postgres DSN (use the copied dump; VM teardown noted). `rca-exclusion-glob-audit.py` — parses gold `patch` paths from the dataset JSON and matches the EXACT captureDiff exclusion list; validated on synthetic data (flags `internal/testing/*.go` + `setup.py`, no false positive on `*_test.go`). **ACTION for founder/next agent: run both once the DB dump is restored + point the glob audit at `/var/swebench/swebench_pro_sample20.json` (copy it off the VM before teardown!).** |
