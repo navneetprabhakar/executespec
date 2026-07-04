@@ -71,3 +71,12 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
   some coupling).
 - The engine has **no knowledge** of credits / PRs / scoring / governance / SSE / DB — those are the
   caller's (upstream/downstream) concern.
+
+
+## Harness-resolution (2026-07-04, feature/harness-resolution — all flag-gated OFF)
+
+- `WorkerAgent` progress-v2 (`worker.progress-v2.enabled`): novelty-based progress (seen-set of tool+args signatures), per-signature consecutive-failure force (nudge@3/force@5), PATCH exploration ceiling replaces the 6-non-write nudge, bounded `tool_choice=required` retries on text-only stops, `progressNudgeMessageV2` (no 'imperfect edit beats zero'). Pinned by `agent/WorkerAgentProgressV2Test`.
+- auto-verify (`worker.auto-verify.enabled`): server runs the resolved suite at edit-burst end and injects counts + failing tail (schema-free); VBC refusals carry failure detail via `WorkspaceTestRunner.runTestsDetailed`.
+- Context-overflow recovery: `isContextLengthError` + compactNow → `hardTrimHistory` → ERROR (was: instant ERROR). Pinned by `WorkerAgentOverflowRecoveryTest`.
+- `RepoOrientationService` (`worker.localization.enabled`): deterministic warm-start block (layout, identifier grep hits, resolver commands) injected in both BUILD and engine lanes.
+- `WorkerTaskRequest` gained `progressV2` + `autoVerify`. New `@RequiredArgsConstructor` deps go at the END of the field list (7 test ctor sites were churned by mid-list insertion).

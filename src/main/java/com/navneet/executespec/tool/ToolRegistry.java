@@ -47,6 +47,18 @@ public class ToolRegistry {
   private final RemoteToolDispatcher remoteToolDispatcher;
 
   /**
+   * Gates the T1 lean-toolset worker binding ({@code worker.lean-toolset.enabled}). Nullable in
+   * unit tests (null ⇒ flag treated as OFF ⇒ legacy full binding).
+   */
+  private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+
+  /**
+   * Task 10 — capability-profile lookups for provider-aware worker binds. Nullable in unit tests
+   * (null ⇒ no profile tools).
+   */
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
+
+  /**
    * Tools the worker agent must NOT call directly. Workspace persistence (git commit + push)
    * happens at run-end via {@code ScmPushService.pushMultiRepo} — having gitCommit in the worker's
    * bind set causes runaways: the worker observes that its writeFile didn't auto-commit, tries to
@@ -63,6 +75,48 @@ public class ToolRegistry {
    * need to commit can still go through {@link #bind(ExecutionContext)}, which is unchanged.
    */
   public static final Set<String> WORKER_DENY_TOOLS = Set.of("gitCommit");
+
+  /**
+   * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
+   * canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
+   * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
+   * {@code executeCommand} / {@code lsp} / stubs — see {@link CommandToolConfiguration}); binding
+   * those to server workers duplicates the schema 2-3× (schema-token bloat, the RL-2026-05-061
+   * stall class), splits model behavior across aliases with DIFFERENT error semantics ({@code bash}
+   * errs on non-zero exit, {@code shell} returns ok+exit=N), and teaches models the tool surface is
+   * unreliable when they hit a stub. When the flag is ON, server-side (non-remote) workers bind
+   * ONLY this set; remote/local-hands runs keep the full parity set — the aliases exist for those
+   * clients.
+   *
+   * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
+   * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
+   * unwired fallbacks (lsp, spawn_subagent, mcp_client, plan/todo stubs) stay out. Flag-gated tools
+   * listed here still require their own flag ON to bind.
+   */
+  public static final Set<String> LEAN_WORKER_TOOLS =
+      Set.of(
+          "readFile",
+          "writeFile",
+          "editFile",
+          "listFiles",
+          "searchFiles",
+          "glob",
+          "move",
+          "delete",
+          "gitStatus",
+          "gitDiff",
+          "shell",
+          "buildProject",
+          "runTests",
+          "install",
+          "test",
+          "lint",
+          "format",
+          "completeTask",
+          "backgroundJob",
+          "readCodeOutline",
+          "runWorkspaceTests",
+          "verifyBoot");
 
   /** Names of all registered tools. */
   public List<String> toolNames() {
@@ -107,14 +161,43 @@ public class ToolRegistry {
    * per-task git-plumbing loop.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
+    return bindForWorker(ctx, null);
+  }
+
+  /**
+   * Provider-aware worker bind (task 10). A provider's capability profile may list flag-gated tool
+   * NAMES in {@code optionalTools} — those bind for that provider even while the tool's global flag
+   * is OFF (per-provider re-enablement; the global OFF continues to protect schema-sensitive
+   * providers). Null provider / no profile ⇒ global flag gating only.
+   */
+  public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider) {
+    // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
+    // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
+    final boolean lean =
+        featureFlagService != null
+            && featureFlagService.isEnabled("worker.lean-toolset.enabled")
+            && !isRemoteRun(ctx);
+    final java.util.Set<String> profileTools = profileOptionalTools(provider);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
-        .filter(this::isToolBound)
+        .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
+        .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)
                     new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
+  }
+
+  private java.util.Set<String> profileOptionalTools(String provider) {
+    if (provider == null || modelRegistry == null) return java.util.Set.of();
+    try {
+      var profile = modelRegistry.capabilityProfileFor(provider);
+      if (profile == null || profile.getOptionalTools() == null) return java.util.Set.of();
+      return new java.util.HashSet<>(profile.getOptionalTools());
+    } catch (Exception e) {
+      return java.util.Set.of();
+    }
   }
 
   /**
