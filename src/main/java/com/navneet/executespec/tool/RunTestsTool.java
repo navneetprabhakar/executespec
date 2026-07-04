@@ -30,16 +30,16 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>History: until 2026-07-04 (harness-resolution task 6) this tool was pytest-only while its
  * schema said "use this instead of shell for running tests" — on Go/JS/TS repos (65% of SWE-bench
- * Pro) that description was a lie that taught models to distrust the structured tools. The
- * resolver was always available; the tool just didn't use it.
+ * Pro) that description was a lie that taught models to distrust the structured tools. The resolver
+ * was always available; the tool just didn't use it.
  *
  * <p>Why structured: with {@code shell} the agent had to parse runner output itself — count
  * "passed" / "failed" lines, extract assertion errors. Models sometimes mis-counted, sometimes
  * treated a single-test-failed run as "everything failed." A typed envelope removes that parsing
  * burden. The envelope shape is identical across frameworks ({@code summary} / {@code passed} /
  * {@code failed} / {@code errored} / {@code exit_code} / {@code raw_tail}); pytest additionally
- * gets per-test extraction, Go gets {@code --- FAIL:} extraction, other frameworks lean on
- * {@code raw_tail} (deliberately — over-parsing is where these tools go to die).
+ * gets per-test extraction, Go gets {@code --- FAIL:} extraction, other frameworks lean on {@code
+ * raw_tail} (deliberately — over-parsing is where these tools go to die).
  *
  * <p>Routing: same dispatch tree as {@link ShellTool} — SWE-bench container store first (login
  * shell for conda activation), then ProgramBench, then host ProcessBuilder.
@@ -66,9 +66,9 @@ public class RunTestsTool implements Tool {
   static final int MAX_TEST_IDS = 20;
 
   /**
-   * Allowlisted prefixes for the raw {@code command} override (also the remote/local-hands
-   * contract — the TB adapter sends {@code command}). Constrains the override to real test
-   * runners; anything else belongs in {@code shell} where the sandbox policy applies.
+   * Allowlisted prefixes for the raw {@code command} override (also the remote/local-hands contract
+   * — the TB adapter sends {@code command}). Constrains the override to real test runners; anything
+   * else belongs in {@code shell} where the sandbox policy applies.
    */
   static final List<String> COMMAND_ALLOWLIST_PREFIXES =
       List.of(
@@ -169,7 +169,8 @@ public class RunTestsTool implements Tool {
         // ProcessBuilder argument-array dispatch below (audit 2026-05-12 #77).
         if (containsShellMetachar(id)) {
           return ToolResult.err(
-              ToolResult.ErrorKind.INVALID_ARGS, "test id contains forbidden shell metachars: " + id);
+              ToolResult.ErrorKind.INVALID_ARGS,
+              "test id contains forbidden shell metachars: " + id);
         }
         testIds.add(id);
       }
@@ -186,7 +187,8 @@ public class RunTestsTool implements Tool {
     TestCommandResolver.Framework framework =
         resolved.map(TestCommandResolver.TestCommand::framework).orElse(null);
     boolean pytestShapedIds = testIds.stream().anyMatch(id -> id.contains(".py"));
-    if (framework == null || (pytestShapedIds && framework != TestCommandResolver.Framework.PYTEST)) {
+    if (framework == null
+        || (pytestShapedIds && framework != TestCommandResolver.Framework.PYTEST)) {
       framework = TestCommandResolver.Framework.PYTEST;
     }
 
@@ -194,7 +196,9 @@ public class RunTestsTool implements Tool {
         args.hasNonNull("timeoutSeconds")
             ? Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC)
             : Math.min(
-                resolved.map(TestCommandResolver.TestCommand::timeoutSeconds).orElse(DEFAULT_TIMEOUT_SEC),
+                resolved
+                    .map(TestCommandResolver.TestCommand::timeoutSeconds)
+                    .orElse(DEFAULT_TIMEOUT_SEC),
                 MAX_TIMEOUT_SEC);
 
     // ---- container routing (mirrors ShellTool). useLoginShell: SWE-bench images need
@@ -391,7 +395,9 @@ public class RunTestsTool implements Tool {
   private static final Pattern PYTEST_SUMMARY_LINE =
       Pattern.compile("(?m)^=+\\s*(.*?passed.*?|.*?failed.*?|.*?error.*?)\\s*=+\\s*$");
 
-  /** Go test failure markers: per-test {@code --- FAIL: TestX} and per-package {@code FAIL\tpkg}. */
+  /**
+   * Go test failure markers: per-test {@code --- FAIL: TestX} and per-package {@code FAIL\tpkg}.
+   */
   private static final Pattern GO_FAIL_LINE = Pattern.compile("(?m)^\\s*--- FAIL: (\\S+)");
 
   private static final Pattern GO_PKG_FAIL_LINE = Pattern.compile("(?m)^FAIL\\s+(\\S+)");
@@ -449,8 +455,8 @@ public class RunTestsTool implements Tool {
   /**
    * Non-pytest envelope — same field shape so the V182 completeTask gate works on every stack:
    * green run ⇒ {@code "failed":[]} + {@code "errored":[]} + {@code "exit_code":0}; red run ⇒ a
-   * failed entry (Go gets real {@code --- FAIL:} names; others get a framework-level entry) so
-   * the gate blocks. Deliberately under-parsed beyond that — the model reads raw_tail.
+   * failed entry (Go gets real {@code --- FAIL:} names; others get a framework-level entry) so the
+   * gate blocks. Deliberately under-parsed beyond that — the model reads raw_tail.
    */
   private String genericEnvelope(
       ExecutionContext ctx,

@@ -2,10 +2,12 @@ package com.navneet.executespec.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.navneet.executespec.smoketest.BuildCommandResolver;
-import com.navneet.executespec.smoketest.TestCommandResolver;
 import java.nio.file.Files;
 import java.nio.file.Path;
+
+import com.navneet.executespec.smoketest.BuildCommandResolver;
+import com.navneet.executespec.smoketest.TestCommandResolver;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,8 +24,7 @@ class RepoOrientationServiceTest {
   void orientsWithLayoutIdentifierHitsAndCommands() throws Exception {
     Files.createDirectories(ws.resolve("pkg/cache"));
     Files.writeString(ws.resolve("go.mod"), "module acme/widget\n");
-    Files.writeString(
-        ws.resolve("pkg/cache/fn_cache.go"), "package cache\nfunc NewFnCache() {}\n");
+    Files.writeString(ws.resolve("pkg/cache/fn_cache.go"), "package cache\nfunc NewFnCache() {}\n");
     Files.writeString(ws.resolve("pkg/cache/other.go"), "package cache\n");
 
     String block =
@@ -56,8 +57,7 @@ class RepoOrientationServiceTest {
         RepoOrientationService.extractIdentifiers(
             "The FluxGuard.check method fails when retry_count exceeds MaxRetries; see"
                 + " `config.yaml` handling in ConfigLoader");
-    assertThat(ids)
-        .contains("FluxGuard", "retry_count", "MaxRetries", "ConfigLoader");
+    assertThat(ids).contains("FluxGuard", "retry_count", "MaxRetries", "ConfigLoader");
     assertThat(ids).doesNotContain("method", "fails");
   }
 }

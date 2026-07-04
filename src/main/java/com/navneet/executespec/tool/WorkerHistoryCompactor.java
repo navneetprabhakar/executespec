@@ -169,15 +169,19 @@ public class WorkerHistoryCompactor {
   }
 
   /**
-   * Emergency compaction for context-overflow recovery (task 9): bypasses BOTH the feature flag
-   * and the token trigger — when the provider has already rejected the request for length, "the
-   * flag is off" is not a reason to lose the run. Same fail-safe contract (any failure returns
-   * the original list).
+   * Emergency compaction for context-overflow recovery (task 9): bypasses BOTH the feature flag and
+   * the token trigger — when the provider has already rejected the request for length, "the flag is
+   * off" is not a reason to lose the run. Same fail-safe contract (any failure returns the original
+   * list).
    */
   public List<Message> compactNow(
-      List<Message> history, String workerProvider, String workerModel, ExecutionContext ctx,
+      List<Message> history,
+      String workerProvider,
+      String workerModel,
+      ExecutionContext ctx,
       String workerGoal) {
-    return compact(history, workerProvider, ctx, Long.MAX_VALUE, workerGoal, true, windowFor(workerModel));
+    return compact(
+        history, workerProvider, ctx, Long.MAX_VALUE, workerGoal, true, windowFor(workerModel));
   }
 
   private long windowFor(String workerModel) {

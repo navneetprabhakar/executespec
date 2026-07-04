@@ -9,15 +9,15 @@ import org.springframework.stereotype.Component;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * V2 gitDiff tool. Returns the working-tree diff (unstaged + staged) since HEAD, optionally
- * limited to a pathspec.
+ * V2 gitDiff tool. Returns the working-tree diff (unstaged + staged) since HEAD, optionally limited
+ * to a pathspec.
  *
- * <p>Harness-resolution T3 (2026-07-04): the old hard 3,000-char truncation made self-review of
- * any multi-file change physically impossible — a worker (or the critic/verifier) that wanted to
+ * <p>Harness-resolution T3 (2026-07-04): the old hard 3,000-char truncation made self-review of any
+ * multi-file change physically impossible — a worker (or the critic/verifier) that wanted to
  * inspect its own patch before {@code completeTask} could not see it, while every other bulky tool
  * had the {@link ToolOutput#budget} spill-to-disk treatment. Now: 6KB inline + full diff persisted
- * to {@code .agent-context/tool-output/} with a readFile path, plus an optional {@code path} arg
- * to scope the diff.
+ * to {@code .agent-context/tool-output/} with a readFile path, plus an optional {@code path} arg to
+ * scope the diff.
  */
 @Component
 @Slf4j
@@ -39,17 +39,17 @@ public class GitDiffTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "path": {
-                 "type": "string",
-                 "description": "Optional workspace-relative file or directory to limit the diff to."
-               }
-             },
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional workspace-relative file or directory to limit the diff to."
+    }
+  },
+  "additionalProperties": false
+}
+""";
   }
 
   @Override

@@ -25,9 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Harness-resolution task 11 (flag {@code worker.localization.enabled}, V255, default OFF) — the
- * DETERMINISTIC repo-orientation layer: a bounded, zero-LLM-cost warm-start block injected into
- * the worker's first user message so localization doesn't have to be re-derived from a cold
- * prompt one readFile at a time (assessment Gap 5 / deep-dive 5).
+ * DETERMINISTIC repo-orientation layer: a bounded, zero-LLM-cost warm-start block injected into the
+ * worker's first user message so localization doesn't have to be re-derived from a cold prompt one
+ * readFile at a time (assessment Gap 5 / deep-dive 5).
  *
  * <p>Contents: a depth-capped directory sketch, literal-match hits for identifiers extracted from
  * the task text (CamelCase / snake_case / dotted / quoted symbols), and the resolver-detected
@@ -51,8 +51,20 @@ public class RepoOrientationService {
 
   private static final Set<String> SKIP_DIRS =
       Set.of(
-          ".git", "node_modules", "target", "build", "dist", ".next", ".venv", "venv",
-          "__pycache__", ".gradle", ".idea", ".vscode", "vendor", ".agent-context");
+          ".git",
+          "node_modules",
+          "target",
+          "build",
+          "dist",
+          ".next",
+          ".venv",
+          "venv",
+          "__pycache__",
+          ".gradle",
+          ".idea",
+          ".vscode",
+          "vendor",
+          ".agent-context");
 
   /** CamelCase / snake_case / dotted / path-like identifiers worth grepping for. */
   private static final Pattern IDENTIFIER =
@@ -62,15 +74,24 @@ public class RepoOrientationService {
 
   private static final Set<String> STOPWORDS =
       Set.of(
-          "должен", "should_be", "for_example", "e.g", "i.e", "node_modules", "package.json",
-          "requirements.txt", "pom.xml", "go.mod", "setup.py");
+          "должен",
+          "should_be",
+          "for_example",
+          "e.g",
+          "i.e",
+          "node_modules",
+          "package.json",
+          "requirements.txt",
+          "pom.xml",
+          "go.mod",
+          "setup.py");
 
   private final BuildCommandResolver buildCommandResolver;
   private final TestCommandResolver testCommandResolver;
 
   /**
-   * Build the orientation block for a task in an existing repo. Empty string when the workspace
-   * is missing/empty or anything fails (fail-open, never throws).
+   * Build the orientation block for a task in an existing repo. Empty string when the workspace is
+   * missing/empty or anything fails (fail-open, never throws).
    */
   public String orient(Path workspaceRoot, String taskText) {
     try {

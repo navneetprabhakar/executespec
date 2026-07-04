@@ -201,8 +201,8 @@ public class WorkerAgent {
 
   /**
    * auto-verify (flag {@code worker.auto-verify.enabled}) — max server-side test runs per task.
-   * Bounds loop latency on slow suites; the VBC completeTask gate still runs at the end
-   * regardless, so the cap never lets a red suite complete unnoticed.
+   * Bounds loop latency on slow suites; the VBC completeTask gate still runs at the end regardless,
+   * so the cap never lets a red suite complete unnoticed.
    */
   public static final int AUTO_VERIFY_MAX_RUNS_PER_TASK = 4;
 
@@ -1421,7 +1421,9 @@ public class WorkerAgent {
         history.add(new UserMessage(progressNudgeMessageV2(totalWriteCalls)));
         progressNudged = true;
       }
-      if (progressV2 && !progressNudged && worstFailureStreak >= PROGRESS_V2_REPEAT_FAILURE_NUDGE_AT) {
+      if (progressV2
+          && !progressNudged
+          && worstFailureStreak >= PROGRESS_V2_REPEAT_FAILURE_NUDGE_AT) {
         log.info(
             "WorkerAgent REPEAT_FAILURE_NUDGE run={} task={} iter={} worstStreak={}",
             req.context().runId(),
@@ -1516,7 +1518,9 @@ public class WorkerAgent {
             itersSinceProgress,
             progressForceAfter,
             totalWriteCalls,
-            repetitionForce ? "REPEATED_FAILURE_STREAK(" + worstFailureStreak + ")" : "NO_PROGRESS");
+            repetitionForce
+                ? "REPEATED_FAILURE_STREAK(" + worstFailureStreak + ")"
+                : "NO_PROGRESS");
         // 2026-05-09 Lever B extension — salvage on STAGNATION_FORCE with zero writes.
         // RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): LOW BUILD task spent 12 iters
         // reading without writing, hit stagnation force, was marked FAILED with no recovery
@@ -2427,8 +2431,8 @@ public class WorkerAgent {
   }
 
   /**
-   * progress-v2 corrective nudge (non-terminal modes). Differences from v1, both deliberate:
-   * no "STOP reading" (novel investigation is legitimate progress under v2 — the trigger was
+   * progress-v2 corrective nudge (non-terminal modes). Differences from v1, both deliberate: no
+   * "STOP reading" (novel investigation is legitimate progress under v2 — the trigger was
    * repetition, not reading) and no "an imperfect edit beats zero" (benchmark-diff logic; on a
    * customer run a forced bad edit is reviewer load and trust-cap damage, not a save).
    */
@@ -2512,9 +2516,9 @@ public class WorkerAgent {
   }
 
   /**
-   * progress-v2 — stable identity of a tool call for novelty + repetition tracking:
-   * name + whitespace-normalized raw arguments. Trailing/duplicate whitespace differences do
-   * not make a call "new"; any real argument change does.
+   * progress-v2 — stable identity of a tool call for novelty + repetition tracking: name +
+   * whitespace-normalized raw arguments. Trailing/duplicate whitespace differences do not make a
+   * call "new"; any real argument change does.
    */
   public static String callSignature(AssistantMessage.ToolCall tc) {
     String args = tc.arguments() == null ? "" : tc.arguments().replaceAll("\\s+", " ").trim();
@@ -2523,10 +2527,9 @@ public class WorkerAgent {
 
   /**
    * progress-v2 — did this tool envelope represent a FAILED attempt? Two shapes exist: error
-   * envelopes ({@code {"ok":false...}}) and ok-envelopes carrying a non-zero process exit
-   * (shell / buildProject / runTests embed {@code exit=N} or {@code "exit_code": N}). Only the
-   * envelope head is inspected — large outputs spill to disk and the verdict is always in the
-   * head.
+   * envelopes ({@code {"ok":false...}}) and ok-envelopes carrying a non-zero process exit (shell /
+   * buildProject / runTests embed {@code exit=N} or {@code "exit_code": N}). Only the envelope head
+   * is inspected — large outputs spill to disk and the verdict is always in the head.
    */
   public static boolean isFailureEnvelope(String envelope) {
     if (envelope == null || envelope.isEmpty()) return false;

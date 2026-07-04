@@ -68,26 +68,26 @@ public class WriteFileTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "path": {
-                 "type": "string",
-                 "description": "Workspace-relative path of the new file"
-               },
-               "content": {
-                 "type": "string",
-                 "description": "Full file contents"
-               },
-               "overwrite": {
-                 "type": "boolean",
-                 "description": "Set true to REPLACE an existing file wholesale. Requires a readFile of that file first (same freshness rule as editFile) so the replacement is grounded in the current contents. Default false."
-               }
-             },
-             "required": ["path", "content"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Workspace-relative path of the new file"
+    },
+    "content": {
+      "type": "string",
+      "description": "Full file contents"
+    },
+    "overwrite": {
+      "type": "boolean",
+      "description": "Set true to REPLACE an existing file wholesale. Requires a readFile of that file first (same freshness rule as editFile) so the replacement is grounded in the current contents. Default false."
+    }
+  },
+  "required": ["path", "content"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override

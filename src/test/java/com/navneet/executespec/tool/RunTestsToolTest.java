@@ -151,7 +151,8 @@ class RunTestsToolTest {
   @Test
   void wrapShellCommandTargetsContainerOrHost() {
     assertThat(RunTestsTool.wrapShellCommand("cid9", "/app", "go test ./..."))
-        .containsExactly("docker", "exec", "-w", "/app", "cid9", "/bin/bash", "-lc", "go test ./...");
+        .containsExactly(
+            "docker", "exec", "-w", "/app", "cid9", "/bin/bash", "-lc", "go test ./...");
     assertThat(RunTestsTool.wrapShellCommand(null, null, "go test ./..."))
         .containsExactly("/bin/sh", "-c", "go test ./...");
   }

@@ -57,10 +57,9 @@ public class WorkspaceTestRunner {
   private final SwebenchContainerStore swebenchContainers;
 
   /**
-   * Detailed run result (harness-resolution task 8): the parsed counts PLUS the raw output tail
-   * and command, so callers (VBC refusals, the auto-verify observation) can show the model WHAT
-   * failed instead of only how many. {@code outputTail} is bounded to {@value #DETAIL_TAIL_CHARS}
-   * chars.
+   * Detailed run result (harness-resolution task 8): the parsed counts PLUS the raw output tail and
+   * command, so callers (VBC refusals, the auto-verify observation) can show the model WHAT failed
+   * instead of only how many. {@code outputTail} is bounded to {@value #DETAIL_TAIL_CHARS} chars.
    */
   public record DetailedResult(
       TestExecutionSummary summary, String outputTail, String command, int exitCode) {}
