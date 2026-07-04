@@ -2498,6 +2498,59 @@
 .ide-benchmark-row-stats {
   min-width: 0;
 }
+.ide-benchmark-section {
+  margin-top: 18px;
+}
+.ide-benchmark-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.ide-benchmark-collapse {
+  min-height: 34px;
+  gap: 7px;
+}
+.ide-benchmark-count {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ide-bg-input);
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+.ide-benchmark-section-sub {
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+}
+.ide-benchmark-table-card {
+  padding: 0;
+  overflow-x: auto;
+}
+.ide-benchmark-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+}
+.ide-benchmark-table-row {
+  border-top: 1px solid var(--ide-border);
+  cursor: pointer;
+}
+.ide-benchmark-table-row:hover {
+  background: var(--ide-list-hover);
+}
+.ide-benchmark-table-row:focus {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: -2px;
+}
+.ide-benchmark-model {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
 
 /* C3 — breadcrumbs (ide/Crumbs.tsx). Desktop trail; mobile collapses to a
    single "‹ parent" back link. */
@@ -2668,6 +2721,16 @@
   .ide-benchmark-row-status,
   .ide-benchmark-row-time {
     margin-left: 0 !important;
+  }
+  .ide-benchmark-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ide-benchmark-section-sub {
+    padding-left: 4px;
+  }
+  .ide-benchmark-table {
+    min-width: 820px;
   }
 }
 
