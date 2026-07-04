@@ -371,6 +371,22 @@ public class BenchmarkGenerationService {
     };
   }
 
+  /**
+   * Pre-completeTask self-verification, provider-agnostic. Grounded in observed blind-run failures:
+   * a changed return/arg signature with an un-updated caller (Python "too many values to unpack",
+   * Go "undefined: X" / "build failed") and incomplete cross-call-site edits. This does not reveal
+   * the held-out tests — it only enforces internal consistency of the candidate patch.
+   */
+  private static final String BENCH_VERIFY_CHECKLIST =
+      "6. BEFORE completeTask, self-verify the patch is internally consistent:\n"
+          + "   - If you changed any function/method signature or return shape, searchFiles for"
+          + " EVERY caller and update them; a missed caller fails with unpack/arg-count/undefined"
+          + " errors.\n"
+          + "   - Confirm the files you edited still parse/compile (build or import the changed"
+          + " module); a patch that does not compile scores zero regardless of logic.\n"
+          + "   - Re-read the issue's stated expected behavior and confirm your change produces"
+          + " exactly that, not merely a plausible-looking edit.\n";
+
   /** Blind spec — issue + offline/existing-repo framing only. NO held-out tests. */
   private String synthesizeBlindSpec(SwebenchInstanceLoader.SwebenchInstance i) {
     StringBuilder sb = new StringBuilder();
@@ -421,11 +437,13 @@ public class BenchmarkGenerationService {
       sb.append(
           "5. Run the repository's EXISTING tests for the module you changed to confirm no"
               + " regression, then call completeTask.\n");
+      sb.append(BENCH_VERIFY_CHECKLIST);
     } else {
       sb.append("3. Make a minimal, targeted fix.\n");
       sb.append(
           "4. Run the repository's EXISTING tests for the module you changed to confirm no"
               + " regression, then call completeTask.\n");
+      sb.append(BENCH_VERIFY_CHECKLIST);
     }
     return sb.toString();
   }

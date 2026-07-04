@@ -80,9 +80,14 @@ def main():
             st, d = post("/api/admin/benchmark/generate",
                          {"instanceId": inst, "aiProvider": a.provider, "modelName": a.model},
                          token=token)
+            # Capture the EXACT artifact paths the API returns (proPatchJson / predsJson).
+            # Do NOT glob-match run dirs by instance: parallel lanes write one dir per model,
+            # and glob-latest mis-attributes a patch to the wrong model. The response paths are
+            # unambiguous per run.
             rec.update(http=st, runId=d.get("runId"), outcome=d.get("outcome"),
                        patchBytes=d.get("patchBytes"), costUsd=d.get("costUsd"),
-                       outputDir=d.get("outputDir") or d.get("outputPath"))
+                       proPatchJson=d.get("proPatchJson"), predsJson=d.get("predsJson"),
+                       submissionPatch=d.get("submissionPatch"))
         except urllib.error.HTTPError as e:
             body = e.read().decode()[:300]
             rec.update(http=e.code, error=body)
