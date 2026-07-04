@@ -24,16 +24,18 @@ class WriteFileToolTest {
 
   private final ObjectMapper om = new ObjectMapper();
   private WriteFileTool tool;
+  private ReadFileStateStore readState;
   private ExecutionContext ctx;
 
   @BeforeEach
   void setUp() {
+    readState = new ReadFileStateStore();
     tool =
         new WriteFileTool(
             new FileSandboxPolicy(),
             new CodeAbuseScanner(),
             mock(SseBroadcaster.class),
-            new ReadFileStateStore(),
+            readState,
             null);
     ctx = new ExecutionContext("run-1", "T1", workspace);
   }
@@ -51,6 +53,55 @@ class WriteFileToolTest {
 
     assertThat(result).isInstanceOf(ToolResult.Ok.class);
     assertThat(Files.readString(workspace.resolve("src/App.java"))).isEqualTo("class App {}\n");
+  }
+
+  // ---- harness-resolution T4: overwrite=true gated on read-recency ----
+
+  private JsonNode argsOverwrite(String path, String content) {
+    ObjectNode node = (ObjectNode) args(path, content);
+    node.put("overwrite", true);
+    return node;
+  }
+
+  @Test
+  void refusesExistingFileWithoutOverwrite() throws Exception {
+    Files.writeString(workspace.resolve("a.txt"), "v1");
+    ToolResult result = tool.execute(args("a.txt", "v2"), ctx);
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.ALREADY_EXISTS);
+    assertThat(((ToolResult.Err) result).message()).contains("overwrite=true");
+    assertThat(Files.readString(workspace.resolve("a.txt"))).isEqualTo("v1");
+  }
+
+  @Test
+  void overwriteRefusedWithoutPriorRead() throws Exception {
+    Files.writeString(workspace.resolve("a.txt"), "v1");
+    ToolResult result = tool.execute(argsOverwrite("a.txt", "v2"), ctx);
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.STALE_READ);
+    assertThat(Files.readString(workspace.resolve("a.txt"))).isEqualTo("v1");
+  }
+
+  @Test
+  void overwriteSucceedsAfterFreshRead() throws Exception {
+    java.nio.file.Path f = workspace.resolve("a.txt");
+    Files.writeString(f, "v1");
+    readState.recordRead(ctx.runId(), PathSafety.safeResolve(workspace, "a.txt"), "v1");
+    ToolResult result = tool.execute(argsOverwrite("a.txt", "v2"), ctx);
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(Files.readString(f)).isEqualTo("v2");
+  }
+
+  @Test
+  void overwriteRefusedWhenDiskDriftedSinceRead() throws Exception {
+    java.nio.file.Path f = workspace.resolve("a.txt");
+    Files.writeString(f, "v1");
+    readState.recordRead(ctx.runId(), PathSafety.safeResolve(workspace, "a.txt"), "v1");
+    Files.writeString(f, "v1-changed-behind-your-back");
+    ToolResult result = tool.execute(argsOverwrite("a.txt", "v2"), ctx);
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.STALE_READ);
+    assertThat(Files.readString(f)).isEqualTo("v1-changed-behind-your-back");
   }
 
   @Test
