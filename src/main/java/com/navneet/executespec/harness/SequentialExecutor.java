@@ -525,6 +525,12 @@ to boot — skip it for those.""";
       emitTaskWavePlan(runId, plan);
 
       int taskCount = plan.tasks().size();
+      // task 12 (execution.run-journal.enabled, default OFF) — rolling run journal: each task's
+      // outcome one-liner, injected into subsequent task prompts so task N+1 stops being amnesiac
+      // about task N (assessment Gap 5: cross-task coherence was deferred entirely to the
+      // reviewer wiring pass). Accumulated unconditionally (cheap strings); INJECTED only when
+      // the flag is on.
+      List<String> runJournal = new ArrayList<>();
       for (int i = 0; i < taskCount; i++) {
         // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
         // calls {@code future.cancel(true)} which interrupts THIS thread, but
@@ -575,13 +581,13 @@ to boot — skip it for those.""";
                   "Executor RESUME task={} from snapshot iter={}",
                   task.id(),
                   action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
+              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
             }
-            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
-            default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+            default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
           }
         } else {
-          outcome = executeOne(task, plan, req, isFinalTask, null);
+          outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
         }
 
         if (resume == null) {
@@ -589,6 +595,7 @@ to boot — skip it for those.""";
         }
 
         outcomes.add(outcome);
+        runJournal.add(journalEntry(task, outcome));
         metrics.recordTaskStatus(outcome.status().name());
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
@@ -1268,7 +1275,17 @@ to boot — skip it for those.""";
       ExecutionRequest req,
       boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null);
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      List<String> runJournal) {
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, runJournal);
   }
 
   private TaskOutcome executeOne(
@@ -1278,6 +1295,17 @@ to boot — skip it for those.""";
       boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom,
       ProviderModelOverride providerModelOverride) {
+    return executeOne(task, plan, req, isFinalTask, resumeFrom, providerModelOverride, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      ProviderModelOverride providerModelOverride,
+      List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
@@ -1303,7 +1331,20 @@ to boot — skip it for those.""";
             ? repoOrientationService.orient(
                 taskCtx.workspaceRoot(), task.title() + "\n" + task.description())
             : "";
-    String userPrompt = composeUserPrompt(task, null, orientation);
+    // task 12 — run-journal injection: plan outline + last few task outcomes, so this task is a
+    // MEMBER OF A RUN rather than an isolated job (naming/placement/interface choices stay
+    // globally coherent). Flag-gated; empty when off or first task.
+    String journalBlock =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("execution.run-journal.enabled")
+                && runJournal != null
+                && !runJournal.isEmpty())
+            ? journalBlock(plan, runJournal)
+            : "";
+    String contextBlocks =
+        (orientation.isBlank() ? "" : orientation)
+            + (journalBlock.isBlank() ? "" : (orientation.isBlank() ? "" : "\n\n") + journalBlock);
+    String userPrompt = composeUserPrompt(task, null, contextBlocks);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
     String runId = req.runContext().runId();
@@ -4396,6 +4437,40 @@ to boot — skip it for those.""";
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError) {
     return composeUserPrompt(task, previousBuildError, null);
+  }
+
+  /** task 12 — one journal line per finished task; accumulated every run, injected when flagged. */
+  static String journalEntry(PlannedTask task, TaskOutcome outcome) {
+    String summary = null;
+    if (outcome.workerOutcome() != null && outcome.workerOutcome().completionSummary() != null) {
+      summary = outcome.workerOutcome().completionSummary();
+    }
+    if (summary != null && summary.length() > 220) summary = summary.substring(0, 220) + "…";
+    return task.id()
+        + " ("
+        + task.title()
+        + ") → "
+        + outcome.status()
+        + (summary == null || summary.isBlank() ? "" : " — " + summary);
+  }
+
+  /** task 12 — plan outline + the last few journal entries (~1-2k tokens max). */
+  static String journalBlock(Plan plan, List<String> runJournal) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("# RUN JOURNAL (context from earlier tasks in this run)\n\n");
+    sb.append("Plan outline: ");
+    List<String> titles = new ArrayList<>();
+    for (PlannedTask t : plan.tasks()) titles.add(t.id() + " " + t.title());
+    sb.append(String.join(" · ", titles.subList(0, Math.min(titles.size(), 12))));
+    sb.append("\n\nCompleted so far:\n");
+    int from = Math.max(0, runJournal.size() - 5);
+    for (int i = from; i < runJournal.size(); i++) {
+      sb.append("- ").append(runJournal.get(i)).append("\n");
+    }
+    sb.append(
+        "\nStay consistent with the files, names, and interfaces established above — later tasks"
+            + " (and the reviewer) assume they hold.");
+    return sb.toString();
   }
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError, String orientation) {
