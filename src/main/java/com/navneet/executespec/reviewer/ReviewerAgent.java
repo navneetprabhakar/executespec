@@ -120,6 +120,13 @@ public class ReviewerAgent {
   private final com.navneet.executespec.router.ModelResolver modelResolver;
 
   /**
+   * Harness-resolution task 8 (flag {@code worker.auto-verify.enabled}) — lets the reviewer run
+   * the project's own tests after a GREEN final build and spend one bounded fix pass on red
+   * tests, mirroring the fix-build third pass. Nullable (tests / legacy wiring) ⇒ inert.
+   */
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
+
+  /**
    * Per-call executor for the timeout wrapper. Cached pool so successive reviews reuse threads;
    * daemon threads so JVM shutdown is not blocked.
    */
@@ -358,14 +365,82 @@ public class ReviewerAgent {
           buildPassed);
     }
 
+    // Harness-resolution task 8 — fix-tests pass (flag worker.auto-verify.enabled). The build is
+    // the compile signal; the suite is the behavior signal, and until now NO reviewer stage ever
+    // executed it. When the final build is green but the project's own tests are red, spend ONE
+    // bounded pass with the failing output as the spec (exact same machinery as fix-build), then
+    // re-check. Fail-open at every step; flag OFF ⇒ byte-identical.
+    boolean autoVerifyEnabled =
+        featureFlagService != null && featureFlagService.isEnabled("worker.auto-verify.enabled");
+    WorkerResult fixTests = null;
+    if (buildPassed && autoVerifyEnabled && workspaceTestRunner != null) {
+      try {
+        var red =
+            workspaceTestRunner
+                .runTestsDetailed(req.context().runId(), req.context().workspaceRoot())
+                .filter(d -> d.summary().getTotalTests() > 0)
+                .filter(d -> d.summary().getFailed() > 0 || d.summary().getErrors() > 0);
+        if (red.isPresent()) {
+          var d = red.get();
+          log.info(
+              "ReviewerAgent run={} fix-tests pass START — {} failed / {} errored of {}",
+              req.context().runId(),
+              d.summary().getFailed(),
+              d.summary().getErrors(),
+              d.summary().getTotalTests());
+          String testSpec =
+              "THE PROJECT'S OWN TESTS ARE FAILING ("
+                  + d.summary().getFailed()
+                  + " failed / "
+                  + d.summary().getErrors()
+                  + " errored of "
+                  + d.summary().getTotalTests()
+                  + "; command: "
+                  + d.command()
+                  + ").\n\nTest output (tail):\n"
+                  + d.outputTail();
+          fixTests =
+              runPassWithTimeout(
+                  req,
+                  FIX_BUILD_PASS_MAX_ITER,
+                  "reviewer-fixtests",
+                  loadPrompt("prompts/reviewer-general.md"),
+                  FIX_BUILD_PASS_TIMEOUT_SECONDS,
+                  testSpec);
+          var after =
+              workspaceTestRunner.runTestsDetailed(
+                  req.context().runId(), req.context().workspaceRoot());
+          log.info(
+              "ReviewerAgent run={} fix-tests pass DONE — after: {}",
+              req.context().runId(),
+              after
+                  .map(
+                      a ->
+                          a.summary().getFailed()
+                              + " failed / "
+                              + a.summary().getErrors()
+                              + " errored of "
+                              + a.summary().getTotalTests())
+                  .orElse("unresolvable"));
+        }
+      } catch (Exception e) {
+        log.warn(
+            "ReviewerAgent run={} fix-tests pass failed (fail-open): {}",
+            req.context().runId(),
+            e.getMessage());
+      }
+    }
+
     ReviewerResult.Overall overall = determineOverall(general, wiring, buildPassed);
     long elapsed = System.currentTimeMillis() - start;
     log.info(
-        "ReviewerAgent DONE run={} overall={} buildPassed={} thirdPassFired={} elapsed={}ms",
+        "ReviewerAgent DONE run={} overall={} buildPassed={} thirdPassFired={} fixTestsFired={}"
+            + " elapsed={}ms",
         req.context().runId(),
         overall,
         buildPassed,
         fixBuild != null,
+        fixTests != null,
         elapsed);
 
     // Compose pass summary including third-pass note if it fired, so the UI
