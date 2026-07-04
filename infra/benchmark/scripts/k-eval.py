@@ -29,7 +29,9 @@ Env: ES_BASE (default http://localhost:8080); admin creds ~/swebench-bench/.espe
 """
 
 import argparse
+import concurrent.futures
 import json
+import threading
 import os
 import pathlib
 import statistics
@@ -130,50 +132,58 @@ def cmd_generate(a):
                     done.add(json.loads(line)["instance_id"])
                 except Exception:
                     pass
-        print(f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} already done)")
-        with open(manifest, "a") as mf:
-            for i, iid in enumerate(instances):
-                if iid in done:
-                    continue
-                t0 = time.time()
-                row = {"instance_id": iid, "pass": k, "model": a.model}
-                try:
-                    st, d = post(
-                        "/api/admin/benchmark/generate",
-                        {"instanceId": iid, "aiProvider": a.provider, "modelName": a.model},
-                        token,
-                    )
-                    # EXACT artifact paths from the response — never glob (attribution bug).
-                    row.update(
-                        status=st,
-                        outcome=d.get("outcome"),
-                        patchBytes=d.get("patchBytes"),
-                        runId=d.get("runId"),
-                        iterations=d.get("iterations"),
-                        proPatchJson=d.get("proPatchJson"),
-                        predsJson=d.get("predsJson"),
-                        submissionPatch=d.get("submissionPatch"),
-                        costUsd=d.get("costUsd"),
-                        seconds=round(time.time() - t0, 1),
-                    )
-                except urllib.error.HTTPError as e:
-                    row.update(status=e.code, error=e.read().decode()[:300], seconds=round(time.time() - t0, 1))
-                except Exception as e:  # noqa: BLE001 — record and continue; manifest is the audit trail
-                    row.update(status=-1, error=str(e)[:300], seconds=round(time.time() - t0, 1))
-                mf.write(json.dumps(row) + "\n")
-                mf.flush()
-                print(f"   [{i+1}/{len(instances)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
+        todo = [iid for iid in instances if iid not in done]
+        print(f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} done, {len(todo)} to run, concurrency {a.concurrency})")
+        mf_lock = threading.Lock()
+        counter = {"n": 0}
+        token_box = {"t": token}
+
+        def run_one(iid):
+            t0 = time.time()
+            row = {"instance_id": iid, "pass": k, "model": a.model}
+            try:
+                st, d = post(
+                    "/api/admin/benchmark/generate",
+                    {"instanceId": iid, "aiProvider": a.provider, "modelName": a.model},
+                    token_box["t"],
+                )
+                # EXACT artifact paths from the response — never glob (attribution bug).
+                row.update(
+                    status=st, outcome=d.get("outcome"), patchBytes=d.get("patchBytes"),
+                    runId=d.get("runId"), iterations=d.get("iterations"),
+                    proPatchJson=d.get("proPatchJson"), predsJson=d.get("predsJson"),
+                    submissionPatch=d.get("submissionPatch"), costUsd=d.get("costUsd"),
+                    seconds=round(time.time() - t0, 1),
+                )
+                if st == 401:
+                    token_box["t"] = login()
+            except urllib.error.HTTPError as e:
+                row.update(status=e.code, error=e.read().decode()[:300], seconds=round(time.time() - t0, 1))
+                if e.code == 401:
+                    token_box["t"] = login()
+            except Exception as e:  # record and continue; manifest is the audit trail
+                row.update(status=-1, error=str(e)[:300], seconds=round(time.time() - t0, 1))
+            with mf_lock:
+                counter["n"] += 1
+                i = counter["n"]
+                with open(manifest, "a") as mf:
+                    mf.write(json.dumps(row) + "\n")
+                    mf.flush()
+                print(f"   [{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
                 tracking_event(
-                    token, bench_id,
-                    {"type": "RUN_PROGRESS", "taskName": iid,
-                     "esRunId": row.get("runId"),
+                    token_box["t"], bench_id,
+                    {"type": "RUN_PROGRESS", "taskName": iid, "esRunId": row.get("runId"),
                      "outcome": row.get("outcome"),
-                     "message": f"[{i+1}/{len(instances)}] {iid}: "
-                                f"{row.get('outcome') or row.get('error','?')}"
-                                f" patch={row.get('patchBytes')}B ${row.get('costUsd')}"
-                                f" {row['seconds']}s (UNSCORED)"})
-                if row.get("status") == 401:
-                    token = login()
+                     "message": f"[{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')}"
+                                f" patch={row.get('patchBytes')}B ${row.get('costUsd')} {row['seconds']}s (UNSCORED)"})
+            return row
+
+        if a.concurrency <= 1:
+            for iid in todo:
+                run_one(iid)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=a.concurrency) as ex:
+                list(ex.map(run_one, todo))
         tracking_event(token, bench_id, {"type": "RUN_PROGRESS",
                                          "message": f"pass {k}/{a.k} generation complete — score externally, then post rewards"})
         print(f"== pass {k} manifest: {manifest}")
@@ -283,6 +293,7 @@ def main():
     g.add_argument("--k", type=int, default=3)
     g.add_argument("--limit", type=int, default=0)
     g.add_argument("--out", required=True)
+    g.add_argument("--concurrency", type=int, default=1, help="parallel generate requests (server cap is max-concurrent-runs; watch RAM)")
 
     for name in ("aggregate", "canary"):
         s = sub.add_parser(name)
