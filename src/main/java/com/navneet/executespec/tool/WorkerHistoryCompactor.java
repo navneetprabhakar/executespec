@@ -99,6 +99,22 @@ public class WorkerHistoryCompactor {
   private final FeatureFlagService featureFlagService;
 
   /**
+   * Window-aware trigger (harness-resolution task 9): the compaction threshold is {@code
+   * WINDOW_TRIGGER_RATIO × the worker model's context window} instead of the DeepSeek-128k-era
+   * static 60k (30% of a 200k window — TB review R2 measured the evidence loss of firing that
+   * early). Nullable (legacy call sites / tests) ⇒ static {@link #TRIGGER_INPUT_TOKENS} fallback.
+   */
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
+
+  static final double WINDOW_TRIGGER_RATIO = 0.75;
+
+  /** Recent-tail token budget as a fraction of the window (≈4 chars/token estimate). */
+  static final double TAIL_BUDGET_RATIO = 0.25;
+
+  /** Dossier budget for the window-aware path — 1,200 tokens destroyed evidence (TB R2). */
+  static final int DOSSIER_MAX_TOKENS = 6_000;
+
+  /**
    * Return a (possibly) compacted copy of {@code history}. Returns the SAME list reference when no
    * compaction happened (flag off / under threshold / no safe boundary / any failure) so the caller
    * can cheaply detect a no-op by identity.
@@ -119,12 +135,69 @@ public class WorkerHistoryCompactor {
       ExecutionContext ctx,
       long lastInputTokens,
       String workerGoal) {
+    // Legacy signature — static trigger, fixed tail, 1,200-token summary (pre-task-9 behavior).
     if (!featureFlagService.isEnabled(FLAG_ENABLED)) {
       return history;
     }
     if (lastInputTokens < TRIGGER_INPUT_TOKENS) {
       return history;
     }
+    return compact(history, workerProvider, ctx, lastInputTokens, workerGoal, false, 0);
+  }
+
+  /**
+   * Window-aware variant (task 9): trigger at {@link #WINDOW_TRIGGER_RATIO} of the worker model's
+   * context window, keep a token-budgeted recent tail, and produce the structured dossier (up to
+   * {@link #DOSSIER_MAX_TOKENS} tokens).
+   */
+  public List<Message> compactIfNeeded(
+      List<Message> history,
+      String workerProvider,
+      String workerModel,
+      ExecutionContext ctx,
+      long lastInputTokens,
+      String workerGoal) {
+    if (!featureFlagService.isEnabled(FLAG_ENABLED)) {
+      return history;
+    }
+    long window = windowFor(workerModel);
+    long trigger = window > 0 ? (long) (window * WINDOW_TRIGGER_RATIO) : TRIGGER_INPUT_TOKENS;
+    if (lastInputTokens < trigger) {
+      return history;
+    }
+    return compact(history, workerProvider, ctx, lastInputTokens, workerGoal, true, window);
+  }
+
+  /**
+   * Emergency compaction for context-overflow recovery (task 9): bypasses BOTH the feature flag
+   * and the token trigger — when the provider has already rejected the request for length, "the
+   * flag is off" is not a reason to lose the run. Same fail-safe contract (any failure returns
+   * the original list).
+   */
+  public List<Message> compactNow(
+      List<Message> history, String workerProvider, String workerModel, ExecutionContext ctx,
+      String workerGoal) {
+    return compact(history, workerProvider, ctx, Long.MAX_VALUE, workerGoal, true, windowFor(workerModel));
+  }
+
+  private long windowFor(String workerModel) {
+    try {
+      return modelRegistry == null || workerModel == null
+          ? 0
+          : modelRegistry.contextLimitForOrPrefixFallback(workerModel);
+    } catch (Exception e) {
+      return 0;
+    }
+  }
+
+  private List<Message> compact(
+      List<Message> history,
+      String workerProvider,
+      ExecutionContext ctx,
+      long lastInputTokens,
+      String workerGoal,
+      boolean windowAware,
+      long window) {
     if (history == null || ctx == null) {
       return history;
     }
@@ -141,7 +214,25 @@ public class WorkerHistoryCompactor {
 
     // Align the cut to an AssistantMessage boundary so we never split a tool_use/tool_result pair
     // (see class javadoc). Scan DOWN from the target so we summarise as much as is safe.
-    final int targetCut = n - KEEP_RECENT_MESSAGES;
+    // Window-aware path: keep as many recent messages as fit the tail token budget (>= the fixed
+    // legacy 8), so big windows retain a large verbatim working set instead of a fixed 8 messages.
+    int keepRecent = KEEP_RECENT_MESSAGES;
+    if (windowAware && window > 0) {
+      long tailCharBudget = (long) (window * TAIL_BUDGET_RATIO) * 4L; // ~4 chars/token
+      long acc = 0;
+      int count = 0;
+      for (int i = n - 1; i > HEAD_KEEP; i--) {
+        String t = renderMessages(history.subList(i, i + 1));
+        acc += t.length();
+        if (acc > tailCharBudget) break;
+        count++;
+      }
+      keepRecent = Math.max(KEEP_RECENT_MESSAGES, count);
+      if (n <= HEAD_KEEP + keepRecent + 1) {
+        return history; // everything already fits the tail budget — nothing worth summarising
+      }
+    }
+    final int targetCut = n - keepRecent;
     int cut = -1;
     for (int i = targetCut; i >= HEAD_KEEP + 1; i--) {
       if (history.get(i) instanceof AssistantMessage) {
@@ -205,7 +296,7 @@ public class WorkerHistoryCompactor {
                   .agentRole("WorkerHistoryCompactor")
                   .stepId("worker-history.compact")
                   .temperature(0.0)
-                  .maxTokens(SUMMARY_MAX_TOKENS)
+                  .maxTokens(windowAware ? DOSSIER_MAX_TOKENS : SUMMARY_MAX_TOKENS)
                   .toolsOverride(Collections.emptyList())
                   .build());
       String summary = resp.getResult().getOutput().getText();
