@@ -83,6 +83,32 @@ def login():
     return tok
 
 
+# ---------- tracking (in-app /benchmark UI) ----------
+
+def tracking_start(token, provider, model, k, total, dataset_label):
+    """Register this generation run on the /benchmark dashboard. Fail-soft: UI-only."""
+    try:
+        st, d = post(
+            "/api/v2/test/benchmark/start",
+            {"suite": "SWE_BENCH", "dataset": dataset_label, "provider": provider,
+             "model": model, "k": k, "totalTasks": total, "harborJobName": "k-eval-local"},
+            token, timeout=30)
+        return d.get("id")
+    except Exception as e:
+        print(f"[tracking] start failed (non-fatal): {e}")
+        return None
+
+
+def tracking_event(token, bench_id, body):
+    """Publish one event. NEVER posts a reward (first-write-wins on reward — score first)."""
+    if not bench_id:
+        return
+    try:
+        post(f"/api/v2/test/benchmark/{bench_id}/event", body, token, timeout=30)
+    except Exception as e:
+        print(f"[tracking] event failed (non-fatal): {e}")
+
+
 # ---------- generate ----------
 
 def cmd_generate(a):
@@ -92,8 +118,10 @@ def cmd_generate(a):
     out_root = pathlib.Path(a.out).expanduser()
     out_root.mkdir(parents=True, exist_ok=True)
     token = login()
+    dataset_label = pathlib.Path(a.dataset).stem + " k-eval " + time.strftime("%Y-%m-%d")
 
     for k in range(1, a.k + 1):
+        bench_id = tracking_start(token, a.provider, a.model, a.k, len(instances), f"{dataset_label} pass{k}")
         manifest = out_root / f"pass{k}.manifest.jsonl"
         done = set()
         if manifest.exists():  # resumable per pass
@@ -135,8 +163,19 @@ def cmd_generate(a):
                 mf.write(json.dumps(row) + "\n")
                 mf.flush()
                 print(f"   [{i+1}/{len(instances)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
+                tracking_event(
+                    token, bench_id,
+                    {"type": "RUN_PROGRESS", "taskName": iid,
+                     "esRunId": row.get("runId"),
+                     "outcome": row.get("outcome"),
+                     "message": f"[{i+1}/{len(instances)}] {iid}: "
+                                f"{row.get('outcome') or row.get('error','?')}"
+                                f" patch={row.get('patchBytes')}B ${row.get('costUsd')}"
+                                f" {row['seconds']}s (UNSCORED)"})
                 if row.get("status") == 401:
                     token = login()
+        tracking_event(token, bench_id, {"type": "RUN_PROGRESS",
+                                         "message": f"pass {k}/{a.k} generation complete — score externally, then post rewards"})
         print(f"== pass {k} manifest: {manifest}")
     print("\ngenerate done. Score each pass with the Scale harness, then: k-eval.py aggregate <k eval_results.json>")
 
