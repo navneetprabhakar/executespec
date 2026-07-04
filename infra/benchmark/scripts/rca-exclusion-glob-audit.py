@@ -25,28 +25,20 @@ import sys
 # Mirror of captureDiff's exclusion list (BenchmarkGenerationService.java captureDiff).
 # Non-glob entries behave as git pathspec prefix matches; glob entries use glob(5) with
 # '**' crossing directories. Keep in lockstep with the Java when either changes.
+# NOTE: as of 2026-07-04 these mirror the NARROWED Pro list in
+# BenchmarkGenerationService.diffExcludes(pro=true) — the audit of all 731 gold patches drove the
+# narrowing (32 instances had gold hunks stripped by the old broad list). Keep in lockstep.
 PREFIX_EXCLUDES = [
     ".agent-context",
-    "Dockerfile",
-    ".dockerignore",
-    "README.md",
     "__pycache__",
     ".pytest_cache",
     "*.egg-info",  # git treats bare * here as glob within any depth component
 ]
 GLOB_EXCLUDES = [
-    "**/pyproject.toml",
-    "**/setup.py",
-    "**/setup.cfg",
-    "**/tox.ini",
-    "**/MANIFEST.in",
-    "**/requirements*.txt",
-    "**/.github/**",
     "appendonlydir/**",
     "**/test_*.py",
     "**/*_test.py",
     "**/tests/**",
-    "**/testing/**",
     "**/conftest.py",
     "**/repro*",
     "**/*_repro*",

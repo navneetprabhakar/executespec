@@ -171,7 +171,12 @@ public class BenchmarkGenerationService {
                   .verifyMode(VerifyMode.NONE)
                   .build());
 
-      String patch = captureDiff(containerName, instance.baseCommit(), workdirFor(instance));
+      String patch =
+          captureDiff(
+              containerName,
+              instance.baseCommit(),
+              workdirFor(instance),
+              instance.isSweBenchPro() || props.isSweBenchPro());
       Path submission = outputDir.resolve("submission.patch");
       Files.writeString(submission, patch);
       Path preds = writePreds(outputDir, instanceId, model, patch);
@@ -322,22 +327,13 @@ public class BenchmarkGenerationService {
 
   /** Capture the agent's {@code git diff} against the base commit, excluding run-infra noise. */
   private String captureDiff(String containerName, String baseCommit, String workdir) {
+    return captureDiff(containerName, baseCommit, workdir, props.isSweBenchPro());
+  }
+
+  private String captureDiff(
+      String containerName, String baseCommit, String workdir, boolean proExcludes) {
     String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
-    String excludes =
-        " -- . \":(exclude).agent-context\" \":(exclude)Dockerfile\" \":(exclude).dockerignore\""
-            + " \":(exclude)README.md\" \":(exclude)__pycache__\" \":(exclude).pytest_cache\""
-            + " \":(exclude)*.egg-info\""
-            + " \":(exclude,glob)**/pyproject.toml\" \":(exclude,glob)**/setup.py\""
-            + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
-            + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
-            + " \":(exclude,glob)**/.github/**\""
-            + " \":(exclude,glob)appendonlydir/**\""
-            + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
-            + " \":(exclude,glob)**/tests/**\" \":(exclude,glob)**/testing/**\""
-            + " \":(exclude,glob)**/conftest.py\""
-            + " \":(exclude,glob)**/repro*\" \":(exclude,glob)**/*_repro*\""
-            + " \":(exclude,glob)tmp/**\" \":(exclude,glob)**/tmp_*\""
-            + " \":(exclude,glob)**/scratch*\"";
+    String excludes = diffExcludes(proExcludes);
     String cmd =
         "docker exec "
             + containerName
@@ -352,6 +348,41 @@ public class BenchmarkGenerationService {
             + "'";
     ShellResult diff = run(cmd, 120);
     return diff.exit() == 0 ? diff.output() : "";
+  }
+
+  /**
+   * Diff-exclusion pathspecs. Two variants (harness-resolution B.2 finding #4, 2026-07-04):
+   *
+   * <p><b>Classic</b> keeps the historical Lite-calibrated list. <b>Pro</b> keeps ONLY the rules
+   * that can never hit a gold fix — agent-noise dirs and test files (Scale strips test changes from
+   * gold {@code patch} into {@code test_patch}, so test excludes are provably safe) — after the
+   * 2026-07-04 audit of all 731 Pro gold patches found the broad list silently stripped gold hunks
+   * on 32 instances / 52 files (28× {@code **&#47;testing/**} — Go helper packages — plus
+   * README.md, Dockerfile, .github, packaging files). A dropped gold hunk scores as a model
+   * failure; ~4.4% of the full set was unwinnable as configured. Pinned by {@code
+   * BenchmarkDiffExcludesTest}.
+   */
+  static String diffExcludes(boolean pro) {
+    String common =
+        " -- . \":(exclude).agent-context\" \":(exclude)__pycache__\""
+            + " \":(exclude).pytest_cache\" \":(exclude)*.egg-info\""
+            + " \":(exclude,glob)appendonlydir/**\""
+            + " \":(exclude,glob)**/test_*.py\" \":(exclude,glob)**/*_test.py\""
+            + " \":(exclude,glob)**/tests/**\""
+            + " \":(exclude,glob)**/conftest.py\""
+            + " \":(exclude,glob)**/repro*\" \":(exclude,glob)**/*_repro*\""
+            + " \":(exclude,glob)tmp/**\" \":(exclude,glob)**/tmp_*\""
+            + " \":(exclude,glob)**/scratch*\"";
+    if (pro) {
+      return common;
+    }
+    return common
+        + " \":(exclude)Dockerfile\" \":(exclude).dockerignore\" \":(exclude)README.md\""
+        + " \":(exclude,glob)**/pyproject.toml\" \":(exclude,glob)**/setup.py\""
+        + " \":(exclude,glob)**/setup.cfg\" \":(exclude,glob)**/tox.ini\""
+        + " \":(exclude,glob)**/MANIFEST.in\" \":(exclude,glob)**/requirements*.txt\""
+        + " \":(exclude,glob)**/.github/**\""
+        + " \":(exclude,glob)**/testing/**\"";
   }
 
   private Path writePreds(Path outputDir, String instanceId, String model, String patch)
