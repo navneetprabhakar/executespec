@@ -333,6 +333,9 @@ to boot — skip it for those.""";
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
+
+  /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
+  private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
@@ -1293,7 +1296,14 @@ to boot — skip it for those.""";
             req.workspaceSummary(),
             requestedProvider,
             req.localHandsMode());
-    String userPrompt = composeUserPrompt(task, null);
+    String orientation =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("worker.localization.enabled")
+                && repoOrientationService != null)
+            ? repoOrientationService.orient(
+                taskCtx.workspaceRoot(), task.title() + "\n" + task.description())
+            : "";
+    String userPrompt = composeUserPrompt(task, null, orientation);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
     String runId = req.runContext().runId();
@@ -4385,9 +4395,18 @@ to boot — skip it for those.""";
   }
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError) {
+    return composeUserPrompt(task, previousBuildError, null);
+  }
+
+  private String composeUserPrompt(PlannedTask task, String previousBuildError, String orientation) {
     StringBuilder sb = new StringBuilder();
     sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
     sb.append(task.description());
+    if (orientation != null && !orientation.isBlank()) {
+      // task 11 (worker.localization.enabled): advisory warm-start block — layout, identifier
+      // hits, detected build/test commands — so localization isn't re-derived from a cold prompt.
+      sb.append("\n\n").append(orientation);
+    }
     if (previousBuildError != null && !previousBuildError.isBlank()) {
       // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
       // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the
