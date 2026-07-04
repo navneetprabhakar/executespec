@@ -52,6 +52,9 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private final PromptAssembler promptAssembler;
   private final RunCostTracker costTracker;
 
+  /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
+  private final RepoOrientationService repoOrientationService;
+
   private String patchPrompt;
 
   @Override
@@ -101,7 +104,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .provider(request.provider())
         .model(request.model())
         .systemPrompt(buildSystemPrompt(request.provider()))
-        .userPrompt(request.taskSpec())
+        .userPrompt(withOrientation(request.taskSpec(), ctx))
         .context(ctx)
         .maxIterations(maxIterations)
         .temperature(0.0)
@@ -121,6 +124,19 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         // injection — the schema-free replacement for the reverted V209/V217 pair.
         .autoVerify(featureFlagService.isEnabled("worker.auto-verify.enabled"))
         .build();
+  }
+
+  /**
+   * task 11 (worker.localization.enabled, default OFF): prepend the deterministic repo-orientation
+   * warm-start block for existing-repo work. Fail-open — empty block appends nothing.
+   */
+  private String withOrientation(String taskSpec, ExecutionContext ctx) {
+    if (repoOrientationService == null
+        || !featureFlagService.isEnabled("worker.localization.enabled")) {
+      return taskSpec;
+    }
+    String orientation = repoOrientationService.orient(ctx.workspaceRoot(), taskSpec);
+    return orientation.isBlank() ? taskSpec : taskSpec + "\n\n" + orientation;
   }
 
   private boolean requireTestVerification(EngineRequest request) {

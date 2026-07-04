@@ -67,7 +67,7 @@ class SequentialExecutorResumeKeyTest {
         null /* costTracker */,
         null /* gcsTaskCheckpointService */,
         null /* availableProviderResolver */,
-        null /* goalContinuationAdvisor */);
+        null /* goalContinuationAdvisor */, null);
   }
 
   /**
