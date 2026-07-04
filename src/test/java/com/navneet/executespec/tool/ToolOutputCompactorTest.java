@@ -27,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -94,8 +95,7 @@ class ToolOutputCompactorTest {
   }
 
   @Test
-  @DisplayName(
-      "tool in SKIP_TOOLS (writeFile/editFile/gitCommit/completeTask/gitDiff/gitStatus) → empty")
+  @DisplayName("tool in SKIP_TOOLS (exact reads, writes, git, complete) → empty")
   void skip_whenToolInSkipList() {
     when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
 
@@ -157,7 +157,7 @@ class ToolOutputCompactorTest {
     when(router.call(any(LlmRequest.class))).thenThrow(new RuntimeException("boom"));
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "anthropic");
+        compactor.compactIfNeeded("searchFiles", BIG_RAW, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isEmpty();
   }
@@ -174,13 +174,16 @@ class ToolOutputCompactorTest {
                 .build());
     when(promptAssembler.assemble(anyString(), any())).thenReturn("compactor prompt");
 
-    String summaryText = "[compacted from " + BIG_RAW.length() + " bytes] short.";
+    String modelText = "short.";
+    String summaryText = "[compacted from " + BIG_RAW.length() + " bytes]\n" + modelText;
     ChatResponse resp = Mockito.mock(ChatResponse.class);
     Generation gen = Mockito.mock(Generation.class);
     AssistantMessage msg = Mockito.mock(AssistantMessage.class);
     Mockito.when(resp.getResult()).thenReturn(gen);
     Mockito.when(gen.getOutput()).thenReturn(msg);
-    Mockito.when(msg.getText()).thenReturn(summaryText);
+    Mockito.when(msg.getText()).thenReturn(modelText);
+    Mockito.when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason("stop").build());
     ChatResponseMetadata meta = Mockito.mock(ChatResponseMetadata.class);
     Usage usage = Mockito.mock(Usage.class);
     Mockito.when(resp.getMetadata()).thenReturn(meta);
@@ -192,7 +195,7 @@ class ToolOutputCompactorTest {
         .thenReturn(0.000123);
 
     Optional<ToolOutputCompactor.Compacted> result =
-        compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "anthropic");
+        compactor.compactIfNeeded("searchFiles", BIG_RAW, "the goal", false, CTX, "anthropic");
 
     assertThat(result).isPresent();
     assertThat(result.get().summary()).isEqualTo(summaryText);
@@ -201,6 +204,35 @@ class ToolOutputCompactorTest {
     assertThat(result.get().tokensIn()).isEqualTo(900L);
     assertThat(result.get().tokensOut()).isEqualTo(40L);
     assertThat(result.get().costUsd()).isEqualTo(0.000123);
+  }
+
+  @Test
+  @DisplayName(
+      "finishReason=length → returns empty so truncated summaries never replace raw output")
+  void skip_whenModelHitLengthLimit() {
+    when(featureFlagService.isEnabled(ToolOutputCompactor.FLAG_ENABLED)).thenReturn(true);
+    when(modelResolver.resolve(anyString(), any(LlmProvider.class)))
+        .thenReturn(
+            ResolvedModel.builder()
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-haiku-4-5-20251001")
+                .build());
+    when(promptAssembler.assemble(anyString(), any())).thenReturn("compactor prompt");
+
+    ChatResponse resp = Mockito.mock(ChatResponse.class);
+    Generation gen = Mockito.mock(Generation.class);
+    AssistantMessage msg = Mockito.mock(AssistantMessage.class);
+    Mockito.when(resp.getResult()).thenReturn(gen);
+    Mockito.when(gen.getOutput()).thenReturn(msg);
+    Mockito.when(msg.getText()).thenReturn("partial summary");
+    Mockito.when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason("length").build());
+    when(router.call(any(LlmRequest.class))).thenReturn(resp);
+
+    Optional<ToolOutputCompactor.Compacted> result =
+        compactor.compactIfNeeded("searchFiles", BIG_RAW, "the goal", false, CTX, "anthropic");
+
+    assertThat(result).isEmpty();
   }
 
   @Test
@@ -229,7 +261,7 @@ class ToolOutputCompactorTest {
     Mockito.when(resp.getMetadata()).thenReturn(null);
     when(router.call(any(LlmRequest.class))).thenReturn(resp);
 
-    compactor.compactIfNeeded("readFile", BIG_RAW, "the goal", false, CTX, "openai");
+    compactor.compactIfNeeded("searchFiles", BIG_RAW, "the goal", false, CTX, "openai");
 
     verify(modelResolver).resolve(ToolOutputCompactor.AGENT_NAME, LlmProvider.OPENAI);
   }

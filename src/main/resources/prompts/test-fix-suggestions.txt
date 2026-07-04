@@ -14,7 +14,9 @@ CLASSIFICATION — before suggesting fixes, classify each failure:
 - DATA_MISMATCH: Response shape doesn't match expectation → suggest DTO/serialization fix
 - CASCADING: Failure caused by another test's side effect → suggest test isolation fix
 
-Include the classification in each suggestion object.
+Include `testClass`, `testMethod`, and `classification` in each suggestion object. Copy `testClass`
+and `testMethod` exactly from the failure input so the report can join suggestions back to the exact
+failed test.
 
 CASCADING FAILURE DETECTION:
 If 5+ tests fail with the same root cause (e.g., all 404 because no error handler),
@@ -36,6 +38,7 @@ Examples of good suggestions:
 Respond with ONLY a JSON array. No markdown fences. No preamble. No text outside the array.
 [
   {
+    "testClass": "UserControllerApiTest",
     "testMethod": "shouldRejectDuplicateEmail",
     "classification": "MISSING_VALIDATION",
     "suggestion": "Add @Column(unique = true) to User.email..."

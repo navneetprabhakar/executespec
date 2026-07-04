@@ -766,8 +766,8 @@ public class FallbackLlmRouter {
       Prompt augmented =
           switch (provider.toLowerCase()) {
             case "anthropic" -> {
-              var builder =
-                  AnthropicChatOptions.builder().model(model).maxTokens(maxTok).temperature(0.0);
+              var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok);
+              if (!AnthropicModelOptions.shouldOmitTemperature(model)) builder.temperature(0.0);
               if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
               if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
               if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
@@ -866,7 +866,6 @@ public class FallbackLlmRouter {
     AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
     return AnthropicChatModel.builder()
         .anthropicApi(api)
-        .defaultOptions(AnthropicChatOptions.builder().temperature(0.0).build())
         .retryTemplate(getRetryTemplate())
         .observationRegistry(getObservationRegistry())
         .build();

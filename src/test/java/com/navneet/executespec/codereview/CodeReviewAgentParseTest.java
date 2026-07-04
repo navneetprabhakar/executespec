@@ -125,6 +125,27 @@ class CodeReviewAgentParseTest {
   }
 
   @Test
+  void missing_source_defaults_static_for_static_rule_ids() throws Exception {
+    String json =
+        "{\n"
+            + "  \"summary\": \"\",\n"
+            + "  \"issues\": [\n"
+            + "    { \"fingerprintRuleId\": \"java.lang.security.audit.weak-prng\","
+            + " \"severity\": \"MAJOR\", \"category\": \"SECURITY\", \"filePath\":"
+            + " \"src/z.java\", \"lineStart\": 5, \"lineEnd\": 5, \"message\": \"hi\" },\n"
+            + "    { \"fingerprintRuleId\": \"LLM-NATIVE-auth-gap\", \"severity\": \"MAJOR\","
+            + " \"category\": \"SECURITY\", \"filePath\": \"src/a.java\", \"lineStart\": 8,"
+            + " \"lineEnd\": 8, \"message\": \"native\" }\n"
+            + "  ]\n"
+            + "}";
+
+    CodeReviewAgent.AgentResult result = agent.parseSubmission(json);
+
+    assertEquals("STATIC", result.issues().get(0).source());
+    assertEquals("LLM", result.issues().get(1).source());
+  }
+
+  @Test
   void absent_droppedStaticFindings_array_is_safe() throws Exception {
     String json = "{\"summary\":\"all good\",\"issues\":[]}";
     CodeReviewAgent.AgentResult result = agent.parseSubmission(json);

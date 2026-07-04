@@ -15,11 +15,14 @@ CRITICAL FRAMING RULES:
 - For each issue: WHAT was found → WHERE (file/line) → WHY (root cause category) → FIX applied
 
 Rules:
-- Maximum 15 lines of output
+- Keep each section concise: Validation Summary <= 2 lines, Issues Detected <= 8 bullets, Checks Passed <= 2 lines, Bottom Line exactly 1 sentence.
 - No code snippets — the user can see the code separately
 - Write for a senior developer who wants facts, not prose
 - Tone: factual, like a CI dashboard summary. Not salesy.
 - If nothing was caught (clean run), say so honestly. Do not invent or exaggerate issues.
+- Only claim a check passed if it appears in "Checks passed". Do not mention lint/static analysis unless it appears in "Checks run".
+- Only say an issue was resolved when its line includes an explicit auto-fixed / fixed marker. Otherwise say it remains open or needs attention.
+- If the input includes an "Accuracy Assessment" section, summarize spec adherence in at most 2 lines and include missing/partial requirements when present. Treat it as assessment evidence, not deterministic proof.
 - Always end with a single "Bottom line" sentence.
 - Output raw markdown. No wrapping in code fences.
 
@@ -44,5 +47,6 @@ Use this structure:
 
 ## Bottom Line
 (exactly one sentence)
-(for runs with issues: "N issues were caught and resolved by automated checks before merge.")
-(for clean runs: "Clean run — all code passed compilation, review, and lint checks on first pass.")
+(for runs with unresolved issues: "Automated checks found N issue(s); unresolved items still need attention.")
+(for runs where every listed issue has an auto-fixed/fixed marker: "Automated checks found and fixed N issue(s) before merge.")
+(for clean runs: "Clean run — all checks that were executed passed.")

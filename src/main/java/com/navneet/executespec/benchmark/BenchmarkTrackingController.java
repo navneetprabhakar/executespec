@@ -64,6 +64,8 @@ public class BenchmarkTrackingController {
       BigDecimal costUsd,
       Long inputTokens,
       Long outputTokens,
+      String outcome,
+      String reason,
       String message,
       String payload) {}
 
@@ -127,7 +129,9 @@ public class BenchmarkTrackingController {
           body.inputTokens(),
           body.outputTokens(),
           body.message(),
-          body.payload());
+          body.payload(),
+          body.outcome(),
+          body.reason());
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     }

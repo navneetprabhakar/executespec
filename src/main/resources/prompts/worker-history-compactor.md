@@ -5,6 +5,13 @@ You are compacting the EARLIER turns of a coding agent's work session into a tig
 The agent's task:
 {{WORKER_GOAL}}
 
+Budget: your note may use up to roughly 6000 output tokens when the work was substantial — this is
+a HANDOFF DOSSIER for an engineer with amnesia, not a summary. Preserve in this order: (1) files
+edited and exact identifiers, (2) verification outcomes and current failures — copy error messages
+and expected outputs VERBATIM, never paraphrase them, (3) the current working hypothesis and the
+concrete next step, (4) hard constraints and architecture/API decisions, (5) dead ends already
+tried. Drop narration and successful read/search noise before dropping any unresolved problem.
+
 ## What to PRESERVE (the agent will lose these turns — capture every load-bearing fact)
 
 - **Files created / edited so far** — path + a one-line description of what each now contains.
@@ -23,7 +30,7 @@ The agent's task:
 ## Output rules
 
 - Output ONLY the progress note — no preamble, no "Here is the summary:".
-- Use terse bullet points grouped under short headers (Files · Decisions · Verified · Open). Skip a header if it's empty.
+- Use terse bullet points grouped under short headers (Files · Decisions · Verified · Hypothesis/Next · Open). Skip a header if it's empty.
 - This note replaces many turns, so it can be long if the work was substantial — but every line must earn its place. Fidelity on identifiers + open problems beats brevity.
 - Do NOT invent progress the transcript doesn't show. If something is unclear, say so rather than guessing.
 

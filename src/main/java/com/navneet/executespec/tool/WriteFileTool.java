@@ -15,7 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * V2 writeFile tool. Creates a NEW file. Errors if the file already exists.
+ * V2 writeFile tool. Creates a NEW file; overwrite=true replaces an existing file gated on
+ * read-recency (harness-resolution T4, 2026-07-04).
  *
  * <p><b>Hard rule (V2 design):</b> writeFile is reserved for new files only. To modify an existing
  * file, the LLM must use {@link EditFileTool} instead. This cuts write-phase tokens significantly
@@ -58,29 +59,35 @@ public class WriteFileTool implements Tool {
 
   @Override
   public String description() {
-    return "Creates a NEW file with the given content. Errors if the file already exists — "
-        + "use editFile to modify existing files. Parent directories are created automatically.";
+    return "Creates a NEW file with the given content, or wholesale-REPLACES an existing file when"
+        + " overwrite=true (requires a prior readFile of that file — same freshness rule as"
+        + " editFile). For targeted changes prefer editFile. Parent directories are created"
+        + " automatically.";
   }
 
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "path": {
-                 "type": "string",
-                 "description": "Workspace-relative path of the new file"
-               },
-               "content": {
-                 "type": "string",
-                 "description": "Full file contents"
-               }
-             },
-             "required": ["path", "content"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Workspace-relative path of the new file"
+    },
+    "content": {
+      "type": "string",
+      "description": "Full file contents"
+    },
+    "overwrite": {
+      "type": "boolean",
+      "description": "Set true to REPLACE an existing file wholesale. Requires a readFile of that file first (same freshness rule as editFile) so the replacement is grounded in the current contents. Default false."
+    }
+  },
+  "required": ["path", "content"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -104,10 +111,37 @@ public class WriteFileTool implements Tool {
             "writeFile blocked by FileSandboxPolicy path={} reason={}", path, sandbox.reason());
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, sandbox.reason());
       }
+      boolean overwrite = args.path("overwrite").asBoolean(false);
       if (Files.exists(resolved)) {
-        return ToolResult.err(
-            ToolResult.ErrorKind.ALREADY_EXISTS,
-            "file already exists: " + path + " — use editFile to modify existing files");
+        if (!overwrite) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.ALREADY_EXISTS,
+              "file already exists: "
+                  + path
+                  + " — use editFile for targeted changes, or writeFile with overwrite=true to"
+                  + " replace the whole file (requires a prior readFile of it)");
+        }
+        // T4 (harness-resolution): wholesale replacement is allowed but gated on read-recency —
+        // the same ReadFileStateStore freshness rule editFile enforces — so an overwrite is
+        // always grounded in the file's actual current contents (kills the hallucinated-rewrite
+        // class without leaving large/mangled files unrecoverable).
+        String current = Files.readString(resolved);
+        ReadFileStateStore.Status rbw = readState.check(ctx.runId(), resolved, current);
+        if (rbw == ReadFileStateStore.Status.NOT_READ) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.STALE_READ,
+              "overwrite refused — you have not readFile "
+                  + path
+                  + " in this run. Read it first so the replacement is grounded in the current"
+                  + " contents, then re-issue writeFile overwrite=true.");
+        }
+        if (rbw == ReadFileStateStore.Status.STALE) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.STALE_READ,
+              path
+                  + " changed on disk since you last read it — readFile it again, then re-issue"
+                  + " the overwrite.");
+        }
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, content);
       if (scanResult.flagged()) {

@@ -4,6 +4,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 
 import com.google.genai.Client;
+import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -117,15 +118,9 @@ public class AgentModelConfig {
     }
     log.info("[AgentModelConfig] Creating system Anthropic bean ({})", model);
     AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-    return AnthropicChatModel.builder()
-        .anthropicApi(api)
-        .defaultOptions(
-            AnthropicChatOptions.builder()
-                .model(model)
-                .maxTokens(maxTokens)
-                .temperature(0.0)
-                .build())
-        .build();
+    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens);
+    if (!AnthropicModelOptions.shouldOmitTemperature(model)) options.temperature(0.0);
+    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options.build()).build();
   }
 
   /**
