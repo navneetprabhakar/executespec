@@ -78,6 +78,7 @@ class ToolRegistryWorkerBindTest {
                 fakeTool("gitCommit"),
                 fakeTool("completeTask")),
             new ObjectMapper(),
+            null,
             null); // remoteToolDispatcher — not exercised here; the dispatch branch is null-guarded
 
     List<ToolCallback> workerTools = registry.bindForWorker(ctx());
@@ -103,6 +104,7 @@ class ToolRegistryWorkerBindTest {
         new ToolRegistry(
             List.of(fakeTool("writeFile"), fakeTool("gitCommit"), fakeTool("completeTask")),
             new ObjectMapper(),
+            null,
             null);
 
     List<ToolCallback> all = registry.bind(ctx());
@@ -151,7 +153,7 @@ class ToolRegistryWorkerBindTest {
   void bindForWorker_excludes_backgroundJob_when_flag_off() {
     ToolRegistry registry =
         new ToolRegistry(
-            List.of(fakeTool("readFile"), backgroundJob(false)), new ObjectMapper(), null);
+            List.of(fakeTool("readFile"), backgroundJob(false)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertFalse(
@@ -165,7 +167,7 @@ class ToolRegistryWorkerBindTest {
   void bindForWorker_includes_backgroundJob_when_flag_on() {
     ToolRegistry registry =
         new ToolRegistry(
-            List.of(fakeTool("readFile"), backgroundJob(true)), new ObjectMapper(), null);
+            List.of(fakeTool("readFile"), backgroundJob(true)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertTrue(names.contains("backgroundJob"), "backgroundJob must be bound when its flag is ON");
@@ -175,7 +177,7 @@ class ToolRegistryWorkerBindTest {
   void bindForWorker_excludes_runWorkspaceTests_when_flag_off() {
     ToolRegistry registry =
         new ToolRegistry(
-            List.of(fakeTool("readFile"), workspaceRunTests(false)), new ObjectMapper(), null);
+            List.of(fakeTool("readFile"), workspaceRunTests(false)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertFalse(
@@ -188,7 +190,7 @@ class ToolRegistryWorkerBindTest {
   void bindForWorker_includes_runWorkspaceTests_when_flag_on() {
     ToolRegistry registry =
         new ToolRegistry(
-            List.of(fakeTool("readFile"), workspaceRunTests(true)), new ObjectMapper(), null);
+            List.of(fakeTool("readFile"), workspaceRunTests(true)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertTrue(
@@ -199,7 +201,7 @@ class ToolRegistryWorkerBindTest {
   void bindForWorker_excludes_verifyBoot_when_flag_off() {
     ToolRegistry registry =
         new ToolRegistry(
-            List.of(fakeTool("readFile"), verifyBoot(false)), new ObjectMapper(), null);
+            List.of(fakeTool("readFile"), verifyBoot(false)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertFalse(
@@ -211,9 +213,51 @@ class ToolRegistryWorkerBindTest {
   @Test
   void bindForWorker_includes_verifyBoot_when_flag_on() {
     ToolRegistry registry =
-        new ToolRegistry(List.of(fakeTool("readFile"), verifyBoot(true)), new ObjectMapper(), null);
+        new ToolRegistry(List.of(fakeTool("readFile"), verifyBoot(true)), new ObjectMapper(), null, null);
     List<String> names =
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     assertTrue(names.contains("verifyBoot"), "verifyBoot must be bound when its flag is ON");
+  }
+
+  // ---- harness-resolution T1: lean worker toolset (flag worker.lean-toolset.enabled) ----
+
+  @Test
+  void leanToolsetFiltersCompatAliasesForServerWorkers() {
+    var flags = org.mockito.Mockito.mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(flags.isEnabled("worker.lean-toolset.enabled")).thenReturn(true);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("read_file"),
+                fakeTool("shell"),
+                fakeTool("bash"),
+                fakeTool("grep"),
+                fakeTool("glob"),
+                fakeTool("lsp"),
+                fakeTool("completeTask")),
+            new ObjectMapper(),
+            null,
+            flags);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "shell", "glob", "completeTask");
+  }
+
+  @Test
+  void leanToolsetOffKeepsFullBinding() {
+    var flags = org.mockito.Mockito.mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(flags.isEnabled("worker.lean-toolset.enabled")).thenReturn(false);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), fakeTool("read_file"), fakeTool("bash")),
+            new ObjectMapper(),
+            null,
+            flags);
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "read_file", "bash");
   }
 }
