@@ -77,7 +77,7 @@ class ReviewerAgentVerdictParsingTest {
   private static ReviewerAgent agent() {
     // 7 nulls: WorkerAgent, BuildProjectTool, ObjectMapper, Metrics, FeatureFlagService,
     // PostEditFormatter, ModelResolver. determineOverall touches none of them.
-    return new ReviewerAgent(null, null, null, null, null, null, null);
+    return new ReviewerAgent(null, null, null, null, null, null, null, null);
   }
 
   @Test

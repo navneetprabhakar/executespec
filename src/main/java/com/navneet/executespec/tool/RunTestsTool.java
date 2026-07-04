@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -14,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.smoketest.TestCommandResolver;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -21,36 +23,31 @@ import org.springframework.stereotype.Component;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Structured pytest tool for patch-mode (SWE-bench / generic Python). Takes a list of pytest test
- * ids, runs them inside the bench container (or host workspace if no container is registered for
- * this run), and returns a parsed pass/fail summary instead of raw stdout.
+ * Structured LANGUAGE-AWARE test tool for patch-mode. Resolves the workspace's test framework via
+ * {@link TestCommandResolver} (pytest / go test / npm / cargo / mvn / gradle — the same resolver
+ * the scoring path trusts) and runs the requested tests inside the bench container (or the host
+ * workspace when no container is registered), returning a parsed pass/fail envelope.
  *
- * <p>Why structured: with {@code shell} the agent had to parse pytest output itself — count
- * "passed" / "failed" lines, extract assertion errors from indented blocks. Models sometimes
- * mis-counted, sometimes treated a single-test-failed run as "everything failed," sometimes claimed
- * a passing test based on a misread. A typed envelope removes that parsing burden:
+ * <p>History: until 2026-07-04 (harness-resolution task 6) this tool was pytest-only while its
+ * schema said "use this instead of shell for running tests" — on Go/JS/TS repos (65% of SWE-bench
+ * Pro) that description was a lie that taught models to distrust the structured tools. The resolver
+ * was always available; the tool just didn't use it.
  *
- * <pre>{@code
- * {
- *   "summary": "1 passed, 1 failed",
- *   "passed":  ["test/foo.py::test_a"],
- *   "failed":  [
- *     {"test_id": "test/foo.py::test_b",
- *      "message": "AssertionError: expected 'x' got 'y'",
- *      "traceback": "...short traceback..."}
- *   ],
- *   "raw_tail": "...last ~60 lines of output for context..."
- * }
- * }</pre>
+ * <p>Why structured: with {@code shell} the agent had to parse runner output itself — count
+ * "passed" / "failed" lines, extract assertion errors. Models sometimes mis-counted, sometimes
+ * treated a single-test-failed run as "everything failed." A typed envelope removes that parsing
+ * burden. The envelope shape is identical across frameworks ({@code summary} / {@code passed} /
+ * {@code failed} / {@code errored} / {@code exit_code} / {@code raw_tail}); pytest additionally
+ * gets per-test extraction, Go gets {@code --- FAIL:} extraction, other frameworks lean on {@code
+ * raw_tail} (deliberately — over-parsing is where these tools go to die).
  *
- * <p>Routing: same dispatch tree as {@link ShellTool} — consult the SWE-bench container store
- * first, then the ProgramBench store. If neither has a cid for this run, falls back to running
- * pytest in the host workspace through a {@link ProcessBuilder} argument array.
+ * <p>Routing: same dispatch tree as {@link ShellTool} — SWE-bench container store first (login
+ * shell for conda activation), then ProgramBench, then host ProcessBuilder.
  *
- * <p>Doubles as the gate for {@code completeTask} verification (see Layer 3 in {@code
- * WorkerAgent}). Calling {@code runTests} successfully marks the conversation as "test-verified" in
- * the loop's local state; the agent must call this within a small window of completing or {@code
- * completeTask} is refused.
+ * <p>Doubles as the gate for {@code completeTask} verification (V182 layer-3 in {@code
+ * WorkerAgent}): the gate reads {@code "failed":[]} + {@code "errored":[]} + {@code "exit_code":0}
+ * from the ok-envelope — every framework path emits those fields so the gate works on non-Python
+ * repos too.
  */
 @Component
 @Slf4j
@@ -59,26 +56,49 @@ public class RunTestsTool implements Tool {
   /** Tail truncation for the verbatim output that goes into {@code raw_tail}. */
   static final int RAW_TAIL_CHARS = 4_000;
 
-  /** Default per-call timeout (pytest can be slow in some repos). */
+  /** Default per-call timeout when the resolver doesn't supply one. */
   static final int DEFAULT_TIMEOUT_SEC = 240;
 
-  static final int MAX_TIMEOUT_SEC = 600;
+  /** Raised 600 → 900 (task 6): full go/npm suites on Pro-scale repos exceed 10 minutes. */
+  static final int MAX_TIMEOUT_SEC = 900;
 
   /** Hard cap on test ids per call so the LLM doesn't cram a 200-test list into one call. */
   static final int MAX_TEST_IDS = 20;
 
+  /**
+   * Allowlisted prefixes for the raw {@code command} override (also the remote/local-hands contract
+   * — the TB adapter sends {@code command}). Constrains the override to real test runners; anything
+   * else belongs in {@code shell} where the sandbox policy applies.
+   */
+  static final List<String> COMMAND_ALLOWLIST_PREFIXES =
+      List.of(
+          "python -m pytest",
+          "python3 -m pytest",
+          "pytest",
+          "go test",
+          "npm test",
+          "yarn test",
+          "pnpm test",
+          "cargo test",
+          "mvn ",
+          "./gradlew ",
+          "gradle ");
+
   private final ProgramBenchContainerStore programBenchContainers;
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
   private final ObjectMapper json;
+  private final TestCommandResolver testCommandResolver;
 
   @Autowired
   public RunTestsTool(
       ProgramBenchContainerStore programBenchContainers,
       com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
-      ObjectMapper json) {
+      ObjectMapper json,
+      TestCommandResolver testCommandResolver) {
     this.programBenchContainers = programBenchContainers;
     this.swebenchContainers = swebenchContainers;
     this.json = json;
+    this.testCommandResolver = testCommandResolver;
   }
 
   @Override
@@ -88,11 +108,13 @@ public class RunTestsTool implements Tool {
 
   @Override
   public String description() {
-    return "Runs a list of pytest test ids inside the project's test environment and returns "
-        + "a parsed pass/fail summary. Use this instead of `shell` for running tests — it "
-        + "extracts assertion errors and counts cleanly. Required before completeTask in "
-        + "patch mode: the agent must observe the failing test pass before claiming the "
-        + "task is done.";
+    return "Runs tests using the project's detected framework (pytest, go test, npm/jest, cargo,"
+        + " mvn, gradle) and returns a parsed pass/fail summary with exit code. Pass specific"
+        + " tests via `tests` (pytest ids, Go test names or ./package paths, JS test file"
+        + " paths, cargo filters, or JUnit class names), or omit it to run the module/suite."
+        + " Prefer this over `shell` for tests — the envelope reports counts and failures"
+        + " cleanly. Required before completeTask in patch mode: observe the failing test pass"
+        + " before claiming the task is done.";
   }
 
   @Override
@@ -101,21 +123,29 @@ public class RunTestsTool implements Tool {
 {
   "type": "object",
   "properties": {
+    "tests": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Tests to run, in the project's framework syntax: pytest ids ('test/foo.py::test_a'), Go test names ('TestFoo') or package paths ('./pkg/...'), JS test file paths, cargo test filters, or JUnit class names. Omit or pass [] to run the whole suite/module. Max 20.",
+      "maxItems": 20
+    },
     "test_ids": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "pytest test ids, e.g. ['test/foo.py::test_a', 'test/bar.py::test_b']. Max 20 per call.",
-      "minItems": 1,
+      "description": "DEPRECATED alias of `tests` (kept for compatibility).",
       "maxItems": 20
+    },
+    "command": {
+      "type": "string",
+      "description": "Advanced: run this exact test command instead (must start with a known runner: pytest / go test / npm test / cargo test / mvn / gradle). Use only when the framework filters above cannot express what you need."
     },
     "timeoutSeconds": {
       "type": "integer",
-      "description": "Optional timeout (default 240, max 600).",
+      "description": "Optional timeout (default: framework-dependent, max 900).",
       "minimum": 1,
-      "maximum": 600
+      "maximum": 900
     }
   },
-  "required": ["test_ids"],
   "additionalProperties": false
 }
 """;
@@ -123,46 +153,56 @@ public class RunTestsTool implements Tool {
 
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
-    JsonNode idsNode = args.path("test_ids");
-    if (!idsNode.isArray() || idsNode.size() == 0) {
-      return ToolResult.err(
-          ToolResult.ErrorKind.INVALID_ARGS,
-          "test_ids is required and must be a non-empty array of pytest ids");
-    }
-    if (idsNode.size() > MAX_TEST_IDS) {
-      return ToolResult.err(
-          ToolResult.ErrorKind.INVALID_ARGS,
-          "test_ids exceeds max of "
-              + MAX_TEST_IDS
-              + " per call; split into multiple runTests calls");
-    }
-    List<String> testIds = new ArrayList<>(idsNode.size());
-    for (JsonNode el : idsNode) {
-      String id = el.asText("").trim();
-      if (id.isEmpty()) continue;
-      // Defence: pytest test ids should never contain shell metachars. If the LLM tries to inject a
-      // payload, refuse the whole call. This is layered defence on top of the ProcessBuilder
-      // argument-array dispatch below.
-      if (containsShellMetachar(id)) {
+    // ---- parse inputs (tests preferred; test_ids kept as alias; command as override) ----
+    JsonNode idsNode = args.hasNonNull("tests") ? args.path("tests") : args.path("test_ids");
+    List<String> testIds = new ArrayList<>();
+    if (idsNode.isArray()) {
+      if (idsNode.size() > MAX_TEST_IDS) {
         return ToolResult.err(
-            ToolResult.ErrorKind.INVALID_ARGS, "test_id contains forbidden shell metachars: " + id);
+            ToolResult.ErrorKind.INVALID_ARGS,
+            "tests exceeds max of " + MAX_TEST_IDS + " per call; split into multiple calls");
       }
-      testIds.add(id);
+      for (JsonNode el : idsNode) {
+        String id = el.asText("").trim();
+        if (id.isEmpty()) continue;
+        // Defence: test ids should never contain shell metachars. Layered on top of the
+        // ProcessBuilder argument-array dispatch below (audit 2026-05-12 #77).
+        if (containsShellMetachar(id)) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.INVALID_ARGS,
+              "test id contains forbidden shell metachars: " + id);
+        }
+        testIds.add(id);
+      }
     }
-    if (testIds.isEmpty()) {
-      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "test_ids was empty after trim");
+    String commandOverride =
+        args.hasNonNull("command") ? args.get("command").asText("").trim() : "";
+
+    // ---- resolve framework from workspace markers (bind-mounted, so container runs resolve
+    // host-side too). Pytest-shaped ids force PYTEST even without markers (legacy behavior). ----
+    Optional<TestCommandResolver.TestCommand> resolved =
+        testCommandResolver == null
+            ? Optional.empty()
+            : testCommandResolver.resolve(ctx.workspaceRoot());
+    TestCommandResolver.Framework framework =
+        resolved.map(TestCommandResolver.TestCommand::framework).orElse(null);
+    boolean pytestShapedIds = testIds.stream().anyMatch(id -> id.contains(".py"));
+    if (framework == null
+        || (pytestShapedIds && framework != TestCommandResolver.Framework.PYTEST)) {
+      framework = TestCommandResolver.Framework.PYTEST;
     }
+
     int timeout =
         args.hasNonNull("timeoutSeconds")
             ? Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC)
-            : DEFAULT_TIMEOUT_SEC;
+            : Math.min(
+                resolved
+                    .map(TestCommandResolver.TestCommand::timeoutSeconds)
+                    .orElse(DEFAULT_TIMEOUT_SEC),
+                MAX_TIMEOUT_SEC);
 
-    // Dispatch routing — mirrors ShellTool's container-store ladder.
-    // useLoginShell flag: SWE-bench images depend on conda activation that lives in
-    // /etc/bash.bashrc, so bare `sh -c "python -m pytest"` runs against base Python
-    // (no pytest installed). bash -lc sources /etc/profile → bashrc → conda activate
-    // testbed → pytest resolves. Programbench's images don't need this; host fallback
-    // also doesn't need it.
+    // ---- container routing (mirrors ShellTool). useLoginShell: SWE-bench images need
+    // bash -lc for conda activation; harmless for other stacks. ----
     String containerId = null;
     String workdir = null;
     boolean useLoginShell = false;
@@ -182,9 +222,31 @@ public class RunTestsTool implements Tool {
       }
     }
 
+    if (!commandOverride.isEmpty() && !allowlistedCommand(commandOverride, containerId != null)) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.INVALID_ARGS,
+          "command must start with a known test runner ("
+              + String.join(", ", COMMAND_ALLOWLIST_PREFIXES).trim()
+              + ") and contain no shell chaining — use the shell tool for anything else");
+    }
+
+    List<String> cmd;
+    if (!commandOverride.isEmpty()) {
+      cmd = wrapShellCommand(containerId, workdir, commandOverride);
+    } else if (framework == TestCommandResolver.Framework.PYTEST && !testIds.isEmpty()) {
+      // Byte-identical legacy pytest path (pinned by RunTestsToolTest).
+      cmd = buildProcessCommand(containerId, workdir, useLoginShell, testIds);
+    } else {
+      String shellCmd =
+          frameworkCommand(
+              framework,
+              testIds,
+              resolved.map(TestCommandResolver.TestCommand::command).orElse(null));
+      cmd = wrapShellCommand(containerId, workdir, shellCmd);
+    }
+
     try {
-      ProcessBuilder pb =
-          new ProcessBuilder(buildProcessCommand(containerId, workdir, useLoginShell, testIds));
+      ProcessBuilder pb = new ProcessBuilder(cmd);
       if (containerId == null) {
         pb.directory(ctx.workspaceRoot().toFile());
       }
@@ -204,21 +266,26 @@ public class RunTestsTool implements Tool {
         proc.destroyForcibly();
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT,
-            "pytest exceeded "
+            framework
+                + " tests exceeded "
                 + timeout
-                + "s timeout for "
-                + testIds.size()
-                + " test(s). Try fewer ids per call or raise timeoutSeconds.");
+                + "s timeout. Try fewer/narrower tests per call or raise timeoutSeconds (max "
+                + MAX_TIMEOUT_SEC
+                + ").");
       }
       String output = new String(proc.getInputStream().readAllBytes());
       int exit = proc.exitValue();
       log.info(
-          "runTests run={} ids={} exit={} outBytes={}",
+          "runTests run={} framework={} ids={} exit={} outBytes={}",
           ctx.runId(),
+          framework,
           testIds.size(),
           exit,
           output.length());
-      String envelope = parseAndEnvelope(ctx, testIds, exit, output);
+      String envelope =
+          framework == TestCommandResolver.Framework.PYTEST
+              ? parseAndEnvelope(ctx, testIds, exit, output)
+              : genericEnvelope(ctx, framework, String.join(" ", cmd), testIds, exit, output);
       return ToolResult.ok(envelope);
     } catch (IOException ioe) {
       log.warn("runTests IO error: {}", ioe.getMessage());
@@ -228,6 +295,85 @@ public class RunTestsTool implements Tool {
       return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
     }
   }
+
+  // ------------------------------------------------------------------ command construction
+
+  /**
+   * Per-framework test command with filters (returned as ONE shell string; ids are
+   * metachar-screened above and single-token, so plain joining is safe).
+   */
+  static String frameworkCommand(
+      TestCommandResolver.Framework framework, List<String> ids, String suiteCommand) {
+    switch (framework) {
+      case GO -> {
+        if (ids.isEmpty()) return suiteCommand != null ? suiteCommand : "go test ./...";
+        List<String> packages = ids.stream().filter(id -> id.contains("/")).toList();
+        List<String> names = ids.stream().filter(id -> !id.contains("/")).toList();
+        StringBuilder sb = new StringBuilder("go test");
+        if (!names.isEmpty()) {
+          sb.append(" -run '").append(String.join("|", names)).append("'");
+        }
+        sb.append(" ").append(packages.isEmpty() ? "./..." : String.join(" ", packages));
+        return sb.toString();
+      }
+      case JEST -> {
+        if (ids.isEmpty()) return suiteCommand != null ? suiteCommand : "npm test --silent";
+        return "npm test --silent -- " + String.join(" ", ids);
+      }
+      case CARGO -> {
+        if (ids.isEmpty()) return suiteCommand != null ? suiteCommand : "cargo test";
+        return "cargo test " + String.join(" ", ids);
+      }
+      case SUREFIRE -> {
+        String base = suiteCommand != null ? suiteCommand : "mvn -q test";
+        if (ids.isEmpty()) return base;
+        if (base.startsWith("mvn")) return base + " -Dtest=" + String.join(",", ids);
+        // gradle
+        StringBuilder sb = new StringBuilder(base);
+        for (String id : ids) sb.append(" --tests ").append(id);
+        return sb.toString();
+      }
+      default -> {
+        // PYTEST suite mode (empty ids) or UNKNOWN.
+        if (ids.isEmpty()) return suiteCommand != null ? suiteCommand : "python3 -m pytest -q";
+        return "python -m pytest " + String.join(" ", ids) + " --tb=short --no-header -q";
+      }
+    }
+  }
+
+  /** Wraps a shell command for container (bash -lc) or host (sh -c) execution. */
+  static List<String> wrapShellCommand(String containerId, String workdir, String shellCmd) {
+    List<String> cmd = new ArrayList<>();
+    if (containerId != null) {
+      cmd.add("docker");
+      cmd.add("exec");
+      cmd.add("-w");
+      cmd.add(workdir);
+      cmd.add(containerId);
+      cmd.add("/bin/bash");
+      cmd.add("-lc");
+      cmd.add(shellCmd);
+    } else {
+      cmd.add("/bin/sh");
+      cmd.add("-c");
+      cmd.add(shellCmd);
+    }
+    return cmd;
+  }
+
+  /**
+   * The raw {@code command} override must start with a known runner AND be free of shell chaining
+   * chars. {@code |} (go -run regex alternation) is permitted only inside a container — there the
+   * container is the sandbox (network none); on the host a pipe could chain to arbitrary binaries.
+   */
+  static boolean allowlistedCommand(String command, boolean inContainer) {
+    String c = command.strip();
+    if (COMMAND_ALLOWLIST_PREFIXES.stream().noneMatch(c::startsWith)) return false;
+    String screened = inContainer ? c.replace("|", "") : c;
+    return !containsShellMetachar(screened);
+  }
+
+  // ------------------------------------------------------------------ envelopes
 
   /**
    * pytest -q output ends with a summary line like:
@@ -249,6 +395,13 @@ public class RunTestsTool implements Tool {
   private static final Pattern PYTEST_SUMMARY_LINE =
       Pattern.compile("(?m)^=+\\s*(.*?passed.*?|.*?failed.*?|.*?error.*?)\\s*=+\\s*$");
 
+  /**
+   * Go test failure markers: per-test {@code --- FAIL: TestX} and per-package {@code FAIL\tpkg}.
+   */
+  private static final Pattern GO_FAIL_LINE = Pattern.compile("(?m)^\\s*--- FAIL: (\\S+)");
+
+  private static final Pattern GO_PKG_FAIL_LINE = Pattern.compile("(?m)^FAIL\\s+(\\S+)");
+
   private String parseAndEnvelope(
       ExecutionContext ctx, List<String> requestedIds, int exit, String output) {
     ObjectNode env = json.createObjectNode();
@@ -261,6 +414,7 @@ public class RunTestsTool implements Tool {
       summary = exit == 0 ? "all passed" : "exit=" + exit;
     }
     env.put("summary", summary);
+    env.put("framework", "PYTEST");
 
     // Extract individual passed / failed test ids.
     ArrayNode passed = env.putArray("passed");
@@ -291,6 +445,65 @@ public class RunTestsTool implements Tool {
     env.put("raw_tail", tailLines(output, RAW_TAIL_CHARS));
     // Output budget (#6): on large output, persist the full log + expose a readFile path so the
     // worker can inspect the COMPLETE failure trace, not just raw_tail.
+    if (output != null && output.length() > ToolOutput.DEFAULT_INLINE_CAP) {
+      String p = ToolOutput.persistFull(ctx, "tests", output);
+      if (p != null) env.put("full_output_path", p);
+    }
+    return env.toString();
+  }
+
+  /**
+   * Non-pytest envelope — same field shape so the V182 completeTask gate works on every stack:
+   * green run ⇒ {@code "failed":[]} + {@code "errored":[]} + {@code "exit_code":0}; red run ⇒ a
+   * failed entry (Go gets real {@code --- FAIL:} names; others get a framework-level entry) so the
+   * gate blocks. Deliberately under-parsed beyond that — the model reads raw_tail.
+   */
+  private String genericEnvelope(
+      ExecutionContext ctx,
+      TestCommandResolver.Framework framework,
+      String command,
+      List<String> requestedIds,
+      int exit,
+      String output) {
+    ObjectNode env = json.createObjectNode();
+    env.put("framework", framework.name());
+    env.put("command", command);
+    ArrayNode passed = env.putArray("passed");
+    ArrayNode failed = env.putArray("failed");
+    ArrayNode errored = env.putArray("errored");
+
+    if (framework == TestCommandResolver.Framework.GO) {
+      Matcher gf = GO_FAIL_LINE.matcher(output);
+      while (gf.find()) {
+        ObjectNode entry = failed.addObject();
+        entry.put("test_id", gf.group(1));
+        entry.put("message", "see raw_tail");
+      }
+      if (failed.isEmpty() && exit != 0) {
+        Matcher pf = GO_PKG_FAIL_LINE.matcher(output);
+        while (pf.find()) {
+          ObjectNode entry = failed.addObject();
+          entry.put("test_id", pf.group(1));
+          entry.put("message", "package failed — see raw_tail (may be a build error)");
+        }
+      }
+    }
+    if (exit != 0 && failed.isEmpty()) {
+      ObjectNode entry = failed.addObject();
+      entry.put("test_id", framework.name().toLowerCase() + " suite");
+      entry.put("message", "non-zero exit " + exit + " — see raw_tail");
+    }
+    if (exit == 0) {
+      for (String id : requestedIds) passed.add(id);
+    }
+
+    env.put(
+        "summary",
+        exit == 0
+            ? framework.name().toLowerCase() + " tests passed (exit=0)"
+            : framework.name().toLowerCase() + " tests FAILED (exit=" + exit + ")");
+    env.put("exit_code", exit);
+    env.put("raw_tail", tailLines(output, RAW_TAIL_CHARS));
     if (output != null && output.length() > ToolOutput.DEFAULT_INLINE_CAP) {
       String p = ToolOutput.persistFull(ctx, "tests", output);
       if (p != null) env.put("full_output_path", p);

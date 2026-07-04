@@ -147,6 +147,18 @@ public class ModelRegistry {
    * Returns the context window limit for a model, in tokens. Replaces {@code
    * TokenBudgetMonitor.contextLimitFor()}.
    */
+  /**
+   * Harness-resolution task 10 — the provider's capability profile, or null when none configured.
+   * Provider key matched case-insensitively.
+   */
+  public ModelMatrixProperties.CapabilityProfile capabilityProfileFor(String provider) {
+    if (provider == null || matrixProps.getCapabilityProfiles() == null) return null;
+    ModelMatrixProperties.CapabilityProfile exact =
+        matrixProps.getCapabilityProfiles().get(provider);
+    if (exact != null) return exact;
+    return matrixProps.getCapabilityProfiles().get(provider.toLowerCase(java.util.Locale.ROOT));
+  }
+
   public int contextLimitFor(String modelName) {
     ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
     return config != null ? config.getContextLimit() : DEFAULT_CONTEXT_LIMIT;
