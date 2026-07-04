@@ -84,8 +84,13 @@ After Flash and Pro both finish:
 
 1. Compare selected count, manifest rows, scored rows, resolved rows, no-patch rows, non-COMPLETED
    rows, cost, iterations, and tool calls.
-2. Identify generic fixes only. Do not add model-specific hacks.
-3. Deploy the generic fixes to the benchmark VM.
+2. Fix every RCA-backed issue found in the iteration before moving to iter2: harness defects,
+   prompt/control failures, verifier/scoring bugs, timeout/resource issues, provider/API failure
+   handling, and model-specific failure modes.
+3. Model-specific symptoms may get targeted treatment, but the implementation must extend cleanly
+   across models through provider fragments, shared worker controls, routing policy, or harness
+   behavior. Do not add task-specific shortcuts, leaked-test assumptions, or brittle one-model hacks.
+4. Deploy the fixes to the benchmark VM.
 
 ## Iteration 2
 
