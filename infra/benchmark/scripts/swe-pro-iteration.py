@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -63,6 +64,16 @@ def call(path: str, body: dict, token: str | None = None, timeout: int = 60) -> 
         return json.loads(r.read().decode() or "{}")
 
 
+def get(path: str, token: str, timeout: int = 60) -> dict:
+    req = urllib.request.Request(
+        BASE + path,
+        method="GET",
+        headers={"Authorization": "Bearer " + token},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
 def login() -> str:
     email, pw = load_env()
     token = call("/api/auth/login", {"email": email, "password": pw}).get("accessToken")
@@ -93,6 +104,32 @@ def read_manifest(path: Path) -> dict[str, dict]:
             except Exception:
                 continue
     return rows
+
+
+def preflight_backend_instances(instances: list[str], token: str) -> None:
+    loaded = get("/api/admin/benchmark/instances", token).get("count")
+    if loaded is not None and int(loaded) < len(instances):
+        raise SystemExit(
+            "backend loaded fewer SWE instances than selected "
+            f"(loaded={loaded}, selected={len(instances)}). "
+            "Check SWEBENCH_INSTANCES_FILE before launching generation."
+        )
+    missing: list[str] = []
+    for inst in instances:
+        try:
+            get("/api/admin/benchmark/preview/" + urllib.parse.quote(inst, safe=""), token)
+        except urllib.error.HTTPError as e:
+            missing.append(f"{inst}: HTTP {e.code} {e.read().decode(errors='ignore')[:180]}")
+        except Exception as e:
+            missing.append(f"{inst}: {type(e).__name__}: {e}")
+        if len(missing) >= 5:
+            break
+    if missing:
+        joined = "\n  ".join(missing)
+        raise SystemExit(
+            "backend cannot resolve selected SWE instances; aborting before generation.\n  "
+            + joined
+        )
 
 
 def generate_one(instance: str, provider: str, model: str, token: str) -> dict:
@@ -130,6 +167,7 @@ def generate_all(instances: list[str], provider: str, model: str, tag: str, conc
     done = read_manifest(manifest)
     todo = [i for i in instances if i not in done]
     token = login()
+    preflight_backend_instances(instances, token)
     print(f"[generate] model={model} selected={len(instances)} done={len(done)} todo={len(todo)} concurrency={concurrency}", flush=True)
 
     def write_row(row: dict) -> None:
