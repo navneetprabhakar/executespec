@@ -3,9 +3,9 @@ package com.navneet.executespec.agentsession;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.lenient;
 
 import java.util.List;
 
@@ -58,7 +58,9 @@ class AgentStreamTurnStarterTest {
             modelAccessService,
             modelRegistry);
     lenient().when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
-    lenient().when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    lenient()
+        .when(eventRepo.save(any(AgentActionEvent.class)))
+        .thenAnswer(inv -> inv.getArgument(0));
     lenient().when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
   }
 
@@ -176,7 +178,8 @@ class AgentStreamTurnStarterTest {
   void explicitModelSwitchIsAuthorizedAndPersistsProviderAndModel() {
     AgentSession session = session();
     when(turnRepo.countBySessionId("s1")).thenReturn(0L);
-    when(aiProviderPreferenceService.updatePreferredProvider(any(AppUserDetails.class), eq("OPENAI")))
+    when(aiProviderPreferenceService.updatePreferredProvider(
+            any(AppUserDetails.class), eq("OPENAI")))
         .thenReturn("OPENAI");
     when(modelRegistry.providerFor("gpt-5.4-mini")).thenReturn("openai");
     when(modelRegistry.canonicalize("gpt-5.4-mini")).thenReturn("gpt-5.4-mini");

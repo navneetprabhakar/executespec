@@ -17,7 +17,6 @@ import com.navneet.executespec.router.ResolvedModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -146,8 +145,7 @@ public class MemoryCompactionService {
             resolved.providerName(),
             resolved.getModel(),
             List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage("Emit the updated snapshot now.")),
+                new SystemMessage(systemPrompt), new UserMessage("Emit the updated snapshot now.")),
             "compact-" + projectId,
             "memory-compaction",
             "compact");

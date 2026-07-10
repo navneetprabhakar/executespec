@@ -78,7 +78,9 @@ class AgentStreamTurnStarter {
         request == null ? null : AgentText.blankToNull(request.providerOverride());
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
     String modelProvider =
-        explicitModel == null || modelRegistry == null ? null : modelRegistry.providerFor(explicitModel);
+        explicitModel == null || modelRegistry == null
+            ? null
+            : modelRegistry.providerFor(explicitModel);
     if (explicitModel != null) {
       if (modelAccessService != null) {
         modelAccessService.assertModelAllowed(user.getUser().getId(), explicitModel);

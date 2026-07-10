@@ -22,8 +22,8 @@ import lombok.extern.slf4j.Slf4j;
  * Canonical model-facing subagent action for chat/agent sessions.
  *
  * <p>The child is always a bounded, read-only SCOUT or VERIFIER. The service owns persistence,
- * eligibility, budgets, cancellation and model execution; this adapter only validates arguments
- * and exposes the result as a structured tool envelope. {@link ObjectProvider} avoids a bean cycle
+ * eligibility, budgets, cancellation and model execution; this adapter only validates arguments and
+ * exposes the result as a structured tool envelope. {@link ObjectProvider} avoids a bean cycle
  * because the child execution service itself uses {@link SpecChatService} for its bounded turns.
  */
 @Component
@@ -71,7 +71,8 @@ public class SubagentChatTools {
           }
           SubagentProtocol.Role role;
           try {
-            role = SubagentProtocol.Role.valueOf(textOrDefault(input, "role", "SCOUT").toUpperCase());
+            role =
+                SubagentProtocol.Role.valueOf(textOrDefault(input, "role", "SCOUT").toUpperCase());
           } catch (IllegalArgumentException ex) {
             return error("role must be SCOUT or VERIFIER");
           }
@@ -155,7 +156,10 @@ public class SubagentChatTools {
     @Override
     public String call(String toolInput) {
       try {
-        JsonNode input = toolInput == null || toolInput.isBlank() ? json.createObjectNode() : json.readTree(toolInput);
+        JsonNode input =
+            toolInput == null || toolInput.isBlank()
+                ? json.createObjectNode()
+                : json.readTree(toolInput);
         return body.run(input).toString();
       } catch (Exception ex) {
         return error("invalid subagent tool input").toString();

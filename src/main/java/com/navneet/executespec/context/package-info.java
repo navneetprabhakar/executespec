@@ -18,12 +18,13 @@
  *   v2:agent-ctx-meta:{runId}:{taskId}  Hash of metadata (iteration, lastWriteAt, byteSize) (TTL 86400)
  * </pre>
  *
- * <p>Completed context-agent runs also write a workspace-local
- * {@code .agent-context/evidence-bundle.json}. It is a bounded, schema-versioned handoff dossier
- * containing deduplicated evidence summaries and SHA-256 fingerprints of {@code CODEBASE_CONTEXT.md}
- * and {@code decisions.md}. Readers must use {@code ContextEvidenceBundleWriter.readCurrent(...)}
- * so a source edit invalidates the bundle instead of replaying stale evidence. The sidecar is
- * atomic-and-replace written and is not a replacement for the canonical markdown sources.
+ * <p>Completed context-agent runs also write a workspace-local {@code
+ * .agent-context/evidence-bundle.json}. It is a bounded, schema-versioned handoff dossier
+ * containing deduplicated evidence summaries and SHA-256 fingerprints of {@code
+ * CODEBASE_CONTEXT.md} and {@code decisions.md}. Readers must use {@code
+ * ContextEvidenceBundleWriter.readCurrent(...)} so a source edit invalidates the bundle instead of
+ * replaying stale evidence. The sidecar is atomic-and-replace written and is not a replacement for
+ * the canonical markdown sources.
  *
  * <h2>Access patterns</h2>
  *
@@ -42,7 +43,7 @@
  * TTL down if pressure observed.
  *
  * <p>{@code ContextPlanner} selects evidence by descending priority with deterministic
- * fresh/kind/id tie-breakers. This keeps tight-window retries and benchmark comparisons stable
- * even when search or Redis result ordering changes.
+ * fresh/kind/id tie-breakers. This keeps tight-window retries and benchmark comparisons stable even
+ * when search or Redis result ordering changes.
  */
 package com.navneet.executespec.context;

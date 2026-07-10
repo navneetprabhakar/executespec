@@ -140,8 +140,7 @@ public class RunLedgerAgent {
             resolved.providerName(),
             resolved.getModel(),
             List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage("Generate the ledger entry now.")),
+                new SystemMessage(systemPrompt), new UserMessage("Generate the ledger entry now.")),
             runId,
             "run-ledger",
             "generate");

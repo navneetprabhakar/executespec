@@ -54,9 +54,9 @@ public interface PipelineRunRepository
   void clearCurrentGate(@Param("runId") String runId);
 
   /**
-   * Claim the post-approval resume transition without overwriting concurrent lifecycle changes.
-   * The approval endpoint may race cancellation after it has read {@code AWAITING_APPROVAL}; only
-   * the caller that still observes that state may move the run to {@code APPROVAL_RESUMING}.
+   * Claim the post-approval resume transition without overwriting concurrent lifecycle changes. The
+   * approval endpoint may race cancellation after it has read {@code AWAITING_APPROVAL}; only the
+   * caller that still observes that state may move the run to {@code APPROVAL_RESUMING}.
    *
    * @return one when this caller won the transition, zero when another lifecycle action already
    *     changed the run state
@@ -66,8 +66,7 @@ public interface PipelineRunRepository
   @Query(
       "UPDATE PipelineRun r SET r.status = 'APPROVAL_RESUMING', r.resumedAt = :resumedAt "
           + "WHERE r.runId = :runId AND r.status = 'AWAITING_APPROVAL'")
-  int claimApprovalResume(
-      @Param("runId") String runId, @Param("resumedAt") Instant resumedAt);
+  int claimApprovalResume(@Param("runId") String runId, @Param("resumedAt") Instant resumedAt);
 
   List<PipelineRun> findByStatusIn(List<String> statuses);
 

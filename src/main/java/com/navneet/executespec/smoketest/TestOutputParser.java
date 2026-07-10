@@ -14,8 +14,8 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
  * <p><b>Hard rule:</b> when the output can't be confidently parsed into a count, return {@link
  * Optional#empty()} — NEVER fabricate a number. A wrong count poisons the verifiedScore TESTS slot
  * worse than no count (the caller falls back to LLM-judged coverage on empty). The only count we
- * trust is one the framework explicitly printed and internally consistent (passed + failed +
- * errors + skipped cannot exceed total).
+ * trust is one the framework explicitly printed and internally consistent (passed + failed + errors
+ * + skipped cannot exceed total).
  */
 public final class TestOutputParser {
 
@@ -197,8 +197,7 @@ public final class TestOutputParser {
   }
 
   /** Reject impossible framework counts instead of turning malformed output into score evidence. */
-  private static boolean invalidCounts(
-      int total, int passed, int failed, int errors, int skipped) {
+  private static boolean invalidCounts(int total, int passed, int failed, int errors, int skipped) {
     return total < 0
         || passed < 0
         || failed < 0
