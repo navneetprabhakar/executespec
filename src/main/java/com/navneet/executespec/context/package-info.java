@@ -49,8 +49,12 @@
  * or reorders tool messages. The assembler removes repeated search hits and estimates each optional
  * entry at the bundle writer's 1,000-character cap before spending its 6,000-token budget, so
  * duplicate or overlong hits cannot crowd out distinct evidence that will actually be serialized.
- * This is a local deterministic optimization; it does not require a FastContext/Microsoft runtime
- * dependency. {@code FastContextExperiment} remains an isolated, measured adapter seam until a
- * paired recall/latency/cost evaluation justifies using an external index.
+ * Worker headroom decisions also emit low-cardinality Micrometer evidence through {@code
+ * executespec.context.headroom.decisions} and {@code
+ * executespec.context.headroom.available_tokens}; provider is bounded and model names are
+ * deliberately excluded from metric tags so enterprise model overrides cannot create unbounded time
+ * series. This is a local deterministic optimization; it does not require a FastContext/Microsoft
+ * runtime dependency. {@code FastContextExperiment} remains an isolated, measured adapter seam
+ * until a paired recall/latency/cost evaluation justifies using an external index.
  */
 package com.navneet.executespec.context;
