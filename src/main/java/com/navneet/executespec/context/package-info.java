@@ -21,18 +21,19 @@
  * <p>Completed context-agent runs also write a workspace-local {@code
  * .agent-context/evidence-bundle.json}. It is a bounded, schema-versioned handoff dossier
  * containing deduplicated evidence summaries and SHA-256 fingerprints of {@code
- * CODEBASE_CONTEXT.md} and {@code decisions.md}. Readers must use {@code
+ * CODEBASE_CONTEXT.md} and {@code decisions.md}. Any reader must use {@code
  * ContextEvidenceBundleWriter.readCurrent(...)} so a source edit invalidates the bundle instead of
- * replaying stale evidence. The sidecar is atomic-and-replace written and is not a replacement for
- * the canonical markdown sources.
+ * replaying stale evidence. The current release writes this sidecar for inspection and recovery
+ * preparation; cross-run consumption remains a follow-up until a durable project-scoped handoff
+ * store is wired.
  *
  * <h2>Access patterns</h2>
  *
  * <ul>
  *   <li><b>Write:</b> every 5 worker iterations, on every compaction event, before shell/build
  *       calls
- *   <li><b>Read:</b> on task retry (replay last context), on harness boot ({@code
- *       StartupRunResumer})
+ *   <li><b>Read:</b> Redis context is replayed on task retry; the evidence sidecar has no active
+ *       cross-run consumer yet
  *   <li><b>Delete:</b> on task COMPLETE (success path), on run terminal state
  * </ul>
  *
@@ -42,8 +43,8 @@
  * concurrent in-flight runs ≈ 200 MB Redis memory. Monitor {@code redis_memory_used_bytes} and tune
  * TTL down if pressure observed.
  *
- * <p>{@code ContextPlanner} selects evidence by descending priority with deterministic
- * fresh/kind/id tie-breakers. This keeps tight-window retries and benchmark comparisons stable even
- * when search or Redis result ordering changes.
+ * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and is currently
+ * used for model-window headroom decisions. Its evidence-selection API is reserved for the
+ * project-scoped handoff integration and is not represented as active production wiring yet.
  */
 package com.navneet.executespec.context;
