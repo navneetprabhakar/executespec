@@ -170,9 +170,8 @@ public class AnalyticsService {
                     (String) row.get("project_name"), ((Number) row.get("cnt")).intValue()));
 
     // --- Cost by model ---
-    // model_task_metric tracks duration/validation per model but not cost.
-    // Approximate cost per model by counting LLM call duration per model_name.
-    // TODO: Add actual cost tracking to model_task_metric for accurate per-model cost breakdown.
+    // V258 stores task-scoped spend directly. Keep this query fail-soft for databases that have
+    // not yet upgraded; the run-level totals above remain authoritative during the rollout.
     Map<String, Double> costByModel = new LinkedHashMap<>();
     try {
       String costSql;
@@ -180,7 +179,7 @@ public class AnalyticsService {
       if ("ORG".equals(entityType)) {
         costSql =
             """
-SELECT m.model_name AS model, COUNT(*) AS calls, SUM(m.duration_ms) AS total_duration_ms
+SELECT m.model_name AS model, COUNT(*) AS calls, COALESCE(SUM(m.actual_cost_usd), 0) AS total_cost_usd
 FROM model_task_metric m
 JOIN pipeline_run r ON m.run_id = r.run_id
 WHERE r.org_id = ? AND m.created_at > ?
@@ -190,7 +189,7 @@ GROUP BY m.model_name ORDER BY calls DESC
       } else {
         costSql =
             """
-SELECT m.model_name AS model, COUNT(*) AS calls, SUM(m.duration_ms) AS total_duration_ms
+SELECT m.model_name AS model, COUNT(*) AS calls, COALESCE(SUM(m.actual_cost_usd), 0) AS total_cost_usd
 FROM model_task_metric m
 JOIN pipeline_run r ON m.run_id = r.run_id
 WHERE r.created_by_user_id = ? AND m.created_at > ?
@@ -203,7 +202,8 @@ GROUP BY m.model_name ORDER BY calls DESC
           .forEach(
               row ->
                   costByModel.put(
-                      (String) row.get("model"), ((Number) row.get("calls")).doubleValue()));
+                      (String) row.get("model"),
+                      ((Number) row.getOrDefault("total_cost_usd", 0)).doubleValue()));
     } catch (Exception e) {
       log.warn("Failed to query cost by model: {}", e.getMessage());
     }
