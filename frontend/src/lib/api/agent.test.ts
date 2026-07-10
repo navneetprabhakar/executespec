@@ -104,6 +104,33 @@ describe('agent API SSE helpers', () => {
     expect(cost).toBe(0.01);
   });
 
+  it('does not treat a transport EOF before done as a successful turn', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode('event: ack\ndata: {"session_id":"s1","turn_id":"t1"}\n\n'),
+                );
+                controller.close();
+              },
+            }),
+            {status: 200},
+          ),
+      ),
+    );
+
+    await expect(streamAgentTurn('s1', {message: 'hello'})).rejects.toMatchObject({
+      status: 502,
+      message: 'Agent stream ended before the turn completed. Refresh the conversation and retry.',
+    });
+  });
+
   it('confirms a stored cloud-run proposal through the orchestrator endpoint', async () => {
     localStorage.setItem('access_token', 'test-token');
     const fetchMock = vi.fn(async () => {
