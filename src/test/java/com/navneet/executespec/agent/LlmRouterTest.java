@@ -33,10 +33,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -157,6 +159,60 @@ class LlmRouterTest {
     when(openai.call(any())).thenReturn(ok());
     assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
     verify(openai, times(1)).call(any());
+  }
+
+  @Test
+  void textSeamPreservesAnthropicSystemOnlyCacheIntent() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<AnthropicChatModel> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(anthropic);
+    ReflectionTestUtils.setField(router, "anthropicModelProvider", provider);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-5",
+        List.of(new UserMessage("stable system context")),
+        "run-cache",
+        "ConversationAgent",
+        "suggestion-plan",
+        128,
+        LlmRequest.PromptCacheStrategy.SYSTEM_ONLY);
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getCacheOptions().getStrategy())
+        .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY);
+  }
+
+  @Test
+  void textSeamCanDisableAnthropicPromptCaching() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<AnthropicChatModel> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(anthropic);
+    ReflectionTestUtils.setField(router, "anthropicModelProvider", provider);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-5",
+        List.of(new UserMessage("no cache")),
+        "run-cache-none",
+        "ConversationAgent",
+        "test",
+        128,
+        LlmRequest.PromptCacheStrategy.NONE);
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getCacheOptions().getStrategy())
+        .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.NONE);
   }
 
   @Test

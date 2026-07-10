@@ -26,7 +26,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -103,7 +102,6 @@ public class ConversationAgent {
   /** Max tasks in a suggestion mini-plan. If exceeded, throw ApplySuggestionTooLargeException. */
   private static final int MAX_SUGGESTION_TASKS = 6;
 
-  private final FallbackLlmRouter fallbackLlmRouter;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ModelRegistry modelRegistry;
@@ -124,8 +122,7 @@ public class ConversationAgent {
    */
   public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
     // Pin run chat to Anthropic Haiku (LIGHTWEIGHT) straight from the matrix — see
-    // ConversationController. Avoids the adaptive-switch / failover drift to Gemini
-    // Flash; FallbackLlmRouter still fails over only if Anthropic is unhealthy.
+    // ConversationController. The canonical router owns retry/failover policy.
     String selectedModel = modelRegistry.lightweightModelFor("anthropic");
     String selectedProvider = "anthropic";
     log.info(
@@ -201,14 +198,9 @@ public class ConversationAgent {
    * @throws ApplySuggestionTooLargeException if the LLM generates >6 tasks
    */
   public TaskPlan generateSuggestionPlan(PipelineRun run, String suggestion) {
-    // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
-    // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
-    // OpenAiNativeToolClient, but FallbackLlmRouter used here still goes through Spring AI.
-    // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
+    // The canonical router uses the native OpenAI transport, so preserve the run's selected
+    // provider instead of applying the old Spring-AI compatibility reroute.
     com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
-    if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
-      chatProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
-    }
     ResolvedModel resolved = modelResolver.resolve("ConversationAgent", chatProvider);
     String selectedModel = resolved.getModel();
     String selectedProvider = resolved.providerName();
@@ -271,27 +263,20 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
     messages.add(
         new UserMessage("Generate a task plan for the following improvement:\n\n" + suggestion));
 
-    var cacheOpts =
-        org.springframework.ai.anthropic.api.AnthropicCacheOptions.builder()
-            .strategy(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY)
-            .build();
-    var opts =
-        org.springframework.ai.anthropic.AnthropicChatOptions.builder()
-            .model(selectedModel)
-            .maxTokens(MAX_OUTPUT_TOKENS)
-            .cacheOptions(cacheOpts)
-            .build();
-
+    // Use the canonical router while preserving the legacy Anthropic SYSTEM_ONLY cache intent.
+    // The prompt-cache strategy is provider-neutral at the request boundary; non-Anthropic
+    // transports ignore it. This keeps managed-AI accounting, retries, and telemetry identical to
+    // the rest of the V2 text callers without binding worker tools.
     var response =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             selectedProvider,
             selectedModel,
-            new Prompt(messages, opts),
+            messages,
             run.getRunId(),
+            "ConversationAgent",
             "suggestion-plan",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            MAX_OUTPUT_TOKENS,
+            LlmRequest.PromptCacheStrategy.SYSTEM_ONLY);
 
     // Track tokens for billing accuracy
     try {

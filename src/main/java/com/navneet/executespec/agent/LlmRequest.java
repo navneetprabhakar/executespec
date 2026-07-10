@@ -57,7 +57,21 @@ public record LlmRequest(
     String agentRole,
     String stepId,
     String retryOf,
-    boolean strictProvider) {
+    boolean strictProvider,
+    PromptCacheStrategy promptCacheStrategy) {
+
+  /**
+   * Provider-neutral prompt-cache intent. Providers that do not support prompt caching ignore the
+   * value. {@link #DEFAULT} preserves the canonical router's normal multi-turn behaviour; {@link
+   * #SYSTEM_ONLY} is for metadata calls whose system prompt is stable while the user input changes
+   * (for example Apply-to-Run suggestion planning).
+   */
+  public enum PromptCacheStrategy {
+    DEFAULT,
+    SYSTEM_ONLY,
+    CONVERSATION_HISTORY,
+    NONE
+  }
 
   public LlmRequest {
     if (provider == null || provider.isBlank())
@@ -67,5 +81,6 @@ public record LlmRequest(
       throw new IllegalArgumentException("messages required");
     if (context == null) throw new IllegalArgumentException("context required");
     if (temperature == null) temperature = 0.0;
+    if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;
   }
 }

@@ -206,6 +206,31 @@ public class LlmRouter {
       String agentRole,
       String stepId,
       Integer maxTokens) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT);
+  }
+
+  /**
+   * Text seam with an explicit output cap and provider-neutral prompt-cache intent. The cache
+   * strategy is consumed only by providers that support it; all other transports retain their
+   * existing request shape.
+   */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy) {
     String effectiveRunId =
         (runId == null || runId.isBlank())
             ? "text-" + Integer.toHexString(messages.hashCode())
@@ -228,6 +253,7 @@ public class LlmRouter {
             .agentRole(agentRole)
             .stepId(stepId)
             .maxTokens(maxTokens)
+            .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
 
@@ -664,15 +690,23 @@ public class LlmRouter {
     // Per-key models get their own per-key prompt cache on Anthropic's
     // side (cache scope = API account), which is the correct isolation
     // for BYOK — Customer A's cached prompts never leak to Customer B.
+    AnthropicCacheStrategy cacheStrategy =
+        switch (r.promptCacheStrategy()) {
+          case SYSTEM_ONLY -> AnthropicCacheStrategy.SYSTEM_ONLY;
+          case CONVERSATION_HISTORY, DEFAULT -> AnthropicCacheStrategy.CONVERSATION_HISTORY;
+          case NONE -> null;
+        };
     AnthropicCacheOptions cache =
-        AnthropicCacheOptions.builder()
-            .strategy(AnthropicCacheStrategy.CONVERSATION_HISTORY)
-            .contentLengthFunction(s -> s == null ? 0 : s.length() / 4) // ~chars→tokens
-            .messageTypeMinContentLength(MessageType.SYSTEM, 256)
-            .messageTypeMinContentLength(MessageType.USER, 512)
-            .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
-            .messageTypeMinContentLength(MessageType.TOOL, 512)
-            .build();
+        cacheStrategy == null
+            ? null
+            : AnthropicCacheOptions.builder()
+                .strategy(cacheStrategy)
+                .contentLengthFunction(s -> s == null ? 0 : s.length() / 4) // ~chars→tokens
+                .messageTypeMinContentLength(MessageType.SYSTEM, 256)
+                .messageTypeMinContentLength(MessageType.USER, 512)
+                .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
+                .messageTypeMinContentLength(MessageType.TOOL, 512)
+                .build();
     boolean dropTemperature =
         ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
             || AnthropicModelOptions.shouldOmitTemperature(r.model());
@@ -680,8 +714,8 @@ public class LlmRouter {
         AnthropicChatOptions.builder()
             .model(r.model())
             .toolCallbacks(tools)
-            .cacheOptions(cache)
             .internalToolExecutionEnabled(false);
+    if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
     if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
     try {
@@ -697,8 +731,8 @@ public class LlmRouter {
           AnthropicChatOptions.builder()
               .model(r.model())
               .toolCallbacks(tools)
-              .cacheOptions(cache)
               .internalToolExecutionEnabled(false);
+      if (cache != null) retry.cacheOptions(cache);
       if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
       return model.call(new Prompt(r.messages(), retry.build()));
     }
