@@ -197,9 +197,20 @@ public class RunLifecycleService {
       }
     }
 
-    run.setStatus("APPROVAL_RESUMING");
-    run.setResumedAt(Instant.now());
-    runRepo.save(run);
+    Instant resumedAt = Instant.now();
+    if ("AWAITING_APPROVAL".equals(run.getStatus())) {
+      // The initial state check in resolvePlanGate is intentionally not trusted here: cancel
+      // can win the race between that read and this queue operation. Claim the transition in the
+      // database so an approved run can never resurrect a concurrently-cancelled run.
+      if (runRepo.claimApprovalResume(runId, resumedAt) != 1) {
+        log.info("plan approval resume lost lifecycle race for run={}", runId);
+        return PlanApprovalOutcome.INVALID_STATE;
+      }
+      run.setStatus("APPROVAL_RESUMING");
+      run.setResumedAt(resumedAt);
+    } else if (!"APPROVAL_RESUMING".equals(run.getStatus())) {
+      return PlanApprovalOutcome.INVALID_STATE;
+    }
     broadcaster.emit(runId, RunEvent.runStatus(runId, "APPROVAL_RESUMING"));
     broadcaster.emit(runId, RunEvent.log(runId, "approval", "Plan approved — resuming execution"));
 
