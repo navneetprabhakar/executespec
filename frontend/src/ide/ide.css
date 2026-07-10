@@ -1365,7 +1365,6 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-
 .agent-error {
   display: grid;
   gap: 4px;
@@ -2757,6 +2756,7 @@
 .agent-bar {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 10px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--ide-border);
@@ -3674,6 +3674,7 @@
   .agent-bar {
     padding: 9px 12px;
     gap: 7px;
+    flex-wrap: wrap;
   }
   .agent-bar-title {
     display: none;
@@ -3683,6 +3684,28 @@
   }
   .agent-usage-pill {
     display: none;
+  }
+  .agent-bar-scope,
+  .agent-bar-status {
+    max-width: 32vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .agent-bar-status {
+    margin-left: auto;
+  }
+  .agent-bar-btn span {
+    display: none;
+  }
+  .agent-bar-btn {
+    gap: 0;
+  }
+  .agent-approval-pill {
+    max-width: 24vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .agent-chat-scroll {
     padding: 16px 12px;
@@ -3725,6 +3748,7 @@
   border-radius: 999px;
   padding: 3px 9px;
 }
+
 .agent-error {
   display: flex;
   align-items: flex-start;

@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.FilePurposeSummary;
 import com.navneet.executespec.codeintel.repository.FilePurposeSummaryRepository;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -32,7 +32,7 @@ class FilePurposeSummaryServiceTest {
 
   private FilePurposeSummaryRepository repo;
   private ModelResolver modelResolver;
-  private FallbackLlmRouter llmRouter;
+  private LlmRouter llmRouter;
   private FeatureFlagService featureFlagService;
   private RunCostTracker costTracker;
   private FilePurposeSummaryService svc;
@@ -41,7 +41,7 @@ class FilePurposeSummaryServiceTest {
   void setUp() {
     repo = mock(FilePurposeSummaryRepository.class);
     modelResolver = mock(ModelResolver.class);
-    llmRouter = mock(FallbackLlmRouter.class);
+    llmRouter = mock(LlmRouter.class);
     featureFlagService = mock(FeatureFlagService.class);
     costTracker = mock(RunCostTracker.class);
     svc =
