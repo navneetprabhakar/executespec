@@ -22,8 +22,8 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -237,8 +237,7 @@ public class TestReportGenerator {
     }
   }
 
-  private void accumulateReportTokens(
-      Long testPlanId, ChatResponse lr, ResolvedModel model) {
+  private void accumulateReportTokens(Long testPlanId, ChatResponse lr, ResolvedModel model) {
     try {
       var usage = lr.getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();

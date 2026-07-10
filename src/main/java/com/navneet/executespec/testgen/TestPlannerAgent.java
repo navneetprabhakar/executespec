@@ -15,9 +15,9 @@ import com.navneet.executespec.testgen.model.*;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -206,10 +206,15 @@ public class TestPlannerAgent {
 
   private ChatResponse callLlm(String runId, ResolvedModel model, String prompt) {
     Prompt chatPrompt =
-        new Prompt(List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")));
+        new Prompt(
+            List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")));
     return llmRouter.callText(
-        model.providerName(), model.getModel(), chatPrompt.getInstructions(), runId,
-        "TestPlannerAgent", "test-plan");
+        model.providerName(),
+        model.getModel(),
+        chatPrompt.getInstructions(),
+        runId,
+        "TestPlannerAgent",
+        "test-plan");
   }
 
   /** Strips markdown code fences (```json ... ``` or ``` ... ```) from LLM responses. */
@@ -229,8 +234,7 @@ public class TestPlannerAgent {
     return trimmed;
   }
 
-  private void accumulatePlannerTokens(
-      TestPlan testPlan, ChatResponse lr, ResolvedModel model) {
+  private void accumulatePlannerTokens(TestPlan testPlan, ChatResponse lr, ResolvedModel model) {
     try {
       var usage = lr.getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();
