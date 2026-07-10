@@ -5,25 +5,20 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.ProviderDispatchAuthorization;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
-import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
-import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -50,14 +45,10 @@ public class FeatureAssessmentService {
   private final ProjectCodeMapRepository codeMapRepo;
   private final FeatureFlagService featureFlags;
   private final ObjectMapper objectMapper;
-  private final RunCostTracker costTracker;
-  private final ProviderDispatchAuthorization dispatchAuthorization;
+  private final LlmRouter llmRouter;
 
-  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
-
-  // B2 (audit 2026-05-29) — the assessment LLM call records its cost against the run via
-  // RunCostTracker.record so the (flag-gated) path no longer escapes cost attribution. Label
-  // mirrors the anthropicChatModel bean's configured model for accurate pricing.
+  // B2 (audit 2026-05-29) — the flag-gated assessment call uses the canonical router so provider
+  // authorization, usage attribution, and model pricing remain in one transport seam.
   @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
   private String anthropicAssessModel;
 
@@ -68,16 +59,11 @@ public class FeatureAssessmentService {
     List<String> repoNames = repoNamesFor(projectId);
 
     // LLM path — when feature flag is on AND we have arch context AND the
-    // anthropic bean is available. Any failure quietly falls through to
+    // the canonical router is available. Any failure quietly falls through to
     // the heuristic so the user never blocks on assessment.
-    AnthropicChatModel anthropicModel = anthropicModelProvider.getIfAvailable();
-    if (featureFlags.isEnabled(FLAG_LLM_ENABLED)
-        && anthropicModel != null
-        && projectId != null
-        && !repoNames.isEmpty()) {
+    if (featureFlags.isEnabled(FLAG_LLM_ENABLED) && projectId != null && !repoNames.isEmpty()) {
       try {
-        AssessmentResult llm =
-            assessViaLlm(anthropicModel, runId, projectId, userRequest, repoNames);
+        AssessmentResult llm = assessViaLlm(runId, projectId, userRequest, repoNames);
         if (llm != null) return llm;
       } catch (Exception e) {
         log.warn(
@@ -100,12 +86,7 @@ public class FeatureAssessmentService {
   }
 
   private AssessmentResult assessViaLlm(
-      AnthropicChatModel anthropicModel,
-      String runId,
-      String projectId,
-      String userRequest,
-      List<String> repoNames)
-      throws Exception {
+      String runId, String projectId, String userRequest, List<String> repoNames) throws Exception {
     ProjectArchitectureDoc arch = archService.latest(projectId).orElse(null);
     String archMd = arch == null ? "" : arch.getContent();
     String annotations =
@@ -152,12 +133,15 @@ public class FeatureAssessmentService {
                 MAX_CODEMAP_CHARS,
                 truncate(codeMapsJoined, MAX_CODEMAP_CHARS));
 
-    Prompt prompt = new Prompt(java.util.List.of(new SystemMessage(system), new UserMessage(user)));
-    dispatchAuthorization.authorize("anthropic", anthropicAssessModel, runId);
-    ChatResponse resp = anthropicModel.call(prompt);
-    if (runId != null) {
-      costTracker.record(runId, "anthropic", anthropicAssessModel, resp);
-    }
+    ChatResponse resp =
+        llmRouter.callText(
+            "anthropic",
+            anthropicAssessModel,
+            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            runId,
+            "FeatureAssessmentService",
+            "assessment.llm",
+            1200);
     String text = resp.getResult().getOutput().getText();
     if (text == null || text.isBlank()) return null;
 
