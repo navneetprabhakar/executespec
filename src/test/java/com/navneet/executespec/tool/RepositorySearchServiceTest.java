@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -88,6 +90,30 @@ class RepositorySearchServiceTest {
                         "after", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0))
                 .totalMatches())
         .isEqualTo(1);
+  }
+
+  @Test
+  void supportsConcurrentReadOnlySearchesWithConsistentSnapshots() throws Exception {
+    for (int i = 0; i < 12; i++) {
+      Files.writeString(root.resolve("file-" + i + ".txt"), "shared\nterm-" + i + "\n");
+    }
+    var service = new RepositorySearchService();
+    var request =
+        new RepositorySearchService.SearchRequest(
+            "shared", RepositorySearchService.SearchMode.EXACT, true, null, "*.txt", 100, 0);
+
+    try (var pool = Executors.newFixedThreadPool(8)) {
+      var futures =
+          java.util.stream.IntStream.range(0, 32)
+              .mapToObj(ignored -> pool.submit(() -> service.search(root, request)))
+              .toList();
+      pool.shutdown();
+      org.junit.jupiter.api.Assertions.assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+      for (var future : futures) {
+        assertThat(future.get().totalMatches()).isEqualTo(12);
+        assertThat(future.get().hits()).hasSize(12);
+      }
+    }
   }
 
   @Test
