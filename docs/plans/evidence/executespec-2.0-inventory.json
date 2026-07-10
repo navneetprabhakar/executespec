@@ -3,24 +3,24 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "5a5b2ed35ef718d660fa5a7b5216765fd45f0bc0",
+      "sha": "6f2cc6ad0292e53197a7a32dc8edc37acfde8aaf",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2603,
-      "worktreeFingerprint": "243f10d3791f034a9d38489058ca4a08be5768889d5f075b6000d8e980d39755"
+      "trackedFiles": 2604,
+      "worktreeFingerprint": "18da3426e8b4abf2ec4cdad1d5fc7e9ede26257b6a8d7e21681e3160615663b0"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "8502eae1e1b19fea2e6b10989647f4255ee760ff",
+      "sha": "31f8982113d020efb29e3fb592597d3b18a44bbc",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 310,
-      "worktreeFingerprint": "19795ef436ce2f31ef2f99b52d9f9a33de18f5182f8dedc400528a99e887d2eb"
+      "trackedFiles": 299,
+      "worktreeFingerprint": "46f34e89c2a43a2aa9c886cd88197af493d8ad353c09d13f43e94eb9092e3084"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "04a79376fb45dfd5c383e4b5a9dc0da0881ae740",
+      "sha": "0f8ac5ae998d4fff7424d2a29ce6bf10b9ea2cd1",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 618,
-      "worktreeFingerprint": "3456af21514ceb6e9408c097c0039c1922873541eec91a39361d50a315e9925d"
+      "trackedFiles": 626,
+      "worktreeFingerprint": "af910c638c996deef3b002ede79dce44bbf53fb4fc0a4bc94745a0a6706ec5cf"
     }
   },
   "backend": {
@@ -28,7 +28,7 @@
       "files": 1242,
       "lines": 193622
     },
-    "testJavaFiles": 378,
+    "testJavaFiles": 379,
     "controllers": 108,
     "mappingAnnotations": 597,
     "prompts": {
@@ -348,9 +348,9 @@
     ]
   },
   "cli": {
-    "sourceFiles": 132,
-    "lines": 55017,
-    "testFiles": 116,
+    "sourceFiles": 127,
+    "lines": 51716,
+    "testFiles": 110,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
       "cli/src/app-tui",
@@ -360,8 +360,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 618,
-    "markdownFiles": 184,
+    "trackedFiles": 626,
+    "markdownFiles": 185,
     "outputFiles": 418
   }
 }
