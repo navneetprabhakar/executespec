@@ -90,6 +90,13 @@ public class SwebenchProperties {
   private int taskWallTimeoutMinutes = 60;
 
   /**
+   * Per-task dollar ceiling written to the minimal benchmark run row. Benchmark campaigns must
+   * lower this explicitly when a repeated-attempt budget is smaller than the historical $8
+   * default; the worker still stops as soon as the observed spend reaches this ceiling.
+   */
+  private double hardCapUsd = 8.0;
+
+  /**
    * RL-2026-05-059 — hard cap on concurrent benchmark runs. A flood of submissions OR orphaned runs
    * from a killed runner can otherwise pile onto the shared box and OOM the JVM (the 2026-05-31
    * jetsam crash: 4 flagship runs + orphans exceeded 23GB → kernel killed the JVM). Each provider

@@ -60,6 +60,7 @@ otherwise create 100KB+ AOF noise and hide a valid source diff behind a timeout/
 
 - `SwebenchProperties` — `enabled` flag (default OFF), `outputBase`, `instancesFile`,
   `imageTemplate`, `benchProjectId`/`benchUserId`/`benchOrgId`, `taskWallTimeoutMinutes`,
+  `hardCapUsd` (historical default $8, env-overridable for bounded repeated-attempt campaigns),
   `defaultProvider`, plus `suite`, `proImageRepository`, and `predictionPrefix` for SWE-bench Pro.
   Set in `application-local.yml` locally and env-driven in `application-benchmark.yml`.
 - `SwebenchInstanceLoader` — `findById`, `imageNameFor`, `allInstanceIds`; parses both classic
