@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {validatePromptManifest} from './validate-prompt-manifest.mjs';
+import {validateLiteralPromptCallers, validatePromptManifest} from './validate-prompt-manifest.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,4 +37,8 @@ test('prompt manifest rejects a deleted base or role fragment', () => {
   assert.ok(errors.includes('stale hash: src/main/resources/prompts/classifier.md'));
   assert.ok(errors.includes('missing prompt fragment: src/main/resources/prompts/classifier.md -> missing-fragment.md'));
   assert.ok(errors.includes('missing prompt role fragment: src/main/resources/prompts/classifier.md -> missing-fragment-worker.md'));
+});
+
+test('literal Java prompt callers resolve to packaged resources', () => {
+  assert.deepEqual(validateLiteralPromptCallers(root), []);
 });
