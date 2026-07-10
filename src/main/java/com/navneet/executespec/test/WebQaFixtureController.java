@@ -23,6 +23,8 @@ import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.model.TestCategory;
 import com.navneet.executespec.testgen.model.TestPlan;
 import com.navneet.executespec.testgen.model.TestPlanStatus;
@@ -62,6 +64,7 @@ public class WebQaFixtureController {
   private final AgentSessionRepository sessionRepository;
   private final AgentTurnRepository turnRepository;
   private final AgentActionEventRepository eventRepository;
+  private final SseBroadcaster sseBroadcaster;
 
   @PostMapping
   public FixtureResponse seed(@org.springframework.security.core.annotation.AuthenticationPrincipal AppUserDetails principal)
@@ -143,6 +146,11 @@ public class WebQaFixtureController {
     testResultRepository.save(TestResult.builder().testPlanId(plan.getId()).testTaskId(test.getId()).testMethod("fixture smoke")
         .status(success ? TestResultStatus.PASSED : TestResultStatus.FAILED).expectedValue("pass").actualValue(success ? "pass" : "build error")
         .failureMessage(success ? null : "fixture build failed").durationMs(12).build());
+    sseBroadcaster.emit(runId, RunEvent.runStatus(runId, status));
+    sseBroadcaster.emit(runId, RunEvent.log(runId, runId + "-task", success ? "fixture verification passed" : "fixture build failed; recovery available"));
+    sseBroadcaster.emit(runId, new RunEvent(
+        "AWAITING_APPROVAL".equals(status) ? "GATE_OPENED" : "COMPLETE",
+        runId, null, status, Instant.now()));
     return run;
   }
 
