@@ -18,9 +18,9 @@ import com.navneet.executespec.testgen.model.TestTaskStatus;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -299,10 +299,15 @@ public class TestWorkerAgent {
   private ChatResponse callLlmTracked(String runId, ResolvedModel model, String systemPrompt) {
     Prompt prompt =
         new Prompt(
-            List.of(new SystemMessage(systemPrompt), new UserMessage("Generate the test class now.")));
+            List.of(
+                new SystemMessage(systemPrompt), new UserMessage("Generate the test class now.")));
     return llmRouter.callText(
-        model.providerName(), model.getModel(), prompt.getInstructions(), runId,
-        "TestWorkerAgent", "test-worker");
+        model.providerName(),
+        model.getModel(),
+        prompt.getInstructions(),
+        runId,
+        "TestWorkerAgent",
+        "test-worker");
   }
 
   private synchronized void accumulateWorkerTokens(
