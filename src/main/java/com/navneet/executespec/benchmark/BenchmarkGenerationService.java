@@ -107,6 +107,7 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
+    double hardCapUsd = validatedHardCapUsd();
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);
@@ -129,12 +130,6 @@ public class BenchmarkGenerationService {
       // Minimal run row — the only state the code-gen path reads back: hardCapUsd (worker budget
       // cap) + sourceType="benchmark" (engine gate OFF for blind runs). NOT the full submitRun
       // lifecycle.
-      double hardCapUsd = props.getHardCapUsd();
-      if (!Double.isFinite(hardCapUsd) || hardCapUsd <= 0.0) {
-        throw new ResponseStatusException(
-            HttpStatus.INTERNAL_SERVER_ERROR,
-            "swebench.hard-cap-usd must be a finite positive value");
-      }
       PipelineRun row =
           PipelineRun.builder()
               .runId(runId)
@@ -225,6 +220,16 @@ public class BenchmarkGenerationService {
       containerStore.remove(runId);
       releaseGenerationSlot();
     }
+  }
+
+  private double validatedHardCapUsd() {
+    double value = props.getHardCapUsd();
+    if (!Double.isFinite(value) || value <= 0.0) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR,
+          "swebench.hard-cap-usd must be a finite positive value");
+    }
+    return value;
   }
 
   void acquireGenerationSlot(String instanceId) {
