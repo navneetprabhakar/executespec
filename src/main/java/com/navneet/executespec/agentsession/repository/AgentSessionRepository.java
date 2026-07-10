@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AgentSessionRepository extends JpaRepository<AgentSession, String> {
 
+  List<AgentSession> findByStatus(String status);
+
   List<AgentSession> findByUserIdAndStatusOrderByUpdatedAtDesc(
       String userId, String status, Pageable pageable);
 
