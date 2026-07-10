@@ -10,9 +10,10 @@ best-effort: a failed model call must never fail the customer run.
 new `FallbackLlmRouter` callers here; the canonical text seam owns provider transport, usage
 accounting, retry, failover, and telemetry.
 
-`RunLedgerAgent` remains on the legacy router until its ledger-generation behavior has a dedicated
-migration/evaluation pass because it runs in the run-completion path and has provider-specific
-fallback semantics.
+`RunLedgerAgent` also uses `LlmRouter.callText`; its run-completion path is best-effort and catches
+all transport failures, while canonical retry/failover and managed-AI accounting remain centralized
+in the router. The call uses an explicit empty tool set and stable `run-ledger` / `generate`
+attribution.
 
 ## Persistence
 
