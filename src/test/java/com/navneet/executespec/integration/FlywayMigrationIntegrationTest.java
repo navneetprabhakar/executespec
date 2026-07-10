@@ -103,7 +103,7 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationBase {
     List<String> indexes =
         jdbc.queryForList(
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'", String.class);
-    assertThat(indexes).containsAnyOf("idx_pipeline_run_tenant_id", "idx_agent_task_tenant_id");
+    assertThat(indexes).containsAnyOf("idx_pipeline_run_tenant", "idx_agent_task_tenant");
   }
 
   @Test
