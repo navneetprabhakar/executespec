@@ -70,6 +70,26 @@ export interface AgentStreamToolResult {
   result: string;
 }
 
+/** Explicit lifecycle marker; ordinary tool progress must not be inferred as a handoff. */
+export interface AgentStreamToolEvent {
+  name?: string;
+  status?: string;
+  detail?: string;
+  type?: string;
+  kind?: string;
+  event_type?: string;
+  action?: string;
+  role?: string;
+  agent_role?: string;
+  provider?: string;
+  provider_name?: string;
+  model?: string;
+  model_name?: string;
+  state?: string;
+  message?: string;
+  reason?: string;
+}
+
 export interface AgentStreamDone {
   session_id: string;
   turn_id: string;

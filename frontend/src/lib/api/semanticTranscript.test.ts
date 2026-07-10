@@ -24,4 +24,39 @@ describe('semanticTranscriptFromEvents', () => {
     ]);
     expect(result[1]).toMatchObject({kind: 'assistant', text: 'hello world'});
   });
+
+  it('preserves explicit handoffs without inferring them from ordinary tool events', () => {
+    const result = semanticTranscriptFromEvents([
+      {
+        event: 'tool_event',
+        data: {
+          name: 'subagent_handoff',
+          status: 'COMPLETED',
+          role: 'SCOUT',
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro-native',
+          detail: 'returned cited files',
+        },
+      },
+      {event: 'tool_event', data: {name: 'searchFiles', status: 'OK', detail: '3 matches'}},
+    ]);
+    expect(result).toEqual([
+      {
+        kind: 'handoff',
+        id: 'tool-event:0',
+        role: 'SCOUT',
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro-native',
+        status: 'COMPLETED',
+        detail: 'returned cited files',
+      },
+      {
+        kind: 'tool_event',
+        id: 'tool-event:1',
+        name: 'searchFiles',
+        status: 'OK',
+        detail: '3 matches',
+      },
+    ]);
+  });
 });
