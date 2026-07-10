@@ -91,8 +91,8 @@ public class SwebenchProperties {
 
   /**
    * Per-task dollar ceiling written to the minimal benchmark run row. Benchmark campaigns must
-   * lower this explicitly when a repeated-attempt budget is smaller than the historical $8
-   * default; the worker still stops as soon as the observed spend reaches this ceiling.
+   * lower this explicitly when a repeated-attempt budget is smaller than the historical $8 default;
+   * the worker still stops as soon as the observed spend reaches this ceiling.
    */
   private double hardCapUsd = 8.0;
 
