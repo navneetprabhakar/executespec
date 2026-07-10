@@ -104,6 +104,21 @@ class TestOutputParserTest {
     assertTrue(TestOutputParser.parse(Framework.UNKNOWN, "5 passed", 0).isEmpty());
   }
 
+  @Test
+  void impossibleFrameworkCounts_areRejectedAsUntrustedEvidence() {
+    assertTrue(
+        TestOutputParser.parse(
+                Framework.SUREFIRE, "Tests run: 2, Failures: 2, Errors: 1, Skipped: 0", 1)
+            .isEmpty());
+    assertTrue(
+        TestOutputParser.parse(Framework.JEST, "Tests: 3 failed, 2 passed, 4 total", 1).isEmpty());
+    assertTrue(
+        TestOutputParser.parseJunitXmlReports(
+                java.util.List.of(
+                    "<testsuite name=\"Broken\" tests=\"1\" failures=\"1\" errors=\"1\" skipped=\"0\">"))
+            .isEmpty());
+  }
+
   // ── JUnit XML report fallback (RL-2026-06-049) ────────────────────────────────
   // The `mvn -q test` regression: stdout has no "Tests run:" line, so the stdout parser returns
   // empty and a run whose tests FAILED was scored UNKNOWN (no penalty / no failed-tests cap). The

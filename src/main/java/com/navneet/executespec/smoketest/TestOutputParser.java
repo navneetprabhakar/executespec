@@ -14,7 +14,8 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
  * <p><b>Hard rule:</b> when the output can't be confidently parsed into a count, return {@link
  * Optional#empty()} — NEVER fabricate a number. A wrong count poisons the verifiedScore TESTS slot
  * worse than no count (the caller falls back to LLM-judged coverage on empty). The only count we
- * trust is one the framework explicitly printed.
+ * trust is one the framework explicitly printed and internally consistent (passed + failed +
+ * errors + skipped cannot exceed total).
  */
 public final class TestOutputParser {
 
@@ -93,6 +94,7 @@ public final class TestOutputParser {
     int p = orZero(firstInt(JEST_PASSED, out));
     int f = orZero(firstInt(JEST_FAILED, out));
     int s = orZero(firstInt(JEST_SKIPPED, out));
+    if (invalidCounts(total, p, f, 0, s)) return Optional.empty();
     return Optional.of(summary(total, p, f, 0, s));
   }
 
@@ -102,10 +104,15 @@ public final class TestOutputParser {
     int total = 0, fail = 0, err = 0, skip = 0;
     while (m.find()) {
       any = true;
-      total += Integer.parseInt(m.group(1));
-      fail += Integer.parseInt(m.group(2));
-      err += Integer.parseInt(m.group(3));
-      skip += m.group(4) != null ? Integer.parseInt(m.group(4)) : 0;
+      int suiteTotal = Integer.parseInt(m.group(1));
+      int suiteFail = Integer.parseInt(m.group(2));
+      int suiteErr = Integer.parseInt(m.group(3));
+      int suiteSkip = m.group(4) != null ? Integer.parseInt(m.group(4)) : 0;
+      if (invalidCounts(suiteTotal, 0, suiteFail, suiteErr, suiteSkip)) return Optional.empty();
+      total += suiteTotal;
+      fail += suiteFail;
+      err += suiteErr;
+      skip += suiteSkip;
     }
     if (!any) return Optional.empty();
     int passed = Math.max(0, total - fail - err - skip);
@@ -132,9 +139,14 @@ public final class TestOutputParser {
       Matcher mf = XML_FAIL.matcher(xml);
       Matcher me = XML_ERR.matcher(xml);
       Matcher ms = XML_SKIP.matcher(xml);
-      fail += mf.find() ? Integer.parseInt(mf.group(1)) : 0;
-      err += me.find() ? Integer.parseInt(me.group(1)) : 0;
-      skip += ms.find() ? Integer.parseInt(ms.group(1)) : 0;
+      int suiteFail = mf.find() ? Integer.parseInt(mf.group(1)) : 0;
+      int suiteErr = me.find() ? Integer.parseInt(me.group(1)) : 0;
+      int suiteSkip = ms.find() ? Integer.parseInt(ms.group(1)) : 0;
+      int suiteTotal = Integer.parseInt(mt.group(1));
+      if (invalidCounts(suiteTotal, 0, suiteFail, suiteErr, suiteSkip)) return Optional.empty();
+      fail += suiteFail;
+      err += suiteErr;
+      skip += suiteSkip;
     }
     if (!any) return Optional.empty();
     int passed = Math.max(0, total - fail - err - skip);
@@ -182,6 +194,17 @@ public final class TestOutputParser {
 
   private static int orZero(Integer i) {
     return i == null ? 0 : i;
+  }
+
+  /** Reject impossible framework counts instead of turning malformed output into score evidence. */
+  private static boolean invalidCounts(
+      int total, int passed, int failed, int errors, int skipped) {
+    return total < 0
+        || passed < 0
+        || failed < 0
+        || errors < 0
+        || skipped < 0
+        || (long) passed + failed + errors + skipped > total;
   }
 
   private static TestExecutionSummary summary(
