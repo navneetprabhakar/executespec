@@ -21,7 +21,7 @@
 | Flyway backward compatibility | PASS | V1–V256 remain immutable and V256 is forward-only; hash-pinned chain plus clean-install and V255→V256 upgrade/data-preservation tests pass |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2418 tests, 0 failures/errors; focused context/subagent/routing/provider-guard/prompt suites pass |
 | Frontend build/lint/format/tests | PASS | 155 tests, production build, format check, and lint pass; one existing hook-dependency warning |
-| CLI/core/VS Code build/tests | PASS (worktree-scoped) | CLI worktree builds clean; core 115 tests pass; the 36-case split-docs contract suite passes with `EXECUTESPEC_DOCS_ROOT=../executespec-docs-2.0`; the offline TS runtime comparator passes all scenarios and reports local-only timing/RSS. The original sibling docs repo remains intentionally out of scope because it is dirty |
+| CLI/core/VS Code build/tests | PASS (worktree-scoped) | With `EXECUTESPEC_DOCS_ROOT=/Users/navneetprabhakar/Documents/antigravity/executespec-docs-2.0`, the full CLI worktree gate passes: core 115 + CLI 734 + VS Code 12 = 861 tests; the offline TS runtime comparator passes all scenarios and reports local-only timing/RSS |
 | Visual QA | FAIL | Web now exposes live connection state and keyboard-contained modal overlays to screen readers and sighted operators, but authenticated protected-flow screenshots and full TUI visual acceptance are still missing |
 | Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
