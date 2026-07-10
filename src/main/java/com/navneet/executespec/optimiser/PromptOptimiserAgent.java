@@ -20,6 +20,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,7 @@ public class PromptOptimiserAgent {
   private final StateStore stateStore;
   private final PromptVersioningService versioningService;
 
+  @Autowired
   public PromptOptimiserAgent(
       PromptPatternAnalyser analyser,
       PromptAuditService auditService,
