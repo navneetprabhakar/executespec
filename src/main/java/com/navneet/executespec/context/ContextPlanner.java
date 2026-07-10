@@ -41,7 +41,16 @@ public class ContextPlanner {
             ? List.of()
             : items.stream()
                 .filter(item -> item != null && item.tokenEstimate() > 0)
-                .sorted(Comparator.comparingInt(Item::priority).reversed())
+                // Preserve priority as the primary signal, but make ties stable. Callers assemble
+                // evidence from Redis/search results whose iteration order is not guaranteed; a
+                // non-deterministic tie break would change which context survives a tight budget
+                // and make model evaluations/retries irreproducible.
+                .sorted(
+                    Comparator.comparingInt(Item::priority)
+                        .reversed()
+                        .thenComparing(item -> item.fresh() ? 0 : 1)
+                        .thenComparing(item -> item.kind() == null ? "" : item.kind().name())
+                        .thenComparing(item -> item.id() == null ? "" : item.id()))
                 .toList();
     long usable =
         window.contextWindowTokens()
