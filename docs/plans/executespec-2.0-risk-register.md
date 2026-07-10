@@ -12,7 +12,7 @@
 | R-08 | Four CLI renderers make behavior and QA non-deterministic | P1 | One semantic state, OpenTUI + plain only, deletion gate | CONTROLLED; compatibility split-footer remains |
 | R-09 | Web redesign preserves backend taxonomy instead of workflow | P1 | Shared protocol state and workflow usability tests | PARTIAL CONTROL; authenticated visual QA remains |
 | R-10 | FastContext adds dependency/cost without recall gain | P1 | Adapter-isolated paired experiment and explicit reject path | OPEN |
-| R-11 | Child agents multiply cost/context and obscure accountability | P1 | Total-tree budgets, depth/role caps, parent-owned audit/cancel, persisted budgets/evidence | PARTIAL CONTROL; parent-driven delegation quality evidence remains |
+| R-11 | Child agents multiply cost/context and obscure accountability | P1 | Total-tree budgets, depth/role caps, parent-owned audit/cancel, persisted budgets/evidence | PARTIAL CONTROL; aggregate descendant turn/cost reservation is enforced; parent-driven delegation quality evidence remains |
 | R-12 | Exploratory benchmark evidence is marketed as parity | P0 | Frozen comparator, k>=3 where affordable, readiness statuses | OPEN |
 | R-13 | Docs publish stale or broken current truth | P1 | Generated facts/map and integrity validators | CONTROLLED; release worktree docs checks pass |
 | R-14 | Cleanup damages user-owned dirty work | P0 | Isolated worktrees, path-scoped staging, pre-commit status audit | CONTROLLED |
