@@ -4,6 +4,7 @@ import type {
   AgentStreamProposal,
   AgentStreamRouteDecision,
   AgentStreamToolCall,
+  AgentStreamToolEvent,
   AgentStreamToolResult,
 } from './agentStream';
 
@@ -12,6 +13,16 @@ export type SemanticTranscriptItem =
   | {kind: 'assistant'; id: string; text: string}
   | {kind: 'tool_call'; id: string; tool: string; args: string}
   | {kind: 'tool_result'; id: string; result: string}
+  | {kind: 'tool_event'; id: string; name?: string; status?: string; detail?: string}
+  | {
+      kind: 'handoff';
+      id: string;
+      role?: string;
+      provider?: string;
+      model?: string;
+      status?: string;
+      detail?: string;
+    }
   | {kind: 'proposal'; id: string; action: string; summary?: string; requiresConfirmation: boolean}
   | {kind: 'verification'; id: string; status: 'pending' | 'passed' | 'failed'; detail?: string}
   | {kind: 'completion'; id: string; costUsd?: number; inputTokens?: number; outputTokens?: number}
@@ -55,6 +66,38 @@ export function semanticTranscriptFromEvents(
       case 'tool_result': {
         const data = event.data as AgentStreamToolResult;
         items.push({kind: 'tool_result', id: `result:${data.id}`, result: data.result});
+        break;
+      }
+      case 'tool_event': {
+        const data = event.data as AgentStreamToolEvent;
+        const marker = [data.name, data.status, data.type, data.kind, data.event_type, data.action]
+          .filter((value): value is string => typeof value === 'string')
+          .join(' ')
+          .toLowerCase();
+        const id = `tool-event:${items.length}`;
+        if (
+          /(?:subagent|sub-agent|handoff|provider[ _-]?switch|model[ _-]?(?:switch|handoff)|continuation)/.test(
+            marker,
+          )
+        ) {
+          items.push({
+            kind: 'handoff',
+            id,
+            role: data.role ?? data.agent_role,
+            provider: data.provider ?? data.provider_name,
+            model: data.model ?? data.model_name,
+            status: data.status ?? data.state,
+            detail: data.detail ?? data.message ?? data.reason,
+          });
+        } else {
+          items.push({
+            kind: 'tool_event',
+            id,
+            name: data.name,
+            status: data.status,
+            detail: data.detail,
+          });
+        }
         break;
       }
       case 'proposal': {
