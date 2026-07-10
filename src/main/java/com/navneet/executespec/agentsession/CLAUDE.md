@@ -82,6 +82,10 @@ turns separately from runs.
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
   session contains the complete action stream.
+- Startup recovery reconciles persisted child sessions left in `RUNNING` after a JVM restart to
+  `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
+  and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale
+  child releases its reserved descendant budget and lets the parent request a fresh bounded child.
 
 ## Key Files
 
