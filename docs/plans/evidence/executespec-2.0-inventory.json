@@ -3,34 +3,34 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "eef4fd0f2e80254bf07d9209cfd14bc72ddb3dd0",
+      "sha": "eee7fbbf3c7f001f8bd43bf3aefcedf3b2e0f768",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2623,
-      "worktreeFingerprint": "2b2473006259172c9b19a8cf97991e58b5f1301dc6cbee7c8eddbfd90bb9d78a"
+      "trackedFiles": 2625,
+      "worktreeFingerprint": "ef49521619a830193a632ca7da9a7f7333c8c17654c280441caf40fb844a412b"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "df96404ee8c928f3bfe26567a6371002ed3608e8",
+      "sha": "b0173f32aba3851d8e43ded27f42918888a33d34",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 303,
-      "worktreeFingerprint": "40a1437dcfe1d2032f1a788302e71b95bc7b95da2f4fc45e2f4ccab6b7829665"
+      "trackedFiles": 305,
+      "worktreeFingerprint": "6038b2fc5288fe5c828f254f5b10875fb39521e155851e8d8fcb18007d1b6c29"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "4716bb3fb2bc5f8d59b06e71577543dd66a265fb",
+      "sha": "f9b7312113a785cb2e3e8bd84d2611cb5a941882",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 643,
-      "worktreeFingerprint": "b53c0595764827b09b6146acdc4c482997a620a8e77df2240bd8f96c9b985e08"
+      "trackedFiles": 726,
+      "worktreeFingerprint": "63b3e2b340bf9c447a9a25df5177ed449e092ae03ee26c2370ea1df033175a7d"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1245,
-      "lines": 195289
+      "files": 1247,
+      "lines": 195835
     },
-    "testJavaFiles": 389,
-    "controllers": 108,
-    "mappingAnnotations": 601,
+    "testJavaFiles": 390,
+    "controllers": 109,
+    "mappingAnnotations": 604,
     "prompts": {
       "count": 88,
       "markdown": 53,
@@ -347,8 +347,8 @@
   },
   "cli": {
     "sourceFiles": 127,
-    "lines": 51941,
-    "testFiles": 113,
+    "lines": 52027,
+    "testFiles": 114,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
       "cli/src/app-tui",
@@ -358,8 +358,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 643,
-    "markdownFiles": 186,
+    "trackedFiles": 726,
+    "markdownFiles": 191,
     "outputFiles": 418
   }
 }
