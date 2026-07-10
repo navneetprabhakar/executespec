@@ -1,6 +1,7 @@
 package com.navneet.executespec.memory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
@@ -31,6 +33,8 @@ class MemoryCompactionServiceTest {
     ModelResolver modelResolver = mock(ModelResolver.class);
     ProjectRunLedgerRepository ledgerRepo = mock(ProjectRunLedgerRepository.class);
     ProjectMemorySnapshotRepository snapshotRepo = mock(ProjectMemorySnapshotRepository.class);
+    PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    when(promptAssembler.assemble(eq("memory-compaction.txt"), any())).thenReturn("compact prompt");
     when(ledgerRepo.findUncompactedBeforeRunNumber("project-1", Integer.MAX_VALUE))
         .thenReturn(
             List.of(
@@ -58,7 +62,8 @@ class MemoryCompactionServiceTest {
         .thenReturn(ok("API work and test coverage."));
 
     MemoryCompactionService service =
-        new MemoryCompactionService(llmRouter, modelResolver, ledgerRepo, snapshotRepo);
+        new MemoryCompactionService(
+            llmRouter, modelResolver, ledgerRepo, snapshotRepo, promptAssembler);
 
     assertThat(service.compactNow("project-1", "org-1")).isEqualTo(1);
     verify(llmRouter)

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
@@ -36,6 +37,8 @@ class RunLedgerAgentTest {
     AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
     MemoryCompactionService compactionService = mock(MemoryCompactionService.class);
     AgentProperties agentProperties = new AgentProperties();
+    PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    when(promptAssembler.assemble(eq("run-ledger.txt"), any())).thenReturn("ledger prompt");
 
     PipelineRun run =
         PipelineRun.builder()
@@ -73,7 +76,8 @@ class RunLedgerAgentTest {
             runRepo,
             taskRepo,
             compactionService,
-            agentProperties);
+            agentProperties,
+            promptAssembler);
 
     agent.generateLedgerEntry("run-1");
 
