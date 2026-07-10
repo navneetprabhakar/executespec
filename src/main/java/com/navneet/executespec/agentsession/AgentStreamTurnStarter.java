@@ -14,12 +14,13 @@ import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
 @Component
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 class AgentStreamTurnStarter {
 
   private final AgentIntentService intentService;
