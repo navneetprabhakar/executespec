@@ -34,8 +34,7 @@ class FastContextExperimentTest {
                 fixtures,
                 (workspace, ignored) -> {
                   calls.incrementAndGet();
-                  return new RepositorySearchService()
-                      .search(workspace, request);
+                  return new RepositorySearchService().search(workspace, request);
                 },
                 FastContextExperiment.InvocationPolicy.SELECTIVE);
 
@@ -62,7 +61,9 @@ class FastContextExperimentTest {
         new FastContextExperiment()
             .run(
                 root,
-                List.of(new FastContextExperiment.FixtureCase("control", request, Set.of("src.java"), false)),
+                List.of(
+                    new FastContextExperiment.FixtureCase(
+                        "control", request, Set.of("src.java"), false)),
                 (workspace, ignored) -> {
                   calls.incrementAndGet();
                   return new RepositorySearchService().search(workspace, request);
@@ -73,5 +74,117 @@ class FastContextExperimentTest {
     assertThat(report.explorerInvocations()).isZero();
     assertThat(report.decision()).isEqualTo(FastContextExperiment.Decision.BASELINE_ONLY);
     assertThat(report.explorerMeanRecall()).isNaN();
+  }
+
+  @Test
+  void syntheticPairedTraceCalculatesPrecisionLatencyAndCostAndAdoptsOnlyNoRegression()
+      throws Exception {
+    Files.writeString(root.resolve("good.java"), "target\n");
+    Files.writeString(root.resolve("noise.java"), "noise\n");
+    var request =
+        new RepositorySearchService.SearchRequest(
+            "target", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+    var expected = Set.of("good.java");
+    var candidateHit =
+        new RepositorySearchService.SearchHit("good.java", 1, 1, "target", "TEXT", "CURRENT", 2);
+    var candidate =
+        new RepositorySearchService.SearchResult(
+            "fixture-repo-sha",
+            "fixture-inventory-sha",
+            "fixture-query-sha",
+            List.of(candidateHit),
+            1,
+            false,
+            1,
+            "synthetic-fastcontext");
+    var explorer =
+        new FastContextExperiment.Explorer() {
+          @Override
+          public RepositorySearchService.SearchResult search(
+              Path workspace, RepositorySearchService.SearchRequest ignored) {
+            return candidate;
+          }
+
+          @Override
+          public FastContextExperiment.InvocationMetrics metrics(
+              Path workspace,
+              RepositorySearchService.SearchRequest ignored,
+              RepositorySearchService.SearchResult ignoredResult) {
+            return new FastContextExperiment.InvocationMetrics(80, 2, 0.000001);
+          }
+
+          @Override
+          public String engine() {
+            return "synthetic-fastcontext";
+          }
+        };
+    var report =
+        new FastContextExperiment()
+            .run(
+                root,
+                List.of(new FastContextExperiment.FixtureCase("paired", request, expected, false)),
+                explorer,
+                FastContextExperiment.InvocationPolicy.PAIRED);
+
+    assertThat(report.baselineMeanRecall()).isEqualTo(1.0);
+    assertThat(report.baselineMeanPrecision()).isEqualTo(1.0);
+    assertThat(report.explorerMeanPrecision()).isEqualTo(1.0);
+    assertThat(report.baselineTokenEstimate()).isEqualTo(1);
+    assertThat(report.explorerTokenEstimate()).isEqualTo(2);
+    assertThat(report.explorerLatencyMicros()).isEqualTo(80);
+    assertThat(report.explorerCostUsd()).isEqualTo(0.000001);
+    // Equal quality is not sufficient for adoption; no synthetic claim is made.
+    assertThat(report.decision()).isEqualTo(FastContextExperiment.Decision.KEEP_BASELINE);
+    assertThat(report.cases().getFirst().explorerEvidence().engine())
+        .isEqualTo("synthetic-fastcontext");
+  }
+
+  @Test
+  void syntheticQualityGainIsRejectedWhenLatencyOrCostRegresses() throws Exception {
+    Files.writeString(root.resolve("good.java"), "target\n");
+    var request =
+        new RepositorySearchService.SearchRequest(
+            "absent", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+    var candidateHit =
+        new RepositorySearchService.SearchHit("good.java", 1, 1, "target", "TEXT", "CURRENT", 2);
+    var candidate =
+        new RepositorySearchService.SearchResult(
+            "fixture-repo-sha",
+            "fixture-inventory-sha",
+            "fixture-query-sha",
+            List.of(candidateHit),
+            1,
+            false,
+            1,
+            "synthetic-fastcontext");
+    var explorer =
+        new FastContextExperiment.Explorer() {
+          @Override
+          public RepositorySearchService.SearchResult search(
+              Path workspace, RepositorySearchService.SearchRequest ignored) {
+            return candidate;
+          }
+
+          @Override
+          public FastContextExperiment.InvocationMetrics metrics(
+              Path workspace,
+              RepositorySearchService.SearchRequest ignored,
+              RepositorySearchService.SearchResult ignoredResult) {
+            return new FastContextExperiment.InvocationMetrics(10_000, 2, 0.10);
+          }
+        };
+    var report =
+        new FastContextExperiment()
+            .run(
+                root,
+                List.of(
+                    new FastContextExperiment.FixtureCase(
+                        "regression", request, Set.of("good.java"), false)),
+                explorer,
+                FastContextExperiment.InvocationPolicy.PAIRED);
+
+    assertThat(report.baselineMeanRecall()).isZero();
+    assertThat(report.explorerMeanRecall()).isEqualTo(1.0);
+    assertThat(report.decision()).isEqualTo(FastContextExperiment.Decision.KEEP_BASELINE);
   }
 }
