@@ -128,6 +128,7 @@ class SubagentExecutionServiceTest {
         .thenReturn(
             new SubagentProtocol.DelegationDecision(
                 "parent", Role.VERIFIER, true, "eligible", 1, 0, 4, 0, 0, null));
+    when(protocol.spawnAndRecordCoordinator(request, "user", "org")).thenReturn(running);
     doAnswer(
             invocation -> {
               SpecChatService.Sink sink = invocation.getArgument(0);
@@ -166,7 +167,7 @@ class SubagentExecutionServiceTest {
     Result result = service.executeCoordinator(optedIn, user, "org");
 
     assertThat(result.summary()).contains("Verified");
-    verify(protocol).recordCoordinatorTrigger(request, null, "user", "org");
+    verify(protocol).spawnAndRecordCoordinator(request, "user", "org");
     verify(protocol).spawn(request, "user", "org");
   }
 

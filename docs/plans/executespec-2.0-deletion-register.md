@@ -26,6 +26,11 @@ This is an execution register. `COMPATIBILITY_ONLY` entries need an owner, remov
 | Raw/full worker history and client-owned canonical chat JSON | Server ContextPlanner, journal, compaction, headroom and local cache | Long-session recovery tests |
 | API-call-success performance tracker and fragmented routing | Task-outcome store plus one auditable RoutingService | Replay/degradation/provider-cap tests |
 | Fake `spawn_subagent` | Persisted child run protocol and bounded orchestration | Scout/verifier integration tests |
+
+The coordinator-triggered path is now an explicit, bounded control-plane seam rather than a model
+claim: the feature flag remains fail-closed, eligibility is advisory, and reservation plus the
+accepted audit event are atomic. No unbounded client-side scheduler or implicit run authority is
+being retained under compatibility aliases.
 | Raw transport events in clients | Agent Protocol v2 semantic transcript state | Cross-client contract suite |
 | Route-first OpenTUI | Transcript-first workspace with overlays | Vertical slice and viewport QA |
 | Web route collection and polling run card | Shared semantic transcript/control state and resumable events | Browser workflow and reconnect QA |

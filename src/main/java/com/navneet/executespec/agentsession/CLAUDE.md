@@ -44,7 +44,9 @@ turns separately from runs.
   compatibility/control-plane surfaces rather than a second execution implementation.
   The coordinator endpoint additionally requires `automatic=true`, `trigger=COORDINATOR`, a fresh
   eligible decision, and `agent.subagents.coordinator-auto.enabled=true`; it never grants write or
-  run authority and records `SUBAGENT_COORDINATOR_ACCEPTED` parent activity before execution.
+  run authority. Child reservation and `SUBAGENT_COORDINATOR_ACCEPTED` parent activity are written
+  in one transaction with the actual child id, so a stale eligibility probe cannot leave a false
+  acceptance event when another coordinator wins the slot.
 - Provider choice is cross-surface account state, not a client-local default. Session creation and
   turns must use `AiProviderPreferenceService`: explicit provider input updates
   `app_user.preferred_ai_provider`; omitted input resolves from that preference.

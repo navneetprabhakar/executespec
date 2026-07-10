@@ -77,6 +77,34 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void coordinatorReservationRecordsAcceptedEventWithActualChildId() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_CREATED))
+        .thenReturn(List.of());
+    when(events.countBySessionIdAndType("parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(0L);
+
+    var handle =
+        service.spawnAndRecordCoordinator(
+            new SpawnRequest("coord-1", "parent", "turn-1", Role.SCOUT, "locate auth", 3, 0.2),
+            "user",
+            "org");
+
+    assertThat(handle.childSessionId()).isNotBlank();
+    ArgumentCaptor<AgentActionEvent> persisted = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(events, org.mockito.Mockito.times(3)).save(persisted.capture());
+    AgentActionEvent accepted =
+        persisted.getAllValues().stream()
+            .filter(
+                event -> SubagentProtocolService.EVENT_COORDINATOR_ACCEPTED.equals(event.getType()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(accepted.getPayloadJson()).contains(handle.childSessionId());
+  }
+
+  @Test
   void evaluateDelegation_isSideEffectFreeAndReportsCapacity() {
     AgentSession parent = parent("parent", "ACTIVE");
     when(sessions.findById("parent")).thenReturn(Optional.of(parent));

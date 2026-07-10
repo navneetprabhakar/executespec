@@ -149,6 +149,34 @@ public class SubagentProtocolService {
             "COORDINATOR"));
   }
 
+  /**
+   * Atomically reserves a child and records the coordinator acceptance with the actual child id.
+   *
+   * <p>The eligibility endpoint is intentionally advisory, so a second coordinator can consume the
+   * last slot between the probe and execution. Keeping reservation and acceptance in one
+   * transaction makes the accepted event an honest audit record: it is written only after the same
+   * transactional spawn checks succeed, and it names the child that will be executed. The request
+   * id still makes retries idempotent through {@link #spawn}.
+   */
+  @Transactional
+  public Handle spawnAndRecordCoordinator(
+      SpawnRequest request, String actorUserId, String actorOrgId) {
+    Handle handle = spawn(request, actorUserId, actorOrgId);
+    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    append(
+        parent.getId(),
+        request.parentTurnId(),
+        request.requestId(),
+        EVENT_COORDINATOR_ACCEPTED,
+        new CoordinatorTrigger(
+            request.requestId(),
+            handle.childSessionId(),
+            request.role(),
+            request.objective().trim(),
+            "COORDINATOR"));
+    return handle;
+  }
+
   @Transactional
   public Handle spawn(SpawnRequest request, String actorUserId, String actorOrgId) {
     validateSpawnRequest(request);
