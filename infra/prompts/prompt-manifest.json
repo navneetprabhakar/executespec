@@ -1,0 +1,930 @@
+{
+  "schemaVersion": 1,
+  "source": "src/main/resources/prompts",
+  "policy": "Prompt hashes are evidence identities; prompt tuning must record provider/model, tool-schema, harness, task slice, flags, and budgets separately.",
+  "prompts": [
+    {
+      "id": "api-test-suite",
+      "path": "src/main/resources/prompts/api-test-suite.txt",
+      "sha256": "0216b26b2a153cd5ac3c00a3cfe96f44077b96dc14df624fb987296a44b9c2ff",
+      "bytes": 3496,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "classifier",
+      "path": "src/main/resources/prompts/classifier.md",
+      "sha256": "bc4377bb14482f8e7282eb74e4972feacab40f2da93d5b6b12f4216cfe1065d2",
+      "bytes": 4800,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "HEURISTIC_VERDICT",
+        "PROJECT_MEMORY",
+        "PROJECT_TYPE",
+        "REPO_COUNT",
+        "REPO_NAMES",
+        "SPEC"
+      ]
+    },
+    {
+      "id": "codereview/code-review-agent",
+      "path": "src/main/resources/prompts/codereview/code-review-agent.md",
+      "sha256": "701d6a47607b0a88fcc79a23d2c182d8d2fdea1f6f93921caa4b4d7c46abb807",
+      "bytes": 4814,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "codereview/pr-review-agent",
+      "path": "src/main/resources/prompts/codereview/pr-review-agent.md",
+      "sha256": "8c56d119788d4528c9417405fc236ed1e90284010b7e0942cd85cbc8d3091a27",
+      "bytes": 3566,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "coherence-planner",
+      "path": "src/main/resources/prompts/coherence-planner.md",
+      "sha256": "4a05e94a3a6864ab65ba41748a646c6ebadd9a224a2b998552b05d383501d2b3",
+      "bytes": 4211,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "PLAN_META",
+        "PLAN_SUMMARY",
+        "REQUIREMENTS",
+        "TASKS",
+        "WORKSPACE_SUMMARY"
+      ]
+    },
+    {
+      "id": "context-agent",
+      "path": "src/main/resources/prompts/context-agent.txt",
+      "sha256": "2417ca57fa3d657ae1d2d534b14482cddaf7fc12652506f8a3298e360476f8e8",
+      "bytes": 1560,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "conversation-system",
+      "path": "src/main/resources/prompts/conversation-system.md",
+      "sha256": "cc5db24afacef63253d6040fc595c4dc47c29b184638e99ee7bcd90a0e0a709f",
+      "bytes": 2241,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-ai-pdf-summarizer",
+      "path": "src/main/resources/prompts/eval/cost-ai-pdf-summarizer.txt",
+      "sha256": "34044b2dc16f02b9078621bf85ad2dd9203683d29efcaa2120b7a27b206157a3",
+      "bytes": 1631,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-booking-system",
+      "path": "src/main/resources/prompts/eval/cost-booking-system.txt",
+      "sha256": "69d4276e3e14a63b6a536a0329ca58f33ccf666d58acac712e73c458590d5686",
+      "bytes": 1766,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-ecommerce-store",
+      "path": "src/main/resources/prompts/eval/cost-ecommerce-store.txt",
+      "sha256": "ecc989b61dfafaa5a44dc3c242d6cb4e48494e5ca8ea27a2f39ea7d1534977c2",
+      "bytes": 1415,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-fitness-dashboard",
+      "path": "src/main/resources/prompts/eval/cost-fitness-dashboard.txt",
+      "sha256": "dd803dbcd359c057861e8fc64ce5966a6385f441d677a8d4aae5510843d67a1b",
+      "bytes": 1824,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-kanban-board",
+      "path": "src/main/resources/prompts/eval/cost-kanban-board.txt",
+      "sha256": "5c70862bb96e6f8f54300448ed4dc4aa8d2f35f193408631adf9c761b6d56e15",
+      "bytes": 1251,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-landing-page",
+      "path": "src/main/resources/prompts/eval/cost-landing-page.txt",
+      "sha256": "bb78075437c53df1363b5dd63789c3e8c854036728454f71f5f408c82b922211",
+      "bytes": 856,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-portfolio-blog",
+      "path": "src/main/resources/prompts/eval/cost-portfolio-blog.txt",
+      "sha256": "a0da918bfa9c88740e9eca0f645d97bb8419cd5491b1a8125fe357b921b1b929",
+      "bytes": 1294,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-realtime-chat",
+      "path": "src/main/resources/prompts/eval/cost-realtime-chat.txt",
+      "sha256": "e70e0f0c62b1deec23ffc7124489cbbd532c63a3d44d0c5960a13cb019ed4e10",
+      "bytes": 1851,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-rest-api-recipes",
+      "path": "src/main/resources/prompts/eval/cost-rest-api-recipes.txt",
+      "sha256": "4eb9b06188d1b1aee5beccc7ce2e930a213504f0b844ee469d719c30b937bde3",
+      "bytes": 2078,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-saas-dashboard",
+      "path": "src/main/resources/prompts/eval/cost-saas-dashboard.txt",
+      "sha256": "fa2084ce1f15ef30e32e7205b255bd3d9536eda2b17392be672e2dba78d778e1",
+      "bytes": 1596,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/cost-url-shortener",
+      "path": "src/main/resources/prompts/eval/cost-url-shortener.txt",
+      "sha256": "afca669cc90573bffda6780a1f73e0d761200edef38f57489c1d29e0960a9753",
+      "bytes": 1945,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/lightweight-request-triage",
+      "path": "src/main/resources/prompts/eval/lightweight-request-triage.txt",
+      "sha256": "d63a12798c4fda5c434194d8a956aef1bdd4bb516cc1d228f2ac9dfce73caef5",
+      "bytes": 2007,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/lightweight-review-summary",
+      "path": "src/main/resources/prompts/eval/lightweight-review-summary.txt",
+      "sha256": "8050a8803085bdc0364c548b0736c1ddabb582b601659faaed18467a99cff23f",
+      "bytes": 2739,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/lightweight-validation-report",
+      "path": "src/main/resources/prompts/eval/lightweight-validation-report.txt",
+      "sha256": "dfabe86ed0508f0e00c3ed4cb6facae7db897d9b596f293d6b626dcce6993d2c",
+      "bytes": 4491,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-architecture-decision",
+      "path": "src/main/resources/prompts/eval/planning-architecture-decision.txt",
+      "sha256": "6d9e2e528641c33512b9c5bd4a0325e83b85d74517cb4f46e0ac2e9aa8b5850c",
+      "bytes": 3218,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-code-review",
+      "path": "src/main/resources/prompts/eval/planning-code-review.txt",
+      "sha256": "16e7e42bafb66ff2e36fa39db493e2edc2ecd20f5207a651470e46bff5b31aa6",
+      "bytes": 4439,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-conflicting-requirements",
+      "path": "src/main/resources/prompts/eval/planning-conflicting-requirements.txt",
+      "sha256": "f5ef904a1a41f04580abb6a4a11ca88e4b0fa53da07c3d768ed6f2e486812ab9",
+      "bytes": 1750,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-plan-generation",
+      "path": "src/main/resources/prompts/eval/planning-plan-generation.txt",
+      "sha256": "4122cdd3a07e6d1c4eadd306ce8851d2c67708e9d3870e38d3e4ebc6071369d5",
+      "bytes": 2846,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-saga-compliance",
+      "path": "src/main/resources/prompts/eval/planning-saga-compliance.txt",
+      "sha256": "770626d888c09421078d88cf8d690686dcc5f8098d3352429ed4e1bfc49e18f1",
+      "bytes": 5080,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-saga-consistency",
+      "path": "src/main/resources/prompts/eval/planning-saga-consistency.txt",
+      "sha256": "44268bdd63fe72154a98aa5c862feef914a36a9a1d4f43fe9bfdaa13190b7ec0",
+      "bytes": 4761,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/planning-saga-diagnosis",
+      "path": "src/main/resources/prompts/eval/planning-saga-diagnosis.txt",
+      "sha256": "1955282a8a89703b56f0c200872841414f1bdc65452184522534a945a60b8be9",
+      "bytes": 7164,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/workhorse-compilation-fix",
+      "path": "src/main/resources/prompts/eval/workhorse-compilation-fix.txt",
+      "sha256": "883654d321edceb2c898357db2d371d7870251641c282bc0292187f055a34dd3",
+      "bytes": 5911,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/workhorse-optimistic-locking",
+      "path": "src/main/resources/prompts/eval/workhorse-optimistic-locking.txt",
+      "sha256": "5f69c2bb98ea7d4ce84da91e603b83a6ebf636c135a837fb094c7badbdac5a1d",
+      "bytes": 1093,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/workhorse-react-component",
+      "path": "src/main/resources/prompts/eval/workhorse-react-component.txt",
+      "sha256": "59b45a701ca0d753381c57da1e7d1fa36e02a1727820b01b960610330418c16e",
+      "bytes": 1951,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "eval/workhorse-websocket-notification",
+      "path": "src/main/resources/prompts/eval/workhorse-websocket-notification.txt",
+      "sha256": "cd140b47ce119871d3972ea1870d1da59fefc93fd565a53b88eee5aef5df04cc",
+      "bytes": 1974,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "execution_planner",
+      "path": "src/main/resources/prompts/execution_planner.txt",
+      "sha256": "76c656222d8903164ed20622eed0628b63bcd648e1cff3ec6e0fca5119e6da89",
+      "bytes": 1266,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "CODEMAPS",
+        "PROJECT_MEMORY",
+        "REQUIREMENT",
+        "UNIFIED_ARCH_DOC"
+      ]
+    },
+    {
+      "id": "fragments/api-url-rules",
+      "path": "src/main/resources/prompts/fragments/api-url-rules.md",
+      "sha256": "e85125c3d79613ac9bf2d59e17dd37e15808728c9693301941cfb3c5b81addc7",
+      "bytes": 324,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/backend-robustness",
+      "path": "src/main/resources/prompts/fragments/backend-robustness.md",
+      "sha256": "9048df39f679311104b6c98b3195d0965f16e3ee096d19a10bcd1c83caf6f045",
+      "bytes": 497,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/compilation-checklist",
+      "path": "src/main/resources/prompts/fragments/compilation-checklist.md",
+      "sha256": "cee6845d256a976a3f652d9d131c89ed8b8643f179a6bc848acc4b18f69b569b",
+      "bytes": 1873,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/cors-config",
+      "path": "src/main/resources/prompts/fragments/cors-config.md",
+      "sha256": "cd883db7ebd91ce49e2a291d731eebce575990b3a8b4fdef428d40d6663556f1",
+      "bytes": 1388,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/format-after-edit",
+      "path": "src/main/resources/prompts/fragments/format-after-edit.md",
+      "sha256": "1e2b8c73b318166aa7b63ae8f07f63e19eef764fb2fb069a4cb94de88918c7dc",
+      "bytes": 1548,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/fullstack-directory",
+      "path": "src/main/resources/prompts/fragments/fullstack-directory.md",
+      "sha256": "5ee674f8b722de08267583febe5005641dead57289634372bd51b3268ca0464a",
+      "bytes": 460,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/module-system",
+      "path": "src/main/resources/prompts/fragments/module-system.md",
+      "sha256": "e4b9f9e444ee5d121701cf324f1d529e4aa7cf9b554eca9c5db5eaa7558788d0",
+      "bytes": 252,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/preview-defaults",
+      "path": "src/main/resources/prompts/fragments/preview-defaults.md",
+      "sha256": "f26c8b215ebfe3b99905fee9d0543e7ec588730b6bd7454b64381d623ec88f57",
+      "bytes": 291,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/anthropic/build",
+      "path": "src/main/resources/prompts/fragments/provider/anthropic/build.md",
+      "sha256": "1c11ac7be3a7f95f53efd969ae892a923fa7b16ed4d7478faa06e205d04f8fbb",
+      "bytes": 543,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/anthropic/patch",
+      "path": "src/main/resources/prompts/fragments/provider/anthropic/patch.md",
+      "sha256": "228c0f4009be560f786a58d11fbd383f9eb188857c1b2bb79c6d3a731de2a561",
+      "bytes": 852,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/anthropic/terminal",
+      "path": "src/main/resources/prompts/fragments/provider/anthropic/terminal.md",
+      "sha256": "28e93d64094c5e4c04131b2a982021f8298ca4b4c0d84c75a1fb53cbf8903198",
+      "bytes": 370,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/deepseek/build",
+      "path": "src/main/resources/prompts/fragments/provider/deepseek/build.md",
+      "sha256": "79f750e760ff2df4b3bce1327963c1168d3003e9031c19c956e495bf18ea3c0d",
+      "bytes": 783,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/deepseek/patch",
+      "path": "src/main/resources/prompts/fragments/provider/deepseek/patch.md",
+      "sha256": "502b612776ff132d2b559b4cd283ac608351830d37b36898d9ec81b15f47c8a7",
+      "bytes": 899,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/deepseek/terminal",
+      "path": "src/main/resources/prompts/fragments/provider/deepseek/terminal.md",
+      "sha256": "df96dc28dc9d150802667d74950a74bb5e0cc39673004b429b849c75da1a841f",
+      "bytes": 554,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/fireworks/build",
+      "path": "src/main/resources/prompts/fragments/provider/fireworks/build.md",
+      "sha256": "8f95d13a30e6a1304402dbfd645528ade7edab78e7012e5cc15098ee811b22d0",
+      "bytes": 666,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/fireworks/patch",
+      "path": "src/main/resources/prompts/fragments/provider/fireworks/patch.md",
+      "sha256": "5b60a7ebbdc8230f30f2b13058d169756d94a75af4925f661fb7077814077112",
+      "bytes": 705,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/gemini/build",
+      "path": "src/main/resources/prompts/fragments/provider/gemini/build.md",
+      "sha256": "5ed8a93d1e7a6fc19934f5b1a9dae1ffa18fa65a0d001d2f625e646b2b826ba3",
+      "bytes": 765,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/gemini/patch",
+      "path": "src/main/resources/prompts/fragments/provider/gemini/patch.md",
+      "sha256": "25e0bc34b0a26d9472209fadd8e855d60366a52f524d2b6ed511c64c613dcaae",
+      "bytes": 869,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/openai/build",
+      "path": "src/main/resources/prompts/fragments/provider/openai/build.md",
+      "sha256": "487c541eaedaeb0b6145297d85d5ca6fe2e16af21b00ba73d01209a8018b61cc",
+      "bytes": 625,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/openai/patch",
+      "path": "src/main/resources/prompts/fragments/provider/openai/patch.md",
+      "sha256": "66ebd5a93add2a6935396ba8cb1e8ca82479fa608fae3c2dfc02c09578dacf16",
+      "bytes": 841,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/openrouter/build",
+      "path": "src/main/resources/prompts/fragments/provider/openrouter/build.md",
+      "sha256": "68e3425e4af5d28557c97f6a159f663769c1a26ec80ce4649a170508e01b0405",
+      "bytes": 554,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/openrouter/patch",
+      "path": "src/main/resources/prompts/fragments/provider/openrouter/patch.md",
+      "sha256": "d7f5b20c6397063810ae7ad5bc694f0754905204590012d607776bfe4f6473ca",
+      "bytes": 693,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/provider/openrouter/terminal",
+      "path": "src/main/resources/prompts/fragments/provider/openrouter/terminal.md",
+      "sha256": "ead74c0df6ddf27ebce5e1f00090ad9ec9cac685cffa3978d948a7edd0826f79",
+      "bytes": 363,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/router-isolation",
+      "path": "src/main/resources/prompts/fragments/router-isolation.md",
+      "sha256": "bbece1409c4563c54024cd72196ca25d98d834ac8a4e44d9196aae209a86a213",
+      "bytes": 286,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/security-rules-planner",
+      "path": "src/main/resources/prompts/fragments/security-rules-planner.md",
+      "sha256": "0e21f7d4141f64ba0f6fd75e68b1083e969401f78a70c8d6cecf1e61c9083806",
+      "bytes": 674,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/security-rules-worker",
+      "path": "src/main/resources/prompts/fragments/security-rules-worker.md",
+      "sha256": "6e783bb32d2c73817e1d02b74f9b258dd8f50461057642c949f28935033f99fa",
+      "bytes": 165,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "fragments/security-rules",
+      "path": "src/main/resources/prompts/fragments/security-rules.md",
+      "sha256": "34156f6f50aecf3818b9555ef9036f184dc19c11d3c202ba84563e60200e3c7c",
+      "bytes": 1339,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "memory-compaction",
+      "path": "src/main/resources/prompts/memory-compaction.txt",
+      "sha256": "0abd536a2917099eb4785e8820756804c8659d4b70911afaecb507d86628dd92",
+      "bytes": 1047,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "EXISTING_SNAPSHOT",
+        "NEW_ENTRIES"
+      ]
+    },
+    {
+      "id": "orchestrator/routing-anthropic",
+      "path": "src/main/resources/prompts/orchestrator/routing-anthropic.md",
+      "sha256": "37dd85b0306f59b74a1a87bbd442fbf5484d40632904215905dafce68806a791",
+      "bytes": 2602,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "orchestrator/routing-deepseek",
+      "path": "src/main/resources/prompts/orchestrator/routing-deepseek.md",
+      "sha256": "b5709370be9d204b3d55f2461331292724afdf171c8060a757aba21c4e4320c3",
+      "bytes": 2430,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "orchestrator/routing-gemini",
+      "path": "src/main/resources/prompts/orchestrator/routing-gemini.md",
+      "sha256": "4720e672b69c2e0a4a5ef172ab951cff05f62f346296c822fe0663e121fb3914",
+      "bytes": 2579,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "orchestrator/routing-openai",
+      "path": "src/main/resources/prompts/orchestrator/routing-openai.md",
+      "sha256": "25851526ffd0a27628e7890a9ee2aa1a0ad534f54a94b0c591a0d80b71531b99",
+      "bytes": 2483,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "orchestrator/routing-reason-codes",
+      "path": "src/main/resources/prompts/orchestrator/routing-reason-codes.md",
+      "sha256": "194514d1c22edce077caaabb98ec4b49aecdb531e30546211d28531f09e5ebcd",
+      "bytes": 491,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "orchestrator/routing-schema",
+      "path": "src/main/resources/prompts/orchestrator/routing-schema.json",
+      "sha256": "0db4b9a7b32a128236bc22f6c77744e28a172fef0634a20d2b5ab350cd647724",
+      "bytes": 850,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "outline-planner-skeleton",
+      "path": "src/main/resources/prompts/outline-planner-skeleton.md",
+      "sha256": "ada814ec6358b32f9da2e00d1742c0b9ee1a97928ee0efe191c0611e487e9057",
+      "bytes": 6783,
+      "active": true,
+      "fragments": [
+        "security-rules:planner"
+      ],
+      "variables": [
+        "CLASSIFICATION",
+        "CONTRACTS",
+        "MAX_TASKS",
+        "PROJECT_ADRS",
+        "PROJECT_BRIEF",
+        "PROJECT_MEMORY",
+        "PR_REVIEW_COMMENTS",
+        "REFERENCE_DOCS",
+        "SPEC",
+        "TDD_MODE_BLOCK",
+        "WORKSPACE_SUMMARY"
+      ]
+    },
+    {
+      "id": "outline-planner",
+      "path": "src/main/resources/prompts/outline-planner.md",
+      "sha256": "1a02e73f413cffd47e35a87d831ab8231a6978659226a151fd53d0a454ebd694",
+      "bytes": 13781,
+      "active": true,
+      "fragments": [
+        "security-rules:planner"
+      ],
+      "variables": [
+        "CLASSIFICATION",
+        "CONTRACTS",
+        "MAX_TASKS",
+        "MOBILE_PREFERENCE_BLOCK",
+        "PROJECT_ADRS",
+        "PROJECT_BRIEF",
+        "PROJECT_MEMORY",
+        "PR_REVIEW_COMMENTS",
+        "REFERENCE_DOCS",
+        "SPEC",
+        "TDD_MODE_BLOCK",
+        "WORKSPACE_SUMMARY"
+      ]
+    },
+    {
+      "id": "patch-agent",
+      "path": "src/main/resources/prompts/patch-agent.md",
+      "sha256": "087c5d4e5639a8034acc6e3ebbddbaa807a7c67f998ccc6e3701ea394846a1a3",
+      "bytes": 6160,
+      "active": true,
+      "fragments": [
+        "security-rules:worker"
+      ],
+      "variables": []
+    },
+    {
+      "id": "reviewer-general",
+      "path": "src/main/resources/prompts/reviewer-general.md",
+      "sha256": "218f96d30f484181425e3db5e296335d422b99a36d51df9515227167e097e5de",
+      "bytes": 4619,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "reviewer-wiring",
+      "path": "src/main/resources/prompts/reviewer-wiring.md",
+      "sha256": "930d2efab0706551d8957627990a3806c012e0febe71c533ca1e867b69f9231a",
+      "bytes": 4662,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "run-ledger",
+      "path": "src/main/resources/prompts/run-ledger.txt",
+      "sha256": "fa53b9f7359a19e1cf1468154aedb5a265b05e0b8217a69db0763117496207ad",
+      "bytes": 1198,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "DIFF_STAT",
+        "PLAN_SUMMARY",
+        "RUN_NUMBER",
+        "TASK_SUMMARIES",
+        "USER_REQUEST"
+      ]
+    },
+    {
+      "id": "scaffolds/all",
+      "path": "src/main/resources/prompts/scaffolds/all.md",
+      "sha256": "b31add225c600131f23b5a03dabbfb284f968335b9f324e6e5b56635f591f3a5",
+      "bytes": 2416,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "scaffolds/fullstack",
+      "path": "src/main/resources/prompts/scaffolds/fullstack.md",
+      "sha256": "476d02b7eba24896147c649575a6f96f35f1680ac28730772b56884c8ca1666d",
+      "bytes": 3478,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/go",
+      "path": "src/main/resources/prompts/scaffolds/go.md",
+      "sha256": "0846dda5366db2f482ea139849492bb67cc8eab115ea6d499864dbce487536d2",
+      "bytes": 831,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/java",
+      "path": "src/main/resources/prompts/scaffolds/java.md",
+      "sha256": "3eb498851ea753ea179ca75ed233aaf22db2000d062096ca34ad5e85bb459a19",
+      "bytes": 782,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/node-backend",
+      "path": "src/main/resources/prompts/scaffolds/node-backend.md",
+      "sha256": "bc51d1ce44a961dac496cebcb92a90e4a6606b42e2d157b0a3caa452b1bd6d86",
+      "bytes": 714,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/node-frontend",
+      "path": "src/main/resources/prompts/scaffolds/node-frontend.md",
+      "sha256": "a753068c0bf23866288792ed1294371baff5193d507d05978d1a5d924f0efaa7",
+      "bytes": 1481,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/python",
+      "path": "src/main/resources/prompts/scaffolds/python.md",
+      "sha256": "20d4b33f273784c958adfce79921af498527553ee06b02c961cabc5379c5667c",
+      "bytes": 2124,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/react-native-expo",
+      "path": "src/main/resources/prompts/scaffolds/react-native-expo.md",
+      "sha256": "01bfe2162fda2118c30597cfd27ac8335f590bd074b0635efda08484a4a49d2b",
+      "bytes": 3173,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/rust",
+      "path": "src/main/resources/prompts/scaffolds/rust.md",
+      "sha256": "adc580f06330894c9b5676fadd1d76a75f3fe303882986a21934d28bc5e0361a",
+      "bytes": 916,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/spring-boot",
+      "path": "src/main/resources/prompts/scaffolds/spring-boot.md",
+      "sha256": "66e1adbc3a749ab6c9c86bb2ff517789aadbf91bfc20fa8e0c9bb8561c1a5734",
+      "bytes": 1281,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "scaffolds/static-html",
+      "path": "src/main/resources/prompts/scaffolds/static-html.md",
+      "sha256": "a9398b66b5e4497697d66f18c99539af146b51126d71c633b5fc06dbccf751bc",
+      "bytes": 2021,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "WORKER_MODEL"
+      ]
+    },
+    {
+      "id": "task-expander",
+      "path": "src/main/resources/prompts/task-expander.md",
+      "sha256": "3f973c11db67f4d698a3c5ac89feb5b7b4c1d664f5a407a12c67bffc8aa2f5eb",
+      "bytes": 5496,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "ALL_TASK_SKELETONS",
+        "BUILD_COMMAND",
+        "PLAN_SUMMARY",
+        "PROJECT_TYPE",
+        "REQUIREMENTS",
+        "RUNTIME_SURFACE",
+        "TASK_COMPLEXITY",
+        "TASK_DEPENDS_ON",
+        "TASK_ID",
+        "TASK_TITLE",
+        "TASK_TOUCHES_FILES",
+        "TASK_TYPE",
+        "WORKSPACE_SUMMARY"
+      ]
+    },
+    {
+      "id": "test-fix-suggestions",
+      "path": "src/main/resources/prompts/test-fix-suggestions.txt",
+      "sha256": "aab39bd390c59bd069617ccd7f51e0893f1005444f1c9e07ea455beff4ec4b4b",
+      "bytes": 2857,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "test-planner",
+      "path": "src/main/resources/prompts/test-planner.txt",
+      "sha256": "065fae4d2cd80012d783790e5b9c66d9badf6885c628c2ee376365e8c072826f",
+      "bytes": 6255,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "test-worker",
+      "path": "src/main/resources/prompts/test-worker.txt",
+      "sha256": "3beec6222e3444dc976c11bc28ab00d921a26923ed54ae168154f0950b825f9f",
+      "bytes": 5241,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "tool-output-compactor",
+      "path": "src/main/resources/prompts/tool-output-compactor.md",
+      "sha256": "a5bbb2c11d346077a93dd86ffb80afd8733ff8c4be3d3cdf6b40ce33258a3c13",
+      "bytes": 3487,
+      "active": true,
+      "fragments": [
+        "security-rules:worker"
+      ],
+      "variables": [
+        "RAW_BYTES",
+        "RAW_OUTPUT",
+        "TOOL_NAME",
+        "WORKER_GOAL"
+      ]
+    },
+    {
+      "id": "validation-report",
+      "path": "src/main/resources/prompts/validation-report.txt",
+      "sha256": "f359e67904ba413e52dee599890321eb07d0762d648ecbf270f9d64eeaeb5c93",
+      "bytes": 3547,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "worker-history-compactor",
+      "path": "src/main/resources/prompts/worker-history-compactor.md",
+      "sha256": "cdb7e259bd326df9e8c72c3e1988e4878895990e7daad34688c7cc3d132f5021",
+      "bytes": 2768,
+      "active": true,
+      "fragments": [
+        "security-rules:worker"
+      ],
+      "variables": [
+        "HISTORY",
+        "WORKER_GOAL"
+      ]
+    }
+  ]
+}
