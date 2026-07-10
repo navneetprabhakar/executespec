@@ -286,15 +286,14 @@ Ranked next steps (impact ÷ effort):
    The 20-slice is noise-dominated: ±1 task = ±5pp, and the 100-floor experiment "improved" 2
    tasks while regressing 2. Full-89 gives the per-task failure taxonomy every other decision
    needs, at ~$2-4/model on DS rates.
-2. **Append the DeepSeek provider fragment to the TB path — verified gap.**
-   `TerminalBenchRunService` passes `TB_SYSTEM_PROMPT` raw (`.systemPrompt(TB_SYSTEM_PROMPT)`,
-   :291); unlike BUILD (`SequentialExecutor:4048-4055`) and PATCH (`CodeGenEngineImpl:130-135`),
-   no `provider/<p>/*.md` fragment is appended. TB DeepSeek therefore runs **without** "EMIT A
-   TOOL CALL ON EVERY TURN / ACT, DON'T JUST EXPLORE" — the directives written for DeepSeek's
-   documented reasoning-only stall mode (RL-2026-05-061), the same failure class the TB
-   checkpoints/finalizers exist to mop up. ~10-line change mirroring
-   `CodeGenEngineImpl.loadProviderPatchFragment` (consider a terminal-flavored
-   `provider/<p>/terminal.md` if patch.md's repo-diff language doesn't fit).
+2. **Provider fragments are now wired into the TB path (fixed 2026-07-11).**
+   `TerminalBenchRunService.systemPromptForProvider` appends the terminal-specific
+   `provider/<p>/terminal.md` fragment by default. The operator-only
+   `terminal-bench.provider-prompt-tuning.enabled` flag and `ES_TB_PROVIDER_PROMPT_TUNING=false`
+   environment override provide explicit A/B/rollback controls. BUILD/PATCH retain their
+   existing `worker.provider-prompt-tuning.enabled` default-off behavior. DeepSeek therefore gets
+   the "EMIT A TOOL CALL ON EVERY TURN / ACT, DON'T JUST EXPLORE" guidance for the lane where
+   reasoning-only stalls were measured.
 3. **Confirm the native DeepSeek route end-to-end.** Phase-1's 12/20 was `deepseek-v4-pro` **via
    OpenRouter** (`p1-ds-pro` row). The runbook correctly targets `deepseek-v4-pro-native` — this
    matters twice: ~3-4× lower per-call latency (more iterations inside the wall clock) and real
