@@ -22,6 +22,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
 import org.springframework.http.MediaType;
@@ -49,6 +50,7 @@ public class AgentSessionController {
   private final AgentActionCatalog actionCatalog;
   private final AgentStreamTurnRunner streamTurnRunner;
   private final AgentAttachmentService attachmentService;
+  private final SubagentExecutionService subagentExecutionService;
 
   @GetMapping("/actions")
   public List<AgentActionDescriptor> actions() {
@@ -66,6 +68,47 @@ public class AgentSessionController {
   public AgentSessionResponse createSession(
       @AuthenticationPrincipal AppUserDetails user, @RequestBody CreateSessionRequest request) {
     return sessionService.createSession(request, user);
+  }
+
+  /**
+   * Execute one bounded, read-only SCOUT/VERIFIER child from a parent agent session.
+   *
+   * <p>This is intentionally a synchronous, small control-plane contract: the child has its own
+   * persisted session and budget, but it cannot create or approve a pipeline run. Larger fan-out
+   * orchestration remains a server concern and must not be reintroduced as a client-side fake
+   * {@code spawn_subagent} tool.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents")
+  public SubagentProtocol.Result executeSubagent(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.SpawnRequest request) {
+    if (request == null || !sessionId.equals(request.parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.execute(request, user, orgId(user));
+  }
+
+  /** Cancel all active child agents owned by this parent session. */
+  @PostMapping("/sessions/{sessionId}/subagents/cancel")
+  public java.util.Map<String, Integer> cancelSubagents(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody(required = false) CancelSubagentsRequest request) {
+    String reason = request == null ? null : request.reason();
+    int cancelled = subagentExecutionService.cancelChildren(sessionId, reason, user, orgId(user));
+    return java.util.Map.of("cancelled", cancelled);
+  }
+
+  record CancelSubagentsRequest(String reason) {}
+
+  private static String orgId(AppUserDetails user) {
+    if (user == null || user.getUser() == null) return null;
+    String orgId = user.getUser().getOrgId();
+    if (orgId == null && user.getOrgMember() != null) {
+      orgId = String.valueOf(user.getOrgMember().getOrgId());
+    }
+    return orgId;
   }
 
   @GetMapping("/sessions")
