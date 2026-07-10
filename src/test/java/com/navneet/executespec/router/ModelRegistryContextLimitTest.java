@@ -86,6 +86,23 @@ class ModelRegistryContextLimitTest {
     assertThat(registry.contextLimitForOrPrefixFallback("   ")).isEqualTo(200_000);
   }
 
+  @Test
+  void modelCapabilityProfile_takesPrecedenceOverProviderProfile() {
+    var providerProfile = new ModelMatrixProperties.CapabilityProfile();
+    providerProfile.setOptionalTools(java.util.List.of("providerTool"));
+    var modelProfile = new ModelMatrixProperties.CapabilityProfile();
+    modelProfile.setOptionalTools(java.util.List.of("modelTool"));
+    props.setCapabilityProfiles(
+        Map.of("anthropic", providerProfile, "anthropic/claude-sonnet-4-6", modelProfile));
+
+    assertThat(registry.capabilityProfileFor("anthropic", "claude-sonnet-4-6"))
+        .isSameAs(modelProfile);
+    assertThat(registry.capabilityProfileFor("ANTHROPIC", "CLAUDE-SONNET-4-6"))
+        .isSameAs(modelProfile);
+    assertThat(registry.capabilityProfileFor("anthropic", "claude-haiku-4-5-20251001"))
+        .isSameAs(providerProfile);
+  }
+
   // displayLabelFor — replaces ModelController.MODEL_LABELS
 
   @Test
