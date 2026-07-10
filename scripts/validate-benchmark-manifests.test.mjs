@@ -76,3 +76,35 @@ test("benchmark validation rejects a missing resolution rate", () => {
     validateManifest(manifest).some((error) => error.includes("finite number")),
   );
 });
+
+test("benchmark validation rejects malformed reproducibility identities", () => {
+  const manifest = {
+    schemaVersion: 1,
+    status: "EXPLORATORY",
+    suite: "suite",
+    repository: { sha: "not-a-sha" },
+    model: { provider: "deepseek", matrixId: "m", providerSlug: "DeepSeek V4" },
+    prompt: { sha256: "ABC" },
+    toolSchema: { sha256: null },
+    harness: { sha256: "0".repeat(64) },
+    dataset: { name: "d", slice: "s", sha256: null },
+    featureFlags: {},
+    budgets: Object.fromEntries(
+      [
+        "passes",
+        "tasks",
+        "concurrency",
+        "contextTokens",
+        "maxOutputTokens",
+        "iterationLimit",
+        "wallClockLimitSeconds",
+        "costLimitUsd",
+      ].map((key) => [key, 1]),
+    ),
+    results: { resolved: 0, total: 0, resolutionRate: 0 },
+  };
+  const errors = validateManifest(manifest);
+  assert.ok(errors.some((error) => error.includes("repository.sha must be null or a lowercase SHA-256")));
+  assert.ok(errors.some((error) => error.includes("prompt.sha256 must be null or a lowercase SHA-256")));
+  assert.ok(errors.some((error) => error.includes("model.providerSlug must be a lowercase provider slug or null")));
+});
