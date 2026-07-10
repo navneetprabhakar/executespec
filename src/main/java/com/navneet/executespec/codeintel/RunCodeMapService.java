@@ -4,7 +4,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import com.navneet.executespec.agent.ProviderDispatchAuthorization;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
@@ -12,13 +12,9 @@ import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
-import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,9 +44,7 @@ public class RunCodeMapService {
   // project's canonical codemap instead of regenerating + re-summarising from scratch.
   private final ProjectCodeMapRepository projectCodeMapRepo;
   private final ProjectRepoRepository projectRepoRepo;
-  private final ProviderDispatchAuthorization dispatchAuthorization;
-
-  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
+  private final LlmRouter llmRouter;
 
   @org.springframework.beans.factory.annotation.Value(
       "${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
@@ -116,19 +110,16 @@ public class RunCodeMapService {
 
     String summary = null;
     int inputTokens = 0, outputTokens = 0;
-    AnthropicChatModel anthropicModel = anthropicModelProvider.getIfAvailable();
-    if (anthropicModel != null) {
-      try {
-        String[] llm = summarise(anthropicModel, runId, repoFullName, raw.markdown());
-        summary = llm[0];
-        inputTokens = Integer.parseInt(llm[1]);
-        outputTokens = Integer.parseInt(llm[2]);
-      } catch (Exception e) {
-        log.warn(
-            "Codemap summarisation failed for run {}: {} — falling back to raw",
-            runId,
-            e.getMessage());
-      }
+    try {
+      String[] llm = summarise(runId, repoFullName, raw.markdown());
+      summary = llm[0];
+      inputTokens = Integer.parseInt(llm[1]);
+      outputTokens = Integer.parseInt(llm[2]);
+    } catch (Exception e) {
+      log.warn(
+          "Codemap summarisation failed for run {}: {} — falling back to raw",
+          runId,
+          e.getMessage());
     }
 
     RunCodeMap entity =
@@ -214,16 +205,10 @@ public class RunCodeMapService {
   /**
    * Returns [summary, inputTokens, outputTokens].
    *
-   * <p><strong>Audit 2026-05-12 review item E #35:</strong> this method calls {@code
-   * anthropicModel.call(prompt)} directly, bypassing {@code LlmRouter}'s provider failover, circuit
-   * breaker, RunCostTracker integration, and telemetry. It is also Anthropic-only — a Gemini- or
-   * OpenAI-preferring org gets no summary even though those providers can summarise. Migrating to
-   * {@code FallbackLlmRouter.callWithFallback} (with a {@code RunCostTracker.record} adapter) is
-   * the cleanest path; left as a follow-up because it changes failure semantics for code-map
-   * summarisation across all eligible tiers.
+   * <p>The summary is routed through {@link LlmRouter}; a disabled or unavailable transport falls
+   * back to the deterministic raw codemap at the caller.
    */
-  private String[] summarise(
-      AnthropicChatModel anthropicModel, String runId, String repoFullName, String rawMarkdown) {
+  private String[] summarise(String runId, String repoFullName, String rawMarkdown) {
     String system =
         """
         You are a senior engineer summarising a code map for use as planner context.
@@ -240,9 +225,15 @@ public class RunCodeMapService {
             + repoFullName
             + "\n\n## Raw scan\n\n"
             + truncate(rawMarkdown, MAX_RAW_CHARS);
-    Prompt prompt = new Prompt(java.util.List.of(new SystemMessage(system), new UserMessage(user)));
-    dispatchAuthorization.authorize("anthropic", anthropicSummaryModel, runId);
-    ChatResponse resp = anthropicModel.call(prompt);
+    ChatResponse resp =
+        llmRouter.callText(
+            "anthropic",
+            anthropicSummaryModel,
+            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            runId,
+            "RunCodeMapService",
+            "codemap.summary",
+            1200);
     String text = resp.getResult().getOutput().getText();
     int in = 0, out = 0;
     if (resp.getMetadata() != null && resp.getMetadata().getUsage() != null) {

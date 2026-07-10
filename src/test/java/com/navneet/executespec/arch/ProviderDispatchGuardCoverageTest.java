@@ -14,7 +14,6 @@ class ProviderDispatchGuardCoverageTest {
   void everyKnownDirectProviderSpendingPathHasAuthorizationBoundary() throws Exception {
     for (String file :
         List.of(
-            "codeintel/RunCodeMapService.java",
             "test/NativeToolsTestController.java",
             "batch/AnthropicBatchClient.java",
             "batch/OpenAiBatchClient.java",
