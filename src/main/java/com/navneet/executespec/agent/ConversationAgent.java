@@ -25,6 +25,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
@@ -103,6 +104,7 @@ public class ConversationAgent {
   private static final int MAX_SUGGESTION_TASKS = 6;
 
   private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ModelRegistry modelRegistry;
   private final WorkspaceFileService workspaceFileService;
@@ -150,23 +152,18 @@ public class ConversationAgent {
     // Add the current user message
     messages.add(new UserMessage(newMessage));
 
-    // Build prompt with selected model + max tokens
-    var cacheOpts =
-        org.springframework.ai.anthropic.api.AnthropicCacheOptions.builder()
-            .strategy(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY)
-            .build();
-    var opts =
-        org.springframework.ai.anthropic.AnthropicChatOptions.builder()
-            .model(selectedModel)
-            .maxTokens(MAX_OUTPUT_TOKENS)
-            .cacheOptions(cacheOpts)
-            .build();
-    Prompt prompt = new Prompt(messages, opts);
-
-    // callDirect bypasses the fallback chain + per-run provider pin so the chat
-    // always uses Anthropic Haiku (selectedProvider/selectedModel) instead of
-    // drifting to a pinned Gemini provider. See ConversationController.
-    var response = fallbackLlmRouter.callDirect(selectedProvider, selectedModel, prompt).response();
+    // Route through the canonical V2 text seam. The explicit provider/model selection preserves
+    // the legacy conversation contract while keeping transport, usage, managed-AI accounting, and
+    // bounded retry/failover in one router.
+    ChatResponse response =
+        llmRouter.callText(
+            selectedProvider,
+            selectedModel,
+            messages,
+            run.getRunId(),
+            "ConversationAgent",
+            "chat",
+            MAX_OUTPUT_TOKENS);
 
     // Track tokens for billing accuracy
     try {
