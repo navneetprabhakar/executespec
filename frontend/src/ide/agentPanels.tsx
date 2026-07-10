@@ -170,7 +170,12 @@ export function AgentTopBar({
         {selected ? sessionTitle(selected) : 'Remote sandbox operator'}
       </div>
       <span className='agent-bar-spacer' />
-      <span className={`agent-bar-status ${barStatus.tone}`}>
+      <span
+        className={`agent-bar-status ${barStatus.tone}`}
+        role='status'
+        aria-live='polite'
+        aria-atomic='true'
+      >
         <span className='agent-bar-dot' aria-hidden='true' />
         {barStatus.label}
       </span>
@@ -1263,6 +1268,21 @@ export function AgentConversation({
     <section className='agent-chat'>
       <h1 className='ide-sr-only'>Agent</h1>
       <div className='agent-chat-scroll' onScroll={onScroll}>
+        <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
+          {runCard
+            ? `Remote sandbox ${runPhaseLabel(runCard.status)}${
+                runStreamStatus === 'RECONNECTING'
+                  ? '. Reconnecting live events.'
+                  : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
+                    ? '. Live events unavailable; showing the latest snapshot.'
+                    : ''
+              }`
+            : isBusy
+              ? streamText
+                ? 'Agent is responding.'
+                : 'Agent is working.'
+              : ''}
+        </div>
         <div className='agent-chat-col'>
           {showOperatorInScroll && (
             <OperatorIntro

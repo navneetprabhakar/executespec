@@ -3,7 +3,7 @@ import {createRoot, Root} from 'react-dom/client';
 import {MemoryRouter, Route, Routes} from 'react-router-dom';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {AgentConversation} from './agentPanels';
+import {AgentConversation, AgentTopBar} from './agentPanels';
 import IdeAgent from './IdeAgent';
 
 (
@@ -268,6 +268,38 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
+  });
+
+  it('exposes agent status as an accessible live region for screen-reader operators', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    await act(async () => {
+      root?.render(
+        <AgentTopBar
+          selected={session}
+          barStatus={{label: 'Reconnecting', tone: 'warn'}}
+          scopeLabel='ExecuteSpec'
+          busy={false}
+          settingsOpen={false}
+          managedAi={null}
+          sessionUsage={{inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0}}
+          routingState={null}
+          capabilities={[]}
+          pendingGateCount={0}
+          onNewChat={vi.fn()}
+          onOpenApprovals={vi.fn()}
+          onToggleChats={vi.fn()}
+          onToggleSettings={vi.fn()}
+        />,
+      );
+    });
+
+    const status = host.querySelector('.agent-bar-status');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.getAttribute('aria-live')).toBe('polite');
+    expect(status?.textContent).toContain('Reconnecting');
   });
 
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
