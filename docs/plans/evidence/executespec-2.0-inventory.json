@@ -3,32 +3,32 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "611ae63cc8d39dd77dbc7d3a3ada8b598187a9bb",
+      "sha": "b5c126c5449d6bf46853e5f2084be26cef7a7570",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2579,
-      "worktreeFingerprint": "39834447ddeab2ac80fcaf6483f56c5300286b416c99d95c08889d7e99503f73"
+      "trackedFiles": 2581,
+      "worktreeFingerprint": "cfd800c3221cb4398d3172382211201a446f267599cdf320e0cd3d60e48a47fc"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "b62295d1e7c6c6d5d52491c94dc72455677df289",
+      "sha": "fb10125b15b6707388822da1525308d50e1698b1",
       "branch": "codex/cli-1.0",
       "trackedFiles": 308,
-      "worktreeFingerprint": "d2a234b47071bca3eeec05b0af7965ee43ab7432e9c99b9d39485ff9c6063582"
+      "worktreeFingerprint": "0902d09566f819491320e3d4396680c6375f8ebbc721f1c9375dca4f680024e4"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "194bd67b2c087143eecca3aded1f3eddfb6e3405",
+      "sha": "addec094bfd8855babba72ff68320424552b27ba",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 601,
-      "worktreeFingerprint": "5dddcaf058f56e8cde3d3325c5e921a73d1fd83010a185d7625bbd8f92b936c9"
+      "trackedFiles": 611,
+      "worktreeFingerprint": "14ee43e38c725c8d85b4a2cbaf705cc1bb7fdfd3a2d871b876fcf57785188168"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1234,
-      "lines": 191941
+      "files": 1235,
+      "lines": 192098
     },
-    "testJavaFiles": 368,
+    "testJavaFiles": 369,
     "controllers": 108,
     "mappingAnnotations": 597,
     "prompts": {
@@ -349,7 +349,7 @@
   },
   "cli": {
     "sourceFiles": 131,
-    "lines": 54809,
+    "lines": 54882,
     "testFiles": 115,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
@@ -360,8 +360,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 601,
-    "markdownFiles": 176,
+    "trackedFiles": 611,
+    "markdownFiles": 184,
     "outputFiles": 418
   }
 }
