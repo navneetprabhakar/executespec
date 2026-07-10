@@ -7,7 +7,7 @@
 | One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
 | Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly and invokes safe compaction when reserves are unsafe; durable journal and broader evidence-bundle integration remain |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` now drives `searchFiles` with typed citations/fingerprints/paging; RepoOrientation and broader symbol/test indexing still need migration |
-| Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER child-session protocol now exists with depth, child, turn, cost, cancellation, ownership, and evidence guards; model execution/coordinator wiring remains |
+| Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER execution now runs read-only SpecChat rounds with tool allow-list, per-round turns/cost, evidence, and cancellation; parent coordinator/UI integration remains |
 | Automatic verification default | FAIL | Critical V255 gates are OFF |
 | Hot handoff and client reconnect | FAIL | Pending tool calls can time out on malformed/disconnected clients |
 | TUI route shell and Inspector removed | PARTIAL | Session route now hides persistent sidebar/Inspector; non-session route chrome and duplicate renderers remain |
