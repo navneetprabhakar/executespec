@@ -6,19 +6,17 @@ import java.util.List;
 
 import jakarta.annotation.PostConstruct;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.router.ModelRegistry;
 
-import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
@@ -61,7 +59,7 @@ public class ConversationController {
     }
   }
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelRegistry modelRegistry;
 
   @PostMapping
@@ -97,12 +95,15 @@ public class ConversationController {
     String model = modelRegistry.lightweightModelFor("anthropic");
     // 4096 leaves room for a full consolidated spec on the "Use as spec" turn;
     // clarifying questions stop early so the higher cap costs nothing there.
-    var options = AnthropicChatOptions.builder().model(model).maxTokens(4096).build();
-
     var response =
-        fallbackLlmRouter
-            .callDirect("anthropic", model, new Prompt(springMessages, options))
-            .response();
+        llmRouter.callText(
+            "anthropic",
+            model,
+            springMessages,
+            "conversation",
+            "ConversationController",
+            "conversation.preflight",
+            4096);
 
     String reply = response.getResult().getOutput().getText();
     log.info("Conversation reply: {} chars", reply != null ? reply.length() : 0);

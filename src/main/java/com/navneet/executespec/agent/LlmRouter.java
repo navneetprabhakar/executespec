@@ -151,6 +151,18 @@ public class LlmRouter {
       String runId,
       String agentRole,
       String stepId) {
+    return callText(provider, model, messages, runId, agentRole, stepId, null);
+  }
+
+  /** Text seam with an explicit output cap for compatibility surfaces with a bounded contract. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens) {
     String effectiveRunId =
         (runId == null || runId.isBlank())
             ? "text-" + Integer.toHexString(messages.hashCode())
@@ -172,6 +184,7 @@ public class LlmRouter {
             .toolsOverride(List.of())
             .agentRole(agentRole)
             .stepId(stepId)
+            .maxTokens(maxTokens)
             .build());
   }
 
