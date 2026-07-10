@@ -7,9 +7,9 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
+import com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -56,7 +56,13 @@ public class ReadFileTool implements Tool {
 
   private final ProjectWorkspaceService projectWorkspace;
   private final PipelineRunRepository pipelineRunRepo;
-  private final ProjectArchitectureService projectArchService;
+  /**
+   * Read-only DB fallback for architecture documents. Keep this dependency at the repository
+   * boundary: injecting {@code ProjectArchitectureService} here creates a bean cycle through the
+   * canonical {@code LlmRouter} (router -> tools -> readFile -> architecture -> project brief ->
+   * router).
+   */
+  private final ProjectArchitectureDocRepository projectArchRepo;
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectRepoLinkRepository repoLinkRepo;
   private final ProjectRepoRepository repoRepo;
@@ -243,8 +249,8 @@ public class ReadFileTool implements Tool {
   private String readFromDbFallback(String projectId, String rel) {
     if (rel == null) return null;
     if (rel.equals("architecture.md")) {
-      return projectArchService
-          .latest(projectId)
+      return projectArchRepo
+          .findFirstByProjectIdOrderByVersionDesc(projectId)
           .map(ProjectArchitectureDoc::getContent)
           .orElse(null);
     }
