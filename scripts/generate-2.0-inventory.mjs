@@ -27,6 +27,10 @@ function sourceFiles(repo) {
     .split("\n")
     .filter(Boolean)
     .filter((file) => !file.endsWith("docs/plans/evidence/executespec-2.0-inventory.json"))
+    // This manifest carries the backend commit SHA used to capture the visual evidence.
+    // Including it in the docs tree fingerprint would create a commit-hash cycle between
+    // the backend inventory and the docs evidence manifest.
+    .filter((file) => !file.endsWith("release-evidence/visual-qa-v1.json"))
     .filter((file) => fs.existsSync(path.join(repo, file)))
     .sort();
 }

@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "d7bebf8f9c6914e6fc7a90a88f9a2ace13eda47d",
+      "sha": "7e20e02acca1251d6ed57f1f4de54957e0dc2b5b",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2625,
-      "worktreeFingerprint": "ef49521619a830193a632ca7da9a7f7333c8c17654c280441caf40fb844a412b"
+      "worktreeFingerprint": "4c6ca84fb4d4cbd3f6a4e9a5b3b08fdda18bfed21a6076a512834766aa23dbd1"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -20,13 +20,13 @@
       "sha": "03b0aa3477701210fca7c0bcd6d6c914f154abf7",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 726,
-      "worktreeFingerprint": "fe1bf7bef51c063a1d5f65e85a0fe4530fd94a6a4e892547880290e5d071fb7b"
+      "worktreeFingerprint": "d2fd075215f05027e44ce440b6005e24630e7da9645d853148a82bf04dde3edd"
     }
   },
   "backend": {
     "mainJava": {
       "files": 1247,
-      "lines": 195835
+      "lines": 195854
     },
     "testJavaFiles": 390,
     "controllers": 109,
@@ -212,6 +212,7 @@
       "spec.chat.enabled",
       "standards.enforcement.enabled",
       "submissions.paused",
+      "terminal-bench.provider-prompt-tuning.enabled",
       "v2.pause.enabled",
       "v3.anonymous-trial.real-dispatch",
       "validation.v3-strict",
@@ -358,7 +359,7 @@
     ]
   },
   "docs": {
-    "trackedFiles": 726,
+    "trackedFiles": 725,
     "markdownFiles": 191,
     "outputFiles": 418
   }
