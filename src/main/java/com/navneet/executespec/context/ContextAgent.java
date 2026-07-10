@@ -27,6 +27,7 @@ import com.navneet.executespec.tool.GitTool;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -44,10 +45,12 @@ public class ContextAgent {
   private final StateStore stateStore;
   private final GitTool gitTool;
   private final ObjectMapper objectMapper;
+  private final ContextEvidenceBundleWriter evidenceBundleWriter;
 
   @Value("classpath:prompts/context-agent.txt")
   private Resource promptTemplate;
 
+  @Autowired
   public ContextAgent(
       ContextAgentScanner scanner,
       FallbackLlmRouter fallbackLlmRouter,
@@ -55,7 +58,8 @@ public class ContextAgent {
       ContextAgentProperties props,
       StateStore stateStore,
       GitTool gitTool,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      ContextEvidenceBundleWriter evidenceBundleWriter) {
     this.scanner = scanner;
     this.fallbackLlmRouter = fallbackLlmRouter;
     this.modelResolver = modelResolver;
@@ -63,6 +67,27 @@ public class ContextAgent {
     this.stateStore = stateStore;
     this.gitTool = gitTool;
     this.objectMapper = objectMapper;
+    this.evidenceBundleWriter = evidenceBundleWriter;
+  }
+
+  /** Compatibility constructor retained for focused unit tests and older embedders. */
+  ContextAgent(
+      ContextAgentScanner scanner,
+      FallbackLlmRouter fallbackLlmRouter,
+      ModelResolver modelResolver,
+      ContextAgentProperties props,
+      StateStore stateStore,
+      GitTool gitTool,
+      ObjectMapper objectMapper) {
+    this(
+        scanner,
+        fallbackLlmRouter,
+        modelResolver,
+        props,
+        stateStore,
+        gitTool,
+        objectMapper,
+        new ContextEvidenceBundleWriter(objectMapper));
   }
 
   public void runAsync(
@@ -93,6 +118,7 @@ public class ContextAgent {
 
       writeContextDoc(projectPath, input.currentContextDoc(), llmResponse, run.getRunId());
       appendDecisionsEntry(projectPath, input, run);
+      evidenceBundleWriter.write(projectPath, input, run.getRunId());
       // Auto-commit DISABLED — JGit-commit against the customer's project workspace from a
       // background pipeline thread can co-opt in-flight edits. The files are written; the
       // caller (RunOrchestrator / project flow) handles commit via ScmPushService.
