@@ -65,4 +65,27 @@ class RepositorySearchServiceTest {
                 new RepositorySearchService.SearchRequest(
                     "needle", RepositorySearchService.SearchMode.EXACT, true, "..", null, 50, 0)));
   }
+
+  @Test
+  void refreshesCachedLinesWhenAWorkingTreeFileChanges() throws Exception {
+    Path file = root.resolve("src.txt");
+    Files.writeString(file, "before\n");
+    var service = new RepositorySearchService();
+    var request =
+        new RepositorySearchService.SearchRequest(
+            "before", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+
+    assertThat(service.search(root, request).totalMatches()).isEqualTo(1);
+    Files.writeString(file, "after\n");
+
+    assertThat(service.search(root, request).totalMatches()).isZero();
+    assertThat(
+            service
+                .search(
+                    root,
+                    new RepositorySearchService.SearchRequest(
+                        "after", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0))
+                .totalMatches())
+        .isEqualTo(1);
+  }
 }
