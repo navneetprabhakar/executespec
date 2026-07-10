@@ -70,13 +70,13 @@ flowchart TD
 | 4. Real subagents | Persisted bounded SCOUT/VERIFIER children, cancellation, evidence, canonical spawn/cancel API, inline Web/CLI activity | Protocol/controller tests; deterministic eligibility and explicitly feature-flagged coordinator execution now exist; automatic model-driven delegation remains intentionally absent | PARTIAL |
 | 5. FastContext | Isolated, licensed, measured experiment behind an adapter | Paired recall/latency/cost decision | CONTRACT + SYNTHETIC FIXTURE COMPLETE; REAL PAIRED EXPERIMENT NOT VERIFIED |
 | 6. Core loop | Evidence-driven localize/edit/verify/repair; automatic verification default; lean tools | Verification parser integrity and worker gates; edit-burst graduation remains | PARTIAL |
-| 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing live credentials | BLOCKED BY AUTHORIZED EVIDENCE |
+| 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing native-x86 evaluator/runtime and sealed repeated baselines | BLOCKED BY AUTHORIZED EVIDENCE |
 | 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay/degradation tests; remaining legacy text callers and production outcome closure remain | PARTIAL |
 | 9. Protocol v2 | Semantic resumable event/state contract shared across all clients | SSE replay, handoff, subagent, and compatibility tests pass | PARTIAL |
-| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI gate, reconnect, resume, and viewport acceptance pass | COMPLETE (CREDENTIAL-FREE GATES) |
+| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI gate, reconnect, resume, and deterministic viewport acceptance pass; native Terminal interactive capture remains permission-gated | PARTIAL (NATIVE VISUAL PENDING) |
 | 11. Web 2.0 | Same semantic transcript/control states as CLI, accessible, resumable, and responsive | 161 Web tests/build/lint; authenticated screenshot QA remains | PARTIAL |
 | 12. Performance | Measured startup, event overhead, search, rendering, memory, provider isolation and recovery | Offline CLI runtime comparator and search cache evidence; full published report remains | PARTIAL |
-| 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Synthetic contract fixture reproduces; live paired runs unavailable | BLOCKED BY AUTHORIZED EVIDENCE |
+| 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Six-provider capability evidence and benchmark cap control pass; native-x86 repeated comparator remains unavailable | BLOCKED BY AUTHORIZED EVIDENCE |
 | 14. Cleanup/release | Delete replacements, graduate flags, upgrade schemas/docs, synchronize versions, run complete gates | Release-readiness table with explicit blockers | IN PROGRESS |
 
 ## Sequencing rules
