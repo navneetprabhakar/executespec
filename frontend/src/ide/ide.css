@@ -3149,7 +3149,7 @@
 .agent-composer-wrap {
   flex-shrink: 0;
   border-top: 1px solid var(--ide-border);
-  padding: 10px clamp(18px, 4vw, 56px) 14px;
+  padding: 10px clamp(18px, 4vw, 56px) max(14px, env(safe-area-inset-bottom, 14px));
   background: var(--ide-bg-editor);
 }
 .agent-msg {
