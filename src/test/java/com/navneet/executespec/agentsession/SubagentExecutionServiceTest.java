@@ -149,7 +149,8 @@ class SubagentExecutionServiceTest {
             eq("anthropic"),
             any(),
             eq(3),
-            any());
+            any(),
+            eq("parent-turn"));
     when(protocol.complete(eq("child"), any(), eq("user"), eq("org")))
         .thenReturn(
             new Result(
@@ -194,7 +195,8 @@ class SubagentExecutionServiceTest {
             eq("anthropic"),
             any(),
             eq(3),
-            any());
+            any(),
+            eq("parent-turn"));
     when(protocol.complete(eq("child"), any(), eq("user"), eq("org")))
         .thenAnswer(
             invocation -> {
@@ -235,7 +237,8 @@ class SubagentExecutionServiceTest {
             eq("anthropic"),
             tools.capture(),
             eq(3),
-            any());
+            any(),
+            eq("parent-turn"));
     assertThat(tools.getValue()).contains("search_repo_files", "search_code");
     assertThat(tools.getValue()).doesNotContain("submit_run", "approve_plan", "shell");
     ArgumentCaptor<AgentTurn> persisted = ArgumentCaptor.forClass(AgentTurn.class);
@@ -262,7 +265,8 @@ class SubagentExecutionServiceTest {
             any(),
             any(),
             any(Integer.class),
-            any());
+            any(),
+            eq("parent-turn"));
 
     assertThatThrownBy(() -> service.execute(request, user, "org"))
         .isInstanceOf(CancellationException.class)

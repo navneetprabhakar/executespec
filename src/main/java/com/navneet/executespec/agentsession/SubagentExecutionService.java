@@ -128,7 +128,8 @@ public class SubagentExecutionService {
             if (costTracker.snapshot(child.getId()).costUsd() >= handle.maxCostUsd()) {
               throw new CancellationException("subagent cost budget exhausted");
             }
-          });
+          },
+          handle.parentTurnId());
 
       RunCostTracker.Snapshot usage = sink.usage();
       if (usage.costUsd() > handle.maxCostUsd()) {
