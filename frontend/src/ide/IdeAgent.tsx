@@ -17,6 +17,7 @@ import {
   selectScopedAgentSession,
   webAgentSessionRequest,
 } from '@/ide/agentSession';
+import {useAgentRunStream} from '@/ide/agentRunStream';
 
 const MAX_CONTEXT_TURNS = 8;
 
@@ -78,9 +79,10 @@ export default function IdeAgent() {
   const [uploading, setUploading] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [runDetail, setRunDetail] = useState<api.RunDetail | null>(null);
-  const [runCost, setRunCost] = useState<number | null>(null);
   const stickToBottom = useRef(true);
+  const liveRun = useAgentRunStream(state.activeRun);
+  const runDetail = liveRun.detail;
+  const runCost = liveRun.costUsd;
 
   const scope = useMemo(() => ({projectId, runId}), [projectId, runId]);
   const selected = useMemo(() => {
@@ -194,37 +196,6 @@ export default function IdeAgent() {
       dispatch({type: 'run:submitted', runId: latestLinkedRunId});
     }
   }, [latestLinkedRunId, state.activeRun]);
-
-  // Poll the agent-submitted run so the pinned run card stays live until terminal.
-  useEffect(() => {
-    const id = state.activeRun;
-    if (!id) {
-      setRunDetail(null);
-      setRunCost(null);
-      return;
-    }
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const [detail, cost] = await Promise.all([
-          api.getRun(id),
-          api.getLiveCost(id).catch(() => null),
-        ]);
-        if (!alive) return;
-        setRunDetail(detail);
-        if (cost && typeof cost.costUsd === 'number') setRunCost(cost.costUsd);
-        if (!isTerminalRunStatus(detail.status)) timer = setTimeout(poll, 4000);
-      } catch {
-        if (alive) timer = setTimeout(poll, 6000);
-      }
-    };
-    void poll();
-    return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [state.activeRun]);
 
   // Escape closes the chats drawer / settings popover.
   useEffect(() => {
@@ -422,8 +393,7 @@ export default function IdeAgent() {
     if (!id) return;
     try {
       await api.cancelRun(id);
-      const detail = await api.getRun(id).catch(() => null);
-      if (detail) setRunDetail(detail);
+      await liveRun.refresh().catch(() => undefined);
       await refreshAfterMutation();
     } catch (e) {
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Could not stop the run.'});
