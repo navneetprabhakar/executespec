@@ -55,6 +55,26 @@ class TaskOutcomeMetricServiceTest {
   }
 
   @Test
+  void recordsObservedTaskSpendForRoutingAndAnalytics() {
+    ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
+    when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    var outcome =
+        TaskOutcome.builder()
+            .taskId("T1")
+            .status(TaskOutcome.Status.SUCCESS)
+            .smokeTestPassed(true)
+            .dispatchedProvider("deepseek")
+            .dispatchedModel("deepseek-v4-flash-native")
+            .build();
+
+    var metric =
+        new TaskOutcomeMetricService(repository)
+            .record("run-1", "BUG_FIX", "LOW", "python", 1, outcome, 100, 4096, 3, 0.0125);
+
+    assertThat(metric.getActualCostUsd()).isEqualTo(0.0125);
+  }
+
+  @Test
   void readsCategorySpecificValidationPriorAfterMinimumSample() {
     ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
     when(repository

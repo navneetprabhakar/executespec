@@ -95,6 +95,7 @@ class SequentialExecutorTaskOutcomeMetricTest {
             any(TaskOutcome.class),
             eq(321),
             eq(4096),
-            eq(2));
+            eq(2),
+            eq(0.01));
   }
 }

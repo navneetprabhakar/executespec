@@ -38,7 +38,8 @@ public class TaskOutcomeMetricService {
         outcome,
         actualOutputTokens,
         maxOutputTokens,
-        iterationCount);
+        iterationCount,
+        0.0);
   }
 
   public ModelTaskMetric record(
@@ -51,6 +52,31 @@ public class TaskOutcomeMetricService {
       int actualOutputTokens,
       int maxOutputTokens,
       int iterationCount) {
+    return record(
+        runId,
+        taskCategory,
+        complexity,
+        language,
+        attempt,
+        outcome,
+        actualOutputTokens,
+        maxOutputTokens,
+        iterationCount,
+        0.0);
+  }
+
+  /** Records the terminal task outcome together with task-scoped spend. */
+  public ModelTaskMetric record(
+      String runId,
+      String taskCategory,
+      String complexity,
+      String language,
+      int attempt,
+      TaskOutcome outcome,
+      int actualOutputTokens,
+      int maxOutputTokens,
+      int iterationCount,
+      double actualCostUsd) {
     if (outcome == null
         || outcome.dispatchedProvider() == null
         || outcome.dispatchedModel() == null) {
@@ -75,6 +101,7 @@ public class TaskOutcomeMetricService {
             .maxOutputTokens(maxOutputTokens)
             .actualOutputTokens(actualOutputTokens)
             .iterationCount(iterationCount)
+            .actualCostUsd(Math.max(0.0, actualCostUsd))
             .createdAt(Instant.now())
             .build();
     try {

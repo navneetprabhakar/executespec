@@ -748,7 +748,8 @@ to boot — skip it for those.""";
         outcome,
         usage == null ? 0 : usage.outputTokens(),
         maxOutputTokens(task.complexity()),
-        iterations);
+        iterations,
+        usage == null ? 0.0 : usage.costUsd());
   }
 
   private static int maxOutputTokens(PlannedTask.Complexity complexity) {
