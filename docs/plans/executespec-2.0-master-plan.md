@@ -67,8 +67,8 @@ flowchart TD
 | 1. Critical correctness | NUL removed and gated; structured intent route; non-blocking approval; reconnectable local hands; Sarvam production removal | Focused tests plus migration upgrade | PARTIAL |
 | 2. Deterministic search | One typed search contract using git inventory, rg, SHA/fingerprint, freshness and citations | Search tests and local cache evidence; symbol/test relationship corpus remains | PARTIAL |
 | 3. Context planner | Server-owned headroom, compaction, deterministic evidence ordering and progressive context | Context/headroom tests; durable journal/evidence-bundle integration remains | PARTIAL |
-| 4. Real subagents | Persisted bounded SCOUT/VERIFIER children, cancellation, evidence, canonical spawn/cancel API, inline Web/CLI activity | Protocol/controller tests; parent-driven automatic delegation remains | PARTIAL |
-| 5. FastContext | Isolated, licensed, measured experiment behind an adapter | Paired recall/latency/cost decision | NOT STARTED; EXPERIMENT BOUNDARY DOCUMENTED |
+| 4. Real subagents | Persisted bounded SCOUT/VERIFIER children, cancellation, evidence, canonical spawn/cancel API, inline Web/CLI activity | Protocol/controller tests; deterministic eligibility now exists, but automatic execution from an accepted decision remains | PARTIAL |
+| 5. FastContext | Isolated, licensed, measured experiment behind an adapter | Paired recall/latency/cost decision | CONTRACT COMPLETE; PAIRED EXPERIMENT NOT VERIFIED |
 | 6. Core loop | Evidence-driven localize/edit/verify/repair; automatic verification default; lean tools | Verification parser integrity and worker gates; edit-burst graduation remains | PARTIAL |
 | 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing live credentials | BLOCKED BY AUTHORIZED EVIDENCE |
 | 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay/degradation tests; remaining legacy text callers and production outcome closure remain | PARTIAL |
