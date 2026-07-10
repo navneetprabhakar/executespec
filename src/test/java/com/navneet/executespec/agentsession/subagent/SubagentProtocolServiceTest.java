@@ -77,6 +77,50 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void evaluateDelegation_isSideEffectFreeAndReportsCapacity() {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(events.countBySessionIdAndType("parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(1L);
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(any(), any())).thenReturn(List.of());
+
+    var decision =
+        service.evaluateDelegation(
+            new SpawnRequest("req", "parent", "turn", Role.SCOUT, "locate mobile reconnect", 4, 0.5),
+            "user",
+            "org");
+
+    assertThat(decision.eligible()).isTrue();
+    assertThat(decision.reason()).isEqualTo("eligible");
+    assertThat(decision.depth()).isEqualTo(1);
+    assertThat(decision.existingChildren()).isEqualTo(1);
+    assertThat(decision.remainingChildren()).isEqualTo(3);
+    assertThat(decision.childSessionId()).isNull();
+    verify(sessions, org.mockito.Mockito.never()).save(any());
+    verify(events, org.mockito.Mockito.never()).save(any());
+  }
+
+  @Test
+  void evaluateDelegation_rejectsInactiveParentWithoutSideEffects() {
+    AgentSession parent = parent("parent", "COMPLETED");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(events.countBySessionIdAndType("parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(0L);
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(any(), any())).thenReturn(List.of());
+
+    var decision =
+        service.evaluateDelegation(
+            new SpawnRequest("req", "parent", "turn", Role.VERIFIER, "verify reconnect", 2, 0.2),
+            "user",
+            "org");
+
+    assertThat(decision.eligible()).isFalse();
+    assertThat(decision.reason()).isEqualTo("parent_inactive");
+    verify(sessions, org.mockito.Mockito.never()).save(any());
+    verify(events, org.mockito.Mockito.never()).save(any());
+  }
+
+  @Test
   void spawnRejectsDepthBeyondHardLimit() throws Exception {
     AgentSession parent = parent("nested", "RUNNING");
     var metadata =

@@ -14,6 +14,7 @@ import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.BudgetState;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Completion;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.DelegationDecision;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Handle;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Result;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
@@ -61,6 +62,63 @@ public class SubagentProtocolService {
   private final AgentTurnRepository turnRepository;
   private final ObjectMapper objectMapper;
 
+  /**
+   * Computes whether a parent may delegate one bounded read-only child.
+   *
+   * <p>This is the coordinator seam for parent-driven delegation. It is intentionally
+   * side-effect-free and model-free; callers must still call {@link #spawn} to reserve the child,
+   * which repeats all limits in one transaction. A parent can therefore inspect this decision
+   * without turning an eligibility probe into a child or a billable model call.
+   */
+  @Transactional(readOnly = true)
+  public DelegationDecision evaluateDelegation(
+      SpawnRequest request, String actorUserId, String actorOrgId) {
+    validateSpawnRequest(request);
+    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    String childId = childId(parent.getId(), request.requestId());
+    AgentSession existing = sessionRepository.findById(childId).orElse(null);
+    if (existing != null) {
+      requireOwnership(existing, actorUserId, actorOrgId);
+      return new DelegationDecision(
+          parent.getId(),
+          request.role(),
+          true,
+          "already_accepted",
+          depthOf(parent.getId()) + 1,
+          countChildren(parent.getId()),
+          remainingChildren(countChildren(parent.getId())),
+          treeBudget(parent.getId()).turns(),
+          treeBudget(parent.getId()).costUsd(),
+          childId);
+    }
+    int depth = depthOf(parent.getId()) + 1;
+    long existingChildren = countChildren(parent.getId());
+    TreeBudget treeBudget = treeBudget(parent.getId());
+    String reason = null;
+    if (!List.of("ACTIVE", "READY", "RUNNING").contains(parent.getStatus())) {
+      reason = "parent_inactive";
+    } else if (depth > MAX_DEPTH) {
+      reason = "depth_limit";
+    } else if (existingChildren >= MAX_CHILDREN_PER_PARENT) {
+      reason = "child_capacity_exhausted";
+    } else if (treeBudget.turns() + request.maxTurns() > MAX_TURNS_PER_TREE) {
+      reason = "tree_turn_budget_exhausted";
+    } else if (treeBudget.costUsd() + request.maxCostUsd() > MAX_COST_USD_PER_TREE) {
+      reason = "tree_cost_budget_exhausted";
+    }
+    return new DelegationDecision(
+        parent.getId(),
+        request.role(),
+        reason == null,
+        reason == null ? "eligible" : reason,
+        depth,
+        existingChildren,
+        remainingChildren(existingChildren),
+        treeBudget.turns(),
+        treeBudget.costUsd(),
+        null);
+  }
+
   @Transactional
   public Handle spawn(SpawnRequest request, String actorUserId, String actorOrgId) {
     validateSpawnRequest(request);
@@ -80,8 +138,7 @@ public class SubagentProtocolService {
     if (depth > MAX_DEPTH) {
       throw new IllegalStateException("Subagent depth limit exceeded: " + depth + "/" + MAX_DEPTH);
     }
-    long existingChildren =
-        eventRepository.countBySessionIdAndType(parent.getId(), EVENT_CHILD_SPAWNED);
+    long existingChildren = countChildren(parent.getId());
     if (existingChildren >= MAX_CHILDREN_PER_PARENT) {
       throw new IllegalStateException(
           "Subagent child limit reached: " + existingChildren + "/" + MAX_CHILDREN_PER_PARENT);
@@ -300,6 +357,14 @@ public class SubagentProtocolService {
     return events.isEmpty()
         ? 0
         : read(events.getLast().getPayloadJson(), ChildMetadata.class).depth();
+  }
+
+  private long countChildren(String sessionId) {
+    return eventRepository.countBySessionIdAndType(sessionId, EVENT_CHILD_SPAWNED);
+  }
+
+  private static int remainingChildren(long existingChildren) {
+    return (int) Math.max(0, Math.min(MAX_CHILDREN_PER_PARENT, MAX_CHILDREN_PER_PARENT - existingChildren));
   }
 
   /**

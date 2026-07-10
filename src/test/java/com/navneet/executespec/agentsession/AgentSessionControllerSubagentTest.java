@@ -62,6 +62,21 @@ class AgentSessionControllerSubagentTest {
   }
 
   @Test
+  void subagentEligibility_requiresMatchingParentAndDoesNotExecuteChild() {
+    var request =
+        new SubagentProtocol.SpawnRequest(
+            "req-1", "parent-1", "turn-1", SubagentProtocol.Role.SCOUT, "mobile reconnect", 2, 0.1);
+    var expected =
+        new SubagentProtocol.DelegationDecision(
+            "parent-1", SubagentProtocol.Role.SCOUT, true, "eligible", 1, 0, 4, 0, 0, null);
+    when(execution.evaluateDelegation(request, user, "org-1")).thenReturn(expected);
+
+    assertThat(controller.subagentEligibility(user, "parent-1", request)).isSameAs(expected);
+    verify(execution).evaluateDelegation(request, user, "org-1");
+    org.mockito.Mockito.verify(execution, org.mockito.Mockito.never()).execute(request, user, "org-1");
+  }
+
+  @Test
   void cancelSubagents_returnsCountAndDelegatesParentScope() {
     when(execution.cancelChildren("parent-1", "stop", user, "org-1")).thenReturn(2);
 
