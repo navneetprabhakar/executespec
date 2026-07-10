@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 import java.util.List;
 
@@ -20,6 +21,8 @@ import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +38,8 @@ class AgentStreamTurnStarterTest {
   @Mock AgentActionEventRepository eventRepo;
   @Mock AgentSessionRepository sessionRepo;
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
+  @Mock ModelAccessService modelAccessService;
+  @Mock ModelRegistry modelRegistry;
 
   private AgentStreamTurnStarter starter;
 
@@ -49,10 +54,12 @@ class AgentStreamTurnStarterTest {
             eventRecorder,
             new AgentTracePayloadFactory(),
             sessionRepo,
-            aiProviderPreferenceService);
-    when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
+            aiProviderPreferenceService,
+            modelAccessService,
+            modelRegistry);
+    lenient().when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
+    lenient().when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    lenient().when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
   }
 
   @Test
@@ -163,6 +170,49 @@ class AgentStreamTurnStarterTest {
     assertThat(session.getDefaultProvider()).isEqualTo("ANTHROPIC");
     assertThat(session.getTitle()).isEqualTo("Existing title");
     assertThat(ctx.sequence()).isEqualTo(1);
+  }
+
+  @Test
+  void explicitModelSwitchIsAuthorizedAndPersistsProviderAndModel() {
+    AgentSession session = session();
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(aiProviderPreferenceService.updatePreferredProvider(any(AppUserDetails.class), eq("OPENAI")))
+        .thenReturn("OPENAI");
+    when(modelRegistry.providerFor("gpt-5.4-mini")).thenReturn("openai");
+    when(modelRegistry.canonicalize("gpt-5.4-mini")).thenReturn("gpt-5.4-mini");
+
+    var ctx =
+        starter.begin(
+            session,
+            "s1",
+            new StreamTurnRequest(
+                "Use the faster model", null, null, null, "OPENAI", "gpt-5.4-mini", null),
+            user());
+
+    verify(modelAccessService).assertModelAllowed("u1", "gpt-5.4-mini");
+    assertThat(ctx.provider()).isEqualTo("OPENAI");
+    assertThat(ctx.model()).isEqualTo("gpt-5.4-mini");
+    assertThat(session.getDefaultProvider()).isEqualTo("OPENAI");
+    assertThat(session.getDefaultModel()).isEqualTo("gpt-5.4-mini");
+  }
+
+  @Test
+  void rejectsModelProviderMismatchBeforePersistingSession() {
+    AgentSession session = session();
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(modelRegistry.providerFor("gpt-5.4-mini")).thenReturn("openai");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                starter.begin(
+                    session,
+                    "s1",
+                    new StreamTurnRequest(
+                        "Switch", null, null, null, "ANTHROPIC", "gpt-5.4-mini", null),
+                    user()))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("not served by provider");
+    org.mockito.Mockito.verifyNoInteractions(sessionRepo);
   }
 
   private static AgentSession session() {

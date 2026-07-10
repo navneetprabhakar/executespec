@@ -213,6 +213,31 @@ claim in a tool result — never invent a runId, score, or status.""";
       List<Map<String, Object>> conversation,
       String providerOverride,
       Set<String> allowedToolNames) {
+    runTurn(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        null,
+        allowedToolNames);
+  }
+
+  /** Run one turn with an explicit, already-authorized model override. */
+  public void runTurn(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      Set<String> allowedToolNames) {
     runTurnBounded(
         sink,
         user,
@@ -222,6 +247,7 @@ claim in a tool result — never invent a runId, score, or status.""";
         orgId,
         conversation,
         providerOverride,
+        modelOverride,
         allowedToolNames,
         MAX_TOOL_ROUNDS,
         () -> {});
@@ -240,6 +266,34 @@ claim in a tool result — never invent a runId, score, or status.""";
       Set<String> allowedToolNames,
       int maxRounds,
       Runnable beforeRound) {
+    runTurnBounded(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        null,
+        allowedToolNames,
+        maxRounds,
+        beforeRound);
+  }
+
+  private void runTurnBounded(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      Set<String> allowedToolNames,
+      int maxRounds,
+      Runnable beforeRound) {
 
     // Provider + model (LIGHTWEIGHT). Keep provider+model consistent on the fallback.
     LlmProvider provider = resolveProvider(providerOverride);
@@ -253,6 +307,16 @@ claim in a tool result — never invent a runId, score, or status.""";
           e.getMessage());
       provider = LlmProvider.ANTHROPIC;
       model = modelResolver.resolve("SpecChatService", provider, AgentTier.LIGHTWEIGHT);
+    }
+    if (modelOverride != null && !modelOverride.isBlank()) {
+      model =
+          ResolvedModel.builder()
+              .requestedProvider(provider)
+              .actualProvider(provider)
+              .model(modelOverride)
+              .agentTier(AgentTier.LIGHTWEIGHT)
+              .fallback(false)
+              .build();
     }
     String providerName = provider.name().toLowerCase();
     if (user != null && user.getUser() != null && user.getUser().getId() != null) {

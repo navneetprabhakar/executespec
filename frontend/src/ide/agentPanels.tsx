@@ -138,6 +138,11 @@ export function AgentTopBar({
   onOpenApprovals,
   onToggleChats,
   onToggleSettings,
+  availableModels,
+  selectedProvider,
+  selectedModel,
+  onProviderChange,
+  onModelChange,
 }: {
   selected: api.AgentSessionResponse | null;
   barStatus: {label: string; tone: BarTone};
@@ -153,6 +158,11 @@ export function AgentTopBar({
   onOpenApprovals: () => void;
   onToggleChats: () => void;
   onToggleSettings: () => void;
+  availableModels?: api.ProviderEntry[];
+  selectedProvider?: string;
+  selectedModel?: string;
+  onProviderChange?: (provider: string) => void;
+  onModelChange?: (model: string) => void;
 }) {
   return (
     <div className='agent-bar'>
@@ -211,6 +221,11 @@ export function AgentTopBar({
             managedAi={managedAi}
             routingState={routingState}
             capabilities={capabilities}
+            availableModels={availableModels ?? []}
+            selectedProvider={selectedProvider ?? ''}
+            selectedModel={selectedModel ?? ''}
+            onProviderChange={onProviderChange ?? (() => {})}
+            onModelChange={onModelChange ?? (() => {})}
             onClose={onToggleSettings}
           />
         )}
@@ -225,13 +240,25 @@ function SettingsPopover({
   routingState,
   capabilities,
   onClose,
+  availableModels,
+  selectedProvider,
+  selectedModel,
+  onProviderChange,
+  onModelChange,
 }: {
   selected: api.AgentSessionResponse | null;
   managedAi: api.ManagedAiBalance | null;
   routingState: RoutingState;
   capabilities: api.AgentCapabilityTool[];
   onClose: () => void;
+  availableModels: api.ProviderEntry[];
+  selectedProvider: string;
+  selectedModel: string;
+  onProviderChange: (provider: string) => void;
+  onModelChange: (model: string) => void;
 }) {
+  const provider = availableModels.find((entry) => entry.id === selectedProvider);
+  const models = provider?.models ?? availableModels.flatMap((entry) => entry.models);
   return (
     <>
       <div
@@ -268,6 +295,37 @@ function SettingsPopover({
         <div className='agent-pop-row'>
           <span>Run credits</span>
           <code>charged after approval</code>
+        </div>
+        <div className='agent-pop-row agent-model-controls'>
+          <label htmlFor='agent-provider-select'>Provider</label>
+          <select
+            id='agent-provider-select'
+            value={selectedProvider}
+            onChange={(event) => onProviderChange(event.target.value)}
+            disabled={availableModels.length === 0}
+          >
+            <option value=''>Default</option>
+            {availableModels.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label || entry.id}
+              </option>
+            ))}
+          </select>
+          <label htmlFor='agent-model-select'>Model</label>
+          <select
+            id='agent-model-select'
+            value={selectedModel}
+            onChange={(event) => onModelChange(event.target.value)}
+            disabled={models.length === 0}
+          >
+            <option value=''>Provider default</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label || model.id}
+              </option>
+            ))}
+          </select>
+          <small>Applies to the next turn.</small>
         </div>
         {managedAi && <ManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>

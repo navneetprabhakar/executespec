@@ -63,6 +63,7 @@ public final class AgentSessionDtos {
       RepoContext repoContext,
       ClientCapabilities clientCapabilities,
       String providerOverride,
+      String modelOverride,
       List<String> attachmentIds) {
     /** Back-compat constructor for callers that predate server-side attachments. */
     public StreamTurnRequest(
@@ -71,7 +72,18 @@ public final class AgentSessionDtos {
         RepoContext repoContext,
         ClientCapabilities clientCapabilities,
         String providerOverride) {
-      this(message, conversation, repoContext, clientCapabilities, providerOverride, null);
+      this(message, conversation, repoContext, clientCapabilities, providerOverride, null, null);
+    }
+
+    /** Back-compat constructor for callers that already send attachment ids. */
+    public StreamTurnRequest(
+        String message,
+        List<Map<String, Object>> conversation,
+        RepoContext repoContext,
+        ClientCapabilities clientCapabilities,
+        String providerOverride,
+        List<String> attachmentIds) {
+      this(message, conversation, repoContext, clientCapabilities, providerOverride, null, attachmentIds);
     }
   }
 
