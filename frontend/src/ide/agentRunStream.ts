@@ -31,9 +31,33 @@ function payloadObject(event: AgentRunEvent): Record<string, unknown> | null {
 }
 
 function terminal(status: string | undefined): boolean {
-  return ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(
-    (status || '').toUpperCase(),
-  );
+  // COMPLETE/RUN_STATUS payloads may carry the human-readable status reason after a
+  // pipe (for example `PARTIAL|FINAL_BUILD_FAILED`). Keep the transport detail
+  // from preventing the stream from reaching its terminal state.
+  const normalized = (status || '').toUpperCase().split('|', 1)[0].trim();
+  return ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(normalized);
+}
+
+/**
+ * Return a terminal status carried by a run event, if any.
+ *
+ * The backend intentionally keeps both the legacy `payload` and typed event
+ * fields. A completed run can therefore arrive as a RUN_STATUS event, a
+ * COMPLETE event, or a RUN_DETAIL snapshot. Centralising this decoding keeps
+ * EventSource completion/reconnect behaviour deterministic across all three.
+ */
+export function terminalStatusFromEvent(event: AgentRunEvent): string | null {
+  const type = String(event.type || '').toUpperCase();
+  const value = payloadObject(event);
+  const candidate =
+    type === 'RUN_DETAIL'
+      ? value?.status
+      : type === 'RUN_STATUS' || type === 'COMPLETE'
+        ? event.payload ?? event.status ?? value?.status
+        : null;
+  if (candidate == null) return null;
+  const status = String(candidate);
+  return terminal(status) ? status : null;
 }
 
 export function useAgentRunStream(runId: string | null) {
@@ -113,9 +137,8 @@ export function useAgentRunStream(runId: string | null) {
           const value = payloadObject(event);
           const nextCost = Number(value?.costUsd ?? event.costUsd);
           if (Number.isFinite(nextCost)) setCostUsd(nextCost);
-        } else if (type === 'RUN_STATUS') {
-          const value = String(event.payload || event.status || '');
-          terminalRef.current = terminal(value);
+        } else if (type === 'RUN_STATUS' || type === 'COMPLETE') {
+          terminalRef.current = terminalStatusFromEvent(event) !== null;
           if (terminalRef.current) void refresh().catch(() => undefined);
         }
         if (terminalRef.current) {
