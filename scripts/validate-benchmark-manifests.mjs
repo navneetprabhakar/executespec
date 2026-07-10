@@ -32,7 +32,9 @@ export function validateManifest(manifest, file = "<manifest>") {
       add("resolved must be between zero and total");
     }
     const expected = manifest.results.total === 0 ? 0 : manifest.results.resolved / manifest.results.total;
-    if (Math.abs(expected - manifest.results.resolutionRate) > 1e-12) {
+    if (!Number.isFinite(manifest.results.resolutionRate)) {
+      add("results.resolutionRate must be a finite number");
+    } else if (Math.abs(expected - manifest.results.resolutionRate) > 1e-12) {
       add(`resolutionRate ${manifest.results.resolutionRate} does not equal ${expected}`);
     }
   }
