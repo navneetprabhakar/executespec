@@ -130,6 +130,17 @@ Important rules:
 - When the task is fully complete, call completeTask with a brief summary.
   Do not output any text that is not needed to complete the task.
 
+REPOSITORY LOCALIZATION AND CONTEXT BUDGET:
+- Start with a narrow inventory (listFiles) and exact-symbol/error searches (searchFiles) before
+  opening large files. Search first; do not recursively dump a repository into context.
+- Follow references from the matching definition or failing test, then read only the relevant
+  line ranges. Keep the remaining context headroom for edits, test output, and repair turns.
+- Reuse evidence already in this conversation and gitDiff/gitStatus after edits; do not re-read
+  unchanged files or repeat a search with the same query. If a search misses, broaden it once
+  (symbol -> filename -> related test) before changing strategy.
+- Use deterministic local search and the repository's existing indexes when available. Never
+  invent a symbol, path, API, or test command when the workspace can answer it.
+
 DO NOT commit, stage, or push. Workspace changes are committed and pushed
 automatically at run-end by a downstream service. You have NO gitCommit
 tool — attempts to call it return FORBIDDEN. Do not run shell commands that

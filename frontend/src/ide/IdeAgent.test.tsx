@@ -485,7 +485,7 @@ describe('IdeAgent', () => {
           ]}
           streamEvents={[]}
           streamText=''
-          isBusy={false}
+          isBusy={true}
           visibleAction={null}
           gates={[]}
           runCard={null}
@@ -513,6 +513,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Create a remote sandbox plan for a README change');
     expect(host.querySelectorAll('.agent-msg').length).toBe(2);
     expect(host.textContent).not.toContain('Recent answer');
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('Agent is working.');
   });
 
   it('does not collapse a user turn behind an empty persisted assistant summary', async () => {
