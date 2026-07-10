@@ -650,9 +650,15 @@ public class WorkerAgent {
         }
       }
 
-      // RL-2026-05-052 follow-up — compact the oldest turns once the previous call's input crossed
-      // the threshold, BEFORE building this request. Flag-gated + default OFF → returns the same
-      // `history` reference (byte-identical loop). Null-guarded for test call sites that pass null.
+      // Bind once so context planning measures the exact schema set that the request will send.
+      // Reusing the same list also prevents headroom accounting from drifting from dispatch.
+      List<org.springframework.ai.tool.ToolCallback> workerTools =
+          toolRegistry.bindForWorker(req.context(), req.provider());
+
+      // ExecuteSpec 2.0 context headroom: before request assembly, reserve output + safety against
+      // the provider model's window and proactively compact only when the remaining headroom is
+      // unsafe. If planner metadata/dependency is unavailable, WorkerHistoryCompactor preserves
+      // the previous flag-gated 75% trigger exactly.
       if (workerHistoryCompactor != null) {
         history =
             workerHistoryCompactor.compactIfNeeded(
@@ -661,7 +667,9 @@ public class WorkerAgent {
                 req.model(),
                 req.context(),
                 lastInputTokens,
-                req.userPrompt());
+                req.userPrompt(),
+                req.maxTokensPerCall(),
+                workerTools);
       }
 
       // progress-v2 — one-shot tool_choice=required after a repeated text-only stop. Consumed
@@ -686,7 +694,7 @@ public class WorkerAgent {
                     .toolChoice(forcedThisCall ? "required" : null)
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
-                    .toolsOverride(toolRegistry.bindForWorker(req.context(), req.provider()))
+                    .toolsOverride(workerTools)
                     // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
                     // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
                     // (thinking model) regularly takes 60-90s on dense tool-call iterations,

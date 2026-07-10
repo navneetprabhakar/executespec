@@ -15,6 +15,7 @@ import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -62,7 +63,7 @@ class WorkerHistoryCompactorTest {
   void setUp() {
     compactor =
         new WorkerHistoryCompactor(
-            router, modelResolver, promptAssembler, featureFlagService, null);
+            router, modelResolver, promptAssembler, featureFlagService, null, null);
   }
 
   /**
@@ -112,6 +113,38 @@ class WorkerHistoryCompactorTest {
     List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
     assertThat(out).isSameAs(h);
     verify(router, never()).call(any());
+  }
+
+  @Test
+  @DisplayName("unsafe planned headroom compacts before the legacy flag trigger")
+  void compact_whenContextPlannerFindsUnsafeHeadroom() {
+    ContextPlanner contextPlanner = Mockito.mock(ContextPlanner.class);
+    when(contextPlanner.planHeadroom(
+            anyString(), anyString(), Mockito.anyLong(), any(), any(), any()))
+        .thenReturn(
+            new ContextPlanner.HeadroomDecision(
+                ContextPlanner.HeadroomAction.COMPACT,
+                "anthropic",
+                "claude-test",
+                100,
+                90_000,
+                8_000,
+                8_000,
+                2_000,
+                "low headroom"));
+    compactor =
+        new WorkerHistoryCompactor(
+            router, modelResolver, promptAssembler, featureFlagService, null, contextPlanner);
+    stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku");
+    List<Message> history = longHistory();
+
+    List<Message> out =
+        compactor.compactIfNeeded(
+            history, "anthropic", "claude-test", CTX, 90_000, "goal", 8_000, List.of());
+
+    assertThat(out).isNotSameAs(history);
+    assertThat(out).hasSizeLessThan(history.size());
+    verify(router).call(any());
   }
 
   @Test

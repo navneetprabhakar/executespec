@@ -23,7 +23,7 @@
 | Frontend build/lint/format/tests | PENDING | Not run on integration branch |
 | CLI/core/VS Code build/tests | PASS | 910/910 on `codex/cli-1.0` (core 115, CLI 783, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
-| Docs links and integrity | FAIL | Broken links and duplicate reason-log IDs |
+| Docs links and integrity | PARTIAL | Canonical entrypoints, release facts, and duplicate-ID policy are fixed; docs validator reports 245 remaining broken links in legacy architecture/archive references |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
 | No orphan prompts | UNKNOWN | Verifier covers only a small critical subset |
 | No unauthorized provider spend | PARTIAL | LlmRouter + deprecated FallbackLlmRouter require exact reservations in goal-live mode; direct provider/batch transports still need the same guard |

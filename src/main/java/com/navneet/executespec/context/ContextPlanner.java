@@ -3,15 +3,37 @@ package com.navneet.executespec.context;
 import java.util.Comparator;
 import java.util.List;
 
+import com.navneet.executespec.router.ModelRegistry;
+
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Provider-window aware context budget planner. It is pure apart from the Spring service boundary:
- * callers provide evidence items and receive a deterministic selection plus the reserves required
- * for output, future tools, verification/repair, and provider handoff.
+ * Provider-window aware context budget planner. It owns both deterministic evidence selection and
+ * the worker's pre-request headroom decision.
  */
 @Service
 public class ContextPlanner {
+
+  static final double SAFETY_RATIO = 0.08;
+  static final int MIN_SAFETY_TOKENS = 4_096;
+  static final int CHARS_PER_TOKEN_ESTIMATE = 4;
+  static final int MESSAGE_OVERHEAD_TOKENS = 12;
+
+  private final ModelRegistry modelRegistry;
+
+  /** Pure-planner compatibility constructor used by evidence-selection callers and unit tests. */
+  public ContextPlanner() {
+    this.modelRegistry = null;
+  }
+
+  @Autowired
+  public ContextPlanner(ModelRegistry modelRegistry) {
+    this.modelRegistry = modelRegistry;
+  }
+
   public Plan plan(Window window, List<Item> items) {
     if (window == null) throw new IllegalArgumentException("window is required");
     List<Item> candidates =
@@ -43,6 +65,120 @@ public class ContextPlanner {
         omitted,
         remaining,
         omitted.stream().mapToLong(Item::tokenEstimate).sum());
+  }
+
+  /**
+   * Decides whether the existing tool-pair-safe history compactor should run before the next worker
+   * request. Unknown model metadata is explicitly unavailable so callers preserve their legacy
+   * trigger/recovery behavior.
+   */
+  public HeadroomDecision planHeadroom(
+      String provider,
+      String model,
+      long lastReportedInputTokens,
+      Integer requestedOutputTokens,
+      List<Message> messages,
+      List<ToolCallback> tools) {
+    if (modelRegistry == null || model == null || model.isBlank()) {
+      return HeadroomDecision.unavailable(provider, model, "model metadata unavailable");
+    }
+    try {
+      if (!modelRegistry.isKnownModel(model)) {
+        return HeadroomDecision.unavailable(provider, model, "model is not registered");
+      }
+      int window = modelRegistry.contextLimitFor(model);
+      if (window <= 0) {
+        return HeadroomDecision.unavailable(provider, model, "context window is not configured");
+      }
+      int outputReserve =
+          requestedOutputTokens != null && requestedOutputTokens > 0
+              ? Math.min(requestedOutputTokens, modelRegistry.maxOutputForModel(model))
+              : modelRegistry.maxOutputForModel(model);
+      outputReserve = Math.max(0, outputReserve);
+      int safetyReserve = Math.max(MIN_SAFETY_TOKENS, (int) Math.ceil(window * SAFETY_RATIO));
+      long estimatedInput =
+          Math.max(Math.max(0L, lastReportedInputTokens), estimateInputTokens(messages, tools));
+      long available = (long) window - estimatedInput - outputReserve;
+      HeadroomAction action =
+          available < safetyReserve ? HeadroomAction.COMPACT : HeadroomAction.CONTINUE;
+      return new HeadroomDecision(
+          action,
+          provider,
+          model,
+          window,
+          estimatedInput,
+          outputReserve,
+          safetyReserve,
+          available,
+          action == HeadroomAction.COMPACT
+              ? "reserved output and safety margin exceed remaining model-window headroom"
+              : "model-window headroom is sufficient after output and safety reserves");
+    } catch (RuntimeException e) {
+      return HeadroomDecision.unavailable(
+          provider, model, "context planning failed: " + e.getMessage());
+    }
+  }
+
+  static long estimateInputTokens(List<Message> messages, List<ToolCallback> tools) {
+    long chars = 0;
+    int messageCount = 0;
+    if (messages != null) {
+      for (Message message : messages) {
+        if (message == null) continue;
+        messageCount++;
+        String text = message.getText();
+        if (text != null) chars += text.length();
+        String rendered = message.toString();
+        if (rendered != null && (text == null || rendered.length() > text.length())) {
+          chars += Math.min(rendered.length() - (text == null ? 0 : text.length()), 16_000);
+        }
+      }
+    }
+    if (tools != null) {
+      for (ToolCallback tool : tools) {
+        if (tool == null || tool.getToolDefinition() == null) continue;
+        var definition = tool.getToolDefinition();
+        chars += length(definition.name());
+        chars += length(definition.description());
+        chars += length(definition.inputSchema());
+      }
+    }
+    return divideCeil(chars, CHARS_PER_TOKEN_ESTIMATE)
+        + (long) messageCount * MESSAGE_OVERHEAD_TOKENS;
+  }
+
+  private static int length(String value) {
+    return value == null ? 0 : value.length();
+  }
+
+  private static long divideCeil(long value, long divisor) {
+    return value <= 0 ? 0 : 1 + ((value - 1) / divisor);
+  }
+
+  public enum HeadroomAction {
+    CONTINUE,
+    COMPACT,
+    UNAVAILABLE
+  }
+
+  public record HeadroomDecision(
+      HeadroomAction action,
+      String provider,
+      String model,
+      int contextWindowTokens,
+      long estimatedInputTokens,
+      int outputReserveTokens,
+      int safetyReserveTokens,
+      long availableHeadroomTokens,
+      String reason) {
+    public boolean shouldCompact() {
+      return action == HeadroomAction.COMPACT;
+    }
+
+    public static HeadroomDecision unavailable(String provider, String model, String reason) {
+      return new HeadroomDecision(
+          HeadroomAction.UNAVAILABLE, provider, model, 0, 0, 0, 0, 0, reason);
+    }
   }
 
   public record Window(
