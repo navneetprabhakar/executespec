@@ -60,6 +60,15 @@ public class SubagentProtocolService {
     AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
     requireParentActive(parent);
 
+    // Resolve idempotency before enforcing capacity. A retry of an already-accepted request must
+    // return its original child even when that child filled the parent's final available slot.
+    String childId = childId(parent.getId(), request.requestId());
+    AgentSession existing = sessionRepository.findById(childId).orElse(null);
+    if (existing != null) {
+      requireOwnership(existing, actorUserId, actorOrgId);
+      return handleFromMetadata(existing, metadataOf(childId));
+    }
+
     int depth = depthOf(parent.getId()) + 1;
     if (depth > MAX_DEPTH) {
       throw new IllegalStateException("Subagent depth limit exceeded: " + depth + "/" + MAX_DEPTH);
@@ -69,13 +78,6 @@ public class SubagentProtocolService {
     if (existingChildren >= MAX_CHILDREN_PER_PARENT) {
       throw new IllegalStateException(
           "Subagent child limit reached: " + existingChildren + "/" + MAX_CHILDREN_PER_PARENT);
-    }
-
-    String childId = childId(parent.getId(), request.requestId());
-    AgentSession existing = sessionRepository.findById(childId).orElse(null);
-    if (existing != null) {
-      requireOwnership(existing, actorUserId, actorOrgId);
-      return handleFromMetadata(existing, metadataOf(childId));
     }
 
     Instant now = Instant.now();

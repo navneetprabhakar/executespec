@@ -98,6 +98,35 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void idempotentSpawnReturnsExistingChildEvenAtParentCapacity() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    SpawnRequest request =
+        new SpawnRequest("same-request", "parent", null, Role.SCOUT, "scan", 3, 0.2);
+    String childId =
+        java.util
+            .UUID
+            .nameUUIDFromBytes(
+                "subagent:parent:same-request".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            .toString();
+    AgentSession child = parent(childId, "READY");
+    var metadata =
+        new SubagentProtocolService.ChildMetadata("parent", null, Role.SCOUT, "scan", 1, 3, 0.2);
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findById(childId)).thenReturn(Optional.of(child));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            childId, SubagentProtocolService.EVENT_CHILD_CREATED))
+        .thenReturn(List.of(event(childId, SubagentProtocolService.EVENT_CHILD_CREATED, metadata)));
+    when(events.countBySessionIdAndType("parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn((long) SubagentProtocolService.MAX_CHILDREN_PER_PARENT);
+
+    var handle = service.spawn(request, "user", "org");
+
+    assertThat(handle.childSessionId()).isEqualTo(childId);
+    assertThat(handle.status()).isEqualTo("READY");
+    verify(sessions, org.mockito.Mockito.never()).save(any());
+  }
+
+  @Test
   void spawnRejectsUnboundedTurnAndCostRequests() {
     assertThatThrownBy(
             () ->
