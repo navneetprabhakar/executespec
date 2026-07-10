@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.memory.entity.ProjectMemorySnapshot;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
@@ -17,7 +17,7 @@ import com.navneet.executespec.router.ResolvedModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +37,7 @@ public class MemoryCompactionService {
 
   static final int SNAPSHOT_CHAR_CAP = 12_000;
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final ProjectMemorySnapshotRepository snapshotRepo;
@@ -141,21 +141,16 @@ public class MemoryCompactionService {
   private String callLightweightLlm(String systemPrompt, String projectId) {
     // Default provider for compaction; project's ai_provider not needed at this layer.
     ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", LlmProvider.OPENAI);
-    Prompt prompt =
-        new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage("Emit the updated snapshot now.")));
     ChatResponse response =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage("Emit the updated snapshot now.")),
             "compact-" + projectId,
             "memory-compaction",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "compact");
     return response.getResult().getOutput().getText();
   }
 
