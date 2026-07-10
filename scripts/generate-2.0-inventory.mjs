@@ -27,6 +27,7 @@ function sourceFiles(repo) {
     .split("\n")
     .filter(Boolean)
     .filter((file) => !file.endsWith("docs/plans/evidence/executespec-2.0-inventory.json"))
+    .filter((file) => fs.existsSync(path.join(repo, file)))
     .sort();
 }
 

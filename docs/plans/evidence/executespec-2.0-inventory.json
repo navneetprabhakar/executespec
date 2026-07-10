@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "63fa73b55e95c9da1ad4ad52b9d28a11ad6aa124",
+      "sha": "eef4fd0f2e80254bf07d9209cfd14bc72ddb3dd0",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2623,
-      "worktreeFingerprint": "e24a0fd949edb426382d0ec38dbb3a723b88ffbd2e7e801262b883d88a7566dd"
+      "worktreeFingerprint": "2b2473006259172c9b19a8cf97991e58b5f1301dc6cbee7c8eddbfd90bb9d78a"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -17,23 +17,23 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "57bf4e59a0935042714b5c04c42326c168480b9a",
+      "sha": "4716bb3fb2bc5f8d59b06e71577543dd66a265fb",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 635,
-      "worktreeFingerprint": "a3c19e98e1b8087d8d0284155109184947e732a37436334ff342c768284ca271"
+      "trackedFiles": 643,
+      "worktreeFingerprint": "b53c0595764827b09b6146acdc4c482997a620a8e77df2240bd8f96c9b985e08"
     }
   },
   "backend": {
     "mainJava": {
       "files": 1245,
-      "lines": 195279
+      "lines": 195289
     },
     "testJavaFiles": 389,
     "controllers": 108,
     "mappingAnnotations": 601,
     "prompts": {
-      "count": 91,
-      "markdown": 56,
+      "count": 88,
+      "markdown": 53,
       "text": 34,
       "json": 1,
       "files": [
@@ -72,9 +72,6 @@
         "src/main/resources/prompts/execution_planner.txt",
         "src/main/resources/prompts/fragments/api-url-rules.md",
         "src/main/resources/prompts/fragments/backend-robustness.md",
-        "src/main/resources/prompts/fragments/compilation-checklist.md",
-        "src/main/resources/prompts/fragments/cors-config.md",
-        "src/main/resources/prompts/fragments/format-after-edit.md",
         "src/main/resources/prompts/fragments/fullstack-directory.md",
         "src/main/resources/prompts/fragments/module-system.md",
         "src/main/resources/prompts/fragments/preview-defaults.md",
@@ -361,7 +358,7 @@
     ]
   },
   "docs": {
-    "trackedFiles": 635,
+    "trackedFiles": 643,
     "markdownFiles": 186,
     "outputFiles": 418
   }
