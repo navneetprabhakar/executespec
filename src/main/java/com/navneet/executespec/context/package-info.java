@@ -43,8 +43,9 @@
  * concurrent in-flight runs ≈ 200 MB Redis memory. Monitor {@code redis_memory_used_bytes} and tune
  * TTL down if pressure observed.
  *
- * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and is currently
- * used for model-window headroom decisions. Its evidence-selection API is reserved for the
- * project-scoped handoff integration and is not represented as active production wiring yet.
+ * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and model-window
+ * headroom decisions. {@code ContextEvidenceAssembler} uses the selector for optional handoff
+ * lists while preserving goal, diff, reviewer and decision text as mandatory evidence; it never
+ * selects or reorders tool messages.
  */
 package com.navneet.executespec.context;

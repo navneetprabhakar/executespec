@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Writes the bounded, machine-readable handoff produced by {@link ContextAgent}.
@@ -41,9 +42,18 @@ public class ContextEvidenceBundleWriter {
   static final int MAX_ITEM_CHARS = 1_000;
 
   private final ObjectMapper objectMapper;
+  private final ContextEvidenceAssembler evidenceAssembler;
 
-  public ContextEvidenceBundleWriter(ObjectMapper objectMapper) {
+  @Autowired
+  public ContextEvidenceBundleWriter(
+      ObjectMapper objectMapper, ContextEvidenceAssembler evidenceAssembler) {
     this.objectMapper = objectMapper;
+    this.evidenceAssembler = evidenceAssembler;
+  }
+
+  /** Compatibility constructor for non-Spring recovery/test callers. */
+  public ContextEvidenceBundleWriter(ObjectMapper objectMapper) {
+    this(objectMapper, new ContextEvidenceAssembler(new ContextPlanner()));
   }
 
   /** Writes a new bundle and returns its target path. */
@@ -67,10 +77,11 @@ public class ContextEvidenceBundleWriter {
     sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
 
     ObjectNode evidence = root.putObject("evidence");
+    ContextEvidenceAssembler.Selection selected = evidenceAssembler.select(input);
     evidence.put("gitDiffSummary", cap(input.gitDiffSummary(), MAX_TEXT_CHARS));
-    putList(evidence, "newPackages", input.newPackagesDetected());
-    putList(evidence, "newFiles", input.newFilesDetected());
-    putList(evidence, "workerReports", input.workerReportSummaries());
+    putList(evidence, "newPackages", selected.packageIndexes());
+    putList(evidence, "newFiles", selected.fileIndexes());
+    putList(evidence, "workerReports", selected.workerIndexes());
     evidence.put("reviewerSummary", cap(input.reviewerSummary(), MAX_TEXT_CHARS));
     evidence.put("recentDecisions", cap(input.recentDecisions(), MAX_TEXT_CHARS));
 
