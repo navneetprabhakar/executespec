@@ -337,33 +337,6 @@
       "variables": []
     },
     {
-      "id": "fragments/compilation-checklist",
-      "path": "src/main/resources/prompts/fragments/compilation-checklist.md",
-      "sha256": "cee6845d256a976a3f652d9d131c89ed8b8643f179a6bc848acc4b18f69b569b",
-      "bytes": 1873,
-      "active": true,
-      "fragments": [],
-      "variables": []
-    },
-    {
-      "id": "fragments/cors-config",
-      "path": "src/main/resources/prompts/fragments/cors-config.md",
-      "sha256": "cd883db7ebd91ce49e2a291d731eebce575990b3a8b4fdef428d40d6663556f1",
-      "bytes": 1388,
-      "active": true,
-      "fragments": [],
-      "variables": []
-    },
-    {
-      "id": "fragments/format-after-edit",
-      "path": "src/main/resources/prompts/fragments/format-after-edit.md",
-      "sha256": "1e2b8c73b318166aa7b63ae8f07f63e19eef764fb2fb069a4cb94de88918c7dc",
-      "bytes": 1548,
-      "active": true,
-      "fragments": [],
-      "variables": []
-    },
-    {
       "id": "fragments/fullstack-directory",
       "path": "src/main/resources/prompts/fragments/fullstack-directory.md",
       "sha256": "5ee674f8b722de08267583febe5005641dead57289634372bd51b3268ca0464a",
