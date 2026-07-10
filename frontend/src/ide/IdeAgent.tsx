@@ -79,6 +79,7 @@ export default function IdeAgent() {
   const [uploading, setUploading] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
   const liveRun = useAgentRunStream(state.activeRun);
   const runDetail = liveRun.detail;
@@ -86,14 +87,55 @@ export default function IdeAgent() {
 
   useEffect(() => {
     if (!chatsOpen && !settingsOpen) return;
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const focusable = dialog?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (settingsOpen) setSettingsOpen(false);
-      else setChatsOpen(false);
+      if (event.key === 'Escape') {
+        if (settingsOpen) setSettingsOpen(false);
+        else setChatsOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const controls = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (controls.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      overlayFocusRef.current?.focus();
+      overlayFocusRef.current = null;
+    };
   }, [chatsOpen, settingsOpen]);
+
+  const toggleChats = useCallback(() => {
+    if (!chatsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    setChatsOpen((open) => !open);
+  }, [chatsOpen]);
+
+  const toggleSettings = useCallback(() => {
+    if (!settingsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    setSettingsOpen((open) => !open);
+  }, [settingsOpen]);
 
   const scope = useMemo(() => ({projectId, runId}), [projectId, runId]);
   const selected = useMemo(() => {
@@ -460,8 +502,8 @@ export default function IdeAgent() {
           void createSession();
         }}
         onOpenApprovals={() => setChatsOpen(true)}
-        onToggleChats={() => setChatsOpen((o) => !o)}
-        onToggleSettings={() => setSettingsOpen((o) => !o)}
+        onToggleChats={toggleChats}
+        onToggleSettings={toggleSettings}
       />
 
       {state.error && (
