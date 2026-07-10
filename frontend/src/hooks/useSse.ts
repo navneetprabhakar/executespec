@@ -16,6 +16,7 @@ export function useSse(runId: string | null) {
   const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
+  const lastEventIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export function useSse(runId: string | null) {
     if (isNewRun) clearEntries();
     setRunId(runId);
     attemptRef.current = 0;
+    lastEventIdRef.current = null;
 
     // Pre-populate with historical messages so revisiting a completed run shows its log.
     // Only do this for NEW run IDs so we don't double-prepend history on remount.
@@ -72,6 +74,9 @@ export function useSse(runId: string | null) {
       } catch {
         console.warn('Failed to obtain scoped SSE token, connecting without auth');
       }
+      if (lastEventIdRef.current) {
+        sseUrl += `${sseUrl.includes('?') ? '&' : '?'}lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
+      }
       const es = new EventSource(sseUrl);
       esRef.current = es;
 
@@ -86,6 +91,7 @@ export function useSse(runId: string | null) {
 
       es.onmessage = (ev) => {
         try {
+          if (ev.lastEventId) lastEventIdRef.current = ev.lastEventId;
           const data = JSON.parse(ev.data);
 
           // RUN_DETAIL: backend pushes full run detail — update store directly
