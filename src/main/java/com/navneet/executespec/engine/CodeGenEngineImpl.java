@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Owns the single-task PATCH-style worker request construction directly: prompt assembly,
  * provider patch fragments, per-provider iteration caps, source-scoped test gate, common critic
  * flags, and result mapping. This keeps benchmark and patch-mode orchestration on one code-gen
- * surface instead of routing through the deprecated {@code PatchAgent} wrapper.
+ * surface; PATCH policy is owned directly here rather than through a compatibility wrapper.
  *
  * <p><b>The caller owns setup</b> (per the contract): the workspace is already prepared and a
  * {@code PipelineRun} row for {@code request.runId()} already exists (the worker reads its {@code
