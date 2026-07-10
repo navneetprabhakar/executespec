@@ -8,8 +8,9 @@ export type AgentChatTarget = {
 export const WEB_CHAT_CAPABILITIES: api.AgentClientCapabilities = {
   localTools: false,
   interactive: true,
-  // Diff inspection/revert is not implemented in the chat surface yet.
-  canRenderDiff: false,
+  // The chat surface renders bounded, read-only run diffs. Mutations remain
+  // behind the existing run/result controls and are never implied here.
+  canRenderDiff: true,
   canRenderTui: false,
 };
 

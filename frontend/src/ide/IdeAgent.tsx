@@ -416,10 +416,9 @@ export default function IdeAgent() {
           clientCapabilities: {
             localTools: false,
             interactive: true,
-            // The Web agent currently links to the full result surface; it does not
-            // render or mutate diff hunks inline. Do not advertise an unsupported
-            // capability to the orchestrator.
-            canRenderDiff: false,
+            // The web agent renders bounded, read-only diffs inline. It does not
+            // claim mutation/revert authority; edits still go through a run.
+            canRenderDiff: true,
             canRenderTui: false,
           },
           providerOverride: selectedProvider || null,
