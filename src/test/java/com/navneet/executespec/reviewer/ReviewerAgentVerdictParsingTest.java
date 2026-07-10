@@ -281,6 +281,23 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   @Test
+  void hasWriteCalls_recognises_mutating_command_aliases() {
+    for (String tool : List.of("move", "deletePath", "bash", "executeCommand", "installDependencies",
+        "testProject", "lintProject", "formatProject", "ast_edit", "background_process", "gitCommit")) {
+      var result =
+          WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.COMPLETED)
+              .iterations(1)
+              .toolCallsDispatched(1)
+              .toolCallLog(List.of(tool + "(path=src/foo.ts)"))
+              .totalLatencyMs(0L)
+              .build();
+      org.junit.jupiter.api.Assertions.assertTrue(
+          ReviewerAgent.hasWriteCalls(result), "expected mutating alias: " + tool);
+    }
+  }
+
+  @Test
   void unparseable_verdict_value_falls_through_to_heuristic() throws Exception {
     // Agent emitted "VERDICT:" prefix but with garbage value → fall through to heuristic.
     var g = workerWithSummary("VERDICT: XYZZY\nfound 0 issues");

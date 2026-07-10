@@ -793,14 +793,35 @@ exit=0 — the harness will reject premature completions.
   }
 
   private static boolean isWriteToolName(String toolName) {
-    return "writeFile".equals(toolName)
-        || "write_file".equals(toolName)
-        || "editFile".equals(toolName)
-        || "edit_file".equals(toolName)
-        || "multiEdit".equals(toolName)
-        || "multi_edit".equals(toolName)
-        || "applyPatch".equals(toolName)
-        || "apply_patch".equals(toolName);
+    return switch (toolName) {
+      case "writeFile",
+          "write_file",
+          "editFile",
+          "edit_file",
+          "multiEdit",
+          "multi_edit",
+          "applyPatch",
+          "apply_patch",
+          "astEdit",
+          "ast_edit",
+          "move",
+          "rename",
+          "delete",
+          "deletePath",
+          "shell",
+          "bash",
+          "executeCommand",
+          "runCommand",
+          "terminalCommand",
+          "backgroundJob",
+          "background_process",
+          "installDependencies",
+          "testProject",
+          "lintProject",
+          "formatProject",
+          "gitCommit" -> true;
+      default -> false;
+    };
   }
 
   /**
