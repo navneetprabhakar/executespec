@@ -116,6 +116,7 @@ class RunLifecycleServiceContinuationApprovalTest {
         .thenReturn(GateStore.PlanGateClaim.CLAIMED)
         .thenReturn(GateStore.PlanGateClaim.ALREADY_APPROVED);
     when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
+    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
     when(pool.submit(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
 
     assertThat(service.resolvePlanGate(RUN_ID, true))
@@ -148,6 +149,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     GateRecord gate = approvedGate();
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
     when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(gate));
+    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
     ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
     when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
 
@@ -162,6 +164,22 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().planGateContinuation()).isNotNull();
     assertThat(request.getValue().planGateContinuation().localRun()).isTrue();
     assertThat(request.getValue().planGateContinuation().pinnedModel()).isEqualTo("pinned-model");
+  }
+
+  @Test
+  void approvalCannotResurrectRunCancelledAfterInitialStateRead() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(gateStore.claimPlanGate(RUN_ID, true)).thenReturn(GateStore.PlanGateClaim.CLAIMED);
+    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
+    // Cancellation (or another terminal lifecycle action) won the atomic status transition.
+    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(0);
+
+    assertThat(service.resolvePlanGate(RUN_ID, true))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.INVALID_STATE);
+    verify(pool, never()).submit(any(Runnable.class));
+    verify(controlPort, never()).putActiveRun(eq(RUN_ID), any());
   }
 
   private PipelineRun approvedPlanRun(String status) {
