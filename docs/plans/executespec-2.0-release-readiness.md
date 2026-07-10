@@ -20,7 +20,7 @@
 | Clean install and migration upgrade | PASS | pgvector PostgreSQL integration runs all 256 migrations, validates Hibernate startup, and the V255→V256 fixture clears active Sarvam state while preserving historical evidence |
 | Flyway backward compatibility | PASS | V1–V256 remain immutable and V256 is forward-only; hash-pinned chain plus clean-install and V255→V256 upgrade/data-preservation tests pass |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2416 tests, 0 failures/errors; focused context/subagent/routing/provider-guard suites pass |
-| Frontend build/lint/format/tests | PASS | 154 tests, production build, format check, and lint pass; one existing hook-dependency warning |
+| Frontend build/lint/format/tests | PASS | 155 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS | 859/859 on `codex/cli-1.0` (core 115, CLI 732, VS Code 12) after deleting obsolete Ink tests and implementation |
 | Visual QA | FAIL | Web now exposes live connection state to screen readers and sighted operators, but authenticated protected-flow screenshots and full TUI visual acceptance are still missing |
 | Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
