@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -87,5 +88,35 @@ class RepositorySearchServiceTest {
                         "after", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0))
                 .totalMatches())
         .isEqualTo(1);
+  }
+
+  @Test
+  void gitInventoryIncludesTrackedAndNonIgnoredFilesButExcludesIgnoredTrees() throws Exception {
+    runGit("init", "-q");
+    Files.writeString(root.resolve(".gitignore"), ".generated/\n");
+    Files.writeString(root.resolve("tracked.txt"), "needle\n");
+    Files.createDirectories(root.resolve(".generated"));
+    Files.writeString(root.resolve(".generated/ignored.txt"), "needle\n");
+    runGit("add", "tracked.txt", ".gitignore");
+
+    var result =
+        new RepositorySearchService()
+            .search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    "needle", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
+
+    assertThat(result.hits())
+        .extracting(RepositorySearchService.SearchHit::path)
+        .containsExactly("tracked.txt");
+  }
+
+  private void runGit(String... args) throws Exception {
+    var command = new java.util.ArrayList<>(List.of("git", "-C", root.toString()));
+    command.addAll(List.of(args));
+    Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    String output = new String(process.getInputStream().readAllBytes());
+    int exit = process.waitFor();
+    org.junit.jupiter.api.Assertions.assertEquals(0, exit, output);
   }
 }
