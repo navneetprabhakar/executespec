@@ -2,7 +2,6 @@ package com.navneet.executespec.codeintel;
 
 import java.util.List;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.ResolvedModel;
 
@@ -13,16 +12,10 @@ import org.springframework.ai.chat.model.ChatResponse;
  * Shared LLM dispatch for the architecture-doc generators ({@link RepoArchitectureGenerator} +
  * {@link ArchitectureDocGenerator}).
  *
- * <p><b>Why this exists (RL-2026-06-002).</b> Both generators historically dispatched only through
- * the legacy {@link FallbackLlmRouter}, whose provider switch handles ONLY {@code
- * anthropic|openai|gemini}. So a project pinned to {@code DEEPSEEK} (or {@code OPENROUTER}) could
- * not generate its codemap/architecture context on the SAME provider as its worker — the docs
- * silently had to come from a different (and ~25x more expensive) model. This helper routes the
- * OpenAI-wire-compatible non-legacy providers through the canonical {@link LlmRouter} (which has
- * {@code deepseek} / {@code openrouter} / {@code fireworks} dispatch cases and also records cost
- * via {@code RunCostTracker} — closing the untracked-arch-gen-cost gap), while leaving the existing
- * {@code anthropic|openai|gemini} path on {@link FallbackLlmRouter} byte-identical (zero regression
- * for current providers).
+ * <p><b>Why this exists (RL-2026-06-002).</b> Architecture generation must use the same canonical
+ * provider transport as the worker so a project pinned to any supported provider keeps one
+ * auditable routing, key-resolution, retry, and cost-accounting path. The shared dispatch seam
+ * keeps the generators consistent while preserving their no-tool text contract.
  *
  * <p>No tools are bound ({@code toolsOverride=[]}) — arch-gen is a single prompt→text completion. A
  * synthetic {@link ExecutionContext} (workspace {@code /tmp}, never touched since no tool runs)
@@ -38,7 +31,6 @@ final class ArchLlmDispatch {
   private ArchLlmDispatch() {}
 
   static ChatResponse dispatch(
-      FallbackLlmRouter fallbackLlmRouter,
       LlmRouter llmRouter,
       ResolvedModel resolved,
       List<Message> messages,
