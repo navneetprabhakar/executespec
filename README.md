@@ -42,7 +42,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 ```
 .
 ├── pom.xml                       Maven build descriptor (parent SB 3.5.14, Spring AI 1.1.6 BOM)
-├── VERSION / Version             Single-line version stamps (1.0.0-M1)
+├── VERSION / Version             Single-line version stamps (2.0.0)
 ├── lombok.config                 Stop-bubbling + Spring @Qualifier propagation for constructor injection
 ├── .env.template                 Copy-to-.env env var template (LLM keys + integrations)
 ├── src/main/java/com/navneet/executespec/
