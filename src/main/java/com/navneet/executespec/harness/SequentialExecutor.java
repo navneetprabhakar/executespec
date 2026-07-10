@@ -44,6 +44,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -337,6 +338,50 @@ to boot — skip it for those.""";
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
 
+  /** Optional only for source-compatible unit construction; Spring always supplies it. */
+  private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
+
+  @Autowired
+  public SequentialExecutor(
+      WorkerAgent worker,
+      BuildProjectTool buildProjectTool,
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      SseBroadcaster broadcaster,
+      AgentTaskRepository taskRepo,
+      ModelResolver modelResolver,
+      com.navneet.executespec.router.ModelMatrixProperties matrixProps,
+      com.navneet.executespec.project.rag.RetrievalService retrievalService,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.context.ContextStore contextStore,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
+      com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
+      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService) {
+    this(
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        matrixProps,
+        retrievalService,
+        inLoopTestRunner,
+        featureFlagService,
+        contextStore,
+        costTracker,
+        gcsTaskCheckpointService,
+        availableProviderResolver,
+        goalContinuationAdvisor,
+        repoOrientationService);
+    this.taskOutcomeMetricService = taskOutcomeMetricService;
+  }
+
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
@@ -595,6 +640,7 @@ to boot — skip it for those.""";
           outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
         }
 
+        recordTaskOutcomeMetric(req, task, outcome);
         outcomes.add(outcome);
         runJournal.add(journalEntry(task, outcome));
         metrics.recordTaskStatus(outcome.status().name());
@@ -669,6 +715,49 @@ to boot — skip it for those.""";
       lowComplexityWorkerStartTierEffectiveByRun.remove(runId);
       continuationConfirmationScopeByRun.remove(runId);
     }
+  }
+
+  private void recordTaskOutcomeMetric(
+      ExecutionRequest req, PlannedTask task, TaskOutcome outcome) {
+    if (taskOutcomeMetricService == null || req == null || task == null || outcome == null) return;
+    String runId = req.runContext().runId();
+    RunCostTracker.Snapshot usage =
+        costTracker == null ? null : costTracker.snapshotTask(runId, task.id());
+    WorkerResult primary = outcome.workerOutcome();
+    WorkerResult retry = outcome.retryWorkerOutcome();
+    int iterations =
+        (primary == null ? 0 : primary.iterations()) + (retry == null ? 0 : retry.iterations());
+    taskOutcomeMetricService.record(
+        runId,
+        taskCategory(task),
+        task.complexity().name(),
+        taskLanguage(task),
+        outcome.retryAttempted() ? 2 : 1,
+        outcome,
+        usage == null ? 0 : usage.outputTokens(),
+        maxOutputTokens(task.complexity()),
+        iterations);
+  }
+
+  private static int maxOutputTokens(PlannedTask.Complexity complexity) {
+    return switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
+      case LOW -> 4096;
+      case MEDIUM -> 8192;
+      case HIGH -> 16384;
+    };
+  }
+
+  private static String taskLanguage(PlannedTask task) {
+    for (String file : taskValues(task.touchesFiles())) {
+      String lower = file.toLowerCase(Locale.ROOT);
+      if (lower.endsWith(".java")) return "java";
+      if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
+      if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
+      if (lower.endsWith(".py")) return "python";
+      if (lower.endsWith(".rs")) return "rust";
+      if (lower.endsWith(".go")) return "go";
+    }
+    return null;
   }
 
   private void emitTaskWavePlan(String runId, Plan plan) {
