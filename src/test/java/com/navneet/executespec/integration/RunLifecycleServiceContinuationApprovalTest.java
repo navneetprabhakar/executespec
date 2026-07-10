@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +28,7 @@ import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.entity.GateRecord;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
@@ -103,6 +105,78 @@ class RunLifecycleServiceContinuationApprovalTest {
             validationKickoff,
             modelResolver,
             validationReportRepository);
+  }
+
+  @Test
+  void planApproval_isIdempotentAndQueuesExactlyOneResume() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(gateStore.claimPlanGate(RUN_ID, true))
+        .thenReturn(GateStore.PlanGateClaim.CLAIMED)
+        .thenReturn(GateStore.PlanGateClaim.ALREADY_APPROVED);
+    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
+    when(pool.submit(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
+
+    assertThat(service.resolvePlanGate(RUN_ID, true))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
+    assertThat(service.resolvePlanGate(RUN_ID, true))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
+
+    verify(pool, times(1)).submit(any(Runnable.class));
+    verify(controlPort, times(1)).putActiveRun(eq(RUN_ID), any());
+  }
+
+  @Test
+  void restartRecovery_queuesApprovedPersistedPlanWithoutReplanning() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
+    GateRecord gate = approvedGate();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(gate));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+
+    assertThat(service.recoverPlanGate(RUN_ID))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
+    runnable.getValue().run();
+
+    ArgumentCaptor<RunOrchestrator.RunPipelineRequest> request =
+        ArgumentCaptor.forClass(RunOrchestrator.RunPipelineRequest.class);
+    verify(controlPort).runPipelineForResume(request.capture());
+    assertThat(request.getValue().skipApproval()).isTrue();
+    assertThat(request.getValue().planGateContinuation()).isNotNull();
+    assertThat(request.getValue().planGateContinuation().localRun()).isTrue();
+    assertThat(request.getValue().planGateContinuation().pinnedModel()).isEqualTo("pinned-model");
+  }
+
+  private PipelineRun approvedPlanRun(String status) {
+    return PipelineRun.builder()
+        .runId(RUN_ID)
+        .status(status)
+        .userRequest("implement feature")
+        .planJson(
+            """
+            {
+              "planTitle": "Approved plan",
+              "planSummary": "",
+              "tasks": [{"id": "T1", "title": "Implement", "description": ""}]
+            }
+            """)
+        .aiProvider("deepseek")
+        .workerModel("deepseek-chat")
+        .approvedExecutionMode("REALTIME")
+        .build();
+  }
+
+  private GateRecord approvedGate() throws Exception {
+    GateRecord gate = GateRecord.pending("gate:plan:" + RUN_ID, RUN_ID, "PLAN");
+    gate.setStatus("APPROVED");
+    gate.setComment(
+        objectMapper.writeValueAsString(
+            new RunOrchestrator.PlanGateContinuation(
+                1, true, true, false, "pinned-model", "WORKHORSE")));
+    return gate;
   }
 
   @Test

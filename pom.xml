@@ -18,7 +18,7 @@
 
   <groupId>com.navneet</groupId>
   <artifactId>executespec</artifactId>
-  <version>1.0.0-M1</version>
+  <version>2.0.0</version>
   <packaging>jar</packaging>
   <name>executespec</name>
   <description>Spec-driven AI coding platform — spec in, multi-repo PR out, with a verified score</description>
@@ -30,6 +30,11 @@
     <mockito.version>5.17.0</mockito.version>
     <!-- Override ByteBuddy 1.14 → 1.16 (officially supports Java 25, class file version 69) -->
     <byte-buddy.version>1.16.1</byte-buddy.version>
+    <!-- Unit/default integration tests are fail-closed for provider transports. Live provider
+         tests must opt in explicitly and still pass through the goal spend ledger. -->
+    <executespec.live-llm.enabled>false</executespec.live-llm.enabled>
+    <executespec.live-llm.test-mode>false</executespec.live-llm.test-mode>
+    <executespec.live-llm.reservation-id></executespec.live-llm.reservation-id>
   </properties>
 
   <dependencyManagement>
@@ -585,6 +590,11 @@
                keys; run via -Pintegration. Default Surefire run = fast unit tests
                only so CI's `mvn package` is bounded to a couple of minutes. -->
           <excludedGroups>e2e,integration,chaos</excludedGroups>
+          <systemPropertyVariables>
+            <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
+            <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
+            <executespec.live-llm.reservation-id>${executespec.live-llm.reservation-id}</executespec.live-llm.reservation-id>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <!-- Google Java Style enforcement via google-java-format.
@@ -658,6 +668,16 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>live-llm-test</id>
+      <properties>
+        <executespec.live-llm.enabled>true</executespec.live-llm.enabled>
+        <executespec.live-llm.test-mode>true</executespec.live-llm.test-mode>
+      </properties>
+    </profile>
+  </profiles>
 
   <repositories>
     <repository>

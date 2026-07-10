@@ -1,5 +1,6 @@
 package com.navneet.executespec.tool.remote;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -10,6 +11,8 @@ import java.util.concurrent.TimeoutException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agentsession.LocalHandsState;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -36,6 +39,7 @@ public class RemoteToolDispatcher {
 
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
+  private final LocalHandsStateService stateService;
 
   /**
    * How long a server-side tool call blocks for the client to execute and reply. Configurable via
@@ -51,31 +55,94 @@ public class RemoteToolDispatcher {
   public RemoteToolDispatcher(
       SseBroadcaster broadcaster,
       ObjectMapper objectMapper,
+      LocalHandsStateService stateService,
       @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs) {
     this.broadcaster = broadcaster;
     this.objectMapper = objectMapper;
+    this.stateService = stateService;
     this.toolTimeoutMs = toolTimeoutMs;
   }
 
   private static final class Session {
-    final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    final Map<String, PendingRemoteCall> pending = new ConcurrentHashMap<>();
+    volatile boolean connected = true;
   }
+
+  private record PendingRemoteCall(
+      String callId,
+      String runId,
+      String taskId,
+      String toolName,
+      String argsJson,
+      String permissionKind,
+      String frameJson,
+      CompletableFuture<String> future) {}
 
   /**
    * Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client.
    */
   public void register(String runId) {
-    sessions.put(runId, new Session());
-    log.info("[RemoteTool] registered local-execution session for run {}", runId);
+    Session existing = sessions.putIfAbsent(runId, new Session());
+    if (existing == null) {
+      log.info("[RemoteTool] registered local-execution session for run {}", runId);
+      return;
+    }
+    reconnect(runId);
   }
 
   /** Tear down a run's session, unblocking any in-flight calls. Called at run terminal. */
   public void unregister(String runId) {
     Session s = sessions.remove(runId);
     if (s != null) {
-      s.pending.values().forEach(f -> f.complete(errorEnvelope("INTERNAL", "run session closed")));
+      s.pending
+          .values()
+          .forEach(
+              call -> {
+                record(call, LocalHandsState.CLIENT_CANCELLED);
+                call.future()
+                    .complete(errorEnvelope("CLIENT_CANCELLED", "local-hands run session closed"));
+              });
       log.info("[RemoteTool] unregistered local-execution session for run {}", runId);
     }
+  }
+
+  /**
+   * Mark a client transport as disconnected without failing the worker's pending tool calls. A new
+   * client can retrieve and resume them through {@link #reconnect}.
+   */
+  public void disconnect(String runId) {
+    Session session = sessions.get(runId);
+    if (session == null) {
+      return;
+    }
+    session.connected = false;
+    session.pending.values().forEach(call -> record(call, LocalHandsState.AWAITING_CLIENT));
+    log.info(
+        "[RemoteTool] local client disconnected for run {}; {} call(s) remain pending",
+        runId,
+        session.pending.size());
+  }
+
+  /** Re-emit every in-flight call after a client reconnects and return durable pending state. */
+  public List<LocalHandsStateService.PendingCall> reconnect(String runId) {
+    Session session = sessions.get(runId);
+    if (session != null) {
+      session.connected = true;
+      session
+          .pending
+          .values()
+          .forEach(
+              call -> {
+                record(call, LocalHandsState.CLIENT_RECONNECTED);
+                emit(call);
+              });
+    }
+    return stateService.pending(runId);
+  }
+
+  /** Reloadable pending calls for clients that reconnect without an active SSE replay cursor. */
+  public List<LocalHandsStateService.PendingCall> pendingCalls(String runId) {
+    return stateService.pending(runId);
   }
 
   public boolean isRemote(String runId) {
@@ -95,23 +162,35 @@ public class RemoteToolDispatcher {
     }
     String callId = UUID.randomUUID().toString();
     CompletableFuture<String> future = new CompletableFuture<>();
-    s.pending.put(callId, future);
+    String permissionKind = permissionKind(toolName);
     try {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
-      broadcaster.emit(
-          runId,
-          RunEvent.toolCall(
-              runId, taskId, frameJson, callId, toolName, argsJson, permissionKind(toolName)));
+      PendingRemoteCall call =
+          new PendingRemoteCall(
+              callId, runId, taskId, toolName, argsJson, permissionKind, frameJson, future);
+      s.pending.put(callId, call);
+      record(call, LocalHandsState.AWAITING_CLIENT);
+      emit(call);
       return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
+      PendingRemoteCall call = s.pending.get(callId);
+      if (call != null) {
+        record(call, LocalHandsState.CLIENT_TIMEOUT);
+      }
       return errorEnvelope(
-          "INTERNAL", "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
+          "CLIENT_TIMEOUT",
+          "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return errorEnvelope("INTERNAL", "interrupted awaiting client tool '" + toolName + "'");
+      PendingRemoteCall call = s.pending.get(callId);
+      if (call != null) {
+        record(call, LocalHandsState.CLIENT_CANCELLED);
+      }
+      return errorEnvelope(
+          "CLIENT_CANCELLED", "interrupted awaiting client tool '" + toolName + "'");
     } catch (Exception e) {
       return errorEnvelope(
-          "INTERNAL", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
+          "REMOTE_DISPATCH", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
     } finally {
       s.pending.remove(callId);
     }
@@ -124,12 +203,37 @@ public class RemoteToolDispatcher {
       log.debug("[RemoteTool] result for unknown session (run={}, callId={})", runId, callId);
       return;
     }
-    CompletableFuture<String> f = s.pending.get(callId);
-    if (f != null) {
-      f.complete(resultEnvelopeJson);
+    PendingRemoteCall call = s.pending.get(callId);
+    if (call != null) {
+      record(call, LocalHandsState.COMPLETED);
+      call.future().complete(resultEnvelopeJson);
     } else {
       log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
     }
+  }
+
+  private void emit(PendingRemoteCall call) {
+    broadcaster.emit(
+        call.runId(),
+        RunEvent.toolCall(
+            call.runId(),
+            call.taskId(),
+            call.frameJson(),
+            call.callId(),
+            call.toolName(),
+            call.argsJson(),
+            call.permissionKind()));
+  }
+
+  private void record(PendingRemoteCall call, LocalHandsState state) {
+    stateService.record(
+        call.runId(),
+        call.callId(),
+        state,
+        call.taskId(),
+        call.toolName(),
+        call.permissionKind(),
+        call.frameJson());
   }
 
   private String frame(

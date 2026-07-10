@@ -23,11 +23,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ModelAccessService {
 
-  // Sarvam is intentionally dark-launched only. Gemini is temporarily dark for buyer-facing run
+  // Gemini is temporarily dark for buyer-facing run
   // selection after the 2026-07-02 provider matrix: it was reachable but returned PARTIAL/37 and
   // produced only README.md on the bounded smoke task while the other enabled providers passed.
   // Keep enum/YAML breadcrumbs for operator evals; customer-facing selection paths fail closed.
-  private static final Set<String> DISABLED_PROVIDERS = Set.of("gemini", "google", "sarvam");
+  private static final Set<String> DISABLED_PROVIDERS = Set.of("gemini", "google");
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -59,6 +59,9 @@ public class ModelAccessService {
 
   /** True when the user's tier may run this model. */
   public boolean isAllowed(String userId, String modelId) {
+    if (modelId == null || modelId.isBlank() || modelRegistry.providerFor(modelId) == null) {
+      return false;
+    }
     if (isDisabledModel(modelId)) return false;
     return !userIsFreeTier(userId) || isFreeModel(modelId);
   }
@@ -102,6 +105,9 @@ public class ModelAccessService {
       return;
     }
     String provider = modelRegistry.providerFor(modelName);
+    if (provider == null || provider.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown model: " + modelName);
+    }
     if (isDisabledProvider(provider)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,

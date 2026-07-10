@@ -2522,7 +2522,7 @@ public class WorkerAgent {
    */
   public static String callSignature(AssistantMessage.ToolCall tc) {
     String args = tc.arguments() == null ? "" : tc.arguments().replaceAll("\\s+", " ").trim();
-    return tc.name() + " " + args;
+    return tc.name() + "\u0000" + args;
   }
 
   /**

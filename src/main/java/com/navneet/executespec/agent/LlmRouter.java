@@ -103,6 +103,20 @@ public class LlmRouter {
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   /**
+   * Provider-transport kill switch. Maven test forks force this off; live tests must opt in
+   * explicitly after reserving provider budget. Initialized true so constructor-only unit tests
+   * that use mocked transports remain unchanged outside a Spring context.
+   */
+  @Value("${executespec.live-llm.enabled:true}")
+  private boolean liveLlmEnabled = true;
+
+  @Value("${executespec.live-llm.test-mode:false}")
+  private boolean liveLlmTestMode;
+
+  @Value("${executespec.live-llm.reservation-id:}")
+  private String liveLlmReservationId;
+
+  /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
    * exhausted, fail over to the next provider(s) in the model's YAML failover chain. Gated by this
    * flag (seeded default OFF, V226 — flip ON once validated) so production is byte-identical until
@@ -158,14 +172,6 @@ public class LlmRouter {
   @Value("${spring.ai.fireworks.base-url:https://api.fireworks.ai/inference/v1}")
   private String fireworksBaseUrl;
 
-  // 2026-06-26 — Sarvam is disabled/dark only. Keep config bindings for stale-env compatibility;
-  // dispatch still fails closed until quality evals pass.
-  @Value("${spring.ai.sarvam.api-key:}")
-  private String sarvamApiKey;
-
-  @Value("${spring.ai.sarvam.base-url:https://api.sarvam.ai/v1}")
-  private String sarvamBaseUrl;
-
   /**
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
    * matrix lost 3 runs to single 502/503 blips (incl. Gemini discarding 51 iterations of work on
@@ -182,6 +188,15 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
+    if (!liveLlmEnabled) {
+      throw new IllegalStateException(
+          "Live LLM transport is disabled. Explicitly authorize the live-llm-test profile and"
+              + " reserve provider budget before dispatch.");
+    }
+    if (liveLlmTestMode) {
+      ProviderTestBudgetGuard.authorize(
+          liveLlmReservationId, request.provider(), request.model(), request.context().runId());
+    }
     // If the caller supplied an explicit tool list (e.g. the planner restricting
     // to just submitPlan), honor it; otherwise bind every registered V2 tool.
     List<ToolCallback> tools =
@@ -501,8 +516,6 @@ public class LlmRouter {
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
       case "fireworks" -> callFireworks(request, tools, apiKey);
-      case "sarvam" ->
-          throw new IllegalStateException("Sarvam provider is disabled until quality eval passes");
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
@@ -757,40 +770,6 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(fireworksBaseUrl)
-            .build());
-  }
-
-  /**
-   * Disabled Sarvam dispatcher breadcrumb (2026-06-26). OpenAI-wire-compatible Indian-language
-   * provider (api.sarvam.ai). Reuses {@link OpenAiNativeToolClient} with a per-call base-URL like
-   * DeepSeek/Fireworks; Sarvam's model ids ({@code sarvam-105b} / {@code sarvam-30b}) are its own
-   * API names, so they pass straight through (no slug map).
-   *
-   * <p>Sarvam documents {@code max_tokens} (not OpenAI's newer {@code max_completion_tokens}), so
-   * the output budget is sent via {@code extraBody.max_tokens} — otherwise Sarvam falls back to its
-   * 2048-token default and truncates worker file writes. Verified live 2026-06-21: Bearer auth →
-   * 200, native tool_calls in OpenAI schema, {@code max_tokens} + {@code tool_choice:"auto"}
-   * accepted, and Sarvam returns {@code reasoning_content} (already captured + round-tripped by
-   * OpenAiNativeToolClient). Do not route here while the dispatch switch rejects provider=sarvam.
-   */
-  private ChatResponse callSarvam(LlmRequest r, List<ToolCallback> tools, String apiKey) {
-    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : sarvamApiKey;
-    if (key == null || key.isBlank()) {
-      throw new IllegalStateException(
-          "Sarvam api-key not configured (org BYOK key or spring.ai.sarvam.api-key)");
-    }
-    Map<String, Object> extra =
-        (r.maxTokens() != null) ? Map.of("max_tokens", r.maxTokens()) : Map.of();
-    return openAiNativeToolClient.call(
-        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
-            .model(r.model())
-            .messages(r.messages())
-            .tools(tools)
-            .temperature(r.temperature())
-            .toolChoice(r.toolChoice())
-            .apiKey(key)
-            .baseUrl(sarvamBaseUrl)
-            .extraBody(extra)
             .build());
   }
 

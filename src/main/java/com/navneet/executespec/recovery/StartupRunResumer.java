@@ -57,7 +57,7 @@ public class StartupRunResumer {
 
   /** Statuses that indicate a run was in-flight when the JVM died. */
   private static final List<String> RESUMABLE_STATUSES =
-      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
+      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL", "APPROVAL_RESUMING");
 
   /**
    * Hard cap on resume attempts per run. Once exceeded the run is permanently FAILED; the user can
@@ -131,10 +131,21 @@ public class StartupRunResumer {
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
-      if ("AWAITING_APPROVAL".equals(status)) {
-        // User-facing gate; no orchestrator thread required to unblock.
-        log.info("StartupRunResumer: run={} AWAITING_APPROVAL — left as-is", run.getRunId());
-        awaitingApproval++;
+      if ("AWAITING_APPROVAL".equals(status) || "APPROVAL_RESUMING".equals(status)) {
+        try {
+          var outcome = runLifecycleServiceProvider.getObject().recoverPlanGate(run.getRunId());
+          log.info(
+              "StartupRunResumer: run={} status={} recoverPlanGate → {}",
+              run.getRunId(),
+              status,
+              outcome);
+          awaitingApproval++;
+        } catch (Exception e) {
+          // Leave the durable gate untouched. A later approval retry or next restart can reconcile
+          // it; failing the run here would destroy a valid user decision.
+          log.error(
+              "StartupRunResumer: durable plan-gate recovery failed for {}", run.getRunId(), e);
+        }
         continue;
       }
 

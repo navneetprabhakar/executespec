@@ -7,9 +7,19 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.LocalHandsState;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -37,12 +47,15 @@ class RemoteToolDispatcherTest {
 
   private final ObjectMapper om = new ObjectMapper();
   private SseBroadcaster broadcaster;
+  private LocalHandsStateService stateService;
   private RemoteToolDispatcher dispatcher;
 
   @BeforeEach
   void setUp() {
     broadcaster = mock(SseBroadcaster.class);
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, 120_000L);
+    stateService = mock(LocalHandsStateService.class);
+    when(stateService.pending(any())).thenReturn(java.util.List.of());
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120_000L);
   }
 
   @Test
@@ -89,6 +102,24 @@ class RemoteToolDispatcherTest {
     assertThat(frame.get("args").get("path").asText()).isEqualTo("x");
     assertThat(frame.get("callId").asText()).isNotBlank();
     assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("read");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            eq(frame.get("callId").asText()),
+            eq(LocalHandsState.AWAITING_CLIENT),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any());
+    verify(stateService)
+        .record(
+            eq("r1"),
+            eq(frame.get("callId").asText()),
+            eq(LocalHandsState.COMPLETED),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any());
   }
 
   @Test
@@ -128,6 +159,72 @@ class RemoteToolDispatcherTest {
     assertPermissionKind("todo", "read");
     assertPermissionKind("ast_edit", "edit");
     assertPermissionKind("mcp_client", "shell");
+  }
+
+  @Test
+  void disconnect_keepsCallPending_andReconnectReemitsIt() throws Exception {
+    dispatcher.register("r1");
+    CountDownLatch firstEmission = new CountDownLatch(1);
+    AtomicInteger emissionCount = new AtomicInteger();
+    String[] callId = new String[1];
+    doAnswer(
+            inv -> {
+              RunEvent event = inv.getArgument(1);
+              callId[0] = om.readTree(event.payload()).get("callId").asText();
+              if (emissionCount.incrementAndGet() == 1) {
+                firstEmission.countDown();
+              } else {
+                dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"resumed\"}");
+              }
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
+
+      dispatcher.disconnect("r1");
+      assertThat(result.isDone()).isFalse();
+      dispatcher.reconnect("r1");
+
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("resumed");
+      assertThat(emissionCount).hasValue(2);
+      verify(stateService)
+          .record(
+              eq("r1"),
+              eq(callId[0]),
+              eq(LocalHandsState.CLIENT_RECONNECTED),
+              eq("t1"),
+              eq("readFile"),
+              eq("read"),
+              any());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void timeout_returnsClientStateInsteadOfInternalToolFailure() throws Exception {
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 1L);
+    dispatcher.register("r1");
+
+    JsonNode result = om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{}"));
+
+    assertThat(result.path("kind").asText()).isEqualTo("CLIENT_TIMEOUT");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            any(),
+            eq(LocalHandsState.CLIENT_TIMEOUT),
+            eq("t1"),
+            eq("shell"),
+            eq("shell"),
+            any());
   }
 
   private void assertPermissionKind(String toolName, String expected) throws Exception {

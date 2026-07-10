@@ -484,47 +484,33 @@ public class RunController {
       stateStore.setApprovedExecutionMode(runId, "BATCH");
     }
 
-    // V2 orchestrator blocks on GateStore.awaitPlanGate() which completes
-    // instantly on the in-memory future. If no future exists (server
-    // restarted while run was AWAITING_APPROVAL), the pipeline thread is
-    // gone — signalling the gate would write Redis/DB without anything
-    // reading them, leaving the run silently stuck. Detect that case and
-    // fail the run cleanly so the user gets an actionable message.
-    if (!gateStore.isPlanGateWaiting(runId)) {
-      log.warn(
-          "POST /api/runs/{}/approve — no pipeline thread waiting; "
-              + "run was interrupted during AWAITING_APPROVAL. Failing cleanly.",
-          runId);
-      // Still persist the gate decision (DB+Redis) — the audit record is
-      // useful — then mark the run FAILED with a retry-able reason.
-      gateStore.setPlanGate(runId, req.approved());
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              r -> {
-                r.setStatus("FAILED");
-                r.setFailureReason(
-                    "Approval received after server restart — pipeline "
-                        + "thread was lost. Please submit a new run.");
-                r.setCompletedAt(Instant.now());
-                stateStore.saveRun(r);
-              });
+    var outcome = runLifecycleService.resolvePlanGate(runId, req.approved());
+    if (outcome
+        == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+            .CONFLICTING_DECISION) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "Approval received but the pipeline was interrupted by a restart. "
-              + "Please submit a new run.");
+          HttpStatus.CONFLICT, "Plan gate was already resolved with the opposite decision.");
     }
-    // Atomic claim — if another concurrent approve call already resolved the gate,
-    // return 409 Conflict to this caller (adversarial-test-report Finding 4).
-    boolean claimed = gateStore.tryClaimPlanGate(runId, req.approved());
-    if (!claimed) {
+    if (outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .INVALID_STATE
+        || outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .PLAN_MISSING
+        || outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .WORKSPACE_GONE) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan gate has already been resolved by another caller.");
+          HttpStatus.CONFLICT, "Plan approval cannot resume from the run's current state.");
     }
 
     // Wave 2.1 — activation funnel step 4 (fires once per user, only on
     // positive approval — rejections don't count as "crossed the credit bar").
-    if (req.approved() && approveRun.getCreatedByUserId() != null) {
+    if (req.approved()
+        && outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .RESUME_QUEUED
+        && approveRun.getCreatedByUserId() != null) {
       eventTracking.track(
           approveRun.getCreatedByUserId(),
           com.navneet.executespec.analytics.EventName.PLAN_APPROVED,

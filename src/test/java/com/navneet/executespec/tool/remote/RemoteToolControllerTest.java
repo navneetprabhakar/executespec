@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,7 +42,7 @@ class RemoteToolControllerTest {
   }
 
   @Test
-  void submitToolResult_turnsMalformedEnvelopeIntoInternalError() throws Exception {
+  void submitToolResult_rejectsMalformedEnvelopeWithoutCompletingPendingCall() throws Exception {
     when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
 
     var body =
@@ -49,11 +50,8 @@ class RemoteToolControllerTest {
 
     var response = controller.submitToolResult(null, "run-1", body);
 
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
-    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
-    verify(dispatcher).complete(eq("run-1"), eq("call-2"), envelope.capture());
-    assertThat(om.readTree(envelope.getValue()).toString())
-        .isEqualTo("{\"ok\":false,\"kind\":\"INTERNAL\",\"message\":\"malformed tool result\"}");
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    verify(dispatcher, never()).complete(any(), any(), any());
   }
 
   @Test

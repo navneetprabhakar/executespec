@@ -15,11 +15,7 @@ public enum LlmProvider {
   // 2026-06-09 — Fireworks AI (api.fireworks.ai), OpenAI-wire-compatible route for Chinese open
   // models (DeepSeek / Kimi / GLM). Added to A/B against OpenRouter latency on Chinese models.
   // ENTERPRISE BYOK; not in the failover chain (deliberate operator route).
-  FIREWORKS("Fast-US"),
-  // 2026-06-26 — Sarvam is disabled/dark only. Keep the enum so stale persisted preferences and
-  // model ids resolve to a known provider and fail closed; do not expose it in catalogs or route
-  // production traffic until quality evals pass.
-  SARVAM("Indic");
+  FIREWORKS("Fast-US");
 
   private final String tag;
 

@@ -2,6 +2,7 @@ package com.navneet.executespec.harness;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.*;
 
 import com.navneet.executespec.harness.entity.GateRecord;
@@ -49,6 +50,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class GateStore {
 
+  public enum PlanGateClaim {
+    CLAIMED,
+    ALREADY_APPROVED,
+    ALREADY_REJECTED
+  }
+
   private static final Duration GATE_TTL = Duration.ofHours(4); // increased from 2h
   private static final Duration MAX_GATE_WAIT = Duration.ofHours(24);
   private static final long POLL_MS = 500;
@@ -86,10 +93,27 @@ public class GateStore {
    * exists.
    */
   public void openPlanGate(String runId) {
+    openPlanGate(runId, null);
+  }
+
+  /**
+   * Open a durable plan gate and persist the data needed to resume after approval. The continuation
+   * payload lives in {@link GateRecord#getComment()} so it survives a JVM restart without adding a
+   * second gate-state store.
+   */
+  public void openPlanGate(String runId, String continuationPayload) {
     String key = planKey(runId);
     try {
-      if (gateRepository.findById(key).isEmpty()) {
-        gateRepository.save(GateRecord.pending(key, runId, "PLAN"));
+      GateRecord record = gateRepository.findById(key).orElse(null);
+      if (record == null) {
+        record = GateRecord.pending(key, runId, "PLAN");
+        record.setComment(continuationPayload);
+        gateRepository.save(record);
+      } else if ("PENDING".equals(record.getStatus())
+          && continuationPayload != null
+          && !continuationPayload.equals(record.getComment())) {
+        record.setComment(continuationPayload);
+        gateRepository.save(record);
       }
     } catch (Exception ex) {
       // Lost a race against another thread inserting the same row — that's fine;
@@ -113,6 +137,15 @@ public class GateStore {
    * loser-409 surface.
    */
   public boolean tryClaimPlanGate(String runId, boolean approved) {
+    return claimPlanGate(runId, approved) == PlanGateClaim.CLAIMED;
+  }
+
+  /**
+   * Atomically resolve a plan gate while distinguishing an idempotent repeat from a conflicting
+   * decision. Database failure is fail-closed: execution must never start from a non-atomic
+   * best-effort gate write.
+   */
+  public PlanGateClaim claimPlanGate(String runId, boolean approved) {
     String key = planKey(runId);
     int updated;
     try {
@@ -120,12 +153,8 @@ public class GateStore {
           gateRepository.tryResolveIfPending(
               key, approved ? "APPROVED" : "REJECTED", Instant.now());
     } catch (Exception ex) {
-      log.warn(
-          "[GateStore] tryResolveIfPending failed for run={}, falling back: {}",
-          runId,
-          ex.getMessage());
-      setPlanGate(runId, approved);
-      return true; // can't detect race, behave as before
+      throw new IllegalStateException(
+          "Unable to atomically resolve plan gate for run " + runId, ex);
     }
     if (updated == 0) {
       boolean missing = gateRepository.findById(key).isEmpty();
@@ -138,13 +167,13 @@ public class GateStore {
           updated =
               gateRepository.tryResolveIfPending(
                   key, approved ? "APPROVED" : "REJECTED", Instant.now());
-        } catch (Exception ignore) {
-          /* fall through */
+        } catch (Exception ex) {
+          throw new IllegalStateException(
+              "Unable to atomically resolve newly opened plan gate for run " + runId, ex);
         }
-        if (updated == 0) return false;
+        if (updated == 0) return resolvedClaim(key);
       } else {
-        // Row exists but already resolved — loser.
-        return false;
+        return resolvedClaim(key);
       }
     }
     // We won the race — propagate via Redis + in-memory future.
@@ -160,7 +189,23 @@ public class GateStore {
       log.debug(
           "[GateStore] Plan gate resolved via in-memory future for run {}: {}", runId, approved);
     }
-    return true;
+    return PlanGateClaim.CLAIMED;
+  }
+
+  private PlanGateClaim resolvedClaim(String key) {
+    GateRecord existing = gateRepository.findById(key).orElse(null);
+    if (existing != null && "APPROVED".equals(existing.getStatus())) {
+      return PlanGateClaim.ALREADY_APPROVED;
+    }
+    if (existing != null && "REJECTED".equals(existing.getStatus())) {
+      return PlanGateClaim.ALREADY_REJECTED;
+    }
+    throw new IllegalStateException("Plan gate is not pending or durably resolved: " + key);
+  }
+
+  public Optional<GateRecord> findPlanGate(String runId) {
+    if (runId == null || runId.isBlank()) return Optional.empty();
+    return gateRepository.findById(planKey(runId));
   }
 
   /**

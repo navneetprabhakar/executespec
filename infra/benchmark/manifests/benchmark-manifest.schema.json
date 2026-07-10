@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://executespec.ai/schemas/benchmark-manifest-v1.json",
+  "title": "ExecuteSpec benchmark manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "suite",
+    "repository",
+    "model",
+    "prompt",
+    "toolSchema",
+    "harness",
+    "dataset",
+    "featureFlags",
+    "budgets",
+    "results"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": {
+      "enum": ["REPRODUCIBLE", "EXPLORATORY", "EXPLORATORY_RETROSPECTIVE", "SUPERSEDED", "INVALID"]
+    },
+    "suite": { "type": "string", "minLength": 1 },
+    "repository": {
+      "type": "object",
+      "required": ["sha"],
+      "properties": { "sha": { "type": ["string", "null"] }, "shaRange": { "type": ["string", "null"] } }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "matrixId", "providerSlug"],
+      "properties": {
+        "provider": { "type": "string" },
+        "matrixId": { "type": "string" },
+        "providerSlug": { "type": ["string", "null"] }
+      }
+    },
+    "prompt": { "$ref": "#/$defs/identity" },
+    "toolSchema": { "$ref": "#/$defs/identity" },
+    "harness": { "$ref": "#/$defs/identity" },
+    "dataset": {
+      "type": "object",
+      "required": ["name", "slice", "sha256"],
+      "properties": {
+        "name": { "type": "string" },
+        "slice": { "type": "string" },
+        "sha256": { "type": ["string", "null"] }
+      }
+    },
+    "featureFlags": { "type": "object" },
+    "budgets": { "type": "object" },
+    "results": { "type": "object" },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": ["sha256"],
+      "properties": { "sha256": { "type": ["string", "null"] }, "description": { "type": "string" } }
+    }
+  }
+}

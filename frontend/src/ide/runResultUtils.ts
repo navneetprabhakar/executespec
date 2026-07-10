@@ -421,8 +421,6 @@ function providerDisplay(provider?: string | null): string {
       return 'Gemini';
     case 'ANTHROPIC':
       return 'Anthropic';
-    case 'SARVAM':
-      return 'Sarvam';
     default:
       return raw.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
   }
@@ -564,7 +562,6 @@ function titleCaseProvider(value: string | null): string | null {
   if (normalized === 'FIREWORKS') return 'Fireworks';
   if (normalized === 'ANTHROPIC') return 'Anthropic';
   if (normalized === 'GEMINI') return 'Gemini';
-  if (normalized === 'SARVAM') return 'Sarvam';
   return value
     .toLowerCase()
     .split(/[_\s-]+/)

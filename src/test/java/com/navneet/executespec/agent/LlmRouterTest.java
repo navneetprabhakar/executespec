@@ -38,6 +38,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @DisplayName("LlmRouter dispatch / retry / failover")
 class LlmRouterTest {
@@ -116,6 +117,31 @@ class LlmRouterTest {
         .messages(List.of(new UserMessage("hi")))
         .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/router-test")))
         .build();
+  }
+
+  @Test
+  void testTransportKillSwitchRejectsBeforeAnyProviderOrUsageCall() {
+    LlmRouter subject = build();
+    ReflectionTestUtils.setField(subject, "liveLlmEnabled", false);
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Live LLM transport is disabled");
+    verify(openai, never()).call(any());
+    verify(managedAiUsageService, never())
+        .authorizeCall(anyString(), anyString(), anyString(), any(), any(), any());
+  }
+
+  @Test
+  void goalLiveTestModeRequiresAProviderBudgetReservation() {
+    LlmRouter subject = build();
+    ReflectionTestUtils.setField(subject, "liveLlmTestMode", true);
+    ReflectionTestUtils.setField(subject, "liveLlmReservationId", "");
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("requires executespec.live-llm.reservation-id");
+    verify(openai, never()).call(any());
   }
 
   private static LlmRequest attributedReq(String provider, String model) {

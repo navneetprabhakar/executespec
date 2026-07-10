@@ -18,6 +18,7 @@ import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.context.ApplicationContext;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("FallbackLlmRouter")
@@ -72,6 +73,16 @@ class FallbackLlmRouterTest {
             modelPerfTracker,
             sseBroadcaster,
             openAiNativeToolClient);
+  }
+
+  @Test
+  void testTransportKillSwitchBlocksLegacyRouterBeforeProviderDispatch() {
+    ReflectionTestUtils.setField(router, "liveLlmEnabled", false);
+
+    assertThatThrownBy(
+            () -> router.callDirect("anthropic", "claude-sonnet-4-6", new Prompt("test")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Live LLM transport is disabled");
   }
 
   @Nested
