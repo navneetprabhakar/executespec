@@ -10,9 +10,9 @@
 | Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER child-session protocol now exists with depth, child, turn, cost, cancellation, ownership, and evidence guards; model execution/coordinator wiring remains |
 | Automatic verification default | FAIL | Critical V255 gates are OFF |
 | Hot handoff and client reconnect | FAIL | Pending tool calls can time out on malformed/disconnected clients |
-| TUI route shell and Inspector removed | FAIL | Current default is route-first with fixed rails |
+| TUI route shell and Inspector removed | PARTIAL | Session route now hides persistent sidebar/Inspector; non-session route chrome and duplicate renderers remain |
 | Exactly rich OpenTUI and plain renderer | FAIL | Frame coalescing is now bounded and tested, but route shell, Inspector, Ink, split-footer, and readline paths still ship |
-| Web/CLI semantic state shared | PARTIAL | Shared semantic transcript adapters now exist in CLI core and Web; they are not yet the single renderer/state path |
+| Web/CLI semantic state shared | PARTIAL | Shared semantic transcript adapters now exist in CLI core and Web; CLI session route now hides sidebar/Inspector, but a single renderer/state path is not complete |
 | SOTA comparator gate | BLOCKED | No frozen paired repeated comparator; provider caps limit statistical power |
 | Benchmark manifests reproduce | FAIL | Current sample evidence lacks one complete identity manifest |
 | Provider readiness honest | PARTIAL | Existing live probes are not a release-wide readiness registry |
@@ -20,10 +20,10 @@
 | Clean install and migration upgrade | PENDING | Docker/Postgres integration migration run still required; static schema/upgrade contract passes |
 | Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; clean-install baseline is intentionally deferred until schema freeze |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test` — 2218 tests, 0 failures/errors; focused context suite 15/15 |
-| Frontend build/lint/format/tests | PENDING | Not run on integration branch |
+| Frontend build/lint/format/tests | PASS | 151 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS | 911/911 on `codex/cli-1.0` (core 115, CLI 784, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
-| Docs links and integrity | PARTIAL | Canonical entrypoints, release facts, and duplicate-ID policy are fixed; docs validator reports 245 remaining broken links in legacy architecture/archive references |
+| Docs links and integrity | PARTIAL | Canonical entrypoints, release facts, duplicate-ID policy, and canonical architecture links are fixed; docs validator reports 149 remaining links outside the canonical set |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
 | No orphan prompts | UNKNOWN | Verifier covers only a small critical subset |
 | No unauthorized provider spend | PARTIAL | LlmRouter + deprecated FallbackLlmRouter require exact reservations in goal-live mode; direct provider/batch transports still need the same guard |
