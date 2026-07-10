@@ -1236,12 +1236,14 @@ export function AgentConversation({
   runCard,
   runCost,
   runStreamStatus,
+  hasNewActivity = false,
   input,
   attachments,
   uploading,
   endRef,
   dispatch,
   onScroll,
+  onJumpToLatest,
   onSend,
   onStop,
   onAddFiles,
@@ -1262,12 +1264,14 @@ export function AgentConversation({
   runCard: api.RunDetail | null;
   runCost: number | null;
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  hasNewActivity?: boolean;
   input: string;
   attachments: AgentAttachmentLite[];
   uploading: boolean;
   endRef: RefObject<HTMLDivElement>;
   dispatch: Dispatch<AgentAction>;
   onScroll: (e: UIEvent<HTMLDivElement>) => void;
+  onJumpToLatest?: () => void;
   onSend: () => void;
   onStop: () => void;
   onAddFiles: (files: FileList | null) => void;
@@ -1354,6 +1358,16 @@ export function AgentConversation({
           )}
           <div ref={endRef} />
         </div>
+        {hasNewActivity && onJumpToLatest && (
+          <button
+            className='agent-jump-latest'
+            type='button'
+            onClick={onJumpToLatest}
+            aria-label='Jump to latest activity'
+          >
+            <span aria-hidden='true'>↓</span> New activity
+          </button>
+        )}
       </div>
       <div className='agent-composer-wrap'>
         <div className='agent-chat-col'>
