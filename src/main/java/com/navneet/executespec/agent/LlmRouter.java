@@ -154,6 +154,45 @@ public class LlmRouter {
     return callText(provider, model, messages, runId, agentRole, stepId, null);
   }
 
+  /** Text seam with strict provider pinning; transient failures never fail over cross-provider. */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId) {
+    return callTextStrict(provider, model, messages, runId, agentRole, stepId, null);
+  }
+
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens) {
+    return call(
+        LlmRequest.builder()
+            .provider(provider)
+            .model(model)
+            .messages(messages)
+            .context(
+                new com.navneet.executespec.tool.ExecutionContext(
+                    (runId == null || runId.isBlank())
+                        ? "text-" + Integer.toHexString(messages.hashCode())
+                        : runId,
+                    (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole,
+                    Path.of(System.getProperty("java.io.tmpdir", "/tmp")).toAbsolutePath().normalize()))
+            .toolsOverride(List.of())
+            .agentRole(agentRole)
+            .stepId(stepId)
+            .maxTokens(maxTokens)
+            .strictProvider(true)
+            .build());
+  }
+
   /** Text seam with an explicit output cap for compatibility surfaces with a bounded contract. */
   public ChatResponse callText(
       String provider,
@@ -427,7 +466,7 @@ public class LlmRouter {
       RunKeyContext keys,
       RunKeyContext.Source source,
       RuntimeException primaryError) {
-    if (!featureFlagService.isEnabled(FAILOVER_FLAG)) return null;
+    if (request.strictProvider() || !featureFlagService.isEnabled(FAILOVER_FLAG)) return null;
     if (!isTransientError(primaryError)) return null;
 
     String primaryProvider = request.provider().toLowerCase(Locale.ROOT);
