@@ -53,6 +53,13 @@ public class AgentStreamTurnRunner {
               "run_api_allowed", ctx.decision().policy().runApiAllowed(),
               "requires_confirmation", ctx.decision().requiresUserConfirmation()));
 
+      // Provider-free scripted stream used only by the local/dev Web release fixture. The
+      // session id is minted by WebQaFixtureController and never comes from a customer request.
+      if (ctx.sessionId().startsWith("web-qa-")) {
+        runWebQaFixtureStream(emitter, ctx);
+        return;
+      }
+
       if (!featureFlags.isEnabled("spec.chat.enabled")) {
         String note = "spec.chat.enabled is OFF";
         sessionService.completeStreamTurn(
@@ -131,6 +138,30 @@ public class AgentStreamTurnRunner {
       }
       // The response is already committed as text/event-stream. Completing with an exception
       // re-enters Spring's JSON exception handlers and produces a second broken response.
+      emitter.complete();
+    }
+  }
+
+  private void runWebQaFixtureStream(
+      SseEmitter emitter, AgentSessionService.StreamTurnContext ctx) {
+    try {
+      Thread.sleep(120);
+      send(emitter, "token", Map.of("delta", "Fixture stream started. "));
+      Thread.sleep(120);
+      send(emitter, "tool_call", Map.of("tool", "readFile", "args", "{\"path\":\"src/app.ts\"}", "id", "web-qa-read"));
+      Thread.sleep(120);
+      send(emitter, "tool_result", Map.of("id", "web-qa-read", "result", "{\"ok\":true,\"path\":\"src/app.ts\"}"));
+      Thread.sleep(120);
+      send(emitter, "token", Map.of("delta", "Verification evidence is ready for review."));
+      sessionService.completeStreamTurn(
+          ctx,
+          "Fixture stream started. Verification evidence is ready for review.",
+          new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+      send(emitter, "done", Map.of("session_id", ctx.sessionId(), "turn_id", ctx.turnId(), "turn_count", ctx.sequence(), "cost_usd", 0.0));
+      emitter.complete();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      sessionService.disconnectStreamTurn(ctx);
       emitter.complete();
     }
   }
