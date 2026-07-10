@@ -5,7 +5,7 @@
 | Gate | State | Evidence / blocker |
 |---|---|---|
 | One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
-| Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly and invokes safe compaction when reserves are unsafe; durable journal and broader evidence-bundle integration remain. FastContext-compatible local-index seam is documented, but no external index dependency is required |
+| Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly, invokes safe compaction when reserves are unsafe, and the production prompt now mandates repository-localization/search-first behavior with explicit headroom and evidence reuse; durable journal and broader evidence-bundle integration remain. FastContext-compatible local-index seam is documented, but no external index dependency is required |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` drives `searchFiles` with typed citations/fingerprints/paging and a bounded metadata-aware line cache; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER execution now runs read-only SpecChat rounds with tool allow-list, per-round turns/cost, evidence, and cancellation; parent coordinator/UI integration remains |
 | Automatic verification default | PARTIAL | Evidence-safe `worker.verify-before-complete.enabled` is default ON via V239; edit-burst auto-verify and broader verification graduation remain OFF |
@@ -22,7 +22,7 @@
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2416 tests, 0 failures/errors; focused context/subagent/routing/provider-guard suites pass |
 | Frontend build/lint/format/tests | PASS | 154 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS | 859/859 on `codex/cli-1.0` (core 115, CLI 732, VS Code 12) after deleting obsolete Ink tests and implementation |
-| Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
+| Visual QA | FAIL | Web now exposes live connection state to screen readers and sighted operators, but authenticated protected-flow screenshots and full TUI visual acceptance are still missing |
 | Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
 | No orphan prompts | UNKNOWN | Verifier covers only a small critical subset |
