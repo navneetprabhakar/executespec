@@ -22,8 +22,8 @@ describe('agent run event stream', () => {
   });
 
   it('reads terminal status from a typed RUN_DETAIL snapshot', () => {
-    expect(
-      terminalStatusFromEvent({type: 'RUN_DETAIL', data: {status: 'CANCELLED'}}),
-    ).toBe('CANCELLED');
+    expect(terminalStatusFromEvent({type: 'RUN_DETAIL', data: {status: 'CANCELLED'}})).toBe(
+      'CANCELLED',
+    );
   });
 });

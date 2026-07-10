@@ -53,7 +53,7 @@ export function terminalStatusFromEvent(event: AgentRunEvent): string | null {
     type === 'RUN_DETAIL'
       ? value?.status
       : type === 'RUN_STATUS' || type === 'COMPLETE'
-        ? event.payload ?? event.status ?? value?.status
+        ? (event.payload ?? event.status ?? value?.status)
         : null;
   if (candidate == null) return null;
   const status = String(candidate);
