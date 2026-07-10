@@ -653,7 +653,7 @@ public class WorkerAgent {
       // Bind once so context planning measures the exact schema set that the request will send.
       // Reusing the same list also prevents headroom accounting from drifting from dispatch.
       List<org.springframework.ai.tool.ToolCallback> workerTools =
-          toolRegistry.bindForWorker(req.context(), req.provider());
+          toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
 
       // ExecuteSpec 2.0 context headroom: before request assembly, reserve output + safety against
       // the provider model's window and proactively compact only when the remaining headroom is
@@ -1998,7 +1998,7 @@ public class WorkerAgent {
   }
 
   private List<ToolCallback> terminalFinalizerTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
     if (!restrict) return all;
     java.util.Set<String> allow =
         java.util.Set.of("writeFile", "editFile", "shell", CompleteTaskTool.NAME);
@@ -2016,7 +2016,7 @@ public class WorkerAgent {
    * change).
    */
   private List<ToolCallback> salvageTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
     if (!restrict) return all;
     java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
     List<ToolCallback> filtered =

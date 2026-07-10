@@ -152,11 +152,44 @@ public class ModelRegistry {
    * Provider key matched case-insensitively.
    */
   public ModelMatrixProperties.CapabilityProfile capabilityProfileFor(String provider) {
+    return capabilityProfileFor(provider, null);
+  }
+
+  /**
+   * Resolve a capability profile for a concrete model, falling back to its provider profile.
+   *
+   * <p>Provider-level tuning is useful for broad transport differences, but it is too coarse for a
+   * provider that exposes materially different models (for example a frontier model and a small
+   * model with different tool-schema tolerance). Model-specific entries use the key {@code
+   * provider/model} and take precedence. The fallback preserves the existing provider-only contract
+   * and keeps an empty matrix byte-identical.
+   */
+  public ModelMatrixProperties.CapabilityProfile capabilityProfileFor(
+      String provider, String model) {
     if (provider == null || matrixProps.getCapabilityProfiles() == null) return null;
-    ModelMatrixProperties.CapabilityProfile exact =
-        matrixProps.getCapabilityProfiles().get(provider);
+    Map<String, ModelMatrixProperties.CapabilityProfile> profiles =
+        matrixProps.getCapabilityProfiles();
+    if (model != null && !model.isBlank()) {
+      String canonical = canonicalize(model);
+      for (String key : List.of(provider + "/" + canonical, provider + "/" + model)) {
+        ModelMatrixProperties.CapabilityProfile modelProfile = profiles.get(key);
+        if (modelProfile != null) return modelProfile;
+        modelProfile =
+            profiles.entrySet().stream()
+                .filter(entry -> entry.getKey().equalsIgnoreCase(key))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+        if (modelProfile != null) return modelProfile;
+      }
+    }
+    ModelMatrixProperties.CapabilityProfile exact = profiles.get(provider);
     if (exact != null) return exact;
-    return matrixProps.getCapabilityProfiles().get(provider.toLowerCase(java.util.Locale.ROOT));
+    return profiles.entrySet().stream()
+        .filter(entry -> entry.getKey().equalsIgnoreCase(provider))
+        .map(Map.Entry::getValue)
+        .findFirst()
+        .orElse(null);
   }
 
   public int contextLimitFor(String modelName) {

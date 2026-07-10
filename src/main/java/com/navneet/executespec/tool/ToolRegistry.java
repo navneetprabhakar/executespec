@@ -171,13 +171,22 @@ public class ToolRegistry {
    * providers). Null provider / no profile ⇒ global flag gating only.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider) {
+    return bindForWorker(ctx, provider, null);
+  }
+
+  /**
+   * Provider/model-aware worker bind. A model profile ({@code provider/model}) takes precedence
+   * over a provider profile; this permits safe tuning when models behind one provider have
+   * different tool-schema behaviour.
+   */
+  public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
     // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
     // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
             && !isRemoteRun(ctx);
-    final java.util.Set<String> profileTools = profileOptionalTools(provider);
+    final java.util.Set<String> profileTools = profileOptionalTools(provider, model);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
@@ -190,9 +199,16 @@ public class ToolRegistry {
   }
 
   private java.util.Set<String> profileOptionalTools(String provider) {
+    return profileOptionalTools(provider, null);
+  }
+
+  private java.util.Set<String> profileOptionalTools(String provider, String model) {
     if (provider == null || modelRegistry == null) return java.util.Set.of();
     try {
-      var profile = modelRegistry.capabilityProfileFor(provider);
+      var profile =
+          model == null
+              ? modelRegistry.capabilityProfileFor(provider)
+              : modelRegistry.capabilityProfileFor(provider, model);
       if (profile == null || profile.getOptionalTools() == null) return java.util.Set.of();
       return new java.util.HashSet<>(profile.getOptionalTools());
     } catch (Exception e) {

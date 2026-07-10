@@ -320,4 +320,34 @@ class ToolRegistryWorkerBindTest {
         toolRegistry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     org.assertj.core.api.Assertions.assertThat(nullProvider).containsExactly("readFile");
   }
+
+  @Test
+  void modelProfileOverridesProviderProfileForToolBinding() {
+    var registry = org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class);
+    var providerProfile =
+        new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    providerProfile.setOptionalTools(List.of("runWorkspaceTests"));
+    var modelProfile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    modelProfile.setOptionalTools(List.of("verifyBoot"));
+    org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic"))
+        .thenReturn(providerProfile);
+    org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic", "claude-sonnet-5"))
+        .thenReturn(modelProfile);
+
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(false), verifyBoot(false)),
+            new ObjectMapper(),
+            null,
+            null,
+            registry);
+
+    List<String> names =
+        toolRegistry.bindForWorker(ctx(), "anthropic", "claude-sonnet-5").stream()
+            .map(t -> t.getToolDefinition().name())
+            .toList();
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "verifyBoot")
+        .doesNotContain("runWorkspaceTests");
+  }
 }
