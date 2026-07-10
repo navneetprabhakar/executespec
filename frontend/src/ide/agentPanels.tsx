@@ -651,7 +651,8 @@ function Activity({items}: {items: StreamTimelineItem[]}) {
     (i) =>
       i.type === 'tool' ||
       i.type === 'run' ||
-      (i.type === 'system' && /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION/i.test(i.title)),
+      (i.type === 'system' &&
+        /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN_VALIDATION_EVIDENCE/i.test(i.title)),
   );
   if (!shown.length) return null;
   return (
