@@ -38,6 +38,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SearchFilesTool implements Tool {
 
+  private final RepositorySearchService repositorySearchService;
+
+  public SearchFilesTool(RepositorySearchService repositorySearchService) {
+    this.repositorySearchService = repositorySearchService;
+  }
+
   private static final Set<String> HIDDEN_DIRS =
       Set.of(
           "node_modules",
@@ -124,6 +130,45 @@ public class SearchFilesTool implements Tool {
     int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
     maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
     final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
+    try {
+      RepositorySearchService.SearchResult structured =
+          repositorySearchService.search(
+              ctx.workspaceRoot(),
+              new RepositorySearchService.SearchRequest(
+                  patternStr,
+                  RepositorySearchService.SearchMode.REGEX,
+                  true,
+                  dir,
+                  filePattern,
+                  maxResults,
+                  offset));
+      if (structured.hits().isEmpty()) return ToolResult.ok("(no matches)");
+      StringBuilder typed = new StringBuilder();
+      typed
+          .append(structured.totalMatches())
+          .append(structured.hasMore() ? "+" : "")
+          .append(" match(es); repositorySha=")
+          .append(structured.repositorySha())
+          .append("; inventory=")
+          .append(structured.inventoryFingerprint())
+          .append('\n');
+      for (RepositorySearchService.SearchHit hit : structured.hits()) {
+        typed
+            .append(hit.path())
+            .append(':')
+            .append(hit.line())
+            .append(':')
+            .append(hit.preview())
+            .append('\n');
+      }
+      return ToolResult.ok(typed.toString().trim());
+    } catch (IllegalArgumentException e) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+    } catch (SecurityException e) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, e.getMessage());
+    } catch (RuntimeException e) {
+      log.warn("structured repository search failed; retaining compatibility fallback", e);
+    }
     Pattern regex;
     try {
       regex = Pattern.compile(patternStr);
