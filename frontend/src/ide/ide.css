@@ -3275,6 +3275,27 @@
 .agent-activity-chip svg {
   color: var(--ide-blue);
 }
+.agent-activity-evidence {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--ide-blue) 28%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ide-blue) 7%, transparent);
+}
+.agent-activity-evidence summary {
+  cursor: pointer;
+  list-style: none;
+}
+.agent-activity-evidence summary::-webkit-details-marker {
+  display: none;
+}
+.agent-activity-evidence p {
+  margin: 0;
+  padding: 0 10px 9px 31px;
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .agent-typing {
   display: inline-flex;
   gap: 4px;

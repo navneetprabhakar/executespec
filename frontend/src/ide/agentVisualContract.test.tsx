@@ -165,6 +165,31 @@ describe('protected transcript visual contract', () => {
     expect(card?.querySelector('button')).not.toBeNull();
   });
 
+  it('keeps persisted verification evidence expandable in the transcript', () => {
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[
+          {
+            id: 'evidence-1',
+            type: 'system',
+            title: 'RUN VALIDATION EVIDENCE',
+            detail: 'Build passed · tests 12/12 · reviewer CLEAN',
+          },
+        ]}
+        hasNewActivity={false}
+        runStreamStatus='CLOSED'
+        runCard={null}
+      />,
+    );
+
+    const evidence = rendered.querySelector('.agent-activity-evidence');
+    expect(evidence).not.toBeNull();
+    expect(evidence?.querySelector('summary')?.textContent).toContain('Verification evidence');
+    expect(evidence?.querySelector('p')?.textContent).toContain('Build passed');
+  });
+
   it('exposes settings and chats as distinct modal screenshot surfaces', () => {
     const top = mount(
       <AgentTopBar

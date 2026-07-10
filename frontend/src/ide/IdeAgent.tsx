@@ -73,7 +73,9 @@ function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
 function persistedEventTimeline(events: api.AgentActionEvent[] | null | undefined) {
   return (events ?? [])
     .filter((event) =>
-      /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN_VALIDATION_EVIDENCE/i.test(event.type),
+      /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN[ _]VALIDATION[ _]EVIDENCE/i.test(
+        event.type,
+      ),
     )
     .map((event) => {
       let detail = event.payloadJson ?? undefined;
