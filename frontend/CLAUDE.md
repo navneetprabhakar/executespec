@@ -94,7 +94,7 @@ JetBrainsMono variable font is the single typeface for the entire app (PR #108, 
 
 `frontend/src/lib/api/` is the primary API client. `core.ts` owns `BASE`, auth headers, `ApiError`, error parsing, and the shared `req<T>` / `reqText` helpers; domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, etc.) export endpoint helpers through `index.ts`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
 
-For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md).
+For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md). The agent POST-SSE client treats `done`/`error` as explicit terminal events and rejects a transport EOF after a partial stream, so a dropped connection cannot be rendered as a completed answer; callers can then refresh durable turns and retry.
 
 ## Build + lint gates
 

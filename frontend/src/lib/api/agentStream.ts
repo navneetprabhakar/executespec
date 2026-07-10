@@ -176,15 +176,22 @@ export async function streamAgentTurn(
     const raw = await response.text().catch(() => '');
     throw new ApiError(response.status, parseErrorMessage(response.status, raw));
   }
-  if (!response.body) return;
+  if (!response.body) {
+    throw new ApiError(502, 'Agent stream ended before it delivered a response. Please retry.');
+  }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminalEventSeen = false;
+  const markTerminal = (event: string) => {
+    if (event === 'done' || event === 'error') terminalEventSeen = true;
+  };
 
   const emitFrame = (frame: string) => {
     const parsed = parseAgentSseFrame(frame);
     if (!parsed) return;
+    markTerminal(parsed.event);
     handlers.onEvent?.(parsed);
     if (parsed.event === 'ack') handlers.onAck?.(parsed.data as AgentStreamAck);
     if (parsed.event === 'route_decision') {
@@ -207,6 +214,11 @@ export async function streamAgentTurn(
     if (parsed.event === 'error') handlers.onErrorEvent?.(parsed.data as AgentStreamError);
   };
 
+  // A successful HTTP response is not proof that a turn completed. Proxies and browser
+  // connections can close an SSE body after a partial sequence (for example after `ack` or a
+  // few tokens). Keep this explicit so callers do not render a truncated answer as complete and
+  // can offer their normal retry/reload path. `error` is terminal because the server has already
+  // persisted the failure; transport EOF without either terminal event is not.
   let reading = true;
   while (reading) {
     const {value, done} = await reader.read();
@@ -222,4 +234,10 @@ export async function streamAgentTurn(
     reading = !done;
   }
   if (buffer.trim()) emitFrame(buffer);
+  if (!terminalEventSeen && !signal?.aborted) {
+    throw new ApiError(
+      502,
+      'Agent stream ended before the turn completed. Refresh the conversation and retry.',
+    );
+  }
 }
