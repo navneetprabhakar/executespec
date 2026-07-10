@@ -86,7 +86,8 @@ class SubagentProtocolServiceTest {
 
     var decision =
         service.evaluateDelegation(
-            new SpawnRequest("req", "parent", "turn", Role.SCOUT, "locate mobile reconnect", 4, 0.5),
+            new SpawnRequest(
+                "req", "parent", "turn", Role.SCOUT, "locate mobile reconnect", 4, 0.5),
             "user",
             "org");
 
@@ -201,8 +202,7 @@ class SubagentProtocolServiceTest {
         .thenReturn(3L);
 
     var direct =
-        List.of(
-            childLink("child-a", 2.0), childLink("child-b", 2.0), childLink("child-c", 2.0));
+        List.of(childLink("child-a", 2.0), childLink("child-b", 2.0), childLink("child-c", 2.0));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
         .thenReturn(

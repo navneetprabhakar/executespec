@@ -42,13 +42,16 @@ public class SubagentProtocolService {
   public static final int MAX_CHILDREN_PER_PARENT = 4;
   public static final int MAX_TURNS_PER_CHILD = 12;
   public static final double MAX_COST_USD_PER_CHILD = 2.0;
+
   /**
    * Hard ceiling for the complete descendant tree rooted at one parent session. A child budget is
    * not a license to fan out another full set of children: nested children consume the same
    * parent-owned budget and are counted recursively from the append-only spawn links.
    */
   public static final int MAX_TURNS_PER_TREE = MAX_CHILDREN_PER_PARENT * MAX_TURNS_PER_CHILD;
-  public static final double MAX_COST_USD_PER_TREE = MAX_CHILDREN_PER_PARENT * MAX_COST_USD_PER_CHILD;
+
+  public static final double MAX_COST_USD_PER_TREE =
+      MAX_CHILDREN_PER_PARENT * MAX_COST_USD_PER_CHILD;
   private static final int MAX_OBJECTIVE_CHARS = 4_000;
 
   static final String EVENT_CHILD_CREATED = "SUBAGENT_CREATED";
@@ -56,6 +59,7 @@ public class SubagentProtocolService {
   static final String EVENT_CHILD_STARTED = "SUBAGENT_STARTED";
   static final String EVENT_CHILD_COMPLETED = "SUBAGENT_COMPLETED";
   static final String EVENT_CHILD_CANCELLED = "SUBAGENT_CANCELLED";
+  static final String EVENT_COORDINATOR_ACCEPTED = "SUBAGENT_COORDINATOR_ACCEPTED";
 
   private final AgentSessionRepository sessionRepository;
   private final AgentActionEventRepository eventRepository;
@@ -117,6 +121,32 @@ public class SubagentProtocolService {
         treeBudget.turns(),
         treeBudget.costUsd(),
         null);
+  }
+
+  /**
+   * Records an accepted deterministic coordinator trigger on the parent activity stream.
+   *
+   * <p>The trigger is deliberately separate from {@code spawn}: callers can audit why an automatic
+   * child was requested, while {@link #spawn} remains the transactional reservation boundary. This
+   * method performs the same ownership check and never calls a provider.
+   */
+  @Transactional
+  public void recordCoordinatorTrigger(
+      SpawnRequest request, String childSessionId, String actorUserId, String actorOrgId) {
+    validateSpawnRequest(request);
+    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    requireParentActive(parent);
+    append(
+        parent.getId(),
+        request.parentTurnId(),
+        request.requestId(),
+        EVENT_COORDINATOR_ACCEPTED,
+        new CoordinatorTrigger(
+            request.requestId(),
+            childSessionId,
+            request.role(),
+            request.objective().trim(),
+            "COORDINATOR"));
   }
 
   @Transactional
@@ -364,7 +394,8 @@ public class SubagentProtocolService {
   }
 
   private static int remainingChildren(long existingChildren) {
-    return (int) Math.max(0, Math.min(MAX_CHILDREN_PER_PARENT, MAX_CHILDREN_PER_PARENT - existingChildren));
+    return (int)
+        Math.max(0, Math.min(MAX_CHILDREN_PER_PARENT, MAX_CHILDREN_PER_PARENT - existingChildren));
   }
 
   /**
@@ -514,6 +545,9 @@ public class SubagentProtocolService {
   record ParentLink(String childSessionId, ChildMetadata child) {}
 
   record Cancellation(String childSessionId, String reason) {}
+
+  record CoordinatorTrigger(
+      String requestId, String childSessionId, Role role, String objective, String trigger) {}
 
   private record TreeBudget(long turns, double costUsd) {
     private static final TreeBudget ZERO = new TreeBudget(0, 0);

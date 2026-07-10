@@ -83,7 +83,14 @@ public final class AgentSessionDtos {
         ClientCapabilities clientCapabilities,
         String providerOverride,
         List<String> attachmentIds) {
-      this(message, conversation, repoContext, clientCapabilities, providerOverride, null, attachmentIds);
+      this(
+          message,
+          conversation,
+          repoContext,
+          clientCapabilities,
+          providerOverride,
+          null,
+          attachmentIds);
     }
   }
 

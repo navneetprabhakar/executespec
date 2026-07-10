@@ -90,6 +90,23 @@ public class AgentSessionController {
   }
 
   /**
+   * Execute a child only when an explicit deterministic coordinator trigger is supplied. The
+   * endpoint is opt-in and remains read-only with respect to the parent repository/run authority.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents/coordinator")
+  public SubagentProtocol.Result executeCoordinatorSubagent(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.CoordinatorExecutionRequest request) {
+    if (request == null
+        || request.spawn() == null
+        || !sessionId.equals(request.spawn().parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.executeCoordinator(request, user, orgId(user));
+  }
+
+  /**
    * Return the deterministic parent-delegation decision without creating a child or calling a
    * provider. A coordinator may use an eligible response immediately before the canonical spawn
    * endpoint; spawn repeats the same limits transactionally.

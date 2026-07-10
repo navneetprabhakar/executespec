@@ -32,14 +32,22 @@ turns separately from runs.
   agents.
 - Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
   (bounded SCOUT/VERIFIER execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
-  (side-effect-free deterministic parent-coordinator decision), and
+  (side-effect-free deterministic parent-coordinator decision),
+  `POST /api/agent/sessions/{parentSessionId}/subagents/coordinator` (explicit, feature-flagged
+  coordinator-triggered automatic execution), and
   `POST /api/agent/sessions/{parentSessionId}/subagents/cancel` (parent cancellation propagation).
   Both the decision and spawn paths require the authenticated session owner; child execution is
   read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
+  The coordinator endpoint additionally requires `automatic=true`, `trigger=COORDINATOR`, a fresh
+  eligible decision, and `agent.subagents.coordinator-auto.enabled=true`; it never grants write or
+  run authority and records `SUBAGENT_COORDINATOR_ACCEPTED` parent activity before execution.
 - Provider choice is cross-surface account state, not a client-local default. Session creation and
   turns must use `AiProviderPreferenceService`: explicit provider input updates
   `app_user.preferred_ai_provider`; omitted input resolves from that preference.
+- Migration `V257__seed_coordinator_subagent_flag.sql` seeds the coordinator-triggered execution
+  flag OFF; enabling it remains an explicit operator decision and does not grant child write/run
+  authority.
 - Web/CLI/VS Code streaming turns may also send an explicit `modelOverride`. The server resolves
   its provider from the model registry, enforces `ModelAccessService` and provider/model
   compatibility, persists the session default, and applies the override only to that next turn.
@@ -89,7 +97,7 @@ turns separately from runs.
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, scout/verifier roles, depth/child/turn/cost guards, explicit start, completion handoff, and cancellation propagation.                     |
-| `SubagentExecutionService.java`            | Executes a persisted SCOUT/VERIFIER child through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires verifier file:line evidence, and propagates cancellation. |
+| `SubagentExecutionService.java`            | Executes a persisted SCOUT/VERIFIER child through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires verifier file:line evidence, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
 | `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |
