@@ -3,15 +3,23 @@ package com.navneet.executespec.harness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.context.SavedContext;
 import com.navneet.executespec.harness.SequentialExecutor.ResumeRequest;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +55,11 @@ class SequentialExecutorResumeKeyTest {
   private static final String FULL_KEY = RUN_SHORT + "_" + TASK_ID;
 
   private SequentialExecutor newExecutorWith(AgentTaskRepository taskRepo) {
+    return newExecutorWith(taskRepo, mock(ContextStore.class));
+  }
+
+  private SequentialExecutor newExecutorWith(
+      AgentTaskRepository taskRepo, ContextStore contextStore) {
     // Constructor args follow @RequiredArgsConstructor field-declaration order:
     // worker, buildProjectTool, objectMapper, metrics, broadcaster, taskRepo,
     // modelResolver, retrievalService, contextStore, costTracker. Only taskRepo
@@ -63,12 +76,46 @@ class SequentialExecutorResumeKeyTest {
         null, // retrievalService
         null, // inLoopTestRunner
         mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
-        mock(ContextStore.class),
+        contextStore,
         null /* costTracker */,
         null /* gcsTaskCheckpointService */,
         null /* availableProviderResolver */,
         null /* goalContinuationAdvisor */,
         null);
+  }
+
+  @Test
+  void continuationHandoffLoadsLatestWorkerSnapshotForSameTask() {
+    AgentTaskRepository repo = mock(AgentTaskRepository.class);
+    ContextStore contextStore = mock(ContextStore.class);
+    SequentialExecutor exec = newExecutorWith(repo, contextStore);
+    ExecutionContext runContext = new ExecutionContext(RUN_ID, "__root__", Path.of("/tmp/ws"));
+    PlannedTask task =
+        PlannedTask.builder().id(TASK_ID).title("Fix auth").description("Fix auth").build();
+    Plan plan = Plan.builder().planTitle("handoff").tasks(List.of(task)).build();
+    ExecutionRequest request =
+        ExecutionRequest.builder()
+            .plan(plan)
+            .provider("anthropic")
+            .model("claude-sonnet-5")
+            .runContext(runContext)
+            .build();
+    SavedContext snapshot =
+        SavedContext.builder()
+            .runId(RUN_ID)
+            .taskId(TASK_ID)
+            .iteration(15)
+            .history(List.of())
+            .savedAt(Instant.now())
+            .sizeBytes(128)
+            .build();
+    ExecutionContext taskContext = new ExecutionContext(RUN_ID, TASK_ID, Path.of("/tmp/ws"));
+    when(contextStore.load(taskContext)).thenReturn(Optional.of(snapshot));
+
+    SavedContext actual = exec.loadContinuationSnapshot(request, task);
+
+    assertEquals(snapshot, actual);
+    verify(contextStore).load(taskContext);
   }
 
   /**
