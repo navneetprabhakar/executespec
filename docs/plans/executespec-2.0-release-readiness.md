@@ -4,7 +4,7 @@
 
 | Gate | State | Evidence / blocker |
 |---|---|---|
-| One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
+| One canonical execution/routing system | PARTIAL | `LlmRouter.callText` is now the canonical text transport seam and title summarization migrated off `FallbackLlmRouter`; 13 legacy non-tool callers and compatibility chat paths still remain |
 | Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly, invokes safe compaction when reserves are unsafe, and the production prompt now mandates repository-localization/search-first behavior with explicit headroom and evidence reuse; durable journal and broader evidence-bundle integration remain. FastContext-compatible local-index seam is documented, but no external index dependency is required |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` drives `searchFiles` with typed citations/fingerprints/paging and a bounded metadata-aware line cache; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER execution now runs read-only SpecChat rounds with tool allow-list, per-round turns/cost, evidence, and cancellation; parent coordinator/UI integration remains |
