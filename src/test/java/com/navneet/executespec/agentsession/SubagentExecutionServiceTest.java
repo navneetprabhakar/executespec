@@ -20,6 +20,7 @@ import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.BudgetState;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Completion;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Handle;
@@ -29,6 +30,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnReque
 import com.navneet.executespec.agentsession.subagent.SubagentProtocolService;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.specchat.SpecChatService;
 
@@ -45,6 +47,7 @@ class SubagentExecutionServiceTest {
       mock(AgentOrchestratorTurnService.class);
   private final SpecChatService chat = mock(SpecChatService.class);
   private final RunCostTracker costs = mock(RunCostTracker.class);
+  private final FeatureFlagService flags = mock(FeatureFlagService.class);
   private final AppUserDetails user =
       new AppUserDetails(
           AppUser.builder()
@@ -62,7 +65,8 @@ class SubagentExecutionServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new SubagentExecutionService(protocol, sessions, turns, orchestrator, chat, costs);
+    service =
+        new SubagentExecutionService(protocol, sessions, turns, orchestrator, chat, costs, flags);
     request = new SpawnRequest("req", "parent", "parent-turn", Role.VERIFIER, "check auth", 4, 0.5);
     running =
         new Handle(
@@ -97,6 +101,72 @@ class SubagentExecutionServiceTest {
     when(protocol.authorizeNextTurn("child", "user", "org"))
         .thenReturn(new BudgetState("child", 1, 4, 0, 0.5, true, null));
     when(costs.snapshot("child")).thenReturn(new RunCostTracker.Snapshot(20, 10, 0, 0, 0.02, 1));
+  }
+
+  @Test
+  void coordinatorExecutionRequiresOptInAndFlag() {
+    var coordinator =
+        new SubagentProtocol.CoordinatorExecutionRequest(request, false, "COORDINATOR", null);
+    assertThatThrownBy(() -> service.executeCoordinator(coordinator, user, "org"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("automatic coordinator opt-in");
+
+    var optedIn =
+        new SubagentProtocol.CoordinatorExecutionRequest(request, true, "COORDINATOR", null);
+    when(flags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG)).thenReturn(false);
+    assertThatThrownBy(() -> service.executeCoordinator(optedIn, user, "org"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("disabled");
+  }
+
+  @Test
+  void coordinatorExecutionRefreshesEligibilityAndRecordsTrigger() {
+    var optedIn =
+        new SubagentProtocol.CoordinatorExecutionRequest(request, true, "COORDINATOR", null);
+    when(flags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG)).thenReturn(true);
+    when(protocol.evaluateDelegation(request, "user", "org"))
+        .thenReturn(
+            new SubagentProtocol.DelegationDecision(
+                "parent", Role.VERIFIER, true, "eligible", 1, 0, 4, 0, 0, null));
+    doAnswer(
+            invocation -> {
+              SpecChatService.Sink sink = invocation.getArgument(0);
+              Runnable beforeRound = invocation.getArgument(10);
+              beforeRound.run();
+              sink.token("Verified src/AuthService.java:42");
+              sink.done(1, new RunCostTracker.Snapshot(20, 10, 0, 0, 0.02, 1));
+              return null;
+            })
+        .when(chat)
+        .runTurnBounded(
+            any(),
+            eq(user),
+            eq("child"),
+            eq("project"),
+            eq("run"),
+            eq("org"),
+            any(),
+            eq("anthropic"),
+            any(),
+            eq(3),
+            any());
+    when(protocol.complete(eq("child"), any(), eq("user"), eq("org")))
+        .thenReturn(
+            new Result(
+                running,
+                "Verified src/AuthService.java:42",
+                java.util.List.of(
+                    new com.navneet.executespec.agentsession.subagent.SubagentProtocol.Evidence(
+                        "src/AuthService.java:42", "evidence")),
+                2,
+                0.02,
+                Instant.now()));
+
+    Result result = service.executeCoordinator(optedIn, user, "org");
+
+    assertThat(result.summary()).contains("Verified");
+    verify(protocol).recordCoordinatorTrigger(request, null, "user", "org");
+    verify(protocol).spawn(request, "user", "org");
   }
 
   @Test

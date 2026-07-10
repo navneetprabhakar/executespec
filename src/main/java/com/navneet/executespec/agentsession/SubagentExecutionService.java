@@ -28,6 +28,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnRequest;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocolService;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.specchat.SpecChatService;
 
@@ -50,6 +51,9 @@ public class SubagentExecutionService {
   private final AgentOrchestratorTurnService orchestratorTurnService;
   private final SpecChatService specChatService;
   private final RunCostTracker costTracker;
+  private final FeatureFlagService featureFlagService;
+
+  static final String COORDINATOR_AUTO_FLAG = "agent.subagents.coordinator-auto.enabled";
 
   /** Side-effect-free parent coordinator probe; no model call or child session is created. */
   public DelegationDecision evaluateDelegation(
@@ -148,6 +152,42 @@ public class SubagentExecutionService {
       }
       throw e;
     }
+  }
+
+  /**
+   * Deterministic coordinator-triggered execution. This is intentionally not exposed as a model
+   * tool: an authenticated coordinator must explicitly opt in, the platform flag must be enabled,
+   * and a fresh eligibility check must still pass before a child is reserved and executed.
+   */
+  public Result executeCoordinator(
+      SubagentProtocol.CoordinatorExecutionRequest coordinator, AppUserDetails user, String orgId) {
+    if (coordinator == null || coordinator.spawn() == null) {
+      throw new IllegalArgumentException("coordinator execution request is required");
+    }
+    if (!coordinator.automatic()) {
+      throw new IllegalArgumentException("automatic coordinator opt-in is required");
+    }
+    if (!"COORDINATOR".equals(coordinator.trigger())) {
+      throw new IllegalArgumentException("trigger must be COORDINATOR");
+    }
+    if (!featureFlagService.isEnabled(COORDINATOR_AUTO_FLAG)) {
+      throw new IllegalStateException("coordinator-triggered subagents are disabled");
+    }
+    SpawnRequest request = coordinator.spawn();
+    DelegationDecision decision = evaluateDelegation(request, user, orgId);
+    if (!decision.eligible()) {
+      throw new IllegalStateException(
+          "coordinator delegation is not eligible: " + decision.reason());
+    }
+    if (coordinator.eligibilityChildSessionId() != null
+        && !coordinator.eligibilityChildSessionId().isBlank()
+        && decision.childSessionId() != null
+        && !coordinator.eligibilityChildSessionId().equals(decision.childSessionId())) {
+      throw new IllegalStateException("eligibility child session does not match request");
+    }
+    String expectedChild = decision.childSessionId();
+    protocolService.recordCoordinatorTrigger(request, expectedChild, user.getUser().getId(), orgId);
+    return execute(request, user, orgId);
   }
 
   /** Explicit parent cancellation propagation for an in-flight execution owner. */

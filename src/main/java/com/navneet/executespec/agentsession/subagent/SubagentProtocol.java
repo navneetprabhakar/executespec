@@ -22,12 +22,16 @@ public final class SubagentProtocol {
       int maxTurns,
       double maxCostUsd) {}
 
+  /** Explicit coordinator opt-in envelope for the deterministic automatic execution seam. */
+  public record CoordinatorExecutionRequest(
+      SpawnRequest spawn, boolean automatic, String trigger, String eligibilityChildSessionId) {}
+
   /**
    * Side-effect-free coordinator result used before a parent asks to create a child.
    *
    * <p>The decision is deliberately deterministic: it only considers persisted parent state,
-   * role/depth/capacity and reserved descendant budgets. It never calls a model and it never
-   * grants a child write or run authority.
+   * role/depth/capacity and reserved descendant budgets. It never calls a model and it never grants
+   * a child write or run authority.
    */
   public record DelegationDecision(
       String parentSessionId,

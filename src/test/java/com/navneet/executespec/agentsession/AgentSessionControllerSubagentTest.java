@@ -53,8 +53,17 @@ class AgentSessionControllerSubagentTest {
             "req-1", "parent-1", "turn-1", SubagentProtocol.Role.SCOUT, "locate code", 2, 0.1);
     var handle =
         new SubagentProtocol.Handle(
-            "child-1", "parent-1", "turn-1", SubagentProtocol.Role.SCOUT, "locate code", 1, 2, 0.1, "COMPLETED");
-    var expected = new SubagentProtocol.Result(handle, "found it", List.of(), 1, 0.01, Instant.now());
+            "child-1",
+            "parent-1",
+            "turn-1",
+            SubagentProtocol.Role.SCOUT,
+            "locate code",
+            1,
+            2,
+            0.1,
+            "COMPLETED");
+    var expected =
+        new SubagentProtocol.Result(handle, "found it", List.of(), 1, 0.01, Instant.now());
     when(execution.execute(request, user, "org-1")).thenReturn(expected);
 
     assertThat(controller.executeSubagent(user, "parent-1", request)).isSameAs(expected);
@@ -73,14 +82,43 @@ class AgentSessionControllerSubagentTest {
 
     assertThat(controller.subagentEligibility(user, "parent-1", request)).isSameAs(expected);
     verify(execution).evaluateDelegation(request, user, "org-1");
-    org.mockito.Mockito.verify(execution, org.mockito.Mockito.never()).execute(request, user, "org-1");
+    org.mockito.Mockito.verify(execution, org.mockito.Mockito.never())
+        .execute(request, user, "org-1");
+  }
+
+  @Test
+  void coordinatorExecution_requiresMatchingParentAndDelegatesExplicitEnvelope() {
+    var spawn =
+        new SubagentProtocol.SpawnRequest(
+            "req-1", "parent-1", "turn-1", SubagentProtocol.Role.SCOUT, "locate code", 2, 0.1);
+    var request =
+        new SubagentProtocol.CoordinatorExecutionRequest(spawn, true, "COORDINATOR", null);
+    var handle =
+        new SubagentProtocol.Handle(
+            "child-1",
+            "parent-1",
+            "turn-1",
+            SubagentProtocol.Role.SCOUT,
+            "locate code",
+            1,
+            2,
+            0.1,
+            "COMPLETED");
+    var expected =
+        new SubagentProtocol.Result(handle, "found it", List.of(), 1, 0.01, Instant.now());
+    when(execution.executeCoordinator(request, user, "org-1")).thenReturn(expected);
+
+    assertThat(controller.executeCoordinatorSubagent(user, "parent-1", request)).isSameAs(expected);
+    verify(execution).executeCoordinator(request, user, "org-1");
   }
 
   @Test
   void cancelSubagents_returnsCountAndDelegatesParentScope() {
     when(execution.cancelChildren("parent-1", "stop", user, "org-1")).thenReturn(2);
 
-    assertThat(controller.cancelSubagents(user, "parent-1", new AgentSessionController.CancelSubagentsRequest("stop")))
+    assertThat(
+            controller.cancelSubagents(
+                user, "parent-1", new AgentSessionController.CancelSubagentsRequest("stop")))
         .containsEntry("cancelled", 2);
     verify(execution).cancelChildren("parent-1", "stop", user, "org-1");
   }
