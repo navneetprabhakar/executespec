@@ -2,6 +2,8 @@ package com.navneet.executespec.router;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -21,15 +23,19 @@ class ModelProviderCandidateServiceTest {
   private final ModelRegistry modelRegistry = mock(ModelRegistry.class);
   private final ModelPerformanceTracker performanceTracker = mock(ModelPerformanceTracker.class);
   private final BenchmarkRunRepository benchmarkRunRepository = mock(BenchmarkRunRepository.class);
+  private final TaskOutcomeMetricService taskOutcomeMetricService =
+      mock(TaskOutcomeMetricService.class);
   private ModelProviderCandidateService service;
 
   @BeforeEach
   void setUp() {
     service =
         new ModelProviderCandidateService(
-            modelRegistry, performanceTracker, benchmarkRunRepository);
+            modelRegistry, performanceTracker, benchmarkRunRepository, taskOutcomeMetricService);
     when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
         .thenReturn(List.of());
+    when(taskOutcomeMetricService.qualityPrior(anyString(), anyString(), anyString(), anyInt()))
+        .thenReturn(java.util.Optional.empty());
     Map<String, ModelMatrixProperties.ModelConfig> models = new LinkedHashMap<>();
     models.put("claude-sonnet-4-6", model("anthropic", "HIGH", "CAPABLE", 3.0, 15.0, 200_000));
     models.put("gpt-5.4-mini", model("openai", "STANDARD", "UTILITY", 0.2, 0.6, 256_000));
@@ -149,6 +155,28 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.reasons())
         .anySatisfy(reason -> assertThat(reason).contains("local 24h success score 80.00%"));
     assertThat(sonnet.reasons()).contains("terminal-bench first-20");
+  }
+
+  @Test
+  void usesPersistedTaskValidationPriorForMatchingCategory() {
+    when(taskOutcomeMetricService.qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", 5))
+        .thenReturn(
+            java.util.Optional.of(new TaskOutcomeMetricService.QualityPrior(80.0, 10, "BUG_FIX")));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(70.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    assertThat(sonnet.qualityScore()).isEqualTo(80.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
+    assertThat(sonnet.reasons())
+        .contains("persisted BUG_FIX validation pass rate 80.00% from 10 tasks");
   }
 
   @Test

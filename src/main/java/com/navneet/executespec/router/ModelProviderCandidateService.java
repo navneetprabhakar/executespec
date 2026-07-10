@@ -37,6 +37,7 @@ public class ModelProviderCandidateService {
   private final ModelRegistry modelRegistry;
   private final ModelPerformanceTracker performanceTracker;
   private final BenchmarkRunRepository benchmarkRunRepository;
+  private final TaskOutcomeMetricService taskOutcomeMetricService;
   private final ModelProviderCapabilityRegistry capabilityRegistry =
       new ModelProviderCapabilityRegistry();
 
@@ -48,6 +49,9 @@ public class ModelProviderCandidateService {
 
   @Value("${execution.continuation.benchmark-min-sample-tasks:20}")
   private int benchmarkMinSampleTasks = 20;
+
+  @Value("${execution.continuation.outcome-min-sample-tasks:5}")
+  private int outcomeMinSampleTasks = 5;
 
   public List<ModelProviderScore> buildCandidates(ModelProviderCandidateRequest request) {
     return capabilityRegistry.scoreAll(buildSignals(request));
@@ -168,6 +172,13 @@ public class ModelProviderCandidateService {
     double outputCost = pricing != null ? pricing[1] : configuredOutputCost(config);
     double localScore = performanceTracker.getScore(provider, canonicalModel);
     long localLatency = performanceTracker.getAvgLatencyMs(provider, canonicalModel);
+    TaskOutcomeMetricService.QualityPrior outcomePrior =
+        taskOutcomeMetricService == null
+            ? null
+            : taskOutcomeMetricService
+                .qualityPrior(
+                    provider, canonicalModel, request.taskCategory(), outcomeMinSampleTasks())
+                .orElse(null);
     Boolean providerAvailable = providerAvailable(request, provider, canonicalModel, external);
     double recentFailurePenalty =
         external.stream().mapToDouble(ModelProviderCapabilitySignal::recentFailurePenalty).sum();
@@ -182,6 +193,17 @@ public class ModelProviderCandidateService {
       reasons.add("local 24h performance score unavailable or below sample threshold");
     } else {
       reasons.add(String.format(Locale.ROOT, "local 24h success score %.2f%%", localScore * 100.0));
+    }
+    if (outcomePrior == null) {
+      reasons.add("persisted task outcome prior unavailable or below sample threshold");
+    } else {
+      reasons.add(
+          String.format(
+              Locale.ROOT,
+              "persisted %s validation pass rate %.2f%% from %d tasks",
+              outcomePrior.taskCategory(),
+              outcomePrior.validationPassRate(),
+              outcomePrior.sampleSize()));
     }
     if (!external.isEmpty()) {
       reasons.add("merged " + external.size() + " external benchmark/validation signal(s)");
@@ -215,7 +237,9 @@ public class ModelProviderCandidateService {
         .localSuccessRateScore(
             localScore == ModelPerformanceTracker.UNKNOWN_SCORE ? null : localScore * 100.0)
         .validationPassRateScore(
-            avg(external, ModelProviderCapabilitySignal::validationPassRateScore))
+            averageWithPersistedOutcome(
+                avg(external, ModelProviderCapabilitySignal::validationPassRateScore),
+                outcomePrior))
         .codeReviewScore(avg(external, ModelProviderCapabilitySignal::codeReviewScore))
         .toolReliabilityScore(avg(external, ModelProviderCapabilitySignal::toolReliabilityScore))
         .recentFailurePenalty(recentFailurePenalty)
@@ -241,6 +265,17 @@ public class ModelProviderCandidateService {
 
   private int benchmarkMinSampleTasks() {
     return Math.max(1, benchmarkMinSampleTasks);
+  }
+
+  private int outcomeMinSampleTasks() {
+    return Math.max(1, outcomeMinSampleTasks);
+  }
+
+  private static Double averageWithPersistedOutcome(
+      Double externalValidation, TaskOutcomeMetricService.QualityPrior outcomePrior) {
+    if (outcomePrior == null) return externalValidation;
+    if (externalValidation == null) return outcomePrior.validationPassRate();
+    return (externalValidation + outcomePrior.validationPassRate()) / 2.0;
   }
 
   private List<ModelProviderCapabilitySignal> benchmarkSignals(

@@ -1,6 +1,9 @@
 package com.navneet.executespec.router;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
 import com.navneet.executespec.harness.TaskOutcome;
 
@@ -26,20 +29,42 @@ public class TaskOutcomeMetricService {
       int actualOutputTokens,
       int maxOutputTokens,
       int iterationCount) {
+    return record(
+        runId,
+        complexity,
+        complexity,
+        language,
+        attempt,
+        outcome,
+        actualOutputTokens,
+        maxOutputTokens,
+        iterationCount);
+  }
+
+  public ModelTaskMetric record(
+      String runId,
+      String taskCategory,
+      String complexity,
+      String language,
+      int attempt,
+      TaskOutcome outcome,
+      int actualOutputTokens,
+      int maxOutputTokens,
+      int iterationCount) {
     if (outcome == null
         || outcome.dispatchedProvider() == null
         || outcome.dispatchedModel() == null) {
       return null;
     }
     boolean passed =
-        Boolean.TRUE.equals(outcome.smokeTestPassed()) && isSuccessful(outcome.status());
+        isSuccessful(outcome.status()) && !Boolean.FALSE.equals(outcome.smokeTestPassed());
     ModelTaskMetric metric =
         ModelTaskMetric.builder()
             .runId(runId)
             .taskId(outcome.taskId())
             .modelName(outcome.dispatchedModel())
             .provider(outcome.dispatchedProvider())
-            .tier(complexity == null ? "UNKNOWN" : complexity)
+            .tier(taskCategory == null ? "UNKNOWN" : taskCategory)
             .complexity(complexity == null ? "UNKNOWN" : complexity)
             .language(language)
             .attempt(attempt)
@@ -63,6 +88,40 @@ public class TaskOutcomeMetricService {
       return null;
     }
   }
+
+  /** Returns a deterministic validation-pass prior for the same task category. */
+  public Optional<QualityPrior> qualityPrior(
+      String provider, String model, String taskCategory, int minSamples) {
+    if (provider == null || model == null || minSamples < 1) return Optional.empty();
+    try {
+      List<ModelTaskMetric> candidates =
+          repository
+              .findTop200ByProviderIgnoreCaseAndModelNameIgnoreCaseAndTierIgnoreCaseOrderByCreatedAtDesc(
+                  provider, model, normalize(taskCategory));
+      String category = normalize(taskCategory);
+      List<ModelTaskMetric> matching =
+          candidates == null
+              ? List.of()
+              : candidates.stream().filter(metric -> metric != null).toList();
+      if (matching.size() < minSamples) return Optional.empty();
+      long passed = matching.stream().filter(ModelTaskMetric::isValidationPassed).count();
+      return Optional.of(
+          new QualityPrior((passed * 100.0) / matching.size(), matching.size(), category));
+    } catch (RuntimeException e) {
+      log.warn(
+          "Unable to read task outcome prior provider={} model={}: {}",
+          provider,
+          model,
+          e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  private static String normalize(String value) {
+    return value == null ? "UNKNOWN" : value.trim().toUpperCase(Locale.ROOT);
+  }
+
+  public record QualityPrior(double validationPassRate, int sampleSize, String taskCategory) {}
 
   private static boolean isSuccessful(TaskOutcome.Status status) {
     return status == TaskOutcome.Status.SUCCESS || status == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
