@@ -205,7 +205,19 @@ const inventory = {
 
 const rendered = `${JSON.stringify(inventory, null, 2)}\n`;
 if (check) {
-  if (!fs.existsSync(output) || fs.readFileSync(output, "utf8") !== rendered) {
+  let current = null;
+  try { current = JSON.parse(fs.readFileSync(output, "utf8")); } catch { current = null; }
+  // Commit SHA changes are expected when the inventory itself is committed. Compare the
+  // reproducible source/facts payload while allowing the evidence artifact's per-repo SHA fields
+  // to advance with the commit that contains it.
+  const comparable = (value) => {
+    if (Array.isArray(value)) return value.map(comparable);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "sha").map(([key, item]) => [key, comparable(item)]));
+    }
+    return value;
+  };
+  if (!current || JSON.stringify(comparable(current)) !== JSON.stringify(comparable(JSON.parse(rendered)))) {
     process.stderr.write(`Inventory is stale. Regenerate with: node ${path.relative(backend, fileURLToPath(import.meta.url))}\n`);
     process.exit(1);
   }
