@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.ApiKeyResolver;
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -61,6 +62,7 @@ public class AnthropicBatchClient implements BatchClient {
   private final ObjectMapper objectMapper;
   private final ApiKeyResolver apiKeyResolver;
   private final PipelineRunRepository runRepo;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
   private final String baseUrl;
   private final String systemKey;
 
@@ -68,11 +70,13 @@ public class AnthropicBatchClient implements BatchClient {
       ObjectMapper objectMapper,
       ApiKeyResolver apiKeyResolver,
       PipelineRunRepository runRepo,
+      ProviderDispatchAuthorization dispatchAuthorization,
       @Value("${spring.ai.anthropic.base-url:https://api.anthropic.com}") String baseUrl,
       @Value("${spring.ai.anthropic.api-key:}") String systemKey) {
     this.objectMapper = objectMapper;
     this.apiKeyResolver = apiKeyResolver;
     this.runRepo = runRepo;
+    this.dispatchAuthorization = dispatchAuthorization;
     this.baseUrl = baseUrl;
     this.systemKey = systemKey;
   }
@@ -84,6 +88,7 @@ public class AnthropicBatchClient implements BatchClient {
 
   @Override
   public BatchJob submit(String runId, List<BatchRequest> requests) {
+    authorizeSubmit(runId, requests);
     ObjectNode body = buildBatchBody(requests);
     JsonNode resp =
         client(runId)
@@ -109,6 +114,22 @@ public class AnthropicBatchClient implements BatchClient {
         mapProcessingStatus(resp.path("processing_status").asText("in_progress")),
         null,
         null);
+  }
+
+  private void authorizeSubmit(String runId, List<BatchRequest> requests) {
+    String model = singleModel(requests);
+    dispatchAuthorization.authorize("anthropic", model, runId);
+  }
+
+  private static String singleModel(List<BatchRequest> requests) {
+    if (requests == null || requests.isEmpty()) {
+      throw new IllegalArgumentException("Anthropic batch submit requires at least one request");
+    }
+    List<String> models = requests.stream().map(BatchRequest::model).distinct().toList();
+    if (models.size() != 1 || models.get(0) == null || models.get(0).isBlank()) {
+      throw new IllegalArgumentException("Anthropic batch submit requires exactly one model");
+    }
+    return models.get(0);
   }
 
   @Override

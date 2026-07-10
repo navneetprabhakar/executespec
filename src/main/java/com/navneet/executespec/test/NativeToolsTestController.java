@@ -7,6 +7,7 @@ import java.util.Map;
 import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.agent.OpenAiNativeToolClient;
 import com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest;
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -52,6 +53,9 @@ public class NativeToolsTestController {
   private final AnthropicChatModel anthropicModel;
   private final GoogleGenAiChatModel geminiModel;
   private final String openAiModelName;
+  private final String anthropicModelName;
+  private final String geminiModelName;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
 
   // Inject all three model beans by their default qualifiers (defined in AgentModelConfig).
   // These may be null if the provider's API key is not configured — handled per-request.
@@ -64,16 +68,26 @@ public class NativeToolsTestController {
       OpenAiNativeToolClient openAiNativeToolClient,
       @Qualifier("anthropicChatModel") ObjectProvider<AnthropicChatModel> anthropicModelProvider,
       @Qualifier("googleGenAiChatModel") ObjectProvider<GoogleGenAiChatModel> geminiModelProvider,
-      @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}") String openAiModelName) {
+      @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}") String openAiModelName,
+      @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
+          String anthropicModelName,
+      @Value("${spring.ai.google.genai.chat.options.model:gemini-3-flash-preview}")
+          String geminiModelName,
+      ProviderDispatchAuthorization dispatchAuthorization) {
     this.openAiNativeToolClient = openAiNativeToolClient;
     this.anthropicModel = anthropicModelProvider.getIfAvailable();
     this.geminiModel = geminiModelProvider.getIfAvailable();
     this.openAiModelName = openAiModelName;
+    this.anthropicModelName = anthropicModelName;
+    this.geminiModelName = geminiModelName;
+    this.dispatchAuthorization = dispatchAuthorization;
   }
 
   @GetMapping("/native-tools")
   public Map<String, Object> testNativeTools(
-      @RequestParam String provider, @RequestParam(required = false) String model) {
+      @RequestParam String provider,
+      @RequestParam(required = false) String model,
+      @RequestParam(defaultValue = "native-tools-smoke") String runId) {
     ToolCallback echo = buildEchoToolCallback();
     List<ToolCallback> callbacks = List.of(echo);
     String userPrompt = "Use the echoMessage tool to echo back the text 'hello-v2'.";
@@ -85,9 +99,9 @@ public class NativeToolsTestController {
     try {
       ChatResponse resp =
           switch (provider.toLowerCase()) {
-            case "anthropic" -> callAnthropic(userPrompt, callbacks, model);
-            case "openai" -> callOpenAi(userPrompt, callbacks, model);
-            case "gemini" -> callGemini(userPrompt, callbacks, model);
+            case "anthropic" -> callAnthropic(userPrompt, callbacks, model, runId);
+            case "openai" -> callOpenAi(userPrompt, callbacks, model, runId);
+            case "gemini" -> callGemini(userPrompt, callbacks, model, runId);
             default -> throw new IllegalArgumentException("Unknown provider: " + provider);
           };
       return summarizeResponse(result, resp);
@@ -100,8 +114,11 @@ public class NativeToolsTestController {
   }
 
   private ChatResponse callAnthropic(
-      String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
+      String userPrompt, List<ToolCallback> callbacks, String modelOverride, String runId) {
     if (anthropicModel == null) throw new IllegalStateException("Anthropic model not configured");
+    String modelToUse =
+        modelOverride != null && !modelOverride.isBlank() ? modelOverride : anthropicModelName;
+    dispatchAuthorization.authorize("anthropic", modelToUse, runId);
     var b =
         AnthropicChatOptions.builder()
             .maxTokens(512)
@@ -113,11 +130,12 @@ public class NativeToolsTestController {
   }
 
   private ChatResponse callOpenAi(
-      String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
+      String userPrompt, List<ToolCallback> callbacks, String modelOverride, String runId) {
     String modelToUse =
         (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : openAiModelName;
     // Routes through OpenAiNativeToolClient — direct REST call, bypasses Spring AI's
     // OpenAi serialization (which adds extra_body when toolCallbacks is set in 1.1.4).
+    dispatchAuthorization.authorize("openai", modelToUse, runId);
     return openAiNativeToolClient.call(
         OpenAiToolCallRequest.builder()
             .model(modelToUse)
@@ -133,7 +151,8 @@ public class NativeToolsTestController {
    * Phase 0 verification.
    */
   @GetMapping("/native-tools/all")
-  public Map<String, Object> testAll() {
+  public Map<String, Object> testAll(
+      @RequestParam(defaultValue = "native-tools-matrix") String runId) {
     // V2 model matrix (per application.yml model-matrix) + control models for OpenAI.
     List<String[]> matrix =
         List.of(
@@ -160,9 +179,9 @@ public class NativeToolsTestController {
       try {
         ChatResponse resp =
             switch (provider) {
-              case "anthropic" -> callAnthropic(userPrompt, callbacks, model);
-              case "openai" -> callOpenAi(userPrompt, callbacks, model);
-              case "gemini" -> callGemini(userPrompt, callbacks, model);
+              case "anthropic" -> callAnthropic(userPrompt, callbacks, model, runId);
+              case "openai" -> callOpenAi(userPrompt, callbacks, model, runId);
+              case "gemini" -> callGemini(userPrompt, callbacks, model, runId);
               default -> throw new IllegalArgumentException("Unknown provider: " + provider);
             };
         int tcCount = 0;
@@ -193,8 +212,11 @@ public class NativeToolsTestController {
   }
 
   private ChatResponse callGemini(
-      String userPrompt, List<ToolCallback> callbacks, String modelOverride) {
+      String userPrompt, List<ToolCallback> callbacks, String modelOverride, String runId) {
     if (geminiModel == null) throw new IllegalStateException("Gemini model not configured");
+    String modelToUse =
+        modelOverride != null && !modelOverride.isBlank() ? modelOverride : geminiModelName;
+    dispatchAuthorization.authorize("gemini", modelToUse, runId);
     var b =
         GoogleGenAiChatOptions.builder()
             .temperature(0.0)
