@@ -182,10 +182,26 @@ describe('protected transcript visual contract', () => {
         onOpenApprovals={vi.fn()}
         onToggleChats={vi.fn()}
         onToggleSettings={vi.fn()}
+        availableModels={[
+          {
+            id: 'deepseek',
+            label: 'DeepSeek',
+            models: [
+              {id: 'deepseek-v4-flash-native', tier: 'LIGHTWEIGHT', label: 'DeepSeek Flash'},
+            ],
+          },
+        ]}
+        selectedProvider='deepseek'
+        selectedModel='deepseek-v4-flash-native'
+        onProviderChange={vi.fn()}
+        onModelChange={vi.fn()}
       />,
     );
     expect(top.querySelector('[data-agent-overlay="settings"]')).not.toBeNull();
     expect(top.querySelector('[data-agent-overlay-backdrop="settings"]')).not.toBeNull();
+    expect(top.querySelector('#agent-provider-select')).not.toBeNull();
+    expect(top.querySelector('#agent-model-select')).not.toBeNull();
+    expect(top.querySelector('#agent-model-select')?.textContent).toContain('DeepSeek Flash');
 
     act(() => root?.unmount());
     host?.remove();
