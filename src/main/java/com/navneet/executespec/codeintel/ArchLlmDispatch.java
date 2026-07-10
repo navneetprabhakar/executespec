@@ -1,17 +1,13 @@
 package com.navneet.executespec.codeintel;
 
-import java.nio.file.Path;
 import java.util.List;
 
 import com.navneet.executespec.agent.FallbackLlmRouter;
-import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 
 /**
  * Shared LLM dispatch for the architecture-doc generators ({@link RepoArchitectureGenerator} +
@@ -48,28 +44,13 @@ final class ArchLlmDispatch {
       List<Message> messages,
       String source,
       String label) {
-    String prov = resolved.providerName() == null ? "" : resolved.providerName().toLowerCase();
-    if (prov.equals("deepseek") || prov.equals("openrouter") || prov.equals("fireworks")) {
-      return llmRouter.call(
-          LlmRequest.builder()
-              .provider(resolved.providerName())
-              .model(resolved.getModel())
-              .messages(messages)
-              .context(new ExecutionContext(source, label, Path.of("/tmp")))
-              .agentRole("ArchLlmDispatch")
-              .stepId(label)
-              .toolsOverride(List.of())
-              .maxTokens(MAX_OUTPUT_TOKENS)
-              .build());
-    }
-    return fallbackLlmRouter.callWithFallback(
+    return llmRouter.callText(
         resolved.providerName(),
         resolved.getModel(),
-        new Prompt(messages),
+        messages,
         source,
+        "ArchLlmDispatch",
         label,
-        FallbackLlmRouter.FallbackMode.IMMEDIATE,
-        0,
-        false);
+        MAX_OUTPUT_TOKENS);
   }
 }
