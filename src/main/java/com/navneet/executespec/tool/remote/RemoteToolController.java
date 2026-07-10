@@ -50,8 +50,9 @@ public class RemoteToolController {
     }
     JsonNode normalized = normalizeEnvelope(body.result());
     if (normalized == null) {
-      // Keep the call pending. A malformed transport frame is a client protocol error, not a tool
-      // execution failure that should be injected into the model's context.
+      // Fail the pending transport call with a bounded protocol envelope. Leaving it pending makes
+      // one bad client frame stall the worker until the full remote-tool timeout.
+      dispatcher.rejectMalformed(runId, body.callId());
       return ResponseEntity.badRequest().build();
     }
     String envelope = normalized.toString();
