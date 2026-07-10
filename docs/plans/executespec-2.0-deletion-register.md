@@ -38,7 +38,7 @@ This is an execution register. `COMPATIBILITY_ONLY` entries need an owner, remov
 |---|---|
 | Sarvam enum, config, router dispatch, catalog/picker/style/docs/tests and stale persisted selections | Milestone 1; forward migration and provider-contract suite |
 | Literal NUL bytes in `WorkerAgent.java` and `GeminiNativeToolClient.java` | DONE; escaped delimiters preserve behavior and repository source-text gate prevents recurrence |
-| Backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | When real child protocol is available; do not present fake capability meanwhile |
+| Backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | Backend aliases/stub deleted in M2 cleanup; CLI fake aliases already deleted. Persisted child protocol remains the replacement before any delegation UX ships. |
 | Deprecated `PatchAgent` and orphan prompt logic | After `CodeGenEngine`/PATCH characterization |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |

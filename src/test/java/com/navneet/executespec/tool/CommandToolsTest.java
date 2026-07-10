@@ -275,22 +275,17 @@ class CommandToolsTest {
   }
 
   @Test
-  void planSpawnAndMcpFallbackTools_are_operational() {
+  void planAndMcpFallbackTools_are_operational() {
     Tool plan = new PlanStateTool("update_plan");
-    Tool spawn = new SpawnSubagentFallbackTool("spawn_subagent");
     Tool mcp = new McpClientFallbackTool("mcp_client");
 
     ToolResult planResult =
         plan.execute(json("{\"plan\":[{\"step\":\"inspect\",\"status\":\"completed\"}]}"), ctx());
-    ToolResult spawnResult =
-        spawn.execute(json("{\"task\":\"find files\",\"query\":\"CommandToolsTest\"}"), ctx());
     ToolResult mcpResult =
         mcp.execute(json("{\"method\":\"tools/list\",\"command\":\"node fake.js\"}"), ctx());
 
     assertThat(planResult).isInstanceOf(ToolResult.Ok.class);
     assertThat(((ToolResult.Ok) planResult).content()).contains("\"count\":1", "inspect");
-    assertThat(spawnResult).isInstanceOf(ToolResult.Ok.class);
-    assertThat(((ToolResult.Ok) spawnResult).content()).contains("bounded_repo_reconnaissance");
     assertThat(mcpResult).isInstanceOf(ToolResult.Err.class);
     assertThat(((ToolResult.Err) mcpResult).message()).contains("allowlisted");
   }

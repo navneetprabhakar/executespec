@@ -154,7 +154,6 @@ class RemoteToolDispatcherTest {
 
   @Test
   void permissionKind_classifies_cliProtocolTools() throws Exception {
-    assertPermissionKind("spawn_subagent", "read");
     assertPermissionKind("update_plan", "read");
     assertPermissionKind("todo", "read");
     assertPermissionKind("ast_edit", "edit");

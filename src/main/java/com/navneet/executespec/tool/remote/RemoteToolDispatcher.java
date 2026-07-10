@@ -267,8 +267,6 @@ public class RemoteToolDispatcher {
               "lsp",
               "ast_search",
               "astSearch",
-              "spawn_subagent",
-              "spawnSubagent",
               "update_plan",
               "updatePlan",
               "todo",
