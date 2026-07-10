@@ -3788,6 +3788,23 @@
   color: var(--ide-fg-muted);
   font-size: 12px;
 }
+.agent-runcard-stream {
+  align-items: center;
+  color: var(--ide-fg-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  margin-top: 5px;
+}
+.agent-runcard-stream span {
+  background: currentColor;
+  border-radius: 50%;
+  height: 6px;
+  width: 6px;
+}
+.agent-runcard-stream.ok {
+  color: var(--ide-success, #42d392);
+}
 .agent-runcard-phases {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
