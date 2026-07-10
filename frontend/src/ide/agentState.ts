@@ -90,6 +90,7 @@ export type AgentAction =
   | {type: 'sessions:set'; sessions: api.AgentSessionResponse[]}
   | {type: 'session:select'; sessionId: string | null}
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
+  | {type: 'events:set'; events: StreamTimelineItem[]}
   | {type: 'gates:set'; gates: api.AgentGateDecisionCard[]}
   | {type: 'managed-ai:set'; balance: api.ManagedAiBalance | null}
   | {type: 'input:set'; input: string}
@@ -162,6 +163,8 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       };
     case 'turns:set':
       return {...state, turns: action.turns};
+    case 'events:set':
+      return {...state, streamEvents: action.events};
     case 'gates:set':
       return {...state, gates: action.gates};
     case 'managed-ai:set':

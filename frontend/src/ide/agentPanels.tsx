@@ -642,14 +642,26 @@ function mimeForArtifact(artifact: AgentArtifact): string {
 
 /** Friendly activity chips for tool/run events — no raw JSON. */
 function Activity({items}: {items: StreamTimelineItem[]}) {
-  const shown = items.filter((i) => i.type === 'tool' || i.type === 'run');
+  const shown = items.filter(
+    (i) =>
+      i.type === 'tool' ||
+      i.type === 'run' ||
+      (i.type === 'system' && /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION/i.test(i.title)),
+  );
   if (!shown.length) return null;
   return (
     <div className='agent-activity' data-agent-region='activity'>
       {shown.map((i) => (
         <span key={i.id} className='agent-activity-chip'>
           {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
-          {i.type === 'run' ? 'Run created' : friendlyTool(i.title)}
+          <span>
+            {i.type === 'run'
+              ? 'Run created'
+              : i.type === 'system'
+                ? i.title
+                : friendlyTool(i.title)}
+            {i.type === 'system' && i.detail ? ` · ${i.detail}` : ''}
+          </span>
         </span>
       ))}
     </div>
