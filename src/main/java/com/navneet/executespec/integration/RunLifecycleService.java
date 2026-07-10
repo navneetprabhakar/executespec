@@ -227,9 +227,15 @@ public class RunLifecycleService {
 
     log.info("RunOrchestrator cancel: run={} prev={}", runId, status);
 
-    // Wake a thread blocked on the plan gate (reject path).
+    // Wake a thread blocked on the plan gate (reject path). If this instance has no waiter (for
+    // example after a restart), the durable DB row is still resolved by setPlanGate, but there is
+    // no pipeline thread that will consume the Redis signal. Release that transient key eagerly so
+    // cancellation does not retain a four-hour gate lease.
     try {
       gateStore.setPlanGate(runId, false);
+      if (!gateStore.isPlanGateWaiting(runId)) {
+        gateStore.clearPlanGate(runId);
+      }
     } catch (Exception e) {
       log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
     }

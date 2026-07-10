@@ -29,7 +29,7 @@ Continuation provider availability: task-boundary `SequentialExecutor` advice no
 1. `RunOrchestrator.submitRun(req)` persists the run row + estimate.
 2. `SmartClassifierAgent.classify(spec)` → `PlanStrategy`.
 3. Strategy router emits the plan via `OutlinePlannerAgent` (FULL_PLAN / SKELETON_ONLY) + optional `TaskExpanderAgent` parallel expansion + `CoherencePlannerAgent` patch.
-4. **Plan approval gate** — `GateStore.openPlanGate(runId)`. SSE `GATE_OPENED` includes credits + estimated cost. PRODUCTION pauses; PROTOTYPE / `skipApproval` bypasses.
+4. **Plan approval gate** — `GateStore.openPlanGate(runId)`. SSE `GATE_OPENED` includes credits + estimated cost. PRODUCTION pauses; PROTOTYPE / `skipApproval` bypasses. Cancellation resolves the durable decision and eagerly clears the transient Redis signal when no local waiter remains, avoiding a stale gate lease after restart.
 5. On approval: charges credits via `TierEnforcementService.assertAndIncrementRunCount(userId, credits)`. FREE blocks specs requiring >1 credit. BYOK orgs skip the platform cap entirely.
 6. **`SequentialExecutor.execute(req)`** runs tasks one at a time. Tier-routed per-task model. Soft-completion gate covers `COMPLETED_BY_STAGNATION` / `STOPPED_WITHOUT_COMPLETE` paths. Final-task smoke + one-retry on fail, except selected-candidate continuation can step up/change provider before that same-provider retry.
 7. `ReviewerAgent.review(workspace, plan)` — general + project-type-aware wiring pass + post-edit formatter + a fix-the-red-build third pass (flag `reviewer.third-pass.enabled`, default ON, V202) when the final build is still red.
