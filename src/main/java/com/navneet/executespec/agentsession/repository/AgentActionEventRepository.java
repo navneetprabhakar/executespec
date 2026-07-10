@@ -11,4 +11,8 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
   List<AgentActionEvent> findByTurnIdOrderByCreatedAtAsc(String turnId);
+
+  List<AgentActionEvent> findBySessionIdAndTypeOrderByCreatedAtAsc(String sessionId, String type);
+
+  long countBySessionIdAndType(String sessionId, String type);
 }

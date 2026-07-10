@@ -51,6 +51,10 @@ turns separately from runs.
 - Action events that belong to a local/terminal action must persist the first-class
   `agent_action_event.action_id` (V247), not only a nested payload field, so CLI/web clients can
   correlate permission prompts and action results after reload.
+- Child agents use the bounded `subagent/SubagentProtocolService` seam. A child is a persisted
+  `agent_session` with parent/depth/role/turn-budget/cost-budget metadata in append-only
+  `agent_action_event` rows. Executors must call `authorizeNextTurn` before every child turn;
+  verifier completion requires cited evidence. The foundation does not dispatch a model itself.
 
 ## Key Files
 
@@ -68,6 +72,7 @@ turns separately from runs.
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
+| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, scout/verifier roles, depth/child/turn/cost guards, explicit start, completion handoff, and cancellation propagation.                     |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
 | `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |
