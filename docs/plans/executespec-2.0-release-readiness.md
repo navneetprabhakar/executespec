@@ -13,7 +13,7 @@
 | TUI route shell and Inspector removed | PARTIAL | Session route hides persistent sidebar/Inspector and now has an explicit 80x24 transcript budget; native OpenTUI also exposes active provider/model context; non-session route chrome and duplicate renderers remain |
 | Exactly rich OpenTUI and plain renderer | PARTIAL | Obsolete Ink implementation/dependencies/references are deleted; native OpenTUI and plain/readline remain, while split-footer compatibility is intentionally retained for runtimes without Node 26+ FFI |
 | Web/CLI semantic state shared | PARTIAL | Shared semantic transcript adapters now exist in CLI core and Web; both session routes hide dashboard chrome and the Web agent run card consumes a reconnecting typed SSE stream with explicit connected/reconnecting/snapshot-only health, but a single renderer/state path is not complete |
-| SOTA comparator gate | BLOCKED | No frozen paired repeated comparator; provider caps limit statistical power |
+| SOTA comparator gate | BLOCKED | No frozen paired repeated comparator; provider caps limit statistical power. Tier-eval result rows now carry a deterministic prompt fingerprint, but no live quality claim is made |
 | Benchmark manifests reproduce | PARTIAL | A hash-sealed offline contract fixture is reproducible; historical SWE-bench manifests remain exploratory and do not support model/quality claims |
 | Provider readiness honest | PARTIAL | Existing live probes are not a release-wide readiness registry |
 | Sarvam absent from production | PASS (static) | Removed from provider enum/config/router/catalog/UI; V256 clears active persisted dispatch state. Historical benchmark/docs references remain explicitly marked historical. |
