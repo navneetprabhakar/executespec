@@ -14,7 +14,7 @@ The user-requested consolidation option is supported only for clean installs:
 1. Generate and review a complete schema-only baseline from a known migration head.
 2. Add a Flyway baseline migration (`B<baseline>__executespec_2_schema.sql`) containing the generated schema and required seed data in a separately configured clean-install location/profile; do not place it in the ordinary upgrade path by default.
 3. Keep all post-baseline migrations (`V<baseline+1>__...`) as normal forward migrations.
-4. Prove a clean install using the baseline and an upgrade from a database that has applied V258. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
+4. Prove a clean install using the baseline and an upgrade from a database that has applied V257, then validate the V257→V258 forward step. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
 5. Never delete, rename, edit, or checksum-repair an already-applied V-file as part of this work. Historical migrations remain available for old database histories and auditability.
 
 No baseline migration is created until the schema has stopped moving for the release cut; generating one earlier would create a second source of truth while V2 work is still changing entities.
