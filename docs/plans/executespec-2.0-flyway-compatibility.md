@@ -2,7 +2,7 @@
 
 ## Decision
 
-Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V257; any future schema cleanup may start at V258 or later.
+Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V258; any future schema cleanup may start at V259 or later.
 
 The default runtime does not suppress missing applied migrations. A package with an incomplete
 `classpath:db/migration` chain must fail Flyway validation rather than silently starting against an
@@ -19,9 +19,9 @@ The user-requested consolidation option is supported only for clean installs:
 
 No baseline migration is created until the schema has stopped moving for the release cut; generating one earlier would create a second source of truth while V2 work is still changing entities.
 
-## V256/V257 upgrade contract
+## V256/V257/V258 upgrade contract
 
-V256 is a forward data migration only. It removes Sarvam from reusable provider/model state in `app_user`, `project`, `pipeline_run`, `execution_run`, `agent_session`, `agent_task`, and `org`. V257 seeds the coordinator-subagent feature flag with a fail-closed default. These migrations deliberately do not rewrite immutable provider strings in usage, benchmark, or event history. Both migrations are idempotent with respect to already-clean rows and do not drop tables or columns.
+V256 is a forward data migration only. It removes Sarvam from reusable provider/model state in `app_user`, `project`, `pipeline_run`, `execution_run`, `agent_session`, `agent_task`, and `org`. V257 seeds the coordinator-subagent feature flag with a fail-closed default. V258 adds the observed task-cost column with a zero backfill. These migrations deliberately do not rewrite immutable provider strings in usage, benchmark, or event history. All are idempotent and preserve existing rows.
 
 The `model_overrides_json` cleanup treats this legacy TEXT column defensively: valid JSON objects are filtered, while malformed values are retained with a migration notice so one bad row cannot block deployment or silently discard customer data. A later quarantine/repair migration may clean those rows explicitly.
 
