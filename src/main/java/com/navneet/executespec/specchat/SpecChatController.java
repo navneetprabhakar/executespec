@@ -16,6 +16,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -61,6 +62,7 @@ public class SpecChatController {
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
   private final AiProviderPreferenceService aiProviderPreferenceService;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
@@ -91,6 +93,11 @@ public class SpecChatController {
     }
 
     String userId = String.valueOf(userDetails.getUser().getId());
+    // Project-scoped chat binds project read tools. Validate the caller before creating the audit
+    // row or entering the agent loop so an arbitrary projectId cannot become an IDOR oracle.
+    if (request.projectId() != null && !request.projectId().isBlank()) {
+      projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+    }
     String ip = clientIp(forwardedFor, http);
     String ipHash = sha256(ip);
 
