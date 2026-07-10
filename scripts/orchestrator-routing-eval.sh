@@ -23,7 +23,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.ai}"
-PASSWORD="${PASSWORD:-g7kZfo#oKYrI}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 AUTH_TOKEN="${TOKEN:-${ACCESS_TOKEN:-}}"
 
 PROVIDERS=""

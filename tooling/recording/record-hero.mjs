@@ -55,7 +55,8 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 const APP = process.env.APP_URL || 'http://localhost:5173';
 const API = process.env.API_URL || 'http://localhost:8080';
 const EMAIL = process.env.ES_EMAIL || 'admin@executespec.ai';
-const PASSWORD = process.env.ES_PASSWORD || 'g7kZfo#oKYrI';
+const PASSWORD = process.env.ES_PASSWORD;
+if (!PASSWORD) throw new Error('Set ES_PASSWORD');
 
 // The single use case — the tictactoe project. The whole story is THIS project +
 // ONE fresh run against it.

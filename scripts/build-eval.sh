@@ -40,7 +40,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-revalidate-ent@test.local}"
-PASSWORD="${PASSWORD:-Revalidate1!}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 PROVIDER="${PROVIDER:-anthropic}"
 TIMEOUT="${TIMEOUT:-1200}"
 ONLY_CASE=""

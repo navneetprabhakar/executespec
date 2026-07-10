@@ -25,7 +25,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-Admin@123}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI GOOGLE}"
 SKIP_REPORT="${SKIP_REPORT:-0}"
 # START_SPEC: if set, skip all specs before this one (allows resuming mid-suite)

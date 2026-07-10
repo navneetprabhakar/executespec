@@ -25,7 +25,7 @@
 #      resume_attempts so a human can sanity-check the recovery.
 #
 # Requires: postgres + redis running locally (see CLAUDE.md "Build & Test"),
-# a seed admin user (admin@executespec.ai / Admin@123 by default), Java 21.
+# a seed admin user (set ES_USER and ES_PASS), Java 21.
 #
 # Usage:
 #   scripts/test-resilience.sh                    # full cycle
@@ -47,7 +47,7 @@ set -euo pipefail
 # ── Config ────────────────────────────────────────────────────────────────────
 ES_BASE="${ES_BASE:-http://localhost:8080}"
 ES_USER="${ES_USER:-admin@executespec.ai}"
-ES_PASS="${ES_PASS:-Admin@123}"
+ES_PASS="${ES_PASS:?ES_PASS environment variable is required}"
 SIGNAL="${SIGNAL:-KILL}"               # KILL = SIGKILL (worst case); TERM = SIGTERM (graceful)
 KEEP_APP="${KEEP_APP:-0}"
 SPEC_FILE="${SPEC_FILE:-}"

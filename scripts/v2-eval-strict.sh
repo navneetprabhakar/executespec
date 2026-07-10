@@ -8,7 +8,7 @@
 # Requires:
 #   - Server running (default http://localhost:8080) with strict-provider mode ON
 #   - Provider API keys configured (OPENAI / ANTHROPIC / GOOGLE)
-#   - Admin credentials (defaults: admin@executespec.ai / Admin@123)
+#   - Admin credentials via EMAIL and PASSWORD environment variables
 #
 # Usage:
 #   ./scripts/v2-eval-strict.sh                          # all S3/S4/S5 × 3 providers = 9 runs
@@ -31,7 +31,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.ai}"
-PASSWORD="${PASSWORD:-Admin@123}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 
 BANDS_DEFAULT=(s3-medium s4-large s5-integration)
 PROVIDERS_DEFAULT=(anthropic openai gemini)
