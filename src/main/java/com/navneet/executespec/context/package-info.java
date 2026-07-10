@@ -44,8 +44,8 @@
  * TTL down if pressure observed.
  *
  * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and model-window
- * headroom decisions. {@code ContextEvidenceAssembler} uses the selector for optional handoff
- * lists while preserving goal, diff, reviewer and decision text as mandatory evidence; it never
- * selects or reorders tool messages.
+ * headroom decisions. {@code ContextEvidenceAssembler} uses the selector for optional handoff lists
+ * while preserving goal, diff, reviewer and decision text as mandatory evidence; it never selects
+ * or reorders tool messages.
  */
 package com.navneet.executespec.context;
