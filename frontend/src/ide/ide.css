@@ -2887,6 +2887,25 @@
   color: var(--ide-fg-bright);
   font-weight: 650;
 }
+.agent-pop-close,
+.agent-drawer-close {
+  border: 0;
+  background: transparent;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.agent-pop-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.agent-pop-close:hover,
+.agent-drawer-close:hover {
+  color: var(--ide-fg-bright);
+}
 .agent-pop-row {
   display: flex;
   align-items: center;
@@ -2978,6 +2997,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.agent-drawer-head .agent-drawer-close {
+  margin-left: auto;
 }
 .agent-drawer-head strong {
   font-size: 14px;

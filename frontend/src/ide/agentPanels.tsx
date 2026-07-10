@@ -230,8 +230,18 @@ function SettingsPopover({
   return (
     <>
       <div className='agent-pop-backdrop' onClick={onClose} />
-      <div className='agent-pop' role='dialog' aria-label='Agent settings and usage'>
-        <div className='agent-pop-title'>Sandbox policy</div>
+      <div
+        className='agent-pop'
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='agent-settings-title'
+      >
+        <div className='agent-pop-title' id='agent-settings-title'>
+          Sandbox policy
+        </div>
+        <button className='agent-pop-close' onClick={onClose} aria-label='Close agent settings'>
+          ×
+        </button>
         <div className='agent-pop-row'>
           <span>Execution target</span>
           <code>remote only</code>
@@ -344,9 +354,17 @@ export function AgentChatsDrawer({
   return (
     <>
       <div className='agent-drawer-backdrop' onClick={onClose} />
-      <aside className='agent-drawer' role='dialog' aria-label='Chats'>
+      <aside
+        className='agent-drawer'
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='agent-chats-title'
+      >
         <div className='agent-drawer-head'>
-          <strong>Remote sandboxes</strong>
+          <strong id='agent-chats-title'>Remote sandboxes</strong>
+          <button className='agent-drawer-close' onClick={onClose} aria-label='Close chats'>
+            ×
+          </button>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
             New sandbox

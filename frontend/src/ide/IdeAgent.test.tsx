@@ -279,7 +279,7 @@ describe('IdeAgent', () => {
       root?.render(
         <AgentTopBar
           selected={session}
-          barStatus={{label: 'Reconnecting', tone: 'warn'}}
+          barStatus={{label: 'Reconnecting', tone: 'waiting'}}
           scopeLabel='ExecuteSpec'
           busy={false}
           settingsOpen={false}
