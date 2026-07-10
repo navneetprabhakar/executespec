@@ -208,6 +208,69 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
+  void reconnectRenewsPendingCallDeadline() throws Exception {
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120L);
+    dispatcher.register("r1");
+    CountDownLatch firstEmission = new CountDownLatch(1);
+    AtomicInteger emissions = new AtomicInteger();
+    String[] callId = new String[1];
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              callId[0] = om.readTree(event.payload()).path("callId").asText();
+              if (emissions.incrementAndGet() == 1) firstEmission.countDown();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
+      Thread.sleep(80L);
+      dispatcher.disconnect("r1");
+      dispatcher.reconnect("r1");
+      Thread.sleep(70L);
+
+      assertThat(result.isDone()).isFalse();
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"handoff\"}");
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("handoff");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void malformedClientResultFailsPendingCallWithoutWaitingForTimeout() throws Exception {
+    dispatcher.register("r1");
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              String callId = om.readTree(event.payload()).path("callId").asText();
+              assertThat(dispatcher.rejectMalformed("r1", callId)).isTrue();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    JsonNode result = om.readTree(dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+
+    assertThat(result.path("kind").asText()).isEqualTo("CLIENT_PROTOCOL_ERROR");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            any(),
+            eq(LocalHandsState.CLIENT_PROTOCOL_ERROR),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any());
+  }
+
+  @Test
   void timeout_returnsClientStateInsteadOfInternalToolFailure() throws Exception {
     dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 1L);
     dispatcher.register("r1");

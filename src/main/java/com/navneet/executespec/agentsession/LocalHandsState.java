@@ -4,6 +4,7 @@ package com.navneet.executespec.agentsession;
 public enum LocalHandsState {
   AWAITING_CLIENT,
   CLIENT_RECONNECTED,
+  CLIENT_PROTOCOL_ERROR,
   CLIENT_TIMEOUT,
   CLIENT_CANCELLED,
   COMPLETED

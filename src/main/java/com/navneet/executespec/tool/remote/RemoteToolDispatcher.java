@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,6 +77,7 @@ public class RemoteToolDispatcher {
       String argsJson,
       String permissionKind,
       String frameJson,
+      AtomicLong deadlineNanos,
       CompletableFuture<String> future) {}
 
   /**
@@ -133,6 +135,7 @@ public class RemoteToolDispatcher {
           .values()
           .forEach(
               call -> {
+                call.deadlineNanos().set(deadlineAfterTimeout());
                 record(call, LocalHandsState.CLIENT_RECONNECTED);
                 emit(call);
               });
@@ -167,11 +170,19 @@ public class RemoteToolDispatcher {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
       PendingRemoteCall call =
           new PendingRemoteCall(
-              callId, runId, taskId, toolName, argsJson, permissionKind, frameJson, future);
+              callId,
+              runId,
+              taskId,
+              toolName,
+              argsJson,
+              permissionKind,
+              frameJson,
+              new AtomicLong(deadlineAfterTimeout()),
+              future);
       s.pending.put(callId, call);
       record(call, LocalHandsState.AWAITING_CLIENT);
       emit(call);
-      return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
+      return await(call);
     } catch (TimeoutException e) {
       PendingRemoteCall call = s.pending.get(callId);
       if (call != null) {
@@ -210,6 +221,40 @@ public class RemoteToolDispatcher {
     } else {
       log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
     }
+  }
+
+  /** Fail a malformed client frame immediately instead of leaving the worker blocked to timeout. */
+  public boolean rejectMalformed(String runId, String callId) {
+    Session session = sessions.get(runId);
+    if (session == null) return false;
+    PendingRemoteCall call = session.pending.get(callId);
+    if (call == null) return false;
+    record(call, LocalHandsState.CLIENT_PROTOCOL_ERROR);
+    return call.future()
+        .complete(
+            errorEnvelope(
+                "CLIENT_PROTOCOL_ERROR", "client returned a malformed tool-result envelope"));
+  }
+
+  private String await(PendingRemoteCall call)
+      throws InterruptedException, java.util.concurrent.ExecutionException, TimeoutException {
+    while (true) {
+      long deadline = call.deadlineNanos().get();
+      long remaining = deadline - System.nanoTime();
+      if (remaining <= 0) throw new TimeoutException();
+      try {
+        return call.future().get(remaining, TimeUnit.NANOSECONDS);
+      } catch (TimeoutException timeout) {
+        // A reconnect renews the deadline. If it raced with this wait expiring, wait against the
+        // renewed lease instead of converting a healthy handoff into CLIENT_TIMEOUT.
+        if (call.deadlineNanos().get() > deadline) continue;
+        throw timeout;
+      }
+    }
+  }
+
+  private long deadlineAfterTimeout() {
+    return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(toolTimeoutMs);
   }
 
   private void emit(PendingRemoteCall call) {
