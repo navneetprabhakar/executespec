@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.nio.file.Files;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1104,6 +1105,25 @@ to boot — skip it for those.""";
     var context =
         new com.navneet.executespec.tool.ExecutionContext(
             req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
+    java.nio.file.Path evidenceBundle =
+        context.workspaceRoot()
+            .resolve(".agent-context")
+            .resolve(com.navneet.executespec.context.ContextEvidenceBundleWriter.FILE_NAME);
+    if (Files.exists(evidenceBundle)) {
+      // Context-agent evidence is optional during an in-flight run, but when a bundle exists it
+      // must be current before a provider handoff reuses the snapshot. A stale bundle means the
+      // workspace changed after the evidence was captured; restart with the fresh task prompt.
+      ObjectMapper mapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+      if (new com.navneet.executespec.context.ContextEvidenceBundleWriter(mapper)
+          .readCurrent(context.workspaceRoot(), context.runId())
+          .isEmpty()) {
+        log.info(
+            "Continuation handoff evidence bundle stale run={} task={} — starting fresh",
+            context.runId(),
+            context.taskId());
+        return null;
+      }
+    }
     try {
       var snapshot = contextStore.load(context).orElse(null);
       if (snapshot != null) {

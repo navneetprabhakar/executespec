@@ -2,12 +2,14 @@ package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,7 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Pins {@link SequentialExecutor#resolveResumeAction} key-format normalisation introduced
@@ -48,6 +51,8 @@ import org.junit.jupiter.api.Test;
  * method returns a {@code ResumeAction} record we inspect via getter access.
  */
 class SequentialExecutorResumeKeyTest {
+
+  @TempDir Path tempDir;
 
   private static final String RUN_ID = "7483896a-efd6-46be-9ce7-035902797c02";
   private static final String RUN_SHORT = "7483896a";
@@ -116,6 +121,30 @@ class SequentialExecutorResumeKeyTest {
 
     assertEquals(snapshot, actual);
     verify(contextStore).load(taskContext);
+  }
+
+  @Test
+  void continuationHandoffRejectsStaleEvidenceBundleBeforeLoadingSnapshot() throws Exception {
+    AgentTaskRepository repo = mock(AgentTaskRepository.class);
+    ContextStore contextStore = mock(ContextStore.class);
+    SequentialExecutor exec = newExecutorWith(repo, contextStore);
+    ExecutionContext runContext = new ExecutionContext(RUN_ID, "__root__", tempDir);
+    PlannedTask task =
+        PlannedTask.builder().id(TASK_ID).title("Fix auth").description("Fix auth").build();
+    Plan plan = Plan.builder().planTitle("handoff").tasks(List.of(task)).build();
+    ExecutionRequest request =
+        ExecutionRequest.builder()
+            .plan(plan)
+            .provider("anthropic")
+            .model("claude-sonnet-5")
+            .runContext(runContext)
+            .build();
+    Path contextDir = Files.createDirectories(tempDir.resolve(".agent-context"));
+    Files.writeString(contextDir.resolve("evidence-bundle.json"), "{}\n");
+
+    assertNull(exec.loadContinuationSnapshot(request, task));
+    verify(contextStore, org.mockito.Mockito.never())
+        .load(org.mockito.ArgumentMatchers.any(ExecutionContext.class));
   }
 
   /**
