@@ -21,6 +21,7 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.DelegationDecision;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Evidence;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Result;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
@@ -49,6 +50,15 @@ public class SubagentExecutionService {
   private final AgentOrchestratorTurnService orchestratorTurnService;
   private final SpecChatService specChatService;
   private final RunCostTracker costTracker;
+
+  /** Side-effect-free parent coordinator probe; no model call or child session is created. */
+  public DelegationDecision evaluateDelegation(
+      SpawnRequest request, AppUserDetails user, String orgId) {
+    if (user == null || user.getUser() == null) {
+      throw new SecurityException("authenticated user is required");
+    }
+    return protocolService.evaluateDelegation(request, user.getUser().getId(), orgId);
+  }
 
   /** Spawn, policy-check, execute and persist a single child result. */
   public Result execute(SpawnRequest request, AppUserDetails user, String orgId) {

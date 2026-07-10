@@ -31,9 +31,12 @@ turns separately from runs.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
 - Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
-  (bounded SCOUT/VERIFIER execution) and `POST /api/agent/sessions/{parentSessionId}/subagents/cancel`
-  (parent cancellation propagation). Both require the authenticated session owner; child execution
-  is read-only and cannot acquire run authority.
+  (bounded SCOUT/VERIFIER execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
+  (side-effect-free deterministic parent-coordinator decision), and
+  `POST /api/agent/sessions/{parentSessionId}/subagents/cancel` (parent cancellation propagation).
+  Both the decision and spawn paths require the authenticated session owner; child execution is
+  read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
+  transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
 - Provider choice is cross-surface account state, not a client-local default. Session creation and
   turns must use `AiProviderPreferenceService`: explicit provider input updates
   `app_user.preferred_ai_provider`; omitted input resolves from that preference.

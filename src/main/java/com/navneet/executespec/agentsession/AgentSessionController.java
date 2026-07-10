@@ -89,6 +89,22 @@ public class AgentSessionController {
     return subagentExecutionService.execute(request, user, orgId(user));
   }
 
+  /**
+   * Return the deterministic parent-delegation decision without creating a child or calling a
+   * provider. A coordinator may use an eligible response immediately before the canonical spawn
+   * endpoint; spawn repeats the same limits transactionally.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents/eligibility")
+  public SubagentProtocol.DelegationDecision subagentEligibility(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.SpawnRequest request) {
+    if (request == null || !sessionId.equals(request.parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.evaluateDelegation(request, user, orgId(user));
+  }
+
   /** Cancel all active child agents owned by this parent session. */
   @PostMapping("/sessions/{sessionId}/subagents/cancel")
   public java.util.Map<String, Integer> cancelSubagents(
