@@ -71,12 +71,26 @@ function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
 }
 
 function persistedEventTimeline(events: api.AgentActionEvent[] | null | undefined) {
+  const semanticTypes = new Set([
+    'SUBAGENT',
+    'HANDOFF',
+    'PROVIDER_SWITCH',
+    'MODEL_SWITCH',
+    'CONTINUATION',
+    'RUN_TASK_WAVE_PLAN',
+    'RUN_GOAL_DECISION',
+    'RUN_CONTINUATION_DECISION',
+    'RUN_CONTINUATION_ACTION',
+    'RUN_CONTINUATION_ACTION_SKIPPED',
+    'RUN_VALIDATION_EVIDENCE',
+  ]);
+  const isSemanticType = (type: string) =>
+    semanticTypes.has(type) ||
+    ['SUBAGENT_', 'HANDOFF_', 'PROVIDER_', 'MODEL_', 'CONTINUATION_'].some((prefix) =>
+      type.startsWith(prefix),
+    );
   return (events ?? [])
-    .filter((event) =>
-      /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN[ _]VALIDATION[ _]EVIDENCE/i.test(
-        event.type,
-      ),
-    )
+    .filter((event) => isSemanticType(event.type.toUpperCase()))
     .map((event) => {
       let detail = event.payloadJson ?? undefined;
       if (detail) {
