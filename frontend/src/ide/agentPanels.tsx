@@ -235,6 +235,7 @@ function SettingsPopover({
         role='dialog'
         aria-modal='true'
         aria-labelledby='agent-settings-title'
+        tabIndex={-1}
       >
         <div className='agent-pop-title' id='agent-settings-title'>
           Sandbox policy
@@ -359,6 +360,7 @@ export function AgentChatsDrawer({
         role='dialog'
         aria-modal='true'
         aria-labelledby='agent-chats-title'
+        tabIndex={-1}
       >
         <div className='agent-drawer-head'>
           <strong id='agent-chats-title'>Remote sandboxes</strong>
