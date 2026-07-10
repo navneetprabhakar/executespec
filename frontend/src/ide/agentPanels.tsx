@@ -635,12 +635,14 @@ function Typing() {
 function SandboxRunCard({
   run,
   liveCostUsd,
+  streamStatus,
   busy,
   onOpen,
   onStop,
 }: {
   run: api.RunDetail;
   liveCostUsd: number | null;
+  streamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
@@ -657,6 +659,16 @@ function SandboxRunCard({
   const activePhase = sandboxPhaseKey(run.status);
   const score = run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100`;
   const provider = run.aiProvider || run.workerModel || 'default route';
+  const streamLabel =
+    streamStatus === 'RECONNECTING'
+      ? 'Reconnecting live events'
+      : streamStatus === 'CONNECTING'
+        ? 'Connecting live events'
+        : streamStatus === 'CONNECTED'
+          ? 'Live events connected'
+          : streamStatus === 'CLOSED' && !terminal
+            ? 'Snapshot only · live events unavailable'
+            : null;
   const prUrl = run.scmPrUrl || run.githubPrUrl;
   const terminalLabel = failed
     ? 'Open failure evidence'
@@ -686,6 +698,15 @@ function SandboxRunCard({
         </span>
       </div>
       <div className='agent-runcard-mode'>Remote sandbox · plan-gated · PR-oriented</div>
+      {streamLabel && (
+        <div
+          className={`agent-runcard-stream ${streamStatus === 'CONNECTED' ? 'ok' : ''}`}
+          role='status'
+        >
+          <span aria-hidden='true' />
+          {streamLabel}
+        </div>
+      )}
       <div className='agent-runcard-phases' aria-label='Sandbox phase'>
         {SANDBOX_PHASES.map((phase) => (
           <span
@@ -1189,6 +1210,7 @@ export function AgentConversation({
   gates,
   runCard,
   runCost,
+  runStreamStatus,
   input,
   attachments,
   uploading,
@@ -1214,6 +1236,7 @@ export function AgentConversation({
   gates: api.AgentGateDecisionCard[];
   runCard: api.RunDetail | null;
   runCost: number | null;
+  runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
   input: string;
   attachments: AgentAttachmentLite[];
   uploading: boolean;
@@ -1275,6 +1298,7 @@ export function AgentConversation({
             <SandboxRunCard
               run={runCard}
               liveCostUsd={runCost}
+              streamStatus={runStreamStatus}
               busy={isBusy}
               onOpen={onOpenRun}
               onStop={onStopRun}

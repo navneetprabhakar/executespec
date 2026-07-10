@@ -507,6 +507,7 @@ export default function IdeAgent() {
         gates={inlineGates}
         runCard={runCard}
         runCost={runCost}
+        runStreamStatus={liveRun.status}
         input={state.input}
         attachments={state.attachments}
         uploading={uploading}
