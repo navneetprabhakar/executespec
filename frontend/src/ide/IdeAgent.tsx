@@ -70,6 +70,28 @@ function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
   );
 }
 
+function persistedEventTimeline(events: api.AgentActionEvent[] | null | undefined) {
+  return (events ?? [])
+    .filter((event) => /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION/i.test(event.type))
+    .map((event) => {
+      let detail = event.payloadJson ?? undefined;
+      if (detail) {
+        try {
+          const payload = JSON.parse(detail) as Record<string, unknown>;
+          detail = String(payload.summary ?? payload.reason ?? payload.status ?? detail);
+        } catch {
+          // Preserve opaque historical payloads as bounded detail rather than dropping activity.
+        }
+      }
+      return {
+        id: `persisted:${event.id}`,
+        type: 'system' as const,
+        title: event.type.split('_').join(' '),
+        detail,
+      };
+    });
+}
+
 export default function IdeAgent() {
   const navigate = useNavigate();
   const {projectId, runId} = useParams();
@@ -172,6 +194,13 @@ export default function IdeAgent() {
   const loadTurns = useCallback(async (sessionId: string) => {
     const rows = await api.listAgentTurns(sessionId, {limit: 50});
     dispatch({type: 'turns:set', turns: rows});
+    if (typeof api.listAgentEvents !== 'function') return;
+    try {
+      const events = (await api.listAgentEvents(sessionId)) ?? [];
+      dispatch({type: 'events:set', events: persistedEventTimeline(events)});
+    } catch {
+      // Historical event replay is additive; a missing event endpoint must not hide turns.
+    }
   }, []);
 
   const loadSessions = useCallback(async () => {
