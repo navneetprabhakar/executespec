@@ -163,6 +163,7 @@ claim in a tool result — never invent a runId, score, or status.""";
   private final ModelResolver modelResolver;
   private final ProjectChatActionTools actionTools;
   private final WebSearchChatTools webSearchChatTools;
+  private final SubagentChatTools subagentChatTools;
   private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
@@ -336,6 +337,10 @@ claim in a tool result — never invent a runId, score, or status.""";
             new ProjectChatActionTools.ToolContext(
                 user, projectId, orgId, sessionId, providerName, model.getModel())));
     tools.addAll(webSearchChatTools.bind());
+    if (allowedToolNames == null || allowedToolNames.contains("spawn_subagent")) {
+      ToolCallback subagentTool = subagentChatTools.bind(user, sessionId, null);
+      if (subagentTool != null) tools.add(subagentTool);
+    }
     if (projectId != null && !projectId.isBlank()) {
       addUniqueTools(
           tools,

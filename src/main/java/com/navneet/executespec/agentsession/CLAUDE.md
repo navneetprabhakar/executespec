@@ -39,6 +39,9 @@ turns separately from runs.
   Both the decision and spawn paths require the authenticated session owner; child execution is
   read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
+  The canonical chat turn also exposes the bounded `spawn_subagent` tool to the model; it uses the
+  same service/protocol seam and returns structured child evidence, so the REST endpoints are
+  compatibility/control-plane surfaces rather than a second execution implementation.
   The coordinator endpoint additionally requires `automatic=true`, `trigger=COORDINATOR`, a fresh
   eligible decision, and `agent.subagents.coordinator-auto.enabled=true`; it never grants write or
   run authority and records `SUBAGENT_COORDINATOR_ACCEPTED` parent activity before execution.

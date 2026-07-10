@@ -137,12 +137,14 @@ class SpecChatServiceTest {
     when(contextSanitizer.sanitizeInput(any(), any())).thenAnswer(inv -> inv.getArgument(0));
     WebSearchChatTools webSearchChatTools =
         new WebSearchChatTools(new com.fasterxml.jackson.databind.ObjectMapper(), contextSanitizer);
+    SubagentChatTools subagentChatTools = mock(SubagentChatTools.class);
 
     return new SpecChatService(
         router,
         modelResolver,
         actionTools,
         webSearchChatTools,
+        subagentChatTools,
         projectTools,
         props,
         costTracker,
