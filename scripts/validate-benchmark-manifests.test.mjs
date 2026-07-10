@@ -45,3 +45,34 @@ test("reproducible status rejects missing identities and contradictory rates", (
   assert.ok(errors.some((error) => error.includes("repository.sha cannot be null")));
   assert.ok(errors.some((error) => error.includes("budgets.contextTokens cannot be null")));
 });
+
+test("benchmark validation rejects a missing resolution rate", () => {
+  const manifest = {
+    schemaVersion: 1,
+    status: "EXPLORATORY",
+    suite: "suite",
+    model: { provider: "deepseek", matrixId: "m", providerSlug: null },
+    repository: { sha: null },
+    prompt: { sha256: null },
+    toolSchema: { sha256: null },
+    harness: { sha256: null },
+    dataset: { sha256: null },
+    featureFlags: {},
+    budgets: Object.fromEntries(
+      [
+        "passes",
+        "tasks",
+        "concurrency",
+        "contextTokens",
+        "maxOutputTokens",
+        "iterationLimit",
+        "wallClockLimitSeconds",
+        "costLimitUsd",
+      ].map((key) => [key, 1]),
+    ),
+    results: { resolved: 0, total: 0 },
+  };
+  assert.ok(
+    validateManifest(manifest).some((error) => error.includes("finite number")),
+  );
+});
