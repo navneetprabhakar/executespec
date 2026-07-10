@@ -15,7 +15,6 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.ReviewReport;
@@ -40,7 +39,6 @@ import lombok.extern.slf4j.Slf4j;
 public class ContextAgent {
 
   private final ContextAgentScanner scanner;
-  private final FallbackLlmRouter fallbackLlmRouter;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ContextAgentProperties props;
@@ -55,7 +53,6 @@ public class ContextAgent {
   @Autowired
   public ContextAgent(
       ContextAgentScanner scanner,
-      FallbackLlmRouter fallbackLlmRouter,
       LlmRouter llmRouter,
       ModelResolver modelResolver,
       ContextAgentProperties props,
@@ -64,7 +61,6 @@ public class ContextAgent {
       ObjectMapper objectMapper,
       ContextEvidenceBundleWriter evidenceBundleWriter) {
     this.scanner = scanner;
-    this.fallbackLlmRouter = fallbackLlmRouter;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
@@ -72,27 +68,6 @@ public class ContextAgent {
     this.gitTool = gitTool;
     this.objectMapper = objectMapper;
     this.evidenceBundleWriter = evidenceBundleWriter;
-  }
-
-  /** Compatibility constructor retained for focused unit tests and older embedders. */
-  ContextAgent(
-      ContextAgentScanner scanner,
-      FallbackLlmRouter fallbackLlmRouter,
-      ModelResolver modelResolver,
-      ContextAgentProperties props,
-      StateStore stateStore,
-      GitTool gitTool,
-      ObjectMapper objectMapper) {
-    this(
-        scanner,
-        fallbackLlmRouter,
-        null,
-        modelResolver,
-        props,
-        stateStore,
-        gitTool,
-        objectMapper,
-        new ContextEvidenceBundleWriter(objectMapper));
   }
 
   public void runAsync(
@@ -149,23 +124,13 @@ public class ContextAgent {
         new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userMessage)));
 
     var response =
-        llmRouter != null
-            ? llmRouter.callText(
-                resolved.providerName(),
-                resolved.getModel(),
-                prompt.getInstructions(),
-                run.getRunId(),
-                "ContextAgent",
-                "context.generate")
-            : fallbackLlmRouter.callWithFallback(
-                resolved.providerName(),
-                resolved.getModel(),
-                prompt,
-                run.getRunId(),
-                "context-agent",
-                FallbackLlmRouter.FallbackMode.IMMEDIATE,
-                0,
-                false);
+        llmRouter.callText(
+            resolved.providerName(),
+            resolved.getModel(),
+            prompt.getInstructions(),
+            run.getRunId(),
+            "ContextAgent",
+            "context.generate");
 
     // Track tokens for billing accuracy
     try {

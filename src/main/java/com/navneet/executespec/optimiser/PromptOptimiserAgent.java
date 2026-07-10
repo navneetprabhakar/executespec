@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
@@ -54,7 +53,6 @@ public class PromptOptimiserAgent {
 
   private final PromptPatternAnalyser analyser;
   private final PromptAuditService auditService;
-  private final FallbackLlmRouter fallbackLlmRouter;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final PromptOptimiserProperties props;
@@ -65,7 +63,6 @@ public class PromptOptimiserAgent {
   public PromptOptimiserAgent(
       PromptPatternAnalyser analyser,
       PromptAuditService auditService,
-      FallbackLlmRouter fallbackLlmRouter,
       LlmRouter llmRouter,
       ModelResolver modelResolver,
       PromptOptimiserProperties props,
@@ -73,32 +70,11 @@ public class PromptOptimiserAgent {
       PromptVersioningService versioningService) {
     this.analyser = analyser;
     this.auditService = auditService;
-    this.fallbackLlmRouter = fallbackLlmRouter;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
     this.stateStore = stateStore;
     this.versioningService = versioningService;
-  }
-
-  /** Compatibility constructor for focused tests and older embedders. */
-  PromptOptimiserAgent(
-      PromptPatternAnalyser analyser,
-      PromptAuditService auditService,
-      FallbackLlmRouter fallbackLlmRouter,
-      ModelResolver modelResolver,
-      PromptOptimiserProperties props,
-      StateStore stateStore,
-      PromptVersioningService versioningService) {
-    this(
-        analyser,
-        auditService,
-        fallbackLlmRouter,
-        null,
-        modelResolver,
-        props,
-        stateStore,
-        versioningService);
   }
 
   public void runIfDue(PipelineRun completedRun) {
@@ -207,23 +183,13 @@ public class PromptOptimiserAgent {
 
     ResolvedModel resolved = modelResolver.resolve("PromptOptimiserAgent", run.getAiProviderEnum());
     var response =
-        llmRouter != null
-            ? llmRouter.callText(
-                resolved.providerName(),
-                resolved.getModel(),
-                prompt.getInstructions(),
-                run.getRunId(),
-                "PromptOptimiserAgent",
-                "prompt.optimize")
-            : fallbackLlmRouter.callWithFallback(
-                resolved.providerName(),
-                resolved.getModel(),
-                prompt,
-                run.getRunId(),
-                "prompt-optimiser",
-                FallbackLlmRouter.FallbackMode.IMMEDIATE,
-                0,
-                false);
+        llmRouter.callText(
+            resolved.providerName(),
+            resolved.getModel(),
+            prompt.getInstructions(),
+            run.getRunId(),
+            "PromptOptimiserAgent",
+            "prompt.optimize");
 
     // Track tokens for billing accuracy
     try {
