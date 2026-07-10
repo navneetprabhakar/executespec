@@ -186,8 +186,11 @@ public class SubagentExecutionService {
         && !coordinator.eligibilityChildSessionId().equals(decision.childSessionId())) {
       throw new IllegalStateException("eligibility child session does not match request");
     }
-    String expectedChild = decision.childSessionId();
-    protocolService.recordCoordinatorTrigger(request, expectedChild, user.getUser().getId(), orgId);
+    // Reserve first and append the acceptance in the same transaction.  The eligibility probe is
+    // advisory; another coordinator may win the last slot before this point.  In that case spawn
+    // fails closed and no misleading "accepted" event is emitted.  The persisted event names the
+    // actual child rather than the probe's (normally null) placeholder.
+    protocolService.spawnAndRecordCoordinator(request, user.getUser().getId(), orgId);
     return execute(request, user, orgId);
   }
 
