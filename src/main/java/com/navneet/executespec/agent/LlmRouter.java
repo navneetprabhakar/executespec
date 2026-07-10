@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -26,6 +27,7 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -125,6 +127,54 @@ public class LlmRouter {
    * enterprise-BYOK providers (deepseek / openrouter) are never failover targets.
    */
   static final String FAILOVER_FLAG = "router.failover.enabled";
+
+  /**
+   * Dispatch a text-only request through the canonical V2 provider transport.
+   *
+   * <p>This is the migration seam for legacy non-tool callers. It deliberately does not reproduce
+   * {@link FallbackLlmRouter}'s circuit-breaker/fallback policy: provider selection and any
+   * escalation must be decided by the caller/model policy, while transport, BYOK resolution,
+   * managed-AI accounting, retries, and telemetry stay in one router. An empty tool override is
+   * important here; text callers must not bind the mutable worker tool registry just to make a
+   * request.
+   *
+   * @param provider resolved provider identifier
+   * @param model resolved model identifier
+   * @param messages system/user (or other text) messages
+   * @param runId run/session identifier used for key and usage attribution
+   * @param agentRole stable producer role for usage attribution
+   * @param stepId stable producer step for usage attribution
+   */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId) {
+    String effectiveRunId =
+        (runId == null || runId.isBlank())
+            ? "text-" + Integer.toHexString(messages.hashCode())
+            : runId;
+    String taskId =
+        (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
+    return call(
+        LlmRequest.builder()
+            .provider(provider)
+            .model(model)
+            .messages(messages)
+            .context(
+                new com.navneet.executespec.tool.ExecutionContext(
+                    effectiveRunId,
+                    taskId,
+                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
+                        .toAbsolutePath()
+                        .normalize()))
+            .toolsOverride(List.of())
+            .agentRole(agentRole)
+            .stepId(stepId)
+            .build());
+  }
 
   /**
    * Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose).

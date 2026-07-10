@@ -9,7 +9,6 @@ import com.navneet.executespec.router.ResolvedModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -18,8 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Distils a free-form user request into a concise 5-9 word imperative title. Used by the
  * SINGLE_SHOT bypass path so run titles shown in project views read naturally instead of echoing
- * the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link FallbackLlmRouter} (same pattern as
- * {@code RunLedgerAgent}) — cheap + fast + no ExecutionContext plumbing needed.
+ * the raw request. Uses the LIGHTWEIGHT tier through the canonical {@link LlmRouter} text seam —
+ * cheap + fast, with no worker tools bound to this metadata-only call.
  *
  * <p>All failures return {@code null} so callers can fall back to deterministic truncation. Title
  * generation is a nice-to-have, never a hard dependency.
@@ -41,13 +40,13 @@ public class RunTitleSummarizer {
       - Output the title ONLY — nothing else, no prefix, no explanation.
       """;
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
 
   /**
    * @param spec the raw user request
    * @param provider the project/run's LLM provider; falls back to OPENAI
-   * @param runId for logging/correlation in the FallbackLlmRouter
+   * @param runId for key, usage, and logging correlation in the canonical router
    * @return a tightened title, or {@code null} if summarization failed
    */
   public String summarize(String spec, LlmProvider provider, String runId) {
@@ -55,17 +54,16 @@ public class RunTitleSummarizer {
     try {
       LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
       ResolvedModel resolved = modelResolver.resolve("RunTitleSummarizer", effective);
-      Prompt prompt = new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(spec)));
+      List<org.springframework.ai.chat.messages.Message> messages =
+          List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(spec));
       ChatResponse response =
-          fallbackLlmRouter.callWithFallback(
+          llmRouter.callText(
               resolved.providerName(),
               resolved.getModel(),
-              prompt,
+              messages,
               runId == null ? "title-" + spec.hashCode() : runId,
-              "run-title",
-              FallbackLlmRouter.FallbackMode.IMMEDIATE,
-              0,
-              false);
+              "RunTitleSummarizer",
+              "title");
       String text = response.getResult().getOutput().getText();
       return clean(text);
     } catch (Exception e) {
