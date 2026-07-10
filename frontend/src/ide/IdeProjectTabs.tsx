@@ -64,7 +64,7 @@ const PRIMARY_TABS: ProjectTab[] = [
   {label: 'Overview', seg: '/pulse'},
   {label: 'Work', seg: '/runs', count: 'runs'},
   {label: 'Code', seg: '/code'},
-  {label: 'Chat', seg: '/chat'},
+  {label: 'Chat', seg: '/agent'},
   {label: 'Settings', seg: '/settings'},
 ];
 const SECONDARY_TABS: ProjectTab[] = [
