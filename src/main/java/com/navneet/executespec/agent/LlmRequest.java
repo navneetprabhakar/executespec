@@ -41,6 +41,7 @@ import lombok.Builder;
  * @param agentRole stable producer role for W0 usage attribution, e.g. {@code WorkerAgent}
  * @param stepId stable phase/step identifier inside the role, e.g. {@code worker.iteration}
  * @param retryOf optional parent step/call id when this request is a retry/failover attempt
+ * @param strictProvider when true, transient failures are not routed to another provider
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -55,7 +56,8 @@ public record LlmRequest(
     String toolChoice,
     String agentRole,
     String stepId,
-    String retryOf) {
+    String retryOf,
+    boolean strictProvider) {
 
   public LlmRequest {
     if (provider == null || provider.isBlank())

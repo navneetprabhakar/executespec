@@ -12,7 +12,7 @@ class ExecutionPlannerServiceParsePlanTest {
 
   private final ExecutionPlannerService planner =
       new ExecutionPlannerService(
-          mock(com.navneet.executespec.agent.FallbackLlmRouter.class),
+          mock(com.navneet.executespec.agent.LlmRouter.class),
           mock(com.navneet.executespec.router.ModelResolver.class),
           new ObjectMapper(),
           mock(com.navneet.executespec.execution.repository.ExecutionRunRepository.class),
