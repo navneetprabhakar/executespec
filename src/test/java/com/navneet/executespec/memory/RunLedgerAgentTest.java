@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -34,6 +35,7 @@ class RunLedgerAgentTest {
     PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
     AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
     MemoryCompactionService compactionService = mock(MemoryCompactionService.class);
+    AgentProperties agentProperties = new AgentProperties();
 
     PipelineRun run =
         PipelineRun.builder()
@@ -65,7 +67,13 @@ class RunLedgerAgentTest {
 
     RunLedgerAgent agent =
         new RunLedgerAgent(
-            llmRouter, modelResolver, ledgerRepo, runRepo, taskRepo, compactionService);
+            llmRouter,
+            modelResolver,
+            ledgerRepo,
+            runRepo,
+            taskRepo,
+            compactionService,
+            agentProperties);
 
     agent.generateLedgerEntry("run-1");
 

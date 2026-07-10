@@ -1,11 +1,14 @@
 package com.navneet.executespec.memory;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -44,6 +47,7 @@ public class RunLedgerAgent {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final MemoryCompactionService compactionService;
+  private final AgentProperties agentProperties;
 
   private static final int LEDGER_CHAR_CAP = 2000;
 
@@ -80,7 +84,7 @@ public class RunLedgerAgent {
               .replace("{{USER_REQUEST}}", truncate(run.getUserRequest(), 500))
               .replace("{{PLAN_SUMMARY}}", truncate(run.getRunSummary(), 1000))
               .replace("{{TASK_SUMMARIES}}", truncate(taskSummaries, 2000))
-              .replace("{{DIFF_STAT}}", "(diff stat unavailable — worker ran sequentially)");
+              .replace("{{DIFF_STAT}}", diffStat(runId));
 
       String entry = callLightweightLlm(filled, run, runId);
       if (entry == null || entry.isBlank()) {
@@ -146,6 +150,44 @@ public class RunLedgerAgent {
 
   private int estimateTokens(String text) {
     return text == null ? 0 : (int) Math.ceil(text.split("\\s+").length * 1.3);
+  }
+
+  /**
+   * Read the final V2 output commit's stat after the orchestrator commits workspace changes. This
+   * is deliberately a bounded, argument-array git invocation: no shell interpolation and no
+   * unbounded output enters the ledger prompt. Missing/invalid workspaces remain an honest
+   * unavailable marker instead of pretending that sequential execution explains the absence.
+   */
+  private String diffStat(String runId) {
+    try {
+      String root = agentProperties.getWorkspace();
+      if (root == null || root.isBlank()) {
+        return "(diff stat unavailable — workspace not configured)";
+      }
+      Path workspace = Path.of(root, runId).toAbsolutePath().normalize();
+      if (!Files.isDirectory(workspace.resolve(".git"))) {
+        return "(diff stat unavailable — workspace has no git repository)";
+      }
+      ProcessBuilder git =
+          new ProcessBuilder("git", "show", "--stat", "--format=", "HEAD")
+              .directory(workspace.toFile())
+              .redirectErrorStream(true);
+      git.environment().keySet().retainAll(List.of("PATH"));
+      Process process = git.start();
+      if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+        process.destroyForcibly();
+        return "(diff stat unavailable — git timed out)";
+      }
+      String output =
+          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      if (process.exitValue() != 0 || output.isBlank()) {
+        return "(diff stat unavailable — git show failed)";
+      }
+      return truncate(output, 4000);
+    } catch (Exception e) {
+      log.debug("RunLedgerAgent: diff stat unavailable for run {}: {}", runId, e.getMessage());
+      return "(diff stat unavailable — " + e.getClass().getSimpleName() + ")";
+    }
   }
 
   private String truncate(String s, int maxChars) {
