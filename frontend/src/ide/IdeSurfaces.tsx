@@ -593,9 +593,9 @@ export function IdeCompose() {
     return labels;
   }, [modelLabels, providerOptions]);
 
-  const providerModels = modelsByProvider[provider.toLowerCase()] || [];
-  const modelPickerOptions = useMemo<ModelPickerOption[]>(
-    () => [
+  const modelPickerOptions = useMemo<ModelPickerOption[]>(() => {
+    const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+    return [
       {
         value: '',
         label: 'Recommended',
@@ -608,9 +608,8 @@ export function IdeCompose() {
         provider,
         helper: m,
       })),
-    ],
-    [modelLabelById, provider, providerModels],
-  );
+    ];
+  }, [modelLabelById, modelsByProvider, provider]);
   const managedAiMessage =
     managedAi && hasUnlimitedAiCredits(managedAi)
       ? formatManagedAiPlanMessage(managedAi)
