@@ -33,5 +33,9 @@
  * <p>Compacted context typically 20–40 KB per task. A run with 5 tasks ≈ 200 KB peak. 1000
  * concurrent in-flight runs ≈ 200 MB Redis memory. Monitor {@code redis_memory_used_bytes} and tune
  * TTL down if pressure observed.
+ *
+ * <p>{@code ContextPlanner} selects evidence by descending priority with deterministic
+ * fresh/kind/id tie-breakers. This keeps tight-window retries and benchmark comparisons stable
+ * even when search or Redis result ordering changes.
  */
 package com.navneet.executespec.context;

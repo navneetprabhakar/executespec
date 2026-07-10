@@ -61,6 +61,27 @@ class ContextPlannerTest {
   }
 
   @Test
+  void equalPriorityEvidenceUsesStableFreshKindAndIdTieBreakers() {
+    var stale =
+        new ContextPlanner.Item(
+            "z-stale", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, false);
+    var freshZ =
+        new ContextPlanner.Item(
+            "z-fresh", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, true);
+    var freshA =
+        new ContextPlanner.Item(
+            "a-fresh", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, true);
+
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(500, 0, 0, 0, 0, 0), List.of(stale, freshZ, freshA));
+
+    assertThat(plan.selected())
+        .extracting(ContextPlanner.Item::id)
+        .containsExactly("a-fresh", "z-fresh", "z-stale");
+  }
+
+  @Test
   void unknownModelPreservesCallerFallback() {
     when(models.isKnownModel("future-model")).thenReturn(false);
 
