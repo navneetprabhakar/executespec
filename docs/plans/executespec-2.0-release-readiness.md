@@ -21,7 +21,7 @@
 | Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; clean-install baseline is intentionally deferred until schema freeze |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test` — 2218 tests, 0 failures/errors; focused context suite 15/15 |
 | Frontend build/lint/format/tests | PENDING | Not run on integration branch |
-| CLI/core/VS Code build/tests | PASS | 910/910 on `codex/cli-1.0` (core 115, CLI 783, VS Code 12) |
+| CLI/core/VS Code build/tests | PASS | 911/911 on `codex/cli-1.0` (core 115, CLI 784, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
 | Docs links and integrity | PARTIAL | Canonical entrypoints, release facts, and duplicate-ID policy are fixed; docs validator reports 245 remaining broken links in legacy architecture/archive references |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
