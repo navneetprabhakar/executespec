@@ -26,7 +26,6 @@ const PROVIDER_MARKS: Record<string, {text: string; tone: string}> = {
   OPENROUTER: {text: 'OR', tone: 'openrouter'},
   DEEPSEEK: {text: 'DS', tone: 'deepseek'},
   FIREWORKS: {text: 'FW', tone: 'fireworks'},
-  SARVAM: {text: 'S', tone: 'sarvam'},
 };
 
 function providerMark(provider: string): {text: string; tone: string} {

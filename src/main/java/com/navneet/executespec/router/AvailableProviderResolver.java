@@ -53,11 +53,6 @@ public class AvailableProviderResolver {
   @Value("${spring.ai.fireworks.api-key:}")
   private String systemFireworksKey;
 
-  // 2026-06-21 — Sarvam AI system key. Retained for future eval breadcrumbs only. It is
-  // deliberately not added to available providers because live quality was not production-ready.
-  @Value("${spring.ai.sarvam.api-key:}")
-  private String systemSarvamKey;
-
   /**
    * Determine which providers are available for a given run. Uses the already-resolved keys from
    * {@link RunKeyStore}.
@@ -83,7 +78,6 @@ public class AvailableProviderResolver {
       if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
       if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
       if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
-      // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
     }
 
     if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
@@ -125,7 +119,6 @@ public class AvailableProviderResolver {
     if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
     if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
-    // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
     providers.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
     if (providers.isEmpty()) {
@@ -143,7 +136,6 @@ public class AvailableProviderResolver {
       case OPENROUTER -> "openrouter";
       case DEEPSEEK -> "deepseek";
       case FIREWORKS -> "fireworks";
-      case SARVAM -> "sarvam";
     };
   }
 

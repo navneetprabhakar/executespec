@@ -76,7 +76,8 @@ public class RunLifecycleService {
    * sweep them alongside genuinely-active runs.
    */
   static final List<String> NON_TERMINAL_STATUSES =
-      List.of("QUEUED", "PLANNING", "AWAITING_APPROVAL", "WORKING", "REVIEWING");
+      List.of(
+          "QUEUED", "PLANNING", "AWAITING_APPROVAL", "APPROVAL_RESUMING", "WORKING", "REVIEWING");
 
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
@@ -101,6 +102,121 @@ public class RunLifecycleService {
   private final RunValidationKickoff validationKickoff;
   private final ModelResolver modelResolver;
   private final ValidationReportRepository validationReportRepository;
+
+  public enum PlanApprovalOutcome {
+    RESUME_QUEUED,
+    REJECTED,
+    ALREADY_RESOLVED,
+    CONFLICTING_DECISION,
+    NOT_FOUND,
+    INVALID_STATE,
+    WORKSPACE_GONE,
+    PLAN_MISSING
+  }
+
+  /**
+   * Atomically resolves a durable plan gate and, on approval, queues the canonical post-plan
+   * pipeline. Repeating the same decision is a no-op; only an opposite decision conflicts.
+   */
+  public PlanApprovalOutcome resolvePlanGate(String runId, boolean approved) {
+    PipelineRun run = runRepo.findById(runId).orElse(null);
+    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
+    if (!"AWAITING_APPROVAL".equals(run.getStatus())
+        && !"APPROVAL_RESUMING".equals(run.getStatus())) {
+      return PlanApprovalOutcome.INVALID_STATE;
+    }
+
+    GateStore.PlanGateClaim claim = gateStore.claimPlanGate(runId, approved);
+    if (claim != GateStore.PlanGateClaim.CLAIMED) {
+      boolean sameDecision =
+          (approved && claim == GateStore.PlanGateClaim.ALREADY_APPROVED)
+              || (!approved && claim == GateStore.PlanGateClaim.ALREADY_REJECTED);
+      return sameDecision
+          ? PlanApprovalOutcome.ALREADY_RESOLVED
+          : PlanApprovalOutcome.CONFLICTING_DECISION;
+    }
+
+    if (!approved) {
+      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
+      return PlanApprovalOutcome.REJECTED;
+    }
+    return queueApprovedPlan(run, continuationFor(runId));
+  }
+
+  /** Reconciles an approved/rejected durable gate after a JVM restart. Pending gates stay idle. */
+  public PlanApprovalOutcome recoverPlanGate(String runId) {
+    PipelineRun run = runRepo.findById(runId).orElse(null);
+    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
+    var gate = gateStore.findPlanGate(runId).orElse(null);
+    if (gate == null || "PENDING".equals(gate.getStatus())) {
+      return PlanApprovalOutcome.ALREADY_RESOLVED;
+    }
+    if ("REJECTED".equals(gate.getStatus())) {
+      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
+      return PlanApprovalOutcome.REJECTED;
+    }
+    if (!"APPROVED".equals(gate.getStatus())) return PlanApprovalOutcome.INVALID_STATE;
+    return queueApprovedPlan(run, continuationFor(runId));
+  }
+
+  private RunOrchestrator.PlanGateContinuation continuationFor(String runId) {
+    String payload = gateStore.findPlanGate(runId).map(g -> g.getComment()).orElse(null);
+    if (payload == null || payload.isBlank()) {
+      return new RunOrchestrator.PlanGateContinuation(1, false, false, true, null, null);
+    }
+    try {
+      RunOrchestrator.PlanGateContinuation continuation =
+          objectMapper.readValue(payload, RunOrchestrator.PlanGateContinuation.class);
+      if (continuation.schemaVersion() != 1) {
+        throw new IllegalStateException(
+            "Unsupported plan-gate continuation schema " + continuation.schemaVersion());
+      }
+      return continuation;
+    } catch (Exception e) {
+      throw new IllegalStateException("Invalid plan-gate continuation for run " + runId, e);
+    }
+  }
+
+  private PlanApprovalOutcome queueApprovedPlan(
+      PipelineRun run, RunOrchestrator.PlanGateContinuation continuation) {
+    String runId = run.getRunId();
+    if (run.getPlanJson() == null || run.getPlanJson().isBlank()) {
+      controlPort.terminate(runId, "FAILED", "plan missing on approval resume", Instant.now());
+      return PlanApprovalOutcome.PLAN_MISSING;
+    }
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      try {
+        workspaceRestoreService.ensureWorkspaceAvailable(runId);
+      } catch (Exception e) {
+        log.warn("plan approval resume={} workspace restore failed: {}", runId, e.getMessage());
+      }
+      if (!Files.isDirectory(workspace)) {
+        controlPort.terminate(runId, "FAILED", "workspace gone on approval resume", Instant.now());
+        return PlanApprovalOutcome.WORKSPACE_GONE;
+      }
+    }
+
+    run.setStatus("APPROVAL_RESUMING");
+    run.setResumedAt(Instant.now());
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "APPROVAL_RESUMING"));
+    broadcaster.emit(runId, RunEvent.log(runId, "approval", "Plan approved — resuming execution"));
+
+    RunOrchestrator.RunPipelineRequest request =
+        RunOrchestrator.RunPipelineRequest.fromApprovedPlanRow(run, continuation);
+    java.util.concurrent.Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                controlPort.runPipelineForResume(request);
+              } finally {
+                controlPort.removeActiveRun(runId);
+              }
+            });
+    controlPort.putActiveRun(runId, future);
+    return PlanApprovalOutcome.RESUME_QUEUED;
+  }
 
   public boolean cancel(String runId) {
     var opt = runRepo.findById(runId);

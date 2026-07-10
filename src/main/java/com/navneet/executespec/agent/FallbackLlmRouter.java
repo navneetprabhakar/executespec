@@ -31,6 +31,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.retry.RetryUtils;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class FallbackLlmRouter {
+
+  @Value("${executespec.live-llm.enabled:true}")
+  private boolean liveLlmEnabled = true;
+
+  @Value("${executespec.live-llm.test-mode:false}")
+  private boolean liveLlmTestMode;
+
+  @Value("${executespec.live-llm.reservation-id:}")
+  private String liveLlmReservationId;
 
   public enum FallbackMode {
     IMMEDIATE,
@@ -686,6 +696,12 @@ public class FallbackLlmRouter {
    */
   private ChatResponse callWithModelOptions(
       String provider, String model, Prompt prompt, String runId) {
+    if (!liveLlmEnabled) {
+      throw new IllegalStateException("Live LLM transport is disabled for this process");
+    }
+    if (liveLlmTestMode) {
+      ProviderTestBudgetGuard.authorize(liveLlmReservationId, provider, model, runId);
+    }
     List<ToolCallback> toolCallbacks = List.of();
     Boolean internalToolExec = null;
     Integer maxTokens = null;

@@ -605,7 +605,7 @@ public class GeminiNativeToolClient {
     } catch (Exception e) {
       tools = String.valueOf(request.tools().size());
     }
-    return sha256(request.model() + " " + systemTextOf(request.messages()) + " " + tools);
+    return sha256(request.model() + "\u0000" + systemTextOf(request.messages()) + "\u0000" + tools);
   }
 
   /**

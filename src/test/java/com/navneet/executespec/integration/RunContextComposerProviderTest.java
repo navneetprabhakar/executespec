@@ -36,7 +36,7 @@ class RunContextComposerProviderTest {
             .orgId("org-1")
             .name("Project")
             .createdBy("owner")
-            .aiProvider(LlmProvider.SARVAM)
+            .aiProvider(LlmProvider.GEMINI)
             .build();
     when(projectRepo.findById("p1")).thenReturn(Optional.of(project));
     RunContextComposer composer = composer(projectRepo);

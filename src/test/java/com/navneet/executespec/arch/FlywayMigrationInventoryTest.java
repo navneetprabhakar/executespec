@@ -22,8 +22,8 @@ class FlywayMigrationInventoryTest {
   void migrationInventoryHasNoSilentVersionDrift() throws IOException {
     List<MigrationFile> migrations = readMigrations();
 
-    assertThat(migrations).hasSize(255);
-    assertThat(migrations.getLast().version()).isEqualTo("255");
+    assertThat(migrations).hasSize(256);
+    assertThat(migrations.getLast().version()).isEqualTo("256");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

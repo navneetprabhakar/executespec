@@ -1,13 +1,17 @@
 package com.navneet.executespec.tool.remote;
 
+import java.util.List;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agentsession.LocalHandsStateService.PendingCall;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -44,9 +48,40 @@ public class RemoteToolController {
     if (body == null || body.callId() == null || body.callId().isBlank()) {
       return ResponseEntity.badRequest().build();
     }
-    String envelope = normalizeEnvelope(body.result()).toString();
+    JsonNode normalized = normalizeEnvelope(body.result());
+    if (normalized == null) {
+      // Keep the call pending. A malformed transport frame is a client protocol error, not a tool
+      // execution failure that should be injected into the model's context.
+      return ResponseEntity.badRequest().build();
+    }
+    String envelope = normalized.toString();
     dispatcher.complete(runId, body.callId(), envelope);
     return ResponseEntity.noContent().build();
+  }
+
+  /** Reload pending local-hands calls after a client reconnects and re-emit them over run SSE. */
+  @PostMapping("/{runId}/tool-session/reconnect")
+  public ResponseEntity<List<PendingCall>> reconnect(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+    guard.requireRunWriteAccess(runId, userDetails);
+    return ResponseEntity.ok(dispatcher.reconnect(runId));
+  }
+
+  /** Explicit client transport disconnect; pending calls remain resumable until their deadline. */
+  @PostMapping("/{runId}/tool-session/disconnect")
+  public ResponseEntity<Void> disconnect(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+    guard.requireRunWriteAccess(runId, userDetails);
+    dispatcher.disconnect(runId);
+    return ResponseEntity.noContent().build();
+  }
+
+  /** Read-only recovery surface for clients that lost their SSE replay cursor. */
+  @GetMapping("/{runId}/pending-tool-calls")
+  public ResponseEntity<List<PendingCall>> pendingCalls(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+    guard.requireRunAccess(runId, userDetails);
+    return ResponseEntity.ok(dispatcher.pendingCalls(runId));
   }
 
   private JsonNode normalizeEnvelope(JsonNode result) {
@@ -54,7 +89,7 @@ public class RemoteToolController {
         || !result.isObject()
         || !result.has("ok")
         || !result.get("ok").isBoolean()) {
-      return errorEnvelope("INTERNAL", "malformed tool result");
+      return null;
     }
     ObjectNode out = objectMapper.createObjectNode();
     boolean ok = result.get("ok").asBoolean();
@@ -74,14 +109,6 @@ public class RemoteToolController {
         message == null || message.isNull() || message.asText().isBlank()
             ? "client tool failed without a message"
             : message.asText());
-    return out;
-  }
-
-  private JsonNode errorEnvelope(String kind, String message) {
-    ObjectNode out = objectMapper.createObjectNode();
-    out.put("ok", false);
-    out.put("kind", kind);
-    out.put("message", message);
     return out;
   }
 

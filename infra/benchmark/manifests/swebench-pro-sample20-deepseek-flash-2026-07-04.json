@@ -1,0 +1,65 @@
+{
+  "$schema": "./benchmark-manifest.schema.json",
+  "schemaVersion": 1,
+  "status": "EXPLORATORY_RETROSPECTIVE",
+  "suite": "SWE-bench Pro",
+  "repository": {
+    "sha": null,
+    "shaRange": "9afdcd284a6f2e72e419e38ef4161455d0e701b3..b2eb9d191db205f3c3a3c36543bd931e6f0ee06a"
+  },
+  "model": {
+    "provider": "deepseek",
+    "matrixId": "deepseek-v4-flash-native",
+    "providerSlug": null
+  },
+  "prompt": {
+    "sha256": null,
+    "description": "Post-fix worker prompt plus SWE-bench Pro requirements/interface blind spec"
+  },
+  "toolSchema": {
+    "sha256": null,
+    "description": "Exact serialized runtime schema was not captured"
+  },
+  "harness": {
+    "sha256": "bdd3afc70133c1403aae47291c35ae029bef8d4f37bec38e41ff1fa7271a4dc6",
+    "description": "SHA-256 of the 20-row generation manifest JSONL, not a source-tree identity"
+  },
+  "dataset": {
+    "name": "SWE-bench Pro",
+    "slice": "fresh random.Random(42) sample-20",
+    "sha256": "42893cf327246e2306daa3c79c050df56dd845f55542b4d3089bf4d1122cccc9"
+  },
+  "featureFlags": {
+    "worker.progress-v2.enabled": false,
+    "worker.lean-toolset.enabled": false,
+    "worker.auto-verify.enabled": false,
+    "worker.localization.enabled": false,
+    "execution.run-journal.enabled": false
+  },
+  "budgets": {
+    "passes": 1,
+    "tasks": 20,
+    "concurrency": 2,
+    "contextTokens": null,
+    "maxOutputTokens": null,
+    "iterationLimit": null,
+    "wallClockLimitSeconds": null,
+    "costLimitUsd": null
+  },
+  "results": {
+    "resolved": 10,
+    "total": 20,
+    "resolutionRate": 0.5,
+    "emptyPatches": 0,
+    "generationCostUsd": 0.365,
+    "generationSeconds": 13279.9,
+    "scoredArtifactSha256": "8198ba01f709654eb9588be7fa7b8b3ab04526e8e0d71799e7dcd21829ae46d8",
+    "scorer": "official Scale swe_bench_pro_eval.py",
+    "scoringErrors": 0
+  },
+  "limitations": [
+    "k=1 and n=20; not a broad ranking or parity claim",
+    "The exact server commit, provider slug, prompt SHA, serialized tool-schema SHA and runtime budgets were not captured",
+    "The artifact can be audited by hash but the run cannot be reproduced exactly; this is why status is retrospective"
+  ]
+}

@@ -704,10 +704,6 @@
   background: #dc2626;
   color: #fff7ed;
 }
-.ide-provider-logo-sarvam {
-  background: #16a34a;
-  color: #f0fdf4;
-}
 .ide-provider-logo-other {
   background: var(--ide-bg-input);
   color: var(--ide-fg-muted);

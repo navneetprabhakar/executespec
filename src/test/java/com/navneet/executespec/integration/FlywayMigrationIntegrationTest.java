@@ -105,4 +105,24 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationBase {
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'", String.class);
     assertThat(indexes).containsAnyOf("idx_pipeline_run_tenant_id", "idx_agent_task_tenant_id");
   }
+
+  @Test
+  @DisplayName("V256 cleanup columns exist for an upgrade-safe data migration")
+  void sarvamCleanupColumnsExist() {
+    assertThat(columns("app_user")).contains("preferred_ai_provider");
+    assertThat(columns("project")).contains("ai_provider");
+    assertThat(columns("pipeline_run")).contains("ai_provider", "batch_provider");
+    assertThat(columns("execution_run")).contains("ai_provider");
+    assertThat(columns("agent_session")).contains("default_provider", "default_model");
+    assertThat(columns("agent_task")).contains("current_provider", "current_model");
+    assertThat(columns("org")).contains("enabled_providers", "model_overrides_json");
+  }
+
+  private List<String> columns(String table) {
+    return jdbc.queryForList(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND"
+            + " table_name = ?",
+        String.class,
+        table);
+  }
 }
