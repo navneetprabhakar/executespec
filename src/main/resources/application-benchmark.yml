@@ -177,5 +177,8 @@ swebench:
   prediction-prefix: ${SWEBENCH_PREDICTION_PREFIX:executespec}
   default-provider: ${SWEBENCH_DEFAULT_PROVIDER:deepseek}
   task-wall-timeout-minutes: ${SWEBENCH_TASK_WALL_TIMEOUT_MINUTES:60}
+  # Lower this for repeated-attempt campaigns so the aggregate provider ledger can reserve a
+  # bounded worst-case cost before dispatch. The historical default remains backward-compatible.
+  hard-cap-usd: ${SWEBENCH_HARD_CAP_USD:8.0}
   max-concurrent-runs: ${SWEBENCH_MAX_CONCURRENT_RUNS:1}
   submit-queue-wait-seconds: ${SWEBENCH_SUBMIT_QUEUE_WAIT_SECONDS:180}

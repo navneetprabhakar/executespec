@@ -62,8 +62,6 @@ import lombok.extern.slf4j.Slf4j;
 public class BenchmarkGenerationService {
 
   private static final ObjectMapper JSON = new ObjectMapper();
-  private static final double DEFAULT_HARD_CAP_USD = 8.0;
-
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
@@ -131,6 +129,12 @@ public class BenchmarkGenerationService {
       // Minimal run row — the only state the code-gen path reads back: hardCapUsd (worker budget
       // cap) + sourceType="benchmark" (engine gate OFF for blind runs). NOT the full submitRun
       // lifecycle.
+      double hardCapUsd = props.getHardCapUsd();
+      if (!Double.isFinite(hardCapUsd) || hardCapUsd <= 0.0) {
+        throw new ResponseStatusException(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "swebench.hard-cap-usd must be a finite positive value");
+      }
       PipelineRun row =
           PipelineRun.builder()
               .runId(runId)
@@ -144,7 +148,7 @@ public class BenchmarkGenerationService {
               .executionMode("PROTOTYPE")
               .createdByUserId(props.getBenchUserId())
               .orgId(props.getBenchOrgId())
-              .hardCapUsd(DEFAULT_HARD_CAP_USD)
+              .hardCapUsd(hardCapUsd)
               .build();
       runRepo.save(row);
 
