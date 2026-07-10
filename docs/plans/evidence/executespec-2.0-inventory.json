@@ -3,7 +3,7 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "2f98413c0e61ef53d319b7448f67339fe40f2f8c",
+      "sha": "85499755563560483350c50f907269ee04607135",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2622,
       "worktreeFingerprint": "bed867c196b1c2de9c3f7ddadb7ca90be57622b95ec9497b4717d71c0d9dc1e9"
