@@ -11,6 +11,13 @@ Current implementation status: H1-H6, TB1-TB3, and M1-M15 are implemented in
 `codex/benchmark-quality-unified-codegen`. Dead prompt archives with no runtime loader were removed
 after reference checks.
 
+Prompt-boundary hardening: repository-controlled PR metadata/diffs, code-review findings/source
+samples, and project-chat context now share `PromptTrustBoundary`. It escapes the exact closing
+marker from the untrusted payload before framing, so a comment or documentation string cannot close
+the evidence block and create a second apparent instruction section. `PromptTrustBoundaryTest`
+pins marker-collision and null-content behavior; this remains prompt hygiene, not an authorization
+boundary.
+
 ## Non-negotiables
 
 - Keep one code generation path: BUILD/PATCH/benchmark paths may wrap or skip post-codegen phases,
