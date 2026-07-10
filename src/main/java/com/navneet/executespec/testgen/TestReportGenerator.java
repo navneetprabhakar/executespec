@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -23,6 +23,7 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -43,7 +44,7 @@ public class TestReportGenerator {
   private final TestResultRepository testResultRepository;
   private final TestTaskRepository testTaskRepository;
   private final TestPlanRepository testPlanRepository;
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final ObjectMapper objectMapper;
@@ -179,21 +180,19 @@ public class TestReportGenerator {
           new Prompt(
               List.of(
                   new SystemMessage(promptText), new UserMessage("Generate fix suggestions now.")));
-      FallbackLlmRouter.LlmResponse lr =
-          fallbackLlmRouter.callWithFallbackTracked(
+      ChatResponse lr =
+          llmRouter.callText(
               model.providerName(),
               model.getModel(),
-              prompt,
+              prompt.getInstructions(),
               runId,
-              "test-fix-suggestion",
-              FallbackLlmRouter.FallbackMode.IMMEDIATE,
-              0,
-              false);
+              "TestReportGenerator",
+              "test-fix-suggestion");
 
       // Accumulate report tokens on TestPlan
       accumulateReportTokens(testPlanId, lr, model);
 
-      String response = lr.response().getResult().getOutput().getText().strip();
+      String response = lr.getResult().getOutput().getText().strip();
       // Strip markdown fences
       if (response.startsWith("```")) {
         response = response.replaceAll("^```[a-z]*\n?", "").replaceAll("\n?```$", "");
@@ -239,9 +238,9 @@ public class TestReportGenerator {
   }
 
   private void accumulateReportTokens(
-      Long testPlanId, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
+      Long testPlanId, ChatResponse lr, ResolvedModel model) {
     try {
-      var usage = lr.response().getMetadata().getUsage();
+      var usage = lr.getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();
       int outTokens = usage.getCompletionTokens().intValue();
       testPlanRepository
