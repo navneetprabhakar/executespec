@@ -14,7 +14,7 @@ The user-requested consolidation option is supported only for clean installs:
 1. Generate and review a complete schema-only baseline from a known migration head.
 2. Add a Flyway baseline migration (`B<baseline>__executespec_2_schema.sql`) containing the generated schema and required seed data in a separately configured clean-install location/profile; do not place it in the ordinary upgrade path by default.
 3. Keep all post-baseline migrations (`V<baseline+1>__...`) as normal forward migrations.
-4. Prove a clean install using the baseline and an upgrade from a database that has applied V257. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
+4. Prove a clean install using the baseline and an upgrade from a database that has applied V258. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
 5. Never delete, rename, edit, or checksum-repair an already-applied V-file as part of this work. Historical migrations remain available for old database histories and auditability.
 
 No baseline migration is created until the schema has stopped moving for the release cut; generating one earlier would create a second source of truth while V2 work is still changing entities.
@@ -39,7 +39,7 @@ The `model_overrides_json` cleanup treats this legacy TEXT column defensively: v
 
 | Path | Status |
 |---|---|
-| V1–V257 | Existing history; do not rewrite or rename |
-| V256/V257 cleanup + coordinator seed | Forward migrations; source/classpath inventory expects both |
+| V1–V258 | Existing history; do not rewrite or rename |
+| V256/V257/V258 cleanup + coordinator seed + observed spend | Forward migrations; source/classpath inventory expects all three |
 | Squashed clean-install baseline | Not yet generated; deferred until schema freeze; separate clean-install profile only, never a replacement for V1–V257 |
-| Upgrade integration test | Testcontainers/Flyway suite proves V255→V257 and historical data preservation |
+| Upgrade integration test | Testcontainers/Flyway suite proves V255→V258 and historical data preservation |
