@@ -24,6 +24,7 @@ export type AgentStreamEventName =
   | 'token'
   | 'tool_call'
   | 'tool_result'
+  | 'tool_event'
   | 'done'
   | 'error'
   | 'message';
@@ -73,6 +74,8 @@ export interface AgentStreamToolResult {
 
 /** Explicit lifecycle marker; ordinary tool progress must not be inferred as a handoff. */
 export interface AgentStreamToolEvent {
+  /** Server-declared semantic class; clients must not infer lifecycle meaning from labels. */
+  semantic?: 'tool_event' | 'handoff';
   name?: string;
   status?: string;
   detail?: string;
@@ -115,6 +118,7 @@ export interface StreamAgentTurnHandlers {
   onToken?: (data: AgentStreamToken) => void;
   onToolCall?: (data: AgentStreamToolCall) => void;
   onToolResult?: (data: AgentStreamToolResult) => void;
+  onToolEvent?: (data: AgentStreamToolEvent) => void;
   onDone?: (data: AgentStreamDone) => void;
   onErrorEvent?: (data: AgentStreamError) => void;
   onEvent?: (event: AgentStreamEvent) => void;
@@ -195,6 +199,9 @@ export async function streamAgentTurn(
     }
     if (parsed.event === 'tool_result') {
       handlers.onToolResult?.(parsed.data as AgentStreamToolResult);
+    }
+    if (parsed.event === 'tool_event') {
+      handlers.onToolEvent?.(parsed.data as AgentStreamToolEvent);
     }
     if (parsed.event === 'done') handlers.onDone?.(parsed.data as AgentStreamDone);
     if (parsed.event === 'error') handlers.onErrorEvent?.(parsed.data as AgentStreamError);
