@@ -12,8 +12,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -45,6 +47,15 @@ public class RepositorySearchService {
           "worktrees");
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
+  /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
+  private static final int MAX_INDEXED_WORKSPACES = 4;
+  private final Map<Path, CachedWorkspace> workspaceIndex =
+      new LinkedHashMap<>(MAX_INDEXED_WORKSPACES, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Path, CachedWorkspace> eldest) {
+          return size() > MAX_INDEXED_WORKSPACES;
+        }
+      };
 
   public SearchResult search(Path workspace, SearchRequest request) {
     if (workspace == null
@@ -62,19 +73,15 @@ public class RepositorySearchService {
       if (!searchRoot.startsWith(root))
         throw new SecurityException("search root escapes workspace");
       String repoSha = gitSha(root);
-      List<Path> files = inventory(root, searchRoot);
+      List<Path> files = indexedFiles(root, searchRoot);
       String fingerprint = fingerprint(files);
       Pattern pattern = compile(request);
       List<SearchHit> hits = new ArrayList<>();
       for (Path file : files) {
         if (request.fileGlob() != null
             && !file.getFileName().toString().matches(globRegex(request.fileGlob()))) continue;
-        List<String> lines;
-        try {
-          lines = Files.readAllLines(file);
-        } catch (IOException | OutOfMemoryError ignored) {
-          continue;
-        }
+        List<String> lines = indexedLines(root, file);
+        if (lines == null) continue;
         for (int i = 0; i < lines.size(); i++) {
           String line = lines.get(i);
           if (!pattern.matcher(line).find()) continue;
@@ -110,6 +117,67 @@ public class RepositorySearchService {
       throw new IllegalStateException("repository search failed", e);
     }
   }
+
+  /**
+   * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
+   * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it
+   * can contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter
+   * backend can replace later without changing the search contract or callers.
+   */
+  private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      // Keep inventory discovery authoritative on every call (new/deleted files must be visible),
+      // while reusing decoded file lines below. This avoids stale-search bugs and still removes the
+      // expensive readAllLines allocation that dominates repeated agent search turns.
+      List<Path> currentFiles = inventory(root, root);
+      if (cached == null) {
+        cached = new CachedWorkspace(root, currentFiles);
+        workspaceIndex.put(root, cached);
+      } else cached.files = List.copyOf(currentFiles);
+      return cached.files.stream()
+          .filter(path -> path.startsWith(searchRoot))
+          .toList();
+    }
+  }
+
+  private List<String> indexedLines(Path root, Path file) {
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      if (cached == null) return null;
+      return cached.lines(file);
+    }
+  }
+
+  private static final class CachedWorkspace {
+    private final Path root;
+    private List<Path> files;
+    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>();
+
+    private CachedWorkspace(Path root, List<Path> files) {
+      this.root = root;
+      this.files = List.copyOf(files);
+    }
+
+    private List<String> lines(Path file) {
+      try {
+        long size = Files.size(file);
+        long modified = Files.getLastModifiedTime(file).toMillis();
+        FileSnapshot previous = snapshots.get(file);
+        if (previous != null && previous.size == size && previous.modified == modified) {
+          return previous.lines;
+        }
+        List<String> current = Files.readAllLines(file);
+        snapshots.put(file, new FileSnapshot(size, modified, current));
+        return current;
+      } catch (IOException | OutOfMemoryError e) {
+        snapshots.remove(file);
+        return null;
+      }
+    }
+  }
+
+  private record FileSnapshot(long size, long modified, List<String> lines) {}
 
   private static Pattern compile(SearchRequest request) {
     return Pattern.compile(
