@@ -14,6 +14,8 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class ContextPlannerTest {
 
   private final ModelRegistry models = mock(ModelRegistry.class);
@@ -150,6 +152,36 @@ class ContextPlannerTest {
     var decision = planner.planHeadroom("provider", "model", 1_000, 50_000, List.of(), List.of());
 
     assertThat(decision.outputReserveTokens()).isEqualTo(4_000);
+  }
+
+  @Test
+  void recordsBoundedHeadroomEvidenceWithoutModelCardinality() {
+    var registry = new SimpleMeterRegistry();
+    planner = new ContextPlanner(models, registry);
+    knownModel("metric-model", 64_000, 8_000);
+
+    planner.planHeadroom("DeepSeek", "metric-model", 52_000, 8_000, List.of(), List.of());
+    planner.planHeadroom("DeepSeek", "metric-model", 1_000, 8_000, List.of(), List.of());
+
+    assertThat(
+            registry
+                .get("executespec.context.headroom.decisions")
+                .tag("action", "compact")
+                .tag("provider", "deepseek")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(
+            registry
+                .get("executespec.context.headroom.decisions")
+                .tag("action", "continue")
+                .tag("provider", "deepseek")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(registry.find("executespec.context.headroom.decisions").meters())
+        .extracting(meter -> meter.getId().getTag("model"))
+        .containsOnlyNulls();
   }
 
   private void knownModel(String model, int window, int maxOutput) {

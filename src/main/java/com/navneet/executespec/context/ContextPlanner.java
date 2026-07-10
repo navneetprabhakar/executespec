@@ -10,6 +10,10 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Provider-window aware context budget planner. It owns both deterministic evidence selection and
  * the worker's pre-request headroom decision.
@@ -23,15 +27,23 @@ public class ContextPlanner {
   static final int MESSAGE_OVERHEAD_TOKENS = 12;
 
   private final ModelRegistry modelRegistry;
+  private final MeterRegistry meterRegistry;
 
   /** Pure-planner compatibility constructor used by evidence-selection callers and unit tests. */
   public ContextPlanner() {
     this.modelRegistry = null;
+    this.meterRegistry = null;
   }
 
-  @Autowired
   public ContextPlanner(ModelRegistry modelRegistry) {
+    this(modelRegistry, null);
+  }
+
+  /** Spring constructor; the registry is optional for pure planner/test callers. */
+  @Autowired
+  public ContextPlanner(ModelRegistry modelRegistry, MeterRegistry meterRegistry) {
     this.modelRegistry = modelRegistry;
+    this.meterRegistry = meterRegistry;
   }
 
   public Plan plan(Window window, List<Item> items) {
@@ -89,15 +101,16 @@ public class ContextPlanner {
       List<Message> messages,
       List<ToolCallback> tools) {
     if (modelRegistry == null || model == null || model.isBlank()) {
-      return HeadroomDecision.unavailable(provider, model, "model metadata unavailable");
+      return record(HeadroomDecision.unavailable(provider, model, "model metadata unavailable"));
     }
     try {
       if (!modelRegistry.isKnownModel(model)) {
-        return HeadroomDecision.unavailable(provider, model, "model is not registered");
+        return record(HeadroomDecision.unavailable(provider, model, "model is not registered"));
       }
       int window = modelRegistry.contextLimitFor(model);
       if (window <= 0) {
-        return HeadroomDecision.unavailable(provider, model, "context window is not configured");
+        return record(
+            HeadroomDecision.unavailable(provider, model, "context window is not configured"));
       }
       int outputReserve =
           requestedOutputTokens != null && requestedOutputTokens > 0
@@ -110,22 +123,54 @@ public class ContextPlanner {
       long available = (long) window - estimatedInput - outputReserve;
       HeadroomAction action =
           available < safetyReserve ? HeadroomAction.COMPACT : HeadroomAction.CONTINUE;
-      return new HeadroomDecision(
-          action,
-          provider,
-          model,
-          window,
-          estimatedInput,
-          outputReserve,
-          safetyReserve,
-          available,
-          action == HeadroomAction.COMPACT
-              ? "reserved output and safety margin exceed remaining model-window headroom"
-              : "model-window headroom is sufficient after output and safety reserves");
+      return record(
+          new HeadroomDecision(
+              action,
+              provider,
+              model,
+              window,
+              estimatedInput,
+              outputReserve,
+              safetyReserve,
+              available,
+              action == HeadroomAction.COMPACT
+                  ? "reserved output and safety margin exceed remaining model-window headroom"
+                  : "model-window headroom is sufficient after output and safety reserves"));
     } catch (RuntimeException e) {
-      return HeadroomDecision.unavailable(
-          provider, model, "context planning failed: " + e.getMessage());
+      return record(
+          HeadroomDecision.unavailable(
+              provider, model, "context planning failed: " + e.getMessage()));
     }
+  }
+
+  /**
+   * Records low-cardinality headroom evidence without changing the planner's pure decision. The
+   * model name is intentionally not a tag: enterprise overrides can introduce unbounded values.
+   */
+  private HeadroomDecision record(HeadroomDecision decision) {
+    if (meterRegistry == null || decision == null) return decision;
+    String action = decision.action().name().toLowerCase(java.util.Locale.ROOT);
+    String provider = normalizeProvider(decision.provider());
+    Counter.builder("executespec.context.headroom.decisions")
+        .description("Context headroom decisions made before worker requests")
+        .tag("action", action)
+        .tag("provider", provider)
+        .register(meterRegistry)
+        .increment();
+    DistributionSummary.builder("executespec.context.headroom.available_tokens")
+        .description("Available model-window tokens after input and output reservation")
+        .baseUnit("tokens")
+        .tag("action", action)
+        .tag("provider", provider)
+        .publishPercentiles(0.5, 0.95)
+        .register(meterRegistry)
+        .record(Math.max(0, decision.availableHeadroomTokens()));
+    return decision;
+  }
+
+  private static String normalizeProvider(String provider) {
+    if (provider == null || provider.isBlank()) return "unknown";
+    return provider.trim().toLowerCase(java.util.Locale.ROOT);
   }
 
   static long estimateInputTokens(List<Message> messages, List<ToolCallback> tools) {
