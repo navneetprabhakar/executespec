@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "bf60939e1c50c4d24f3bfcecfb3add8be7524742",
+      "sha": "dab9daae190f2275062ebf99621b272b33acc57d",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2597,
-      "worktreeFingerprint": "4ba35fcaad36a4118389a6385d55ffe02439f45fa453374d582ee908ef36e5e7"
+      "worktreeFingerprint": "8ee3dc2b04439809296e17ea52e5eb1539ac957b2a341157bc01ca7c4e4d7eba"
     },
     "cli": {
       "name": "executespec-cli-1.0",
