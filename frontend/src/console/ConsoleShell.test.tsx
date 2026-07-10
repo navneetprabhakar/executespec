@@ -82,6 +82,14 @@ describe('ConsoleShell focus affordances', () => {
 
     expect(document.activeElement).toBe(main);
   });
+
+  it('puts the agent route in transcript focus mode instead of dashboard chrome', async () => {
+    await renderShell('/agent');
+
+    const shell = host.querySelector<HTMLElement>('.con-root');
+    expect(shell?.classList.contains('agent-active')).toBe(true);
+    expect(shell?.dataset.surface).toBe('transcript');
+  });
 });
 
 async function renderShell(path: string) {
@@ -91,6 +99,7 @@ async function renderShell(path: string) {
         <Routes>
           <Route element={<ConsoleShell />}>
             <Route path='/home' element={<button type='button'>Child action</button>} />
+            <Route path='/agent' element={<button type='button'>Agent composer</button>} />
           </Route>
         </Routes>
       </MemoryRouter>,

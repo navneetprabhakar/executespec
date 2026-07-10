@@ -234,7 +234,10 @@ export default function ConsoleShell() {
   const ThemeIcon = theme === 'light' ? SunIcon : theme === 'system' ? MonitorIcon : MoonIcon;
 
   return (
-    <div className={shellClasses}>
+    <div
+      className={shellClasses}
+      data-surface={path.startsWith('/agent') ? 'transcript' : 'console'}
+    >
       <a
         href='#main-content'
         className='con-skip-link'

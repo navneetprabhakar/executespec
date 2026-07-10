@@ -276,6 +276,15 @@
   gap: 2px;
   overflow-y: auto;
 }
+
+/* Agent is a conversation workspace, not another dashboard route. Keep the
+   transcript full-width and remove navigation chrome from the interaction
+   surface; the brand link and command palette remain the escape hatches. */
+.con-root.agent-active .con-side,
+.con-root.agent-active .con-tabbar,
+.con-root.agent-active .con-only-mobile {
+  display: none;
+}
 .con-side-brand {
   display: none;
 }
