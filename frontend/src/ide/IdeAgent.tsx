@@ -84,6 +84,17 @@ export default function IdeAgent() {
   const runDetail = liveRun.detail;
   const runCost = liveRun.costUsd;
 
+  useEffect(() => {
+    if (!chatsOpen && !settingsOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (settingsOpen) setSettingsOpen(false);
+      else setChatsOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [chatsOpen, settingsOpen]);
+
   const scope = useMemo(() => ({projectId, runId}), [projectId, runId]);
   const selected = useMemo(() => {
     const candidate = state.sessions.find((session) => session.id === state.selectedId) ?? null;
