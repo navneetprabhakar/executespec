@@ -21,7 +21,7 @@
 | Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; docs pin the 256-file chain and aggregate hash; clean-install/upgrade execution is still required |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2221 tests, 0 failures/errors; focused context/subagent/routing suites pass |
 | Frontend build/lint/format/tests | PASS | 151 tests, production build, format check, and lint pass; one existing hook-dependency warning |
-| CLI/core/VS Code build/tests | PASS | 912/912 on `codex/cli-1.0` (core 115, CLI 785, VS Code 12) |
+| CLI/core/VS Code build/tests | PASS | 913/913 on `codex/cli-1.0` (core 115, CLI 786, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
 | Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
