@@ -213,6 +213,33 @@ claim in a tool result — never invent a runId, score, or status.""";
       List<Map<String, Object>> conversation,
       String providerOverride,
       Set<String> allowedToolNames) {
+    runTurnBounded(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        allowedToolNames,
+        MAX_TOOL_ROUNDS,
+        () -> {});
+  }
+
+  /** Bounded read-only loop used by persisted child agents. */
+  public void runTurnBounded(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      Set<String> allowedToolNames,
+      int maxRounds,
+      Runnable beforeRound) {
 
     // Provider + model (LIGHTWEIGHT). Keep provider+model consistent on the fallback.
     LlmProvider provider = resolveProvider(providerOverride);
@@ -270,7 +297,17 @@ claim in a tool result — never invent a runId, score, or status.""";
     }
     messages.addAll(translate(conversation));
 
-    int rounds = runToolLoop(sink, providerName, model.getModel(), messages, ctx, tools, sessionId);
+    int rounds =
+        runToolLoop(
+            sink,
+            providerName,
+            model.getModel(),
+            messages,
+            ctx,
+            tools,
+            sessionId,
+            Math.max(1, Math.min(MAX_TOOL_ROUNDS, maxRounds)),
+            beforeRound == null ? () -> {} : beforeRound);
     sink.done(rounds, safeSnapshot(sessionId));
   }
 
@@ -292,10 +329,13 @@ claim in a tool result — never invent a runId, score, or status.""";
       List<Message> seed,
       ExecutionContext ctx,
       List<ToolCallback> tools,
-      String sessionId) {
+      String sessionId,
+      int maxRounds,
+      Runnable beforeRound) {
     List<Message> conversation = new ArrayList<>(seed);
 
-    for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (int round = 0; round < maxRounds; round++) {
+      beforeRound.run();
       LlmRequest req =
           LlmRequest.builder()
               .provider(providerName)
@@ -345,9 +385,9 @@ claim in a tool result — never invent a runId, score, or status.""";
       conversation.add(ToolResponseMessage.builder().responses(responses).build());
     }
 
-    log.warn("spec-chat hit MAX_TOOL_ROUNDS={} (session {})", MAX_TOOL_ROUNDS, sessionId);
+    log.warn("spec-chat hit max tool rounds={} (session {})", maxRounds, sessionId);
     sink.token("_(Reached the tool-call limit for this turn — ask me to continue.)_");
-    return MAX_TOOL_ROUNDS;
+    return maxRounds;
   }
 
   /**
