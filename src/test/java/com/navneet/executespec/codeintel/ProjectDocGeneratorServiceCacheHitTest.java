@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -46,7 +46,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
   private ProjectRepository projectRepo;
   private ProjectRepoLinkRepository linkRepo;
   private ProjectRepoRepository repoRepo;
-  private FallbackLlmRouter fallbackLlmRouter;
+  private LlmRouter llmRouter;
   private ModelResolver modelResolver;
   private RunCostTracker costTracker;
   private ProjectDocGeneratorService svc;
@@ -60,7 +60,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     projectRepo = mock(ProjectRepository.class);
     linkRepo = mock(ProjectRepoLinkRepository.class);
     repoRepo = mock(ProjectRepoRepository.class);
-    fallbackLlmRouter = mock(FallbackLlmRouter.class);
+    llmRouter = mock(LlmRouter.class);
     modelResolver = mock(ModelResolver.class);
     costTracker = mock(RunCostTracker.class);
 
@@ -73,7 +73,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             projectRepo,
             linkRepo,
             repoRepo,
-            fallbackLlmRouter,
+            llmRouter,
             modelResolver,
             costTracker);
   }
@@ -120,9 +120,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
     assertThat(result).isSameAs(cached);
     // The LLM router must NOT have been called — that's the whole point of the short-circuit.
-    verify(fallbackLlmRouter, never())
-        .callWithFallback(
-            any(), any(), any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
+    verify(llmRouter, never()).callText(any(), any(), any(), any(), any(), any());
     // ModelResolver should also not be called — we never even resolved a model.
     verify(modelResolver, never()).resolve(any(), any());
     // No new doc saved.

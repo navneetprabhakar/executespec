@@ -3,7 +3,7 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 import java.util.Optional;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -60,7 +60,7 @@ public class ProjectDocGeneratorService {
   private final ProjectRepository projectRepo;
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepoRepository repoRepo;
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
@@ -224,16 +224,15 @@ public class ProjectDocGeneratorService {
     Prompt prompt =
         new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPayload)));
 
+    String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
     ChatResponse response =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
-            "project-doc-" + docType.name().toLowerCase() + "-" + projectId,
+            prompt.getInstructions(),
+            runId,
             "project-doc-" + docType.name().toLowerCase(),
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "generate");
 
     String content = response.getResult().getOutput().getText();
     if (content == null || content.isBlank()) {
