@@ -3,34 +3,34 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "5fa5a34f0093959a0269aabb06dc71a663e8f3a9",
+      "sha": "2312e0cab34948cdd6346e29fe7dd361f0b469e3",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2606,
-      "worktreeFingerprint": "f993d3330aa21fd644bc616ddba695b3690780f5960ab0f2e5c8bb82f7e40095"
+      "trackedFiles": 2621,
+      "worktreeFingerprint": "64a6b2fe87714877a3e752d8d935cd934e425895413a2a777508be7152f2d1d6"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "31f8982113d020efb29e3fb592597d3b18a44bbc",
+      "sha": "894e57872250f6a44cc5281e20e2494da8010411",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 299,
-      "worktreeFingerprint": "46f34e89c2a43a2aa9c886cd88197af493d8ad353c09d13f43e94eb9092e3084"
+      "trackedFiles": 303,
+      "worktreeFingerprint": "c159587e64cb1689a8d3d186d3de713a3f96bfc883e6d18ba49af87902ee210b"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "0f8ac5ae998d4fff7424d2a29ce6bf10b9ea2cd1",
+      "sha": "a6258c2dbbda9e02a4eb227f295cfee0b3444581",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 626,
-      "worktreeFingerprint": "af910c638c996deef3b002ede79dce44bbf53fb4fc0a4bc94745a0a6706ec5cf"
+      "trackedFiles": 631,
+      "worktreeFingerprint": "f07b261ebc6a5ccd1172f412e966fa5cf8a9c0282721c56dceafe81f78b38342"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1242,
-      "lines": 193622
+      "files": 1244,
+      "lines": 194989
     },
-    "testJavaFiles": 379,
+    "testJavaFiles": 388,
     "controllers": 108,
-    "mappingAnnotations": 597,
+    "mappingAnnotations": 601,
     "prompts": {
       "count": 91,
       "markdown": 56,
@@ -131,8 +131,8 @@
       ]
     },
     "migrations": {
-      "count": 256,
-      "head": "V256"
+      "count": 257,
+      "head": "V257"
     },
     "providers": [
       "anthropic",
@@ -184,6 +184,7 @@
     ],
     "featureFlagLiterals": [
       "activity.retention.days",
+      "agent.subagents.coordinator-auto.enabled",
       "assessment.llm.enabled",
       "billing.lifecycle.sunsetting.enabled",
       "build.test-exec-gate.enabled",
@@ -237,9 +238,9 @@
       "worker.verify-boot.enabled"
     ],
     "web": {
-      "sourceFiles": 147,
-      "lines": 41974,
-      "testFiles": 33,
+      "sourceFiles": 149,
+      "lines": 42908,
+      "testFiles": 35,
       "routePaths": [
         "*",
         "/",
@@ -349,8 +350,8 @@
   },
   "cli": {
     "sourceFiles": 127,
-    "lines": 51716,
-    "testFiles": 110,
+    "lines": 51929,
+    "testFiles": 113,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
       "cli/src/app-tui",
@@ -360,8 +361,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 626,
-    "markdownFiles": 185,
+    "trackedFiles": 631,
+    "markdownFiles": 186,
     "outputFiles": 418
   }
 }

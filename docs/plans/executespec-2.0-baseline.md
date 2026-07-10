@@ -10,7 +10,7 @@ Captured from backend base `9861f68f0` plus Milestone-0 controls, CLI `5ee52d51`
 | REST controller classes / mapping annotations | 108 / 597 |
 | Java test source files | 368 |
 | Prompt resources | 91 (56 Markdown, 34 text resources, 1 JSON) |
-| Flyway migrations / actual head | 256 / V256 |
+| Flyway migrations / actual head | 257 / V257 |
 | Frontend TS/TSX files / LOC / test files | 143 / 41,713 / 31 |
 | CLI TS/TSX LOC / test files | 54,809 / 115 |
 | CLI interaction implementations | 4 plus a duplicate preview/frame contract |
@@ -44,7 +44,7 @@ The older oracle-mode 67%/60% SWE-bench numbers are invalid and excluded. The sa
 | CLI/core/VS Code | `npm test` on CLI base SHA | PASS: core 114, CLI 778, VS Code 12; 904 total |
 | Provider budget control | `node --test scripts/provider-budget-ledger.test.mjs` | PASS: 9/9; canonical cross-worktree ledger, fail-closed missing state, exact reservation scope, dispatched-state accounting, concurrency, breach lock and upward micro-USD rounding |
 | Benchmark manifest control | `node --test scripts/validate-benchmark-manifests.test.mjs` | PASS: 2/2; retrospective manifests remain explicitly non-reproducible |
-| Cross-repo inventory | `node scripts/generate-2.0-inventory.mjs --check` | PASS; six production providers, 256 migrations/V256, 38 model rows and 52 code flag literals generated from current worktree fingerprints |
+| Cross-repo inventory | `node scripts/generate-2.0-inventory.mjs --check` | PASS; six production providers, 257 migrations/V257, 38 model rows and current code flag literals generated from current worktree fingerprints |
 | Backend focused router guard | `mvn -q -Dtest=LlmRouterTest test` | PASS |
 | Backend compile and formatting | `mvn -q -DskipTests compile spotless:check` | PASS |
 | Frontend unit tests | `npm --prefix frontend test` | PASS: 31 files, 151 tests |
