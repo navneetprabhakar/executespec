@@ -229,9 +229,14 @@ function SettingsPopover({
 }) {
   return (
     <>
-      <div className='agent-pop-backdrop' onClick={onClose} />
+      <div
+        className='agent-pop-backdrop'
+        data-agent-overlay-backdrop='settings'
+        onClick={onClose}
+      />
       <div
         className='agent-pop'
+        data-agent-overlay='settings'
         role='dialog'
         aria-modal='true'
         aria-labelledby='agent-settings-title'
@@ -354,9 +359,14 @@ export function AgentChatsDrawer({
   if (!open) return null;
   return (
     <>
-      <div className='agent-drawer-backdrop' onClick={onClose} />
+      <div
+        className='agent-drawer-backdrop'
+        data-agent-overlay-backdrop='chats'
+        onClick={onClose}
+      />
       <aside
         className='agent-drawer'
+        data-agent-overlay='chats'
         role='dialog'
         aria-modal='true'
         aria-labelledby='agent-chats-title'
@@ -635,7 +645,7 @@ function Activity({items}: {items: StreamTimelineItem[]}) {
   const shown = items.filter((i) => i.type === 'tool' || i.type === 'run');
   if (!shown.length) return null;
   return (
-    <div className='agent-activity'>
+    <div className='agent-activity' data-agent-region='activity'>
       {shown.map((i) => (
         <span key={i.id} className='agent-activity-chip'>
           {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
@@ -701,7 +711,12 @@ function SandboxRunCard({
       ? 'Open cancelled run'
       : 'Review evidence';
   return (
-    <div className={`agent-runcard${variant}`}>
+    <div
+      className={`agent-runcard${variant}`}
+      data-agent-region='run-card'
+      data-run-status={run.status || 'UNKNOWN'}
+      data-stream-status={streamStatus || 'IDLE'}
+    >
       <div className='agent-runcard-head'>
         <RunsIcon size={16} />
         <span className='agent-runcard-title'>{run.runTitle || 'Remote sandbox run'}</span>
@@ -1289,9 +1304,9 @@ export function AgentConversation({
   const showComposerContract =
     messages.length === 0 && !visibleAction && gates.length === 0 && !runCard;
   return (
-    <section className='agent-chat'>
+    <section className='agent-chat' data-agent-surface='protected-transcript'>
       <h1 className='ide-sr-only'>Agent</h1>
-      <div className='agent-chat-scroll' onScroll={onScroll}>
+      <div className='agent-chat-scroll' data-agent-region='transcript' onScroll={onScroll}>
         <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {runCard
             ? `Remote sandbox ${runPhaseLabel(runCard.status)}${
@@ -1315,7 +1330,7 @@ export function AgentConversation({
             />
           )}
           {gates.length > 0 && (
-            <div className='agent-gates-inline'>
+            <div className='agent-gates-inline' data-agent-region='approval-gates'>
               <div className='agent-gates-label'>Remote sandboxes waiting for your approval</div>
               {gates.map((g) => (
                 <GateCard
@@ -1361,6 +1376,7 @@ export function AgentConversation({
         {hasNewActivity && onJumpToLatest && (
           <button
             className='agent-jump-latest'
+            data-agent-region='new-activity'
             type='button'
             onClick={onJumpToLatest}
             aria-label='Jump to latest activity'
