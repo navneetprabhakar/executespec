@@ -4,7 +4,7 @@
 
 | Gate | State | Evidence / blocker |
 |---|---|---|
-| One canonical execution/routing system | PARTIAL | `LlmRouter.callText` is now the canonical text transport seam; title summarization and project-brief generation migrated off `FallbackLlmRouter`. 12 legacy non-tool callers and compatibility chat paths still remain |
+| One canonical execution/routing system | PARTIAL | `LlmRouter.callText` is now the canonical text transport seam; title summarization, project briefs, and memory compaction migrated off `FallbackLlmRouter`. 11 legacy non-tool callers and compatibility chat paths still remain |
 | Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly, invokes safe compaction when reserves are unsafe, and the production prompt now mandates repository-localization/search-first behavior with explicit headroom and evidence reuse; durable journal and broader evidence-bundle integration remain. FastContext-compatible local-index seam is documented, but no external index dependency is required |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` drives `searchFiles` with typed citations/fingerprints/paging and a bounded metadata-aware line cache; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER execution now runs read-only SpecChat rounds with tool allow-list, per-round turns/cost, evidence, and cancellation; parent coordinator/UI integration remains |
@@ -20,9 +20,9 @@
 | Clean install and migration upgrade | PASS | pgvector PostgreSQL integration runs all 256 migrations, validates Hibernate startup, and the V255→V256 fixture clears active Sarvam state while preserving historical evidence |
 | Flyway backward compatibility | PASS | V1–V256 remain immutable and V256 is forward-only; hash-pinned chain plus clean-install and V255→V256 upgrade/data-preservation tests pass |
 | Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2418 tests, 0 failures/errors; focused context/subagent/routing/provider-guard/prompt suites pass |
-| Frontend build/lint/format/tests | PASS | 155 tests, production build, format check, and lint pass; one existing hook-dependency warning |
+| Frontend build/lint/format/tests | PASS | 156 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS (worktree-scoped) | With `EXECUTESPEC_DOCS_ROOT=/Users/navneetprabhakar/Documents/antigravity/executespec-docs-2.0`, the full CLI worktree gate passes: core 115 + CLI 734 + VS Code 12 = 861 tests; the offline TS runtime comparator passes all scenarios and reports local-only timing/RSS |
-| Visual QA | FAIL | Web now exposes live connection state and keyboard-contained modal overlays to screen readers and sighted operators, but authenticated protected-flow screenshots and full TUI visual acceptance are still missing |
+| Visual QA | FAIL | Web now exposes live connection state, keyboard-contained modal overlays, and a keyboard-accessible "New activity" jump affordance while preserving scroll position; authenticated protected-flow screenshots and full TUI visual acceptance are still missing |
 | Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
 | No orphan prompts | UNKNOWN | Verifier covers only a small critical subset |
