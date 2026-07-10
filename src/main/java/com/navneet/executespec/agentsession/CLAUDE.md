@@ -55,6 +55,10 @@ turns separately from runs.
   `agent_session` with parent/depth/role/turn-budget/cost-budget metadata in append-only
   `agent_action_event` rows. Executors must call `authorizeNextTurn` before every child turn;
   verifier completion requires cited evidence. The foundation does not dispatch a model itself.
+- Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
+  for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
+  session is being retired and a replacement session reconnects; callers must not assume the newest
+  session contains the complete action stream.
 
 ## Key Files
 

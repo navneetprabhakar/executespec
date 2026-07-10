@@ -87,18 +87,32 @@ public class LocalHandsStateService {
       if (sessions == null || sessions.isEmpty()) {
         return List.of();
       }
-      List<AgentActionEvent> events =
-          eventRepo.findBySessionIdOrderByCreatedAtAsc(sessions.get(0).getId());
+      // A run can briefly have more than one active agent session (for example while a CLI
+      // reconnects and the old session is still being retired).  State writes are intentionally
+      // fanned out to every active session, so reading only the newest session can lose a pending
+      // tool call when that session did not receive the original event.  Reconstruct the latest
+      // state across all active sessions and let the event timestamp provide deterministic
+      // last-write-wins semantics for duplicated action ids.
       Map<String, PendingCall> latest = new LinkedHashMap<>();
-      for (AgentActionEvent event : events) {
-        if (event.getActionId() == null
-            || event.getType() == null
-            || !event.getType().startsWith(EVENT_PREFIX)) {
-          continue;
-        }
-        PendingCall call = from(event);
-        if (call != null) {
-          latest.put(event.getActionId(), call);
+      for (AgentSession session : sessions) {
+        List<AgentActionEvent> events =
+            eventRepo.findBySessionIdOrderByCreatedAtAsc(session.getId());
+        for (AgentActionEvent event : events) {
+          if (event.getActionId() == null
+              || event.getType() == null
+              || !event.getType().startsWith(EVENT_PREFIX)) {
+            continue;
+          }
+          PendingCall call = from(event);
+          if (call == null) {
+            continue;
+          }
+          PendingCall previous = latest.get(event.getActionId());
+          if (previous == null
+              || previous.updatedAt() == null
+              || (call.updatedAt() != null && call.updatedAt().isAfter(previous.updatedAt()))) {
+            latest.put(event.getActionId(), call);
+          }
         }
       }
       List<PendingCall> pending = new ArrayList<>();

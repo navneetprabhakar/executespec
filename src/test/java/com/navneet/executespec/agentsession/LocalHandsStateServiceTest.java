@@ -75,6 +75,24 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void pending_mergesAllActiveSessionsWhenReconnectRacesSessionRetirement() {
+    AgentSession older = AgentSession.builder().id("session-older").build();
+    AgentSession newer = AgentSession.builder().id("session-newer").build();
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(newer, older));
+    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-newer"))
+        .thenReturn(List.of(event("call-1", LocalHandsState.CLIENT_RECONNECTED, 2)));
+    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-older"))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    assertThat(service.pending("run-1"))
+        .extracting(LocalHandsStateService.PendingCall::callId)
+        .containsExactly("call-1");
+    assertThat(service.pending("run-1").get(0).state())
+        .isEqualTo(LocalHandsState.CLIENT_RECONNECTED);
+  }
+
+  @Test
   void persistenceFailure_isFailSoftForWorkerPath() {
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenThrow(new IllegalStateException("database unavailable"));
