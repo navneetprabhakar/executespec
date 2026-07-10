@@ -6,8 +6,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.AnthropicModelOptions;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -16,9 +15,7 @@ import com.navneet.executespec.testgen.model.*;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
-import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -39,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestPlannerAgent {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final TestPlanRepository testPlanRepository;
@@ -120,8 +117,8 @@ public class TestPlannerAgent {
     LlmProvider aiProvider =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel model = modelResolver.resolve("TestPlannerAgent", aiProvider);
-    FallbackLlmRouter.LlmResponse lr = callLlm(runId, model, systemPrompt, 1);
-    String llmResponse = lr.response().getResult().getOutput().getText();
+    ChatResponse lr = callLlm(runId, model, systemPrompt);
+    String llmResponse = lr.getResult().getOutput().getText();
     accumulatePlannerTokens(testPlan, lr, model);
 
     // Parse response — strip markdown fences then retry once on failure
@@ -135,8 +132,8 @@ public class TestPlannerAgent {
           systemPrompt
               + "\n\nIMPORTANT: Your previous response was not valid JSON. "
               + "Respond with ONLY a valid JSON array. No markdown, no backticks, no explanation.";
-      FallbackLlmRouter.LlmResponse lr2 = callLlm(runId, model, retryPrompt, 2);
-      llmResponse = lr2.response().getResult().getOutput().getText();
+      ChatResponse lr2 = callLlm(runId, model, retryPrompt);
+      llmResponse = lr2.getResult().getOutput().getText();
       accumulatePlannerTokens(testPlan, lr2, model);
       try {
         taskPlans = objectMapper.readValue(stripMarkdown(llmResponse), new TypeReference<>() {});
@@ -207,29 +204,12 @@ public class TestPlannerAgent {
     return testPlan;
   }
 
-  private FallbackLlmRouter.LlmResponse callLlm(
-      String runId, ResolvedModel model, String prompt, int attempt) {
-    AnthropicCacheOptions cacheOpts =
-        AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    var optsBuilder =
-        AnthropicChatOptions.builder().model(model.getModel()).cacheOptions(cacheOpts);
-    if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
-      optsBuilder.temperature(0.0);
-    }
-    AnthropicChatOptions opts = optsBuilder.build();
+  private ChatResponse callLlm(String runId, ResolvedModel model, String prompt) {
     Prompt chatPrompt =
-        new Prompt(
-            List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")),
-            opts);
-    return fallbackLlmRouter.callWithFallbackTracked(
-        model.providerName(),
-        model.getModel(),
-        chatPrompt,
-        runId,
-        "test-planner",
-        FallbackLlmRouter.FallbackMode.IMMEDIATE,
-        attempt - 1,
-        false);
+        new Prompt(List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")));
+    return llmRouter.callText(
+        model.providerName(), model.getModel(), chatPrompt.getInstructions(), runId,
+        "TestPlannerAgent", "test-plan");
   }
 
   /** Strips markdown code fences (```json ... ``` or ``` ... ```) from LLM responses. */
@@ -250,15 +230,15 @@ public class TestPlannerAgent {
   }
 
   private void accumulatePlannerTokens(
-      TestPlan testPlan, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
+      TestPlan testPlan, ChatResponse lr, ResolvedModel model) {
     try {
-      var usage = lr.response().getMetadata().getUsage();
+      var usage = lr.getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();
       int outTokens = usage.getCompletionTokens().intValue();
       testPlan.setPlannerInputTokens(testPlan.getPlannerInputTokens() + inTokens);
       testPlan.setPlannerOutputTokens(testPlan.getPlannerOutputTokens() + outTokens);
-      testPlan.setPlannerProvider(lr.provider() != null ? lr.provider() : model.providerName());
-      testPlan.setPlannerModel(lr.model() != null ? lr.model() : model.getModel());
+      testPlan.setPlannerProvider(model.providerName());
+      testPlan.setPlannerModel(model.getModel());
     } catch (Exception e) {
       log.warn("[TestPlanner] Failed to extract token usage: {}", e.getMessage());
     }
