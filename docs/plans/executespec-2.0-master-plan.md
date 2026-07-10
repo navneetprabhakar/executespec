@@ -63,21 +63,21 @@ flowchart TD
 
 | Milestone | Required outcome | Evidence gate | State |
 |---|---|---|---|
-| 0. Truth and controls | Reproducible inventory/baseline, canonical plan, deletion/risk/readiness registers, durable spend guard, unauthorized-call test guard | Regeneration and control tests pass | IN PROGRESS |
-| 1. Critical correctness | NUL removed and gated; structured intent route; non-blocking approval; reconnectable local hands; Sarvam production removal | Focused tests plus migration upgrade | PENDING |
-| 2. Deterministic search | One typed search contract using git inventory, rg, symbols/tests, SHA/fingerprint, freshness and citations | Recall/latency corpus | PENDING |
-| 3. Context planner | Server-owned journal, headroom, compaction and evidence bundles; no client-owned canonical history | Long-session and overflow tests | PENDING |
-| 4. Real subagents | Persisted parent/child runs, bounded role/budget/depth, cancellation, hot handoff; scout and verifier roles | Integration and failure tests | PENDING |
-| 5. FastContext | Isolated, licensed, measured experiment behind an adapter | Paired recall/latency/cost decision | PENDING |
-| 6. Core loop | Evidence-driven localize/edit/verify/repair; automatic verification default; lean tools | Deterministic task corpus | PENDING |
-| 7. Prompt/harness | Prompt manifest, capability overlays, frozen comparator, ablations and adversarial cases | Comparable-budget parity or explicit evidence blocker | PENDING |
-| 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay and degradation tests | PENDING |
-| 9. Protocol v2 | Semantic resumable event/state contract shared across all clients | Contract tests and old-client compatibility | PENDING |
-| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink/split-footer | Workflow and 60/80/100/140-column visual QA | PENDING |
-| 11. Web 2.0 | Same semantic transcript and control states as CLI, accessible and responsive | Browser workflow/visual/a11y QA | PENDING |
-| 12. Performance | Measured startup, event overhead, search, rendering, memory, provider isolation and recovery | Published local performance report | PENDING |
-| 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Benchmark acceptance table | PENDING |
-| 14. Cleanup/release | Delete replacements, graduate flags, upgrade schemas/docs, synchronize versions, run complete gates | Release-readiness table all green or explicitly blocked | PENDING |
+| 0. Truth and controls | Reproducible inventory/baseline, canonical plan, deletion/risk/readiness registers, durable spend guard, unauthorized-call test guard | Regeneration and control tests pass | COMPLETE |
+| 1. Critical correctness | NUL removed and gated; structured intent route; non-blocking approval; reconnectable local hands; Sarvam production removal | Focused tests plus migration upgrade | PARTIAL |
+| 2. Deterministic search | One typed search contract using git inventory, rg, SHA/fingerprint, freshness and citations | Search tests and local cache evidence; symbol/test relationship corpus remains | PARTIAL |
+| 3. Context planner | Server-owned headroom, compaction, deterministic evidence ordering and progressive context | Context/headroom tests; durable journal/evidence-bundle integration remains | PARTIAL |
+| 4. Real subagents | Persisted bounded SCOUT/VERIFIER children, cancellation, evidence, canonical spawn/cancel API, inline Web/CLI activity | Protocol/controller tests; parent-driven automatic delegation remains | PARTIAL |
+| 5. FastContext | Isolated, licensed, measured experiment behind an adapter | Paired recall/latency/cost decision | NOT STARTED; EXPERIMENT BOUNDARY DOCUMENTED |
+| 6. Core loop | Evidence-driven localize/edit/verify/repair; automatic verification default; lean tools | Verification parser integrity and worker gates; edit-burst graduation remains | PARTIAL |
+| 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing live credentials | BLOCKED BY AUTHORIZED EVIDENCE |
+| 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay/degradation tests; remaining legacy text callers and production outcome closure remain | PARTIAL |
+| 9. Protocol v2 | Semantic resumable event/state contract shared across all clients | SSE replay, handoff, subagent, and compatibility tests pass | PARTIAL |
+| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI gate, reconnect, resume, and viewport acceptance pass | COMPLETE (CREDENTIAL-FREE GATES) |
+| 11. Web 2.0 | Same semantic transcript/control states as CLI, accessible, resumable, and responsive | 161 Web tests/build/lint; authenticated screenshot QA remains | PARTIAL |
+| 12. Performance | Measured startup, event overhead, search, rendering, memory, provider isolation and recovery | Offline CLI runtime comparator and search cache evidence; full published report remains | PARTIAL |
+| 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Synthetic contract fixture reproduces; live paired runs unavailable | BLOCKED BY AUTHORIZED EVIDENCE |
+| 14. Cleanup/release | Delete replacements, graduate flags, upgrade schemas/docs, synchronize versions, run complete gates | Release-readiness table with explicit blockers | IN PROGRESS |
 
 ## Sequencing rules
 
