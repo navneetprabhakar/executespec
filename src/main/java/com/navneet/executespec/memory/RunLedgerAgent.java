@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -17,7 +17,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,15 +30,15 @@ import lombok.extern.slf4j.Slf4j;
  * project_run_ledger}. Idempotent: skips if an entry already exists for the runId. Triggers {@link
  * MemoryCompactionService} every 10th run.
  *
- * <p>Uses V1 {@link FallbackLlmRouter} at LIGHTWEIGHT tier (same pattern as {@code ContextAgent}).
- * Memory generation must never break a run — all failures are caught and logged.
+ * <p>Uses the canonical {@link LlmRouter} text seam at LIGHTWEIGHT tier. Memory generation must
+ * never break a run — all failures are caught and logged.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class RunLedgerAgent {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final PipelineRunRepository runRepo;
@@ -131,21 +131,16 @@ public class RunLedgerAgent {
 
   private String callLightweightLlm(String systemPrompt, PipelineRun run, String runId) {
     ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", run.getAiProviderEnum());
-    Prompt prompt =
-        new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage("Generate the ledger entry now.")));
-    org.springframework.ai.chat.model.ChatResponse response =
-        fallbackLlmRouter.callWithFallback(
+    ChatResponse response =
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage("Generate the ledger entry now.")),
             runId,
             "run-ledger",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "generate");
     return response.getResult().getOutput().getText();
   }
 
