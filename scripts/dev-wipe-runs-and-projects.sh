@@ -24,14 +24,14 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 DUMP_FILE="$BACKUP_DIR/executespec-${STAMP}.dump"
 
 echo "▶ pg_dump → $DUMP_FILE"
-PGPASSWORD="${PGPASSWORD:-postgres}" pg_dump \
+PGPASSWORD="${PGPASSWORD:?PGPASSWORD environment variable is required}" pg_dump \
     -Fc \
     -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
     -d "$DB_NAME" \
     -f "$DUMP_FILE"
 
 echo "▶ Running SQL wipe on $DB_NAME"
-PGPASSWORD="${PGPASSWORD:-postgres}" psql \
+PGPASSWORD="${PGPASSWORD:?PGPASSWORD environment variable is required}" psql \
     -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
     -d "$DB_NAME" \
     -v ON_ERROR_STOP=1 \

@@ -5,7 +5,7 @@
 set -uo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.local}"
-PASSWORD="${PASSWORD:-admin}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 CAP="${CAP:-3.0}"          # per-run hard cost cap (USD); 2 runs/provider => <= 2*CAP/provider
 TIMEOUT="${TIMEOUT:-1500}" # per-run poll timeout (s)
 BAND="${BAND:-medium}"

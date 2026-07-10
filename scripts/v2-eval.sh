@@ -31,7 +31,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.local}"
-PASSWORD="${PASSWORD:-admin}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 
 PROVIDERS_DEFAULT=(anthropic openai gemini)
 BANDS_DEFAULT=(low medium high)

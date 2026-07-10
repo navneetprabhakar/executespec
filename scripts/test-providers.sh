@@ -18,7 +18,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI}"
 SPEC_TYPE="${SPEC_TYPE:-both}"   # single | multi | both
 SKIP_REPORT="${SKIP_REPORT:-0}"
