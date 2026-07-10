@@ -44,7 +44,7 @@ Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). Users can sti
 
 Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. `OPENROUTER`, `DEEPSEEK`, and `FIREWORKS` are intentionally NOT in any failover chain — they are explicit BYOK / operator routes that the operator/admin opted into, and silently switching off them would defeat the cost / data-residency / latency reason they picked them.
 
-`FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate to `LlmRouter`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`).
+`FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate text-only callers to `LlmRouter.callText`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`). `RunTitleSummarizer` is the first migrated text-only caller; `callText` uses an explicit empty tool set so metadata calls do not bind worker tools.
 
 ## Circuit breaker
 
@@ -53,7 +53,7 @@ Per `application.yml failover-order:`, when a provider fails the router walks th
 - **Recovery:** unhealthy key has 180s TTL → auto-expires → provider assumed healthy again.
 - **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues).
 - **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider).
-- **Integration:** `FallbackLlmRouter` checks health before each provider attempt; records success/failure after each call. `LlmRouter` (V2 native-tool path) is direct-dispatch — no auto-failover; relies on the YAML failover-order plus per-call cost-cap protection.
+- **Integration:** `FallbackLlmRouter` checks health before each provider attempt; records success/failure after each call. `LlmRouter` (V2 native-tool and `callText` path) owns bounded same-provider retry and flag-gated YAML-chain failover; both paths remain transport-disabled in ordinary tests.
 
 ## Known tech debt
 
