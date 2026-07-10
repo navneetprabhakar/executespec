@@ -710,24 +710,36 @@ function Activity({items}: {items: StreamTimelineItem[]}) {
       i.type === 'tool' ||
       i.type === 'run' ||
       (i.type === 'system' &&
-        /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN_VALIDATION_EVIDENCE/i.test(i.title)),
+        /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN[ _]VALIDATION[ _]EVIDENCE/i.test(
+          i.title,
+        )),
   );
   if (!shown.length) return null;
   return (
     <div className='agent-activity' data-agent-region='activity'>
-      {shown.map((i) => (
-        <span key={i.id} className='agent-activity-chip'>
-          {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
-          <span>
-            {i.type === 'run'
-              ? 'Run created'
-              : i.type === 'system'
-                ? i.title
-                : friendlyTool(i.title)}
-            {i.type === 'system' && i.detail ? ` · ${i.detail}` : ''}
+      {shown.map((i) =>
+        i.type === 'system' && /RUN[ _]VALIDATION[ _]EVIDENCE/i.test(i.title) && i.detail ? (
+          <details key={i.id} className='agent-activity-evidence'>
+            <summary className='agent-activity-chip'>
+              <SearchIcon size={13} />
+              <span>Verification evidence</span>
+            </summary>
+            <p>{i.detail}</p>
+          </details>
+        ) : (
+          <span key={i.id} className='agent-activity-chip'>
+            {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
+            <span>
+              {i.type === 'run'
+                ? 'Run created'
+                : i.type === 'system'
+                  ? i.title
+                  : friendlyTool(i.title)}
+              {i.type === 'system' && i.detail ? ` · ${i.detail}` : ''}
+            </span>
           </span>
-        </span>
-      ))}
+        ),
+      )}
     </div>
   );
 }
