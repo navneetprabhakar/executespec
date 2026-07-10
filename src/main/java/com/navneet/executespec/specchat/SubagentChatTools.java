@@ -88,9 +88,21 @@ public class SubagentChatTools {
                   maxTurns,
                   maxCostUsd);
           try {
-            SubagentProtocol.Result result =
-                executionService.getObject().execute(request, user, orgId(user));
+            SubagentExecutionService execution = executionService.getObject();
+            // Eligibility is a model-visible decision boundary.  Do it before execution so a
+            // saturated parent receives a structured reason instead of burning a child start (or
+            // a provider call) only to discover the same limit in spawn().  spawn() still repeats
+            // every check transactionally, so this probe is advisory and race-safe.
+            SubagentProtocol.DelegationDecision eligibility =
+                execution.evaluateDelegation(request, user, orgId(user));
             ObjectNode envelope = json.createObjectNode();
+            envelope.set("eligibility", json.valueToTree(eligibility));
+            if (!eligibility.eligible()) {
+              envelope.put("ok", false);
+              envelope.put("error", "subagent delegation is not eligible");
+              return envelope;
+            }
+            SubagentProtocol.Result result = execution.execute(request, user, orgId(user));
             envelope.put("ok", true);
             envelope.set("result", json.valueToTree(result));
             return envelope;
