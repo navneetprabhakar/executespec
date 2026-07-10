@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
@@ -50,6 +51,7 @@ public class FeatureAssessmentService {
   private final FeatureFlagService featureFlags;
   private final ObjectMapper objectMapper;
   private final RunCostTracker costTracker;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
@@ -151,6 +153,7 @@ public class FeatureAssessmentService {
                 truncate(codeMapsJoined, MAX_CODEMAP_CHARS));
 
     Prompt prompt = new Prompt(java.util.List.of(new SystemMessage(system), new UserMessage(user)));
+    dispatchAuthorization.authorize("anthropic", anthropicAssessModel, runId);
     ChatResponse resp = anthropicModel.call(prompt);
     if (runId != null) {
       costTracker.record(runId, "anthropic", anthropicAssessModel, resp);

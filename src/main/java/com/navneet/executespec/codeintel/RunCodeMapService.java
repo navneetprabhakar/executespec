@@ -4,6 +4,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
@@ -47,8 +48,13 @@ public class RunCodeMapService {
   // project's canonical codemap instead of regenerating + re-summarising from scratch.
   private final ProjectCodeMapRepository projectCodeMapRepo;
   private final ProjectRepoRepository projectRepoRepo;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
+
+  @org.springframework.beans.factory.annotation.Value(
+      "${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
+  private String anthropicSummaryModel;
 
   public boolean isEligible(String userTier) {
     return userTier != null && ELIGIBLE_TIERS.contains(userTier.toUpperCase());
@@ -113,7 +119,7 @@ public class RunCodeMapService {
     AnthropicChatModel anthropicModel = anthropicModelProvider.getIfAvailable();
     if (anthropicModel != null) {
       try {
-        String[] llm = summarise(anthropicModel, repoFullName, raw.markdown());
+        String[] llm = summarise(anthropicModel, runId, repoFullName, raw.markdown());
         summary = llm[0];
         inputTokens = Integer.parseInt(llm[1]);
         outputTokens = Integer.parseInt(llm[2]);
@@ -217,7 +223,7 @@ public class RunCodeMapService {
    * summarisation across all eligible tiers.
    */
   private String[] summarise(
-      AnthropicChatModel anthropicModel, String repoFullName, String rawMarkdown) {
+      AnthropicChatModel anthropicModel, String runId, String repoFullName, String rawMarkdown) {
     String system =
         """
         You are a senior engineer summarising a code map for use as planner context.
@@ -235,6 +241,7 @@ public class RunCodeMapService {
             + "\n\n## Raw scan\n\n"
             + truncate(rawMarkdown, MAX_RAW_CHARS);
     Prompt prompt = new Prompt(java.util.List.of(new SystemMessage(system), new UserMessage(user)));
+    dispatchAuthorization.authorize("anthropic", anthropicSummaryModel, runId);
     ChatResponse resp = anthropicModel.call(prompt);
     String text = resp.getResult().getOutput().getText();
     int in = 0, out = 0;

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.ApiKeyResolver;
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -59,6 +60,7 @@ public class OpenAiBatchClient implements BatchClient {
   private final ObjectMapper objectMapper;
   private final ApiKeyResolver apiKeyResolver;
   private final PipelineRunRepository runRepo;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
   private final String baseUrl;
   private final String systemKey;
 
@@ -66,11 +68,13 @@ public class OpenAiBatchClient implements BatchClient {
       ObjectMapper objectMapper,
       ApiKeyResolver apiKeyResolver,
       PipelineRunRepository runRepo,
+      ProviderDispatchAuthorization dispatchAuthorization,
       @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
       @Value("${spring.ai.openai.api-key:}") String systemKey) {
     this.objectMapper = objectMapper;
     this.apiKeyResolver = apiKeyResolver;
     this.runRepo = runRepo;
+    this.dispatchAuthorization = dispatchAuthorization;
     this.baseUrl = baseUrl;
     this.systemKey = systemKey;
   }
@@ -82,6 +86,8 @@ public class OpenAiBatchClient implements BatchClient {
 
   @Override
   public BatchJob submit(String runId, List<BatchRequest> requests) {
+    String model = singleModel(requests);
+    dispatchAuthorization.authorize("openai", model, runId);
     String jsonl = buildInputJsonl(requests);
     // 1. Upload the JSONL to the Files API (purpose=batch).
     MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
@@ -135,6 +141,17 @@ public class OpenAiBatchClient implements BatchClient {
         mapStatus(batchResp.path("status").asText("validating")),
         null,
         null);
+  }
+
+  private static String singleModel(List<BatchRequest> requests) {
+    if (requests == null || requests.isEmpty()) {
+      throw new IllegalArgumentException("OpenAI batch submit requires at least one request");
+    }
+    List<String> models = requests.stream().map(BatchRequest::model).distinct().toList();
+    if (models.size() != 1 || models.get(0) == null || models.get(0).isBlank()) {
+      throw new IllegalArgumentException("OpenAI batch submit requires exactly one model");
+    }
+    return models.get(0);
   }
 
   @Override

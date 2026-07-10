@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.ApiKeyResolver;
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -55,6 +56,7 @@ public class GeminiBatchClient implements BatchClient {
   private final ObjectMapper objectMapper;
   private final ApiKeyResolver apiKeyResolver;
   private final PipelineRunRepository runRepo;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
   private final String baseUrl;
   private final String systemKey;
 
@@ -62,12 +64,14 @@ public class GeminiBatchClient implements BatchClient {
       ObjectMapper objectMapper,
       ApiKeyResolver apiKeyResolver,
       PipelineRunRepository runRepo,
+      ProviderDispatchAuthorization dispatchAuthorization,
       @Value("${spring.ai.google.genai.base-url:https://generativelanguage.googleapis.com}")
           String baseUrl,
       @Value("${spring.ai.google.genai.api-key:}") String systemKey) {
     this.objectMapper = objectMapper;
     this.apiKeyResolver = apiKeyResolver;
     this.runRepo = runRepo;
+    this.dispatchAuthorization = dispatchAuthorization;
     this.baseUrl = baseUrl;
     this.systemKey = systemKey;
   }
@@ -82,7 +86,12 @@ public class GeminiBatchClient implements BatchClient {
     if (requests == null || requests.isEmpty()) {
       throw new IllegalArgumentException("Gemini batch submit requires at least one request");
     }
-    String model = requests.get(0).model(); // single-model batch — see class caveat (1)
+    List<String> models = requests.stream().map(BatchRequest::model).distinct().toList();
+    if (models.size() != 1 || models.get(0) == null || models.get(0).isBlank()) {
+      throw new IllegalArgumentException("Gemini batch submit requires exactly one model");
+    }
+    String model = models.get(0);
+    dispatchAuthorization.authorize("gemini", model, runId);
     String key = resolveKey(runId);
     ObjectNode body = buildBatchBody(requests);
     JsonNode op =
