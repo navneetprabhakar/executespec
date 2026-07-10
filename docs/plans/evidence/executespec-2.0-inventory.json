@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "d21fbcf6ce7f130e5f397e998027955bd274ca60",
+      "sha": "960871f055cdb49f90ec76a18ae635f92b2772d0",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2581,
-      "worktreeFingerprint": "b36f61c4c89a888fc52e7569bf3658f9170df3d5a26dcc8d805dfcb0ae2c090f"
+      "trackedFiles": 2583,
+      "worktreeFingerprint": "83bc7ca1dd7e12f3f51ebf6318e785e50636d9c826a480794f193be341801ce0"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -25,10 +25,10 @@
   },
   "backend": {
     "mainJava": {
-      "files": 1235,
-      "lines": 192143
+      "files": 1236,
+      "lines": 192231
     },
-    "testJavaFiles": 369,
+    "testJavaFiles": 370,
     "controllers": 108,
     "mappingAnnotations": 597,
     "prompts": {
