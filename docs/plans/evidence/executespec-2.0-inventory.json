@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "85499755563560483350c50f907269ee04607135",
+      "sha": "5b433ca8ce70301dd78325761b52d1b085d492b0",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2622,
-      "worktreeFingerprint": "bed867c196b1c2de9c3f7ddadb7ca90be57622b95ec9497b4717d71c0d9dc1e9"
+      "trackedFiles": 2623,
+      "worktreeFingerprint": "8db1c6eb2525d66430f2eee5869de846cf2f3d427d601419a88efa2dfbd18c21"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -17,18 +17,18 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "4034e99734644ad847408be1d67587d932174966",
+      "sha": "e56d71226d7afc2f3e9e2282b3fc867572e3ff26",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 632,
-      "worktreeFingerprint": "7a5800264f37ddfa88aadaf426b70b63a58be112c740ac7db5e2ffe662d7096f"
+      "worktreeFingerprint": "918ef27b16c76f587c205602c9efdd4e1aca5d0d307afac469404a491d72a518"
     }
   },
   "backend": {
     "mainJava": {
       "files": 1245,
-      "lines": 195163
+      "lines": 195171
     },
-    "testJavaFiles": 388,
+    "testJavaFiles": 389,
     "controllers": 108,
     "mappingAnnotations": 601,
     "prompts": {
