@@ -3,30 +3,30 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "95e15f856155d13e6d3973e590771a78221b7b71",
+      "sha": "22e3d10a170982b675f441786895606a06615bf4",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2598,
-      "worktreeFingerprint": "dd82051366323991243407a34895cdd7f1d6360d3a0375b05e53727dc6f0f179"
+      "worktreeFingerprint": "65b7cac37750a1d8f65b515c21de0e2b2b82c205117980d4facd76944ed58327"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "1752de1440f9000872e6af1157d8ef89b11fbca5",
+      "sha": "768784458a3d8d43dd3355a40248532c3eadaec6",
       "branch": "codex/cli-1.0",
       "trackedFiles": 310,
-      "worktreeFingerprint": "96e3d6720558b5c899098166c716c182f8438d3fc9f0c2251d1c04fb30d6d06e"
+      "worktreeFingerprint": "0b7b59980c0d1cf4b31ba2b970c1f7dff7092d08cbc104728efd7262a828867b"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "d2534afc0c5592ce5abc0ba8fd435b3e2036d87d",
+      "sha": "26121f7e4532e1e290f05cb86389722d1601cd33",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 612,
-      "worktreeFingerprint": "8dfad932c9650d498c4f57cff35f4a9d03acd94e656bde936fedf6b8f14c79f3"
+      "trackedFiles": 615,
+      "worktreeFingerprint": "b06b7745f1eba1f4478ec0695c76cf6aea5aacae6c9876688dbd2be274ab14af"
     }
   },
   "backend": {
     "mainJava": {
       "files": 1241,
-      "lines": 193464
+      "lines": 193511
     },
     "testJavaFiles": 374,
     "controllers": 108,
@@ -238,7 +238,7 @@
     ],
     "web": {
       "sourceFiles": 145,
-      "lines": 41838,
+      "lines": 41850,
       "testFiles": 32,
       "routePaths": [
         "*",
@@ -349,7 +349,7 @@
   },
   "cli": {
     "sourceFiles": 132,
-    "lines": 55003,
+    "lines": 55011,
     "testFiles": 116,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
@@ -360,7 +360,7 @@
     ]
   },
   "docs": {
-    "trackedFiles": 612,
+    "trackedFiles": 615,
     "markdownFiles": 184,
     "outputFiles": 418
   }
