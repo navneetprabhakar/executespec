@@ -131,6 +131,8 @@ public class WebQaFixtureController {
     gate.setCompletedAt(null);
     gate.setCurrentGate("PLAN_APPROVAL");
     runRepository.save(gate);
+    turn.setLinkedRunId(gate.getRunId());
+    turnRepository.save(turn);
     return new FixtureResponse(success.getRunId(), failed.getRunId(), gate.getRunId(), sessionId);
   }
 
