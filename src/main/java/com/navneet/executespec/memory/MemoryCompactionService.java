@@ -1,11 +1,11 @@
 package com.navneet.executespec.memory;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.memory.entity.ProjectMemorySnapshot;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
@@ -17,7 +17,6 @@ import com.navneet.executespec.router.ResolvedModel;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +39,7 @@ public class MemoryCompactionService {
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final ProjectMemorySnapshotRepository snapshotRepo;
+  private final PromptAssembler promptAssembler;
 
   /**
    * Force-compact every uncompacted ledger entry for a project, regardless of how many runs have
@@ -76,13 +76,10 @@ public class MemoryCompactionService {
       String newEntries =
           entries.stream().map(ProjectRunLedger::getEntry).collect(Collectors.joining("\n\n"));
 
-      String template =
-          new ClassPathResource("prompts/memory-compaction.txt")
-              .getContentAsString(StandardCharsets.UTF_8);
       String filled =
-          template
-              .replace("{{EXISTING_SNAPSHOT}}", existingContent)
-              .replace("{{NEW_ENTRIES}}", newEntries);
+          promptAssembler.assemble(
+              "memory-compaction.txt",
+              java.util.Map.of("EXISTING_SNAPSHOT", existingContent, "NEW_ENTRIES", newEntries));
 
       String compacted = callLightweightLlm(filled, projectId);
       if (compacted == null || compacted.isBlank()) {

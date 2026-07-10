@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
@@ -21,7 +22,6 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +48,7 @@ public class RunLedgerAgent {
   private final AgentTaskRepository taskRepo;
   private final MemoryCompactionService compactionService;
   private final AgentProperties agentProperties;
+  private final PromptAssembler promptAssembler;
 
   private static final int LEDGER_CHAR_CAP = 2000;
 
@@ -74,17 +75,15 @@ public class RunLedgerAgent {
       String taskSummaries = buildTaskSummaries(tasks);
       int runNumber = ledgerRepo.countByProjectId(projectId) + 1;
 
-      String template =
-          new ClassPathResource("prompts/run-ledger.txt")
-              .getContentAsString(StandardCharsets.UTF_8);
-
       String filled =
-          template
-              .replace("{{RUN_NUMBER}}", String.valueOf(runNumber))
-              .replace("{{USER_REQUEST}}", truncate(run.getUserRequest(), 500))
-              .replace("{{PLAN_SUMMARY}}", truncate(run.getRunSummary(), 1000))
-              .replace("{{TASK_SUMMARIES}}", truncate(taskSummaries, 2000))
-              .replace("{{DIFF_STAT}}", diffStat(runId));
+          promptAssembler.assemble(
+              "run-ledger.txt",
+              java.util.Map.of(
+                  "RUN_NUMBER", String.valueOf(runNumber),
+                  "USER_REQUEST", truncate(run.getUserRequest(), 500),
+                  "PLAN_SUMMARY", truncate(run.getRunSummary(), 1000),
+                  "TASK_SUMMARIES", truncate(taskSummaries, 2000),
+                  "DIFF_STAT", diffStat(runId)));
 
       String entry = callLightweightLlm(filled, run, runId);
       if (entry == null || entry.isBlank()) {
