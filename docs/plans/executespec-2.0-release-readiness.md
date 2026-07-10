@@ -19,11 +19,11 @@
 | Sarvam absent from production | PASS (static) | Removed from provider enum/config/router/catalog/UI; V256 clears active persisted dispatch state. Historical benchmark/docs references remain explicitly marked historical. |
 | Clean install and migration upgrade | PENDING | Docker/Postgres integration migration run still required; static schema/upgrade contract passes |
 | Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; clean-install baseline is intentionally deferred until schema freeze |
-| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test` — 2221 tests, 0 failures/errors; focused context/subagent suites pass |
+| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2221 tests, 0 failures/errors; focused context/subagent/routing suites pass |
 | Frontend build/lint/format/tests | PASS | 151 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS | 912/912 on `codex/cli-1.0` (core 115, CLI 785, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
-| Docs links and integrity | PARTIAL | Canonical entrypoints, release facts, duplicate-ID policy, and canonical architecture links are fixed; docs validator reports 149 remaining links outside the canonical set |
+| Docs links and integrity | PASS | Canonical entrypoints, release facts, duplicate-ID policy, cross-repo source paths, and archive-link policy pass `python3 tools/docs_integrity.py --strict` with 0 findings |
 | No NUL bytes | PASS | Literal NULs removed from both Java sources; repository source-text test added |
 | No orphan prompts | UNKNOWN | Verifier covers only a small critical subset |
 | No unauthorized provider spend | PARTIAL | LlmRouter + deprecated FallbackLlmRouter require exact reservations in goal-live mode; direct provider/batch transports still need the same guard |
