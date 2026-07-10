@@ -43,6 +43,7 @@ export function useAgentRunStream(runId: string | null) {
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>();
   const attemptRef = useRef(0);
+  const lastEventIdRef = useRef<string | null>(null);
   const terminalRef = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -63,6 +64,7 @@ export function useAgentRunStream(runId: string | null) {
     setDetail(null);
     setCostUsd(null);
     attemptRef.current = 0;
+    lastEventIdRef.current = null;
     if (!runId) {
       setStatus('IDLE');
       return;
@@ -83,6 +85,9 @@ export function useAgentRunStream(runId: string | null) {
       } catch {
         // Initial snapshot remains useful if the scoped stream token is unavailable.
       }
+      if (lastEventIdRef.current) {
+        url += `${url.includes('?') ? '&' : '?'}lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
+      }
       if (!alive) return;
       const source = new EventSource(url);
       sourceRef.current = source;
@@ -96,6 +101,7 @@ export function useAgentRunStream(runId: string | null) {
       source.onmessage = (message) => {
         const event = parseAgentRunEvent(message.data);
         if (!event || !alive) return;
+        if (message.lastEventId) lastEventIdRef.current = message.lastEventId;
         const type = String(event.type || '').toUpperCase();
         if (type === 'RUN_DETAIL') {
           const value = payloadObject(event);
