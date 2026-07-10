@@ -12,6 +12,12 @@ describe('agentChatStream', () => {
   });
 
   it('streams token text with standard WEB capabilities', async () => {
+    expect(WEB_CHAT_CAPABILITIES).toMatchObject({
+      localTools: false,
+      interactive: true,
+      canRenderDiff: true,
+      canRenderTui: false,
+    });
     vi.mocked(api.streamAgentTurn).mockImplementation(async (_sessionId, _body, handlers = {}) => {
       handlers.onToken?.({delta: 'hello'});
       handlers.onToken?.({delta: ' world'});

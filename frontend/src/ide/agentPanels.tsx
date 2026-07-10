@@ -2,7 +2,9 @@ import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {Markdown} from '@/signal/components/Markdown';
 import {CommandIcon, PlusIcon, RunsIcon, SearchIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
+import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
 import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
+import {boundedInlineDiff} from '@/ide/agentDiff';
 import {
   asText,
   friendlyTool,
@@ -898,6 +900,124 @@ function SandboxRunCard({
           </button>
         )}
       </div>
+      {terminal && <InlineRunDiff runId={run.runId} />}
+    </div>
+  );
+}
+
+/**
+ * Bounded, read-only diff inspection for the chat-first run card.
+ *
+ * This deliberately has no revert/apply control: the browser agent does not
+ * have local workspace authority and the existing run-result endpoint is the
+ * source of truth for changed files. Users can open the full result surface
+ * for the existing PR/push workflow.
+ */
+function InlineRunDiff({runId}: {runId: string}) {
+  const [expanded, setExpanded] = useState(false);
+  const [files, setFiles] = useState<api.FileWithStatus[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [diff, setDiff] = useState<DiffLine[] | null>(null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+
+  async function toggle() {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    setExpanded(true);
+    if (status !== 'idle') return;
+    setStatus('loading');
+    try {
+      const rows = await api.getFilesWithStatus(runId);
+      const changed = (rows ?? [])
+        .filter((row) => row.status === 'ADDED' || row.status === 'MODIFIED')
+        .slice(0, 20);
+      setFiles(changed);
+      setStatus('ready');
+      if (changed.length) {
+        void open(changed[0].path);
+      } else {
+        setSelected(null);
+        setMessage('No added or modified files were reported.');
+      }
+    } catch {
+      setStatus('error');
+      setMessage('Changed files are unavailable in this run snapshot.');
+    }
+  }
+
+  async function open(path: string) {
+    setSelected(path);
+    setDiff(null);
+    setMessage('Loading diff…');
+    try {
+      const payload = await api.getFileDiff(runId, path);
+      // Keep the chat surface responsive even if a backend returns a very large file.
+      const shaped = boundedInlineDiff(payload);
+      setDiff(shaped.lines);
+      setMessage(
+        shaped.truncated
+          ? 'Diff truncated to 2,500 lines. Open Changed files for the full result.'
+          : '',
+      );
+    } catch {
+      setDiff(null);
+      setMessage('This file diff is unavailable. Open Changed files for the full result.');
+    }
+  }
+
+  return (
+    <div className='agent-inline-diff' data-agent-region='inline-diff'>
+      <button className='ide-btn ghost' type='button' onClick={() => void toggle()}>
+        {expanded ? 'Hide inline diff' : 'Inspect changed files'}
+      </button>
+      {expanded && (
+        <div className='agent-inline-diff-panel'>
+          <div className='agent-inline-diff-head'>
+            <strong>Read-only diff</strong>
+            <span>20 files · 2,500 lines max</span>
+          </div>
+          {status === 'loading' && (
+            <div className='agent-inline-diff-note'>Loading changed files…</div>
+          )}
+          {files.length > 0 && (
+            <div className='agent-inline-diff-grid'>
+              <div className='agent-inline-diff-files' role='listbox' aria-label='Changed files'>
+                {files.map((file) => (
+                  <button
+                    key={file.path}
+                    type='button'
+                    role='option'
+                    aria-selected={selected === file.path}
+                    className={selected === file.path ? 'active' : ''}
+                    onClick={() => void open(file.path)}
+                  >
+                    <code>{file.path}</code>
+                    <span>{file.status}</span>
+                  </button>
+                ))}
+              </div>
+              <div className='agent-inline-diff-view'>
+                {selected && diff ? (
+                  <IdeCodeViewer
+                    filename={selected}
+                    content={diff.map((line) => line.text).join('\n')}
+                    diff={diff}
+                  />
+                ) : (
+                  <div className='agent-inline-diff-note'>Select a file to inspect its diff.</div>
+                )}
+              </div>
+            </div>
+          )}
+          {message && <div className='agent-inline-diff-note'>{message}</div>}
+          <div className='agent-inline-diff-foot'>
+            Read-only preview. Revert/apply is not available in the web agent.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
