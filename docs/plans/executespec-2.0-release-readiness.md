@@ -6,7 +6,7 @@
 |---|---|---|
 | One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
 | Context planner active with headroom | FAIL | Raw/full worker history; dark compaction flags |
-| Typed deterministic repository search | PARTIAL | `RepositorySearchService` now provides bounded typed citations/fingerprints/paging; SearchFilesTool and orientation still need migration to the contract |
+| Typed deterministic repository search | PARTIAL | `RepositorySearchService` now drives `searchFiles` with typed citations/fingerprints/paging; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | FAIL | Fake `spawn_subagent` is deleted, but persisted child-run protocol and independent verifier do not exist yet |
 | Automatic verification default | FAIL | Critical V255 gates are OFF |
 | Hot handoff and client reconnect | FAIL | Pending tool calls can time out on malformed/disconnected clients |
