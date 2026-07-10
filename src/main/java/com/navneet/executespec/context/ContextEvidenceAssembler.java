@@ -15,6 +15,9 @@ public class ContextEvidenceAssembler {
 
   static final int DEFAULT_OPTIONAL_TOKEN_BUDGET = 6_000;
 
+  /** Keep planner estimates aligned with the bundle writer's per-entry output cap. */
+  static final int MAX_ITEM_CHARS = 1_000;
+
   private final ContextPlanner planner;
 
   public ContextEvidenceAssembler(ContextPlanner planner) {
@@ -43,9 +46,19 @@ public class ContextEvidenceAssembler {
       ContextPlanner.Kind kind,
       int priority) {
     if (values == null) return;
+    // The bundle writer deduplicates values as a final serialization guard. Do it before
+    // planning as well: spending budget on repeated search hits makes the planner look
+    // headroom-aware while silently starving distinct evidence. Keep the first occurrence so
+    // source ordering remains stable and the selected-value mapping stays deterministic.
+    var seen = new java.util.LinkedHashSet<String>();
     for (int i = 0; i < values.size(); i++) {
       String value = values.get(i);
       if (value == null || value.isBlank()) continue;
+      String bounded = value.strip();
+      if (!seen.add(bounded)) continue;
+      if (bounded.length() > MAX_ITEM_CHARS) {
+        bounded = bounded.substring(0, MAX_ITEM_CHARS) + "\n[truncated]";
+      }
       out.add(
           new ContextPlanner.Item(
               prefix + ":" + i,
@@ -53,7 +66,7 @@ public class ContextEvidenceAssembler {
               "context-agent",
               null,
               null,
-              Math.max(1, (value.length() + 3) / 4),
+              Math.max(1, (bounded.length() + 3) / 4),
               priority,
               true));
     }

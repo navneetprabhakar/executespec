@@ -46,6 +46,11 @@
  * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and model-window
  * headroom decisions. {@code ContextEvidenceAssembler} uses the selector for optional handoff lists
  * while preserving goal, diff, reviewer and decision text as mandatory evidence; it never selects
- * or reorders tool messages.
+ * or reorders tool messages. The assembler removes repeated search hits and estimates each optional
+ * entry at the bundle writer's 1,000-character cap before spending its 6,000-token budget, so
+ * duplicate or overlong hits cannot crowd out distinct evidence that will actually be serialized.
+ * This is a local deterministic optimization; it does not require a FastContext/Microsoft runtime
+ * dependency. {@code FastContextExperiment} remains an isolated, measured adapter seam until a
+ * paired recall/latency/cost evaluation justifies using an external index.
  */
 package com.navneet.executespec.context;
