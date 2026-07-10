@@ -90,8 +90,8 @@ public class ToolRegistry {
    *
    * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
    * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
-   * unwired fallbacks (lsp, spawn_subagent, mcp_client, plan/todo stubs) stay out. Flag-gated tools
-   * listed here still require their own flag ON to bind.
+   * unwired fallbacks (lsp, mcp_client, plan/todo stubs) stay out. Flag-gated tools listed here
+   * still require their own flag ON to bind.
    */
   public static final Set<String> LEAN_WORKER_TOOLS =
       Set.of(
