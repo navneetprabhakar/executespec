@@ -227,6 +227,33 @@ claim in a tool result — never invent a runId, score, or status.""";
         allowedToolNames);
   }
 
+  /** Agent-session variant that correlates any child delegation to the initiating turn. */
+  public void runTurn(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      Set<String> allowedToolNames,
+      String parentTurnId) {
+    runTurnInternal(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        modelOverride,
+        allowedToolNames,
+        parentTurnId);
+  }
+
   /** Run one turn with an explicit, already-authorized model override. */
   public void runTurn(
       Sink sink,
@@ -239,6 +266,32 @@ claim in a tool result — never invent a runId, score, or status.""";
       String providerOverride,
       String modelOverride,
       Set<String> allowedToolNames) {
+    runTurnInternal(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        modelOverride,
+        allowedToolNames,
+        null);
+  }
+
+  private void runTurnInternal(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      Set<String> allowedToolNames,
+      String parentTurnId) {
     runTurnBounded(
         sink,
         user,
@@ -251,7 +304,8 @@ claim in a tool result — never invent a runId, score, or status.""";
         modelOverride,
         allowedToolNames,
         MAX_TOOL_ROUNDS,
-        () -> {});
+        () -> {},
+        parentTurnId);
   }
 
   /** Bounded read-only loop used by persisted child agents. */
@@ -279,7 +333,8 @@ claim in a tool result — never invent a runId, score, or status.""";
         null,
         allowedToolNames,
         maxRounds,
-        beforeRound);
+        beforeRound,
+        null);
   }
 
   private void runTurnBounded(
@@ -294,7 +349,8 @@ claim in a tool result — never invent a runId, score, or status.""";
       String modelOverride,
       Set<String> allowedToolNames,
       int maxRounds,
-      Runnable beforeRound) {
+      Runnable beforeRound,
+      String parentTurnId) {
 
     // Provider + model (LIGHTWEIGHT). Keep provider+model consistent on the fallback.
     LlmProvider provider = resolveProvider(providerOverride);
@@ -338,7 +394,7 @@ claim in a tool result — never invent a runId, score, or status.""";
                 user, projectId, orgId, sessionId, providerName, model.getModel())));
     tools.addAll(webSearchChatTools.bind());
     if (allowedToolNames == null || allowedToolNames.contains("spawn_subagent")) {
-      ToolCallback subagentTool = subagentChatTools.bind(user, sessionId, null);
+      ToolCallback subagentTool = subagentChatTools.bind(user, sessionId, parentTurnId);
       if (subagentTool != null) tools.add(subagentTool);
     }
     if (projectId != null && !projectId.isBlank()) {
