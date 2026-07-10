@@ -1867,6 +1867,20 @@ to boot — skip it for those.""";
             .wallClockSeconds(retryWallClock)
             .requireBuildVerification(true)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+            // Preserve the server-owned worker controls across the smoke retry. A retry is a
+            // continuation of the same task, not a fresh flag-off execution.
+            .criticPass(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+            .verifyBeforeComplete(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+            .progressV2(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+            .autoVerify(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
             .build();
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
@@ -2079,6 +2093,18 @@ to boot — skip it for those.""";
                   .wallClockSeconds(cfg.wallClockSeconds)
                   .requireBuildVerification(true)
                   .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+                  .criticPass(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                  .verifyBeforeComplete(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                  .progressV2(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                  .autoVerify(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.auto-verify.enabled"))
                   .build());
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
@@ -4382,6 +4408,18 @@ to boot — skip it for those.""";
                 .wallClockSeconds(altCfg.wallClockSeconds())
                 .requireBuildVerification(true)
                 .forceToolChoiceOnSalvage(altCfg.forceToolChoiceOnSalvage())
+                .criticPass(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                .verifyBeforeComplete(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                .progressV2(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                .autoVerify(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.auto-verify.enabled"))
                 .build());
     log.info(
         "Executor task={} cross-provider retry DONE — alt={} outcome={}",
