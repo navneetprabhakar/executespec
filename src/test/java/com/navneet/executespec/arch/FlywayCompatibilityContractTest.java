@@ -15,6 +15,7 @@ class FlywayCompatibilityContractTest {
   private static final Path V256 =
       Path.of("src/main/resources/db/migration/V256__remove_sarvam_provider_state.sql");
   private static final Path POLICY = Path.of("docs/plans/executespec-2.0-flyway-compatibility.md");
+  private static final Path APPLICATION = Path.of("src/main/resources/application.yml");
 
   @Test
   void currentCleanupIsForwardOnlyAndDoesNotRewriteSchemaHistory() throws IOException {
@@ -35,5 +36,11 @@ class FlywayCompatibilityContractTest {
         .contains("Applied `V*.sql` files are immutable")
         .contains("baseline migration")
         .contains("upgrade from a database that has applied V257");
+  }
+
+  @Test
+  void defaultConfigurationDoesNotSuppressMissingAppliedMigrations() throws IOException {
+    String application = Files.readString(APPLICATION);
+    assertThat(application).doesNotContain("ignore-migration-patterns");
   }
 }
