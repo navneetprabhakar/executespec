@@ -30,6 +30,7 @@ describe('semanticTranscriptFromEvents', () => {
       {
         event: 'tool_event',
         data: {
+          semantic: 'handoff',
           name: 'subagent_handoff',
           status: 'COMPLETED',
           role: 'SCOUT',

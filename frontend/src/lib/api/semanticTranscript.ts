@@ -70,16 +70,8 @@ export function semanticTranscriptFromEvents(
       }
       case 'tool_event': {
         const data = event.data as AgentStreamToolEvent;
-        const marker = [data.name, data.status, data.type, data.kind, data.event_type, data.action]
-          .filter((value): value is string => typeof value === 'string')
-          .join(' ')
-          .toLowerCase();
         const id = `tool-event:${items.length}`;
-        if (
-          /(?:subagent|sub-agent|handoff|provider[ _-]?switch|model[ _-]?(?:switch|handoff)|continuation)/.test(
-            marker,
-          )
-        ) {
+        if (data.semantic === 'handoff') {
           items.push({
             kind: 'handoff',
             id,
