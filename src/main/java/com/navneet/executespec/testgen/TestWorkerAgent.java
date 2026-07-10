@@ -7,8 +7,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.AnthropicModelOptions;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -19,9 +18,7 @@ import com.navneet.executespec.testgen.model.TestTaskStatus;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
-import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -42,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestWorkerAgent {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final TestTaskRepository testTaskRepository;
@@ -101,8 +98,8 @@ public class TestWorkerAgent {
     LlmProvider aiProvider =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel model = modelResolver.resolve("TestWorkerAgent", aiProvider);
-    FallbackLlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
-    String code = lr.response().getResult().getOutput().getText();
+    ChatResponse lr = callLlmTracked(runId, model, systemPrompt);
+    String code = lr.getResult().getOutput().getText();
     accumulateWorkerTokens(task.getTestPlanId(), lr, model);
 
     // Strip markdown fences if present
@@ -162,8 +159,8 @@ public class TestWorkerAgent {
     LlmProvider aiProviderRetry =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel retryModel = modelResolver.resolve("TestWorkerAgent", aiProviderRetry);
-    FallbackLlmRouter.LlmResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
-    String code = lr.response().getResult().getOutput().getText();
+    ChatResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
+    String code = lr.getResult().getOutput().getText();
     accumulateWorkerTokens(task.getTestPlanId(), lr, retryModel);
     code = stripMarkdownFences(code);
 
@@ -299,44 +296,27 @@ public class TestWorkerAgent {
         .replace("{api_probe_results}", probeSection);
   }
 
-  private FallbackLlmRouter.LlmResponse callLlmTracked(
-      String runId, ResolvedModel model, String systemPrompt) {
-    AnthropicCacheOptions cacheOpts =
-        AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    var optsBuilder =
-        AnthropicChatOptions.builder().model(model.getModel()).cacheOptions(cacheOpts);
-    if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
-      optsBuilder.temperature(0.0);
-    }
-    AnthropicChatOptions opts = optsBuilder.build();
+  private ChatResponse callLlmTracked(String runId, ResolvedModel model, String systemPrompt) {
     Prompt prompt =
         new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt), new UserMessage("Generate the test class now.")),
-            opts);
-    return fallbackLlmRouter.callWithFallbackTracked(
-        model.providerName(),
-        model.getModel(),
-        prompt,
-        runId,
-        "test-worker",
-        FallbackLlmRouter.FallbackMode.IMMEDIATE,
-        0,
-        false);
+            List.of(new SystemMessage(systemPrompt), new UserMessage("Generate the test class now.")));
+    return llmRouter.callText(
+        model.providerName(), model.getModel(), prompt.getInstructions(), runId,
+        "TestWorkerAgent", "test-worker");
   }
 
   private synchronized void accumulateWorkerTokens(
-      Long testPlanId, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
+      Long testPlanId, ChatResponse lr, ResolvedModel model) {
     try {
-      var usage = lr.response().getMetadata().getUsage();
+      var usage = lr.getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();
       int outTokens = usage.getCompletionTokens().intValue();
       TestPlan testPlan = testPlanRepository.findById(testPlanId).orElse(null);
       if (testPlan != null) {
         testPlan.setWorkerInputTokens(testPlan.getWorkerInputTokens() + inTokens);
         testPlan.setWorkerOutputTokens(testPlan.getWorkerOutputTokens() + outTokens);
-        testPlan.setWorkerProvider(lr.provider() != null ? lr.provider() : model.providerName());
-        testPlan.setWorkerModel(lr.model() != null ? lr.model() : model.getModel());
+        testPlan.setWorkerProvider(model.providerName());
+        testPlan.setWorkerModel(model.getModel());
         testPlanRepository.save(testPlan);
       }
     } catch (Exception e) {
