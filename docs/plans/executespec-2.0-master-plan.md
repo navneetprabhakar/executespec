@@ -64,7 +64,7 @@ flowchart TD
 | Milestone | Required outcome | Evidence gate | State |
 |---|---|---|---|
 | 0. Truth and controls | Reproducible inventory/baseline, canonical plan, deletion/risk/readiness registers, durable spend guard, unauthorized-call test guard | Regeneration and control tests pass | COMPLETE |
-| 1. Critical correctness | NUL removed and gated; structured intent route; non-blocking approval; reconnectable local hands; Sarvam production removal | Focused tests plus migration upgrade | PARTIAL |
+| 1. Critical correctness | NUL removed and gated; structured intent route; non-blocking approval; reconnectable local hands; Sarvam production removal | Focused tests plus migration upgrade | PARTIAL (Sarvam removal PASS; approval/recovery closure remains) |
 | 2. Deterministic search | One typed search contract using git inventory, rg, SHA/fingerprint, freshness and citations | Search tests and local cache evidence; symbol/test relationship corpus remains | PARTIAL |
 | 3. Context planner | Server-owned headroom, compaction, deterministic evidence ordering and progressive context | Context/headroom tests; durable journal/evidence-bundle integration remains | PARTIAL |
 | 4. Real subagents | Persisted bounded SCOUT/VERIFIER children, cancellation, evidence, canonical spawn/cancel API, inline Web/CLI activity | Protocol/controller tests; deterministic eligibility and explicitly feature-flagged coordinator execution now exist; automatic model-driven delegation remains intentionally absent | PARTIAL |
@@ -73,7 +73,7 @@ flowchart TD
 | 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing native-x86 evaluator/runtime and sealed repeated baselines | BLOCKED BY AUTHORIZED EVIDENCE |
 | 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay/degradation tests; remaining legacy text callers and production outcome closure remain | PARTIAL |
 | 9. Protocol v2 | Semantic resumable event/state contract shared across all clients | SSE replay, handoff, subagent, and compatibility tests pass | PARTIAL |
-| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI gate, reconnect, resume, and deterministic viewport acceptance pass; native Terminal interactive capture remains permission-gated | PARTIAL (NATIVE VISUAL PENDING) |
+| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI/core/VS Code gate and deterministic viewport acceptance pass; native Terminal interactive capture remains permission-gated | PARTIAL (NATIVE VISUAL PENDING) |
 | 11. Web 2.0 | Same semantic transcript/control states as CLI, accessible, resumable, and responsive | 161 Web tests/build/lint; authenticated screenshot QA remains | PARTIAL |
 | 12. Performance | Measured startup, event overhead, search, rendering, memory, provider isolation and recovery | Offline CLI runtime comparator and search cache evidence; full published report remains | PARTIAL |
 | 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Six-provider capability evidence and benchmark cap control pass; native-x86 repeated comparator remains unavailable | BLOCKED BY AUTHORIZED EVIDENCE |
