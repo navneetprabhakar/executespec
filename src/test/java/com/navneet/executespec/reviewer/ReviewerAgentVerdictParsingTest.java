@@ -282,8 +282,19 @@ class ReviewerAgentVerdictParsingTest {
 
   @Test
   void hasWriteCalls_recognises_mutating_command_aliases() {
-    for (String tool : List.of("move", "deletePath", "bash", "executeCommand", "installDependencies",
-        "testProject", "lintProject", "formatProject", "ast_edit", "background_process", "gitCommit")) {
+    for (String tool :
+        List.of(
+            "move",
+            "deletePath",
+            "bash",
+            "executeCommand",
+            "installDependencies",
+            "testProject",
+            "lintProject",
+            "formatProject",
+            "ast_edit",
+            "background_process",
+            "gitCommit")) {
       var result =
           WorkerResult.builder()
               .outcome(WorkerResult.Outcome.COMPLETED)
