@@ -9,7 +9,7 @@ info:
     marked public (webhooks, public share links, scoped SSE tokens, public
     invites preview, OAuth callback).
 
-    Provider enum: ANTHROPIC (default since 1.0.0-M1), OPENAI, GEMINI. The
+    Provider enum: ANTHROPIC (default since the initial release), OPENAI, GEMINI. The
     `GOOGLE` alias is accepted on input and rewritten to GEMINI before
     persistence (V120). YAML keys under `model-matrix` / `failover-order` use
     `gemini`.
@@ -27,7 +27,7 @@ info:
     For the human-readable endpoint inventory grouped by capability, see
     `CLAUDE.md` § API Contracts. For the frontend consumption audit, see
     `frontend-api-usage.md`.
-  version: 1.0.0-M1
+  version: 2.0.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
