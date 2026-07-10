@@ -3,30 +3,30 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "6090af53a3b6cfced4bdbf9c3a44c4222162df4d",
+      "sha": "789ff14d02fbdd4ebc7cd863f6d28056c15e7269",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2583,
-      "worktreeFingerprint": "b909ff59cb363c3420c6f728e65d4c3f2c9ab4437d6943e434a19a1bc83a62b4"
+      "trackedFiles": 2585,
+      "worktreeFingerprint": "31387340ad68f04c0e985b773bfb05d6a10404a01d426fb68780643e8ebe40f0"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "840b9c32833ee6a657397144f0f25a36e3cda807",
+      "sha": "130fcca0bd30a7acd0887d74974acbb9d1870380",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 308,
-      "worktreeFingerprint": "e0533e3f30b2e7d82f7855609e311f93bb2ea0af0b1225ee09a6b17ed36a406c"
+      "trackedFiles": 310,
+      "worktreeFingerprint": "a804cbb0cb7cd896a7ba7547b8b04458ee925a7bbdad8cc5107ab2c3f240f466"
     },
     "docs": {
       "name": "executespec-docs-2.0",
       "sha": "addec094bfd8855babba72ff68320424552b27ba",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 611,
-      "worktreeFingerprint": "14ee43e38c725c8d85b4a2cbaf705cc1bb7fdfd3a2d871b876fcf57785188168"
+      "worktreeFingerprint": "8cd4e84da69b88eabc92e2ab85a5d79400619f51ddd30266d0d92b7ae38245a5"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1236,
-      "lines": 192231
+      "files": 1238,
+      "lines": 192678
     },
     "testJavaFiles": 370,
     "controllers": 108,
@@ -237,9 +237,9 @@
       "worker.verify-boot.enabled"
     ],
     "web": {
-      "sourceFiles": 143,
-      "lines": 41713,
-      "testFiles": 31,
+      "sourceFiles": 145,
+      "lines": 41838,
+      "testFiles": 32,
       "routePaths": [
         "*",
         "/",
@@ -348,9 +348,9 @@
     ]
   },
   "cli": {
-    "sourceFiles": 131,
-    "lines": 54882,
-    "testFiles": 115,
+    "sourceFiles": 132,
+    "lines": 54969,
+    "testFiles": 116,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
       "cli/src/app-tui",
