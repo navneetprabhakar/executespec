@@ -330,11 +330,40 @@ claim in a tool result — never invent a runId, score, or status.""";
         orgId,
         conversation,
         providerOverride,
-        null,
         allowedToolNames,
         maxRounds,
         beforeRound,
         null);
+  }
+
+  /** Bounded child loop variant that preserves the initiating parent turn correlation. */
+  public void runTurnBounded(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      Set<String> allowedToolNames,
+      int maxRounds,
+      Runnable beforeRound,
+      String parentTurnId) {
+    runTurnBounded(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        null,
+        allowedToolNames,
+        maxRounds,
+        beforeRound,
+        parentTurnId);
   }
 
   private void runTurnBounded(
