@@ -5,7 +5,7 @@
 | Gate | State | Evidence / blocker |
 |---|---|---|
 | One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
-| Context planner active with headroom | FAIL | Raw/full worker history; dark compaction flags |
+| Context planner active with headroom | PARTIAL | Added provider-window `ContextPlanner` contract and tests; worker integration, durable journal, and compaction graduation remain |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` now drives `searchFiles` with typed citations/fingerprints/paging; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | FAIL | Fake `spawn_subagent` is deleted, but persisted child-run protocol and independent verifier do not exist yet |
 | Automatic verification default | FAIL | Critical V255 gates are OFF |
