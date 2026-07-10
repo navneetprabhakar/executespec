@@ -49,8 +49,6 @@ class AnthropicModelAccessTest {
    *   <li>{@code FallbackLlmRouter} — V1 router. Already implements its own per-key Anthropic model
    *       construction via {@code buildAnthropicModel} (BYOK-aware by design). Kept until V1
    *       callers (chat copilot, project-doc generators, accuracy assessment) migrate to V2.
-   *   <li>{@code RunCodeMapService} — pre-V2 codemap generator. <b>Likely BYOK gap</b> — same shape
-   *       as FeatureAssessmentService. Tracked for follow-up.
    *   <li>{@code NativeToolsTestController} — test/smoke endpoint. Resolves the platform bean
    *       intentionally — it tests the bean, not customer dispatch.
    * </ul>
@@ -61,8 +59,7 @@ class AnthropicModelAccessTest {
               "AgentModelConfig",
               "FallbackLlmRouter", // V1, already BYOK-aware via buildAnthropicModel
               "LlmRouter", // V2 router — main BYOK entry point
-              "NativeToolsTestController", // test-only smoke
-              "RunCodeMapService" // BYOK follow-up: thread customer keys
+              "NativeToolsTestController" // test-only smoke
               ));
 
   @Test
