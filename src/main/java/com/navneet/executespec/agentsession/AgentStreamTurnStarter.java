@@ -11,6 +11,8 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.stereotype.Component;
 
@@ -26,6 +28,27 @@ class AgentStreamTurnStarter {
   private final AgentTracePayloadFactory tracePayloadFactory;
   private final AgentSessionRepository sessionRepo;
   private final AiProviderPreferenceService aiProviderPreferenceService;
+  private final ModelAccessService modelAccessService;
+  private final ModelRegistry modelRegistry;
+
+  /** Compatibility seam for focused tests and older package-local callers. */
+  AgentStreamTurnStarter(
+      AgentIntentService intentService,
+      AgentTurnRecorder turnRecorder,
+      AgentEventRecorder eventRecorder,
+      AgentTracePayloadFactory tracePayloadFactory,
+      AgentSessionRepository sessionRepo,
+      AiProviderPreferenceService aiProviderPreferenceService) {
+    this(
+        intentService,
+        turnRecorder,
+        eventRecorder,
+        tracePayloadFactory,
+        sessionRepo,
+        aiProviderPreferenceService,
+        null,
+        null);
+  }
 
   AgentSessionService.StreamTurnContext begin(
       AgentSession session, String sessionId, StreamTurnRequest request, AppUserDetails user) {
@@ -52,6 +75,24 @@ class AgentStreamTurnStarter {
     session.setUpdatedAt(Instant.now());
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
+    String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
+    String modelProvider =
+        explicitModel == null || modelRegistry == null ? null : modelRegistry.providerFor(explicitModel);
+    if (explicitModel != null) {
+      if (modelAccessService != null) {
+        modelAccessService.assertModelAllowed(user.getUser().getId(), explicitModel);
+      }
+      if (modelProvider == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.BAD_REQUEST, "Unknown model: " + explicitModel);
+      }
+      if (explicitProvider != null && !modelProvider.equalsIgnoreCase(explicitProvider)) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.BAD_REQUEST,
+            "Model '" + explicitModel + "' is not served by provider '" + explicitProvider + "'.");
+      }
+      if (explicitProvider == null) explicitProvider = modelProvider;
+    }
     String effectiveProvider =
         explicitProvider != null
             ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
@@ -61,6 +102,10 @@ class AgentStreamTurnStarter {
     }
     if (effectiveProvider != null) {
       session.setDefaultProvider(effectiveProvider);
+    }
+    if (explicitModel != null) {
+      session.setDefaultModel(
+          modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel));
     }
     if (message != null
         && !message.isBlank()
@@ -101,7 +146,9 @@ class AgentStreamTurnStarter {
         session.getOrgId(),
         String.valueOf(session.getUserId()),
         effectiveProvider,
-        session.getDefaultModel(),
+        explicitModel == null
+            ? session.getDefaultModel()
+            : modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel),
         decision);
   }
 }

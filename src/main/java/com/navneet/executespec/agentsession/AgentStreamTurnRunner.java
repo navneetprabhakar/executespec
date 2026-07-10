@@ -82,16 +82,30 @@ public class AgentStreamTurnRunner {
           AgentStreamTurnSupport.withAttachmentBlock(
               AgentStreamTurnSupport.conversationOrCurrentMessage(request),
               attachmentService.injectionBlock(ctx.sessionId(), request.attachmentIds()));
-      specChatService.runTurn(
-          sink,
-          user,
-          ctx.sessionId(),
-          ctx.projectId(),
-          ctx.runId(),
-          ctx.orgId(),
-          conversation,
-          ctx.provider(),
-          AgentStreamTurnSupport.allowedReadOnlyTools());
+      if (ctx.model() == null || ctx.model().isBlank()) {
+        specChatService.runTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            AgentStreamTurnSupport.allowedReadOnlyTools());
+      } else {
+        specChatService.runTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            ctx.model(),
+            AgentStreamTurnSupport.allowedReadOnlyTools());
+      }
       emitter.complete();
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {

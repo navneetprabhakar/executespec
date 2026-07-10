@@ -104,6 +104,9 @@ export default function IdeAgent() {
   const [chatsOpen, setChatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hasNewActivity, setHasNewActivity] = useState(false);
+  const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
   const liveRun = useAgentRunStream(state.activeRun);
@@ -171,6 +174,11 @@ export default function IdeAgent() {
     return agentSessionMatchesScope(candidate, scope) ? candidate : null;
   }, [scope, state.sessions, state.selectedId]);
 
+  useEffect(() => {
+    setSelectedProvider(selected?.defaultProvider ?? '');
+    setSelectedModel(selected?.defaultModel ?? '');
+  }, [selected?.id, selected?.defaultProvider, selected?.defaultModel]);
+
   const historicalActions = useMemo(
     () => state.turns.map(actionFromTurn).filter(Boolean) as PendingAction[],
     [state.turns],
@@ -227,12 +235,29 @@ export default function IdeAgent() {
   const load = useCallback(async () => {
     dispatch({type: 'load:start'});
     try {
-      const [sessionRows, gateRows, capabilityRows, managedAi] = await Promise.all([
+      let modelCatalogPromise: Promise<api.AvailableModelsResponse> = Promise.resolve({
+        providers: [],
+      });
+      // Some legacy surface tests intentionally provide a reduced API mock. Accessing a missing
+      // Vitest namespace export can throw, so keep the optional catalog additive and fail-closed.
+      try {
+        const loadModels = (
+          api as {getAvailableModels?: () => Promise<api.AvailableModelsResponse>}
+        ).getAvailableModels;
+        if (typeof loadModels === 'function') {
+          modelCatalogPromise = loadModels().catch(() => ({providers: []}));
+        }
+      } catch {
+        // Model switching is optional for an older server/mock; the provider default still works.
+      }
+      const [sessionRows, gateRows, capabilityRows, managedAi, modelCatalog] = await Promise.all([
         api.listAgentSessions(25),
         api.listAgentGates(12),
         api.listAgentCapabilities('WEB'),
         api.getManagedAiBalance().catch(() => null),
+        modelCatalogPromise,
       ]);
+      setAvailableModels(modelCatalog.providers ?? []);
       const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
       const scoped = selectScopedAgentSession(sessionRows, scope);
       const selectedId =
@@ -381,6 +406,8 @@ export default function IdeAgent() {
             canRenderDiff: false,
             canRenderTui: false,
           },
+          providerOverride: selectedProvider || null,
+          modelOverride: selectedModel || null,
         },
         {
           onAck: (ack) => dispatch({type: 'stream:ack', turnId: ack.turn_id}),
@@ -554,6 +581,19 @@ export default function IdeAgent() {
         onOpenApprovals={() => setChatsOpen(true)}
         onToggleChats={toggleChats}
         onToggleSettings={toggleSettings}
+        availableModels={availableModels}
+        selectedProvider={selectedProvider}
+        selectedModel={selectedModel}
+        onProviderChange={(provider) => {
+          setSelectedProvider(provider);
+          const entry = availableModels.find((p) => p.id === provider);
+          setSelectedModel(entry?.models?.[0]?.id ?? '');
+        }}
+        onModelChange={(model) => {
+          setSelectedModel(model);
+          const owner = availableModels.find((p) => p.models.some((m) => m.id === model));
+          if (owner) setSelectedProvider(owner.id);
+        }}
       />
 
       {state.error && (
