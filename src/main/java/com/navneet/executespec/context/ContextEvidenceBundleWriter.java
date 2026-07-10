@@ -63,8 +63,7 @@ public class ContextEvidenceBundleWriter {
 
     ObjectNode sources = root.putObject("sources");
     sources.put(
-        "contextDocumentSha256",
-        sha256(readSource(contextDir.resolve("CODEBASE_CONTEXT.md"))));
+        "contextDocumentSha256", sha256(readSource(contextDir.resolve("CODEBASE_CONTEXT.md"))));
     sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
 
     ObjectNode evidence = root.putObject("evidence");
@@ -84,8 +83,7 @@ public class ContextEvidenceBundleWriter {
         StandardOpenOption.TRUNCATE_EXISTING,
         StandardOpenOption.WRITE);
     try {
-      Files.move(
-          temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } catch (java.nio.file.AtomicMoveNotSupportedException e) {
       Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
     }

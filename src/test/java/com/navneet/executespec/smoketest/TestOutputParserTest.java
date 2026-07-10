@@ -115,7 +115,8 @@ class TestOutputParserTest {
     assertTrue(
         TestOutputParser.parseJunitXmlReports(
                 java.util.List.of(
-                    "<testsuite name=\"Broken\" tests=\"1\" failures=\"1\" errors=\"1\" skipped=\"0\">"))
+                    "<testsuite name=\"Broken\" tests=\"1\" failures=\"1\" errors=\"1\""
+                        + " skipped=\"0\">"))
             .isEmpty());
   }
 

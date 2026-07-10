@@ -56,6 +56,7 @@ public class ReadFileTool implements Tool {
 
   private final ProjectWorkspaceService projectWorkspace;
   private final PipelineRunRepository pipelineRunRepo;
+
   /**
    * Read-only DB fallback for architecture documents. Keep this dependency at the repository
    * boundary: injecting {@code ProjectArchitectureService} here creates a bean cycle through the
@@ -63,6 +64,7 @@ public class ReadFileTool implements Tool {
    * router).
    */
   private final ProjectArchitectureDocRepository projectArchRepo;
+
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectRepoLinkRepository repoLinkRepo;
   private final ProjectRepoRepository repoRepo;

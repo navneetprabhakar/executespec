@@ -73,8 +73,7 @@ class ContextPlannerTest {
             "a-fresh", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, true);
 
     var plan =
-        planner.plan(
-            new ContextPlanner.Window(500, 0, 0, 0, 0, 0), List.of(stale, freshZ, freshA));
+        planner.plan(new ContextPlanner.Window(500, 0, 0, 0, 0, 0), List.of(stale, freshZ, freshA));
 
     assertThat(plan.selected())
         .extracting(ContextPlanner.Item::id)

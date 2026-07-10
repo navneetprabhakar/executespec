@@ -47,8 +47,10 @@ public class RepositorySearchService {
           "worktrees");
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
+
   /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
   private static final int MAX_INDEXED_WORKSPACES = 4;
+
   private final Map<Path, CachedWorkspace> workspaceIndex =
       new LinkedHashMap<>(MAX_INDEXED_WORKSPACES, 0.75f, true) {
         @Override
@@ -120,9 +122,9 @@ public class RepositorySearchService {
 
   /**
    * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
-   * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it
-   * can contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter
-   * backend can replace later without changing the search contract or callers.
+   * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it can
+   * contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter backend
+   * can replace later without changing the search contract or callers.
    */
   private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
     synchronized (workspaceIndex) {
@@ -135,9 +137,7 @@ public class RepositorySearchService {
         cached = new CachedWorkspace(root, currentFiles);
         workspaceIndex.put(root, cached);
       } else cached.files = List.copyOf(currentFiles);
-      return cached.files.stream()
-          .filter(path -> path.startsWith(searchRoot))
-          .toList();
+      return cached.files.stream().filter(path -> path.startsWith(searchRoot)).toList();
     }
   }
 
@@ -210,8 +210,8 @@ public class RepositorySearchService {
   }
 
   /**
-   * Prefer Git's tracked + non-ignored inventory when the workspace is a repository. This keeps
-   * the search contract aligned with the files a coding agent can actually commit, avoids walking
+   * Prefer Git's tracked + non-ignored inventory when the workspace is a repository. This keeps the
+   * search contract aligned with the files a coding agent can actually commit, avoids walking
    * generated/ignored trees on every warm search, and still includes newly-created non-ignored
    * files through {@code --others}. A plain directory (tests, unpacked uploads, or a local-hands
    * workspace without Git metadata) uses the bounded tree-walk fallback above.

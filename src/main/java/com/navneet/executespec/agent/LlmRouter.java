@@ -132,8 +132,8 @@ public class LlmRouter {
    * Dispatch a text-only request through the canonical V2 provider transport.
    *
    * <p>This is the migration seam for legacy non-tool callers. It deliberately does not reproduce
-   * {@link FallbackLlmRouter}'s circuit-breaker or fallback-mode guardrails: the canonical
-   * router's bounded retry and flag-gated failover policy apply, while transport, BYOK resolution,
+   * {@link FallbackLlmRouter}'s circuit-breaker or fallback-mode guardrails: the canonical router's
+   * bounded retry and flag-gated failover policy apply, while transport, BYOK resolution,
    * managed-AI accounting, and telemetry stay in one router. An empty tool override is important
    * here; text callers must not bind the mutable worker tool registry just to make a request.
    *
