@@ -5,7 +5,7 @@
 | Gate | State | Evidence / blocker |
 |---|---|---|
 | One canonical execution/routing system | FAIL | Multiple chat paths and fragmented routing remain |
-| Context planner active with headroom | PARTIAL | Added provider-window `ContextPlanner` contract and tests; worker integration, durable journal, and compaction graduation remain |
+| Context planner active with headroom | PARTIAL | Worker now plans model-window headroom before request assembly and invokes safe compaction when reserves are unsafe; durable journal and broader evidence-bundle integration remain |
 | Typed deterministic repository search | PARTIAL | `RepositorySearchService` now drives `searchFiles` with typed citations/fingerprints/paging; RepoOrientation and broader symbol/test indexing still need migration |
 | Real Context Scout and verifier subagents | PARTIAL | Bounded persisted SCOUT/VERIFIER child-session protocol now exists with depth, child, turn, cost, cancellation, ownership, and evidence guards; model execution/coordinator wiring remains |
 | Automatic verification default | FAIL | Critical V255 gates are OFF |
@@ -19,7 +19,7 @@
 | Sarvam absent from production | PASS (static) | Removed from provider enum/config/router/catalog/UI; V256 clears active persisted dispatch state. Historical benchmark/docs references remain explicitly marked historical. |
 | Clean install and migration upgrade | PENDING | Docker/Postgres integration migration run still required; static schema/upgrade contract passes |
 | Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; clean-install baseline is intentionally deferred until schema freeze |
-| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2212 tests, 0 failures/errors |
+| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test` — 2218 tests, 0 failures/errors; focused context suite 15/15 |
 | Frontend build/lint/format/tests | PENDING | Not run on integration branch |
 | CLI/core/VS Code build/tests | PASS | 910/910 on `codex/cli-1.0` (core 115, CLI 783, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
