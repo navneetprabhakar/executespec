@@ -186,6 +186,8 @@ public class RepositorySearchService {
   }
 
   private static List<Path> inventory(Path root, Path searchRoot) throws IOException {
+    List<Path> gitFiles = gitInventory(root, searchRoot);
+    if (gitFiles != null) return gitFiles;
     List<Path> files = new ArrayList<>();
     Files.walkFileTree(
         searchRoot,
@@ -205,6 +207,58 @@ public class RepositorySearchService {
         });
     files.sort(Comparator.comparing(path -> root.relativize(path).toString()));
     return files;
+  }
+
+  /**
+   * Prefer Git's tracked + non-ignored inventory when the workspace is a repository. This keeps
+   * the search contract aligned with the files a coding agent can actually commit, avoids walking
+   * generated/ignored trees on every warm search, and still includes newly-created non-ignored
+   * files through {@code --others}. A plain directory (tests, unpacked uploads, or a local-hands
+   * workspace without Git metadata) uses the bounded tree-walk fallback above.
+   */
+  private static List<Path> gitInventory(Path root, Path searchRoot) {
+    Process process = null;
+    try {
+      process =
+          new ProcessBuilder(
+                  "git",
+                  "-C",
+                  root.toString(),
+                  "ls-files",
+                  "--cached",
+                  "--others",
+                  "--exclude-standard",
+                  "-z")
+              .redirectErrorStream(false)
+              .start();
+      byte[] output = process.getInputStream().readAllBytes();
+      if (process.waitFor() != 0) return null;
+      String listing = new String(output, StandardCharsets.UTF_8);
+      List<Path> files = new ArrayList<>();
+      for (String relativeName : listing.split("\\u0000")) {
+        if (relativeName.isBlank()) continue;
+        Path file = root.resolve(relativeName).normalize();
+        if (!file.startsWith(root)
+            || !file.startsWith(searchRoot)
+            || !Files.isRegularFile(file)
+            || isIgnoredDirectory(file, root)
+            || isBinaryName(file)) continue;
+        files.add(file);
+      }
+      files.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+      return files;
+    } catch (Exception ignored) {
+      if (process != null) process.destroyForcibly();
+      return null;
+    }
+  }
+
+  private static boolean isIgnoredDirectory(Path file, Path root) {
+    Path relative = root.relativize(file);
+    for (Path part : relative) {
+      if (IGNORED_DIRS.contains(part.toString())) return true;
+    }
+    return false;
   }
 
   private static boolean isBinaryName(Path path) {
