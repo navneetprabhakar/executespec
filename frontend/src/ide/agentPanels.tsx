@@ -187,7 +187,12 @@ export function AgentTopBar({
           {pendingGateCount} approval{pendingGateCount === 1 ? '' : 's'}
         </button>
       )}
-      <button className='agent-bar-btn' onClick={onNewChat} disabled={busy}>
+      <button
+        className='agent-bar-btn'
+        onClick={onNewChat}
+        disabled={busy}
+        aria-label='Start a new sandbox'
+      >
         <PlusIcon size={14} />
         <span>New sandbox</span>
       </button>
@@ -1200,7 +1205,19 @@ function Composer({
         </div>
       )}
       <div className='agent-composer-box'>
-        <label className='agent-attach-btn' title='Attach PDF, Markdown, or text'>
+        <label
+          className='agent-attach-btn'
+          title='Attach PDF, Markdown, or text'
+          tabIndex={uploading || isBusy ? -1 : 0}
+          role='button'
+          aria-label='Attach a file'
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && !uploading && !isBusy) {
+              e.preventDefault();
+              e.currentTarget.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+            }
+          }}
+        >
           {uploading ? <span className='agent-attach-spin' /> : <Paperclip />}
           <input
             type='file'

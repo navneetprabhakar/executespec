@@ -8,7 +8,8 @@ export type AgentChatTarget = {
 export const WEB_CHAT_CAPABILITIES: api.AgentClientCapabilities = {
   localTools: false,
   interactive: true,
-  canRenderDiff: true,
+  // Diff inspection/revert is not implemented in the chat surface yet.
+  canRenderDiff: false,
   canRenderTui: false,
 };
 

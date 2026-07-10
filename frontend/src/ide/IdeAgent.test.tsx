@@ -304,6 +304,15 @@ describe('IdeAgent', () => {
     expect(status?.textContent).toContain('Reconnecting');
   });
 
+  it('names the mobile new-sandbox control when its visible label collapses', async () => {
+    ({host, root} = await renderAgent('/agent'));
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
+  });
+
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
     api.getManagedAiBalance.mockResolvedValue({
       ...managedAi,

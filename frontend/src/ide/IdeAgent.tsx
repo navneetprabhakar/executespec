@@ -72,7 +72,9 @@ function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
 
 function persistedEventTimeline(events: api.AgentActionEvent[] | null | undefined) {
   return (events ?? [])
-    .filter((event) => /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION/i.test(event.type))
+    .filter((event) =>
+      /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN_VALIDATION_EVIDENCE/i.test(event.type),
+    )
     .map((event) => {
       let detail = event.payloadJson ?? undefined;
       if (detail) {
@@ -152,11 +154,13 @@ export default function IdeAgent() {
 
   const toggleChats = useCallback(() => {
     if (!chatsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    if (!chatsOpen) setSettingsOpen(false);
     setChatsOpen((open) => !open);
   }, [chatsOpen]);
 
   const toggleSettings = useCallback(() => {
     if (!settingsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    if (!settingsOpen) setChatsOpen(false);
     setSettingsOpen((open) => !open);
   }, [settingsOpen]);
 
@@ -371,7 +375,10 @@ export default function IdeAgent() {
           clientCapabilities: {
             localTools: false,
             interactive: true,
-            canRenderDiff: true,
+            // The Web agent currently links to the full result surface; it does not
+            // render or mutate diff hunks inline. Do not advertise an unsupported
+            // capability to the orchestrator.
+            canRenderDiff: false,
             canRenderTui: false,
           },
         },
@@ -539,7 +546,7 @@ export default function IdeAgent() {
         sessionUsage={sessionUsage}
         routingState={state.routingState}
         capabilities={state.capabilities}
-        pendingGateCount={state.gates.length}
+        pendingGateCount={inlineGates.length}
         onNewChat={() => {
           setChatsOpen(false);
           void createSession();
