@@ -12,7 +12,7 @@
 | Hot handoff and client reconnect | PARTIAL | Pending local tool calls now renew their lease on reconnect and malformed frames terminate immediately with durable `CLIENT_PROTOCOL_ERROR`; server-restart/session-resume proof remains |
 | TUI route shell and Inspector removed | PARTIAL | Session route hides persistent sidebar/Inspector and now has an explicit 80x24 transcript budget; non-session route chrome and duplicate renderers remain |
 | Exactly rich OpenTUI and plain renderer | PARTIAL | Obsolete Ink implementation/dependencies are deleted; native OpenTUI and plain/readline remain, while split-footer compatibility still needs a deliberate removal decision |
-| Web/CLI semantic state shared | PARTIAL | Shared semantic transcript adapters now exist in CLI core and Web; CLI session route and Web `/agent` route now hide dashboard chrome, but a single renderer/state path is not complete |
+| Web/CLI semantic state shared | PARTIAL | Shared semantic transcript adapters now exist in CLI core and Web; both session routes hide dashboard chrome and the Web agent run card now consumes a reconnecting typed SSE stream, but a single renderer/state path is not complete |
 | SOTA comparator gate | BLOCKED | No frozen paired repeated comparator; provider caps limit statistical power |
 | Benchmark manifests reproduce | PARTIAL | A hash-sealed offline contract fixture is reproducible; historical SWE-bench manifests remain exploratory and do not support model/quality claims |
 | Provider readiness honest | PARTIAL | Existing live probes are not a release-wide readiness registry |

@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "6f2cc6ad0292e53197a7a32dc8edc37acfde8aaf",
+      "sha": "5fa5a34f0093959a0269aabb06dc71a663e8f3a9",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2604,
-      "worktreeFingerprint": "18da3426e8b4abf2ec4cdad1d5fc7e9ede26257b6a8d7e21681e3160615663b0"
+      "trackedFiles": 2606,
+      "worktreeFingerprint": "f993d3330aa21fd644bc616ddba695b3690780f5960ab0f2e5c8bb82f7e40095"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -237,9 +237,9 @@
       "worker.verify-boot.enabled"
     ],
     "web": {
-      "sourceFiles": 145,
-      "lines": 41850,
-      "testFiles": 32,
+      "sourceFiles": 147,
+      "lines": 41974,
+      "testFiles": 33,
       "routePaths": [
         "*",
         "/",
