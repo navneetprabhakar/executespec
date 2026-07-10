@@ -17,9 +17,9 @@
 | Benchmark manifests reproduce | FAIL | Current sample evidence lacks one complete identity manifest |
 | Provider readiness honest | PARTIAL | Existing live probes are not a release-wide readiness registry |
 | Sarvam absent from production | PASS (static) | Removed from provider enum/config/router/catalog/UI; V256 clears active persisted dispatch state. Historical benchmark/docs references remain explicitly marked historical. |
-| Clean install and migration upgrade | PENDING | Docker/Postgres integration migration run still required; static schema/upgrade contract passes |
-| Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; docs pin the 256-file chain and aggregate hash; clean-install/upgrade execution is still required |
-| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2221 tests, 0 failures/errors; focused context/subagent/routing suites pass |
+| Clean install and migration upgrade | PARTIAL | `mvn -Pintegration -Dtest=FlywayMigrationIntegrationTest test` runs all 256 migrations against `pgvector/pgvector:pg16`, validates Hibernate startup and six schema assertions; production-like upgrade/data-preservation fixture remains |
+| Flyway backward compatibility | PARTIAL | V1–V256 remain immutable and V256 is forward-only; docs pin the 256-file chain and aggregate hash; clean-install is proven, while an upgrade fixture with historical active Sarvam rows and preserved audit history remains |
+| Backend verify | PASS | `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean test` — 2416 tests, 0 failures/errors; focused context/subagent/routing/provider-guard suites pass |
 | Frontend build/lint/format/tests | PASS | 151 tests, production build, format check, and lint pass; one existing hook-dependency warning |
 | CLI/core/VS Code build/tests | PASS | 913/913 on `codex/cli-1.0` (core 115, CLI 786, VS Code 12) |
 | Visual QA | FAIL | Existing TUI/Web visual gates still accept text-only/blank/stale defects; semantic adapters and frame coalescing are foundations, not visual acceptance |
