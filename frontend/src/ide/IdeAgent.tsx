@@ -79,6 +79,7 @@ export default function IdeAgent() {
   const [uploading, setUploading] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hasNewActivity, setHasNewActivity] = useState(false);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
   const liveRun = useAgentRunStream(state.activeRun);
@@ -238,7 +239,12 @@ export default function IdeAgent() {
   }, [loadTurns, state.selectedId]);
 
   useEffect(() => {
-    if (stickToBottom.current) endRef.current?.scrollIntoView({block: 'end'});
+    if (stickToBottom.current) {
+      endRef.current?.scrollIntoView({block: 'end'});
+      setHasNewActivity(false);
+    } else {
+      setHasNewActivity(true);
+    }
   }, [state.turns, state.pendingUser, state.streamText, state.streamEvents, runDetail]);
 
   // A confirmed web-agent turn persists the run id on the durable turn. Hydrate
@@ -481,7 +487,15 @@ export default function IdeAgent() {
   const runCard = runDetail;
   const onChatScroll = (e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stickToBottom.current = atBottom;
+    if (atBottom) setHasNewActivity(false);
+  };
+
+  const jumpToLatest = () => {
+    stickToBottom.current = true;
+    setHasNewActivity(false);
+    endRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
   };
 
   return (
@@ -561,12 +575,14 @@ export default function IdeAgent() {
         runCard={runCard}
         runCost={runCost}
         runStreamStatus={liveRun.status}
+        hasNewActivity={hasNewActivity}
         input={state.input}
         attachments={state.attachments}
         uploading={uploading}
         endRef={endRef}
         dispatch={dispatch}
         onScroll={onChatScroll}
+        onJumpToLatest={jumpToLatest}
         onSend={() => void send()}
         onStop={stop}
         onAddFiles={(files) => void handleFiles(files)}

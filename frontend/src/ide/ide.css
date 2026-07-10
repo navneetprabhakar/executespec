@@ -3099,6 +3099,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 .agent-operator-dock {
   flex-shrink: 0;
@@ -3109,6 +3110,33 @@
   min-height: 0;
   overflow-y: auto;
   padding: 22px clamp(18px, 4vw, 56px);
+  position: relative;
+}
+
+.agent-jump-latest {
+  position: absolute;
+  right: clamp(18px, 4vw, 56px);
+  bottom: 86px;
+  z-index: 2;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--ide-blue, #5b8def);
+  border-radius: 999px;
+  background: var(--ide-bg-sidebar);
+  color: var(--ide-fg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-jump-latest:hover {
+  background: var(--ide-bg-hover);
+}
+
+.agent-jump-latest:focus-visible {
+  outline: 2px solid var(--ide-blue, #5b8def);
+  outline-offset: 2px;
 }
 .agent-chat-col {
   width: min(100%, 1080px);

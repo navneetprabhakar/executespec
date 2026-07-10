@@ -516,6 +516,52 @@ describe('IdeAgent', () => {
     expect(host.querySelector('[role="status"]')?.textContent).toContain('Agent is working.');
   });
 
+  it('offers a keyboard-accessible jump when activity arrives off-screen', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+    const jumpToLatest = vi.fn();
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          messages={[{id: 'assistant:1', role: 'assistant', content: 'A long-running answer'}]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={true}
+          visibleAction={null}
+          gates={[]}
+          runCard={null}
+          runCost={null}
+          hasNewActivity
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onJumpToLatest={jumpToLatest}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+
+    const jump = host.querySelector<HTMLButtonElement>('.agent-jump-latest');
+    expect(jump?.getAttribute('aria-label')).toBe('Jump to latest activity');
+    await act(async () => jump?.click());
+    expect(jumpToLatest).toHaveBeenCalledTimes(1);
+  });
+
   it('does not collapse a user turn behind an empty persisted assistant summary', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
