@@ -1,8 +1,12 @@
 package com.navneet.executespec.eval.v2;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -314,7 +318,8 @@ public class TierEvalRunner {
         .inputTokens(inputTokens)
         .outputTokens(outputTokens)
         .cacheReadTokens(cacheReadTokens)
-        .costUsd(cost);
+        .costUsd(cost)
+        .promptFingerprint(promptFingerprint(testCase));
   }
 
   private TierEvalResult failureResult(
@@ -349,7 +354,35 @@ public class TierEvalRunner {
         .correctnessScore(0)
         .failureMode(mode)
         .detail(detail)
+        .promptFingerprint("unavailable")
         .build();
+  }
+
+  /**
+   * Stable identity of the exact eval input; makes result rows reproducible without storing
+   * content.
+   */
+  private String promptFingerprint(TierEvalCase testCase) {
+    try {
+      String payload =
+          objectMapper.writeValueAsString(testCase.messages())
+              + "\n"
+              + objectMapper.writeValueAsString(testCase.tools());
+      return hashPrompt(payload);
+    } catch (Exception e) {
+      return "unavailable";
+    }
+  }
+
+  private static String hashPrompt(String payload) {
+    try {
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256")
+                  .digest(payload.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException e) {
+      return "unavailable";
+    }
   }
 
   /** Best-effort lowercase of the input provider for failure paths where resolution didn't run. */
@@ -474,6 +507,7 @@ public class TierEvalRunner {
                   + " tool calls, outcome="
                   + wr.outcome()
                   + "]")
+          .promptFingerprint(hashPrompt(workerPrompt + "\n" + testCase.taskPrompt()))
           .build();
     } catch (Exception e) {
       log.warn(
