@@ -1072,16 +1072,57 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
+    // Preserve the worker's latest investigation when handing the same task to a different
+    // provider/model. The workspace is shared, but starting with a fresh conversation makes the
+    // replacement model repeat repository exploration and can undo the value of the escalation.
+    // ContextStore is best-effort; a missing/expired snapshot still falls back to a fresh attempt.
+    com.navneet.executespec.context.SavedContext handoff =
+        loadContinuationSnapshot(req, task);
     TaskOutcome rerun =
         executeOne(
             task,
             plan,
             req,
             isFinalTask,
-            null,
+            handoff,
             new ProviderModelOverride(
                 candidate.provider(), candidate.model(), decision.decision()));
     return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+  }
+
+  /**
+   * Load the latest bounded worker snapshot for a model/provider continuation handoff.
+   *
+   * <p>The snapshot key is derived from the same run/task context used by {@link WorkerAgent};
+   * keeping this lookup in one seam makes the handoff behavior testable and keeps Redis failures
+   * non-fatal, matching the normal retry/resume policy.
+   */
+  com.navneet.executespec.context.SavedContext loadContinuationSnapshot(
+      ExecutionRequest req, PlannedTask task) {
+    if (contextStore == null || req == null || req.runContext() == null || task == null) {
+      return null;
+    }
+    var context =
+        new com.navneet.executespec.tool.ExecutionContext(
+            req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
+    try {
+      var snapshot = contextStore.load(context).orElse(null);
+      if (snapshot != null) {
+        log.info(
+            "Continuation handoff run={} task={} resumes snapshot iter={}",
+            context.runId(),
+            context.taskId(),
+            snapshot.iteration());
+      }
+      return snapshot;
+    } catch (RuntimeException e) {
+      log.warn(
+          "Continuation handoff snapshot unavailable run={} task={}: {}",
+          context.runId(),
+          context.taskId(),
+          e.getMessage());
+      return null;
+    }
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
