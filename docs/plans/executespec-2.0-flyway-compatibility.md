@@ -18,7 +18,7 @@ No baseline migration is created until the schema has stopped moving for the rel
 
 V256 is a forward data migration only. It removes Sarvam from reusable provider/model state in `app_user`, `project`, `pipeline_run`, `execution_run`, `agent_session`, `agent_task`, and `org`. It deliberately does not rewrite immutable provider strings in usage, benchmark, or event history. The migration must be idempotent with respect to already-clean rows and must not drop tables or columns.
 
-The `model_overrides_json` cleanup assumes the existing application contract: this TEXT column contains valid JSON objects. If production data violates that contract, the migration must be split into a quarantine/repair migration before the JSON rewrite; it must not silently discard malformed customer data.
+The `model_overrides_json` cleanup treats this legacy TEXT column defensively: valid JSON objects are filtered, while malformed values are retained with a migration notice so one bad row cannot block deployment or silently discard customer data. A later quarantine/repair migration may clean those rows explicitly.
 
 ## Required gates for every schema change
 
@@ -34,7 +34,7 @@ The `model_overrides_json` cleanup assumes the existing application contract: th
 
 | Path | Status |
 |---|---|
-| V1–V255 | Existing history; do not rewrite |
+| V1–V256 | Existing history; do not rewrite |
 | V256 Sarvam state cleanup | Forward migration; source/classpath inventory expects it |
 | Squashed clean-install baseline | Not yet generated; deferred until schema freeze |
 | Upgrade integration test | Existing Testcontainers/Flyway suite; V256 data assertions still required |
