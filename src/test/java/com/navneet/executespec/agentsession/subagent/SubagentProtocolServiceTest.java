@@ -147,6 +147,51 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void spawnEnforcesBudgetAcrossTheEntireDescendantTree() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_CREATED))
+        .thenReturn(List.of());
+    when(events.countBySessionIdAndType("parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(3L);
+
+    var direct =
+        List.of(
+            childLink("child-a", 2.0), childLink("child-b", 2.0), childLink("child-c", 2.0));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(
+            List.of(
+                event("parent", "spawn", direct.get(0)),
+                event("parent", "spawn", direct.get(1)),
+                event("parent", "spawn", direct.get(2))));
+    // One nested child consumes another reservation even though the direct child count is only 3.
+    var nested = childLink("nested-a", 2.0);
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "child-a", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of(event("child-a", "spawn", nested)));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "child-b", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of());
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "child-c", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of());
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "nested-a", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of());
+
+    assertThatThrownBy(
+            () ->
+                service.spawn(
+                    new SpawnRequest("req-over-tree", "parent", null, Role.SCOUT, "scan", 1, 0.1),
+                    "user",
+                    "org"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("total-tree cost budget exceeded");
+  }
+
+  @Test
   void authorizeNextTurnFailsClosedAtPersistedBudget() throws Exception {
     AgentSession child = parent("child", "RUNNING");
     var metadata =
@@ -212,6 +257,13 @@ class SubagentProtocolServiceTest {
         .payloadJson(json.writeValueAsString(payload))
         .createdAt(Instant.now())
         .build();
+  }
+
+  private static SubagentProtocolService.ParentLink childLink(String childId, double maxCostUsd) {
+    return new SubagentProtocolService.ParentLink(
+        childId,
+        new SubagentProtocolService.ChildMetadata(
+            "parent", null, Role.SCOUT, "scan", 1, 1, maxCostUsd));
   }
 
   private static AgentSession parent(String id, String status) {

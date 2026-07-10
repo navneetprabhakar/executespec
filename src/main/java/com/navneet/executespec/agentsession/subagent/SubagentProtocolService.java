@@ -41,6 +41,13 @@ public class SubagentProtocolService {
   public static final int MAX_CHILDREN_PER_PARENT = 4;
   public static final int MAX_TURNS_PER_CHILD = 12;
   public static final double MAX_COST_USD_PER_CHILD = 2.0;
+  /**
+   * Hard ceiling for the complete descendant tree rooted at one parent session. A child budget is
+   * not a license to fan out another full set of children: nested children consume the same
+   * parent-owned budget and are counted recursively from the append-only spawn links.
+   */
+  public static final int MAX_TURNS_PER_TREE = MAX_CHILDREN_PER_PARENT * MAX_TURNS_PER_CHILD;
+  public static final double MAX_COST_USD_PER_TREE = MAX_CHILDREN_PER_PARENT * MAX_COST_USD_PER_CHILD;
   private static final int MAX_OBJECTIVE_CHARS = 4_000;
 
   static final String EVENT_CHILD_CREATED = "SUBAGENT_CREATED";
@@ -78,6 +85,21 @@ public class SubagentProtocolService {
     if (existingChildren >= MAX_CHILDREN_PER_PARENT) {
       throw new IllegalStateException(
           "Subagent child limit reached: " + existingChildren + "/" + MAX_CHILDREN_PER_PARENT);
+    }
+    TreeBudget treeBudget = treeBudget(parent.getId());
+    if (treeBudget.turns() + request.maxTurns() > MAX_TURNS_PER_TREE) {
+      throw new IllegalStateException(
+          "Subagent total-tree turn budget exceeded: "
+              + (treeBudget.turns() + request.maxTurns())
+              + "/"
+              + MAX_TURNS_PER_TREE);
+    }
+    if (treeBudget.costUsd() + request.maxCostUsd() > MAX_COST_USD_PER_TREE) {
+      throw new IllegalStateException(
+          "Subagent total-tree cost budget exceeded: "
+              + formatBudget(treeBudget.costUsd() + request.maxCostUsd())
+              + "/"
+              + formatBudget(MAX_COST_USD_PER_TREE));
     }
 
     Instant now = Instant.now();
@@ -280,6 +302,41 @@ public class SubagentProtocolService {
         : read(events.getLast().getPayloadJson(), ChildMetadata.class).depth();
   }
 
+  /**
+   * Calculates the requested budget of every descendant, not the spend so far. Requested budgets
+   * are the safe reservation: enforcing them at spawn time prevents a nested tree from becoming
+   * unbounded before any model turn has been recorded.
+   */
+  private TreeBudget treeBudget(String parentSessionId) {
+    return treeBudget(parentSessionId, new java.util.HashSet<>());
+  }
+
+  private TreeBudget treeBudget(String sessionId, java.util.Set<String> visited) {
+    if (!visited.add(sessionId)) return TreeBudget.ZERO;
+    long turns = 0;
+    double costUsd = 0;
+    for (AgentActionEvent event : safeEvents(sessionId, EVENT_CHILD_SPAWNED)) {
+      ParentLink link = read(event.getPayloadJson(), ParentLink.class);
+      if (link == null || link.childSessionId() == null || link.child() == null) continue;
+      turns += link.child().maxTurns();
+      costUsd += link.child().maxCostUsd();
+      TreeBudget nested = treeBudget(link.childSessionId(), visited);
+      turns += nested.turns();
+      costUsd += nested.costUsd();
+    }
+    return new TreeBudget(turns, costUsd);
+  }
+
+  private List<AgentActionEvent> safeEvents(String sessionId, String type) {
+    List<AgentActionEvent> events =
+        eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(sessionId, type);
+    return events == null ? List.of() : events;
+  }
+
+  private static String formatBudget(double value) {
+    return String.format(Locale.ROOT, "%.2f", value);
+  }
+
   private ChildMetadata metadataOf(String childSessionId) {
     List<AgentActionEvent> events =
         eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(
@@ -392,4 +449,8 @@ public class SubagentProtocolService {
   record ParentLink(String childSessionId, ChildMetadata child) {}
 
   record Cancellation(String childSessionId, String reason) {}
+
+  private record TreeBudget(long turns, double costUsd) {
+    private static final TreeBudget ZERO = new TreeBudget(0, 0);
+  }
 }
