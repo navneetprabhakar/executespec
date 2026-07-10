@@ -54,7 +54,18 @@ class AgentStreamTurnRunnerTest {
     when(attachmentService.injectionBlock(anyString(), any())).thenReturn("");
     doThrow(new IllegalStateException("provider unavailable"))
         .when(specChatService)
-        .runTurn(any(), any(), anyString(), any(), any(), anyString(), any(), any(), any());
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 
@@ -100,7 +111,18 @@ class AgentStreamTurnRunnerTest {
                 "{\"type\":\"error\",\"error\":{\"message\":\"invalid"
                     + " x-api-key\"},\"request_id\":\"req_123\"}"))
         .when(specChatService)
-        .runTurn(any(), any(), anyString(), any(), any(), anyString(), any(), any(), any());
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 

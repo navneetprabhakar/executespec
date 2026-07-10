@@ -92,7 +92,9 @@ public class AgentStreamTurnRunner {
             ctx.orgId(),
             conversation,
             ctx.provider(),
-            AgentStreamTurnSupport.allowedReadOnlyTools());
+            null,
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId());
       } else {
         specChatService.runTurn(
             sink,
@@ -104,7 +106,8 @@ public class AgentStreamTurnRunner {
             conversation,
             ctx.provider(),
             ctx.model(),
-            AgentStreamTurnSupport.allowedReadOnlyTools());
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId());
       }
       emitter.complete();
     } catch (Exception e) {
