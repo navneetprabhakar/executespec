@@ -1076,8 +1076,7 @@ to boot — skip it for those.""";
     // provider/model. The workspace is shared, but starting with a fresh conversation makes the
     // replacement model repeat repository exploration and can undo the value of the escalation.
     // ContextStore is best-effort; a missing/expired snapshot still falls back to a fresh attempt.
-    com.navneet.executespec.context.SavedContext handoff =
-        loadContinuationSnapshot(req, task);
+    com.navneet.executespec.context.SavedContext handoff = loadContinuationSnapshot(req, task);
     TaskOutcome rerun =
         executeOne(
             task,
