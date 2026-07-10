@@ -58,6 +58,7 @@ public class RepositorySearchService {
           return size() > MAX_INDEXED_WORKSPACES;
         }
       };
+  private long inventoryRequestSequence;
 
   public SearchResult search(Path workspace, SearchRequest request) {
     if (workspace == null
@@ -127,31 +128,46 @@ public class RepositorySearchService {
    * can replace later without changing the search contract or callers.
    */
   private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
+    // Inventory discovery is intentionally outside the cache lock. A git ls-files/tree walk can
+    // take noticeable time on a large repository; holding the global LRU lock here used to block
+    // every unrelated workspace and every concurrent read-only search while that process ran.
+    long requestSequence;
+    synchronized (workspaceIndex) {
+      requestSequence = ++inventoryRequestSequence;
+    }
+    List<Path> currentFiles = inventory(root, root);
     synchronized (workspaceIndex) {
       CachedWorkspace cached = workspaceIndex.get(root);
       // Keep inventory discovery authoritative on every call (new/deleted files must be visible),
       // while reusing decoded file lines below. This avoids stale-search bugs and still removes the
       // expensive readAllLines allocation that dominates repeated agent search turns.
-      List<Path> currentFiles = inventory(root, root);
       if (cached == null) {
         cached = new CachedWorkspace(root, currentFiles);
+        cached.lastInventoryRequest = requestSequence;
         workspaceIndex.put(root, cached);
-      } else cached.files = List.copyOf(currentFiles);
+      } else if (requestSequence >= cached.lastInventoryRequest) {
+        cached.files = List.copyOf(currentFiles);
+        cached.lastInventoryRequest = requestSequence;
+      }
       return cached.files.stream().filter(path -> path.startsWith(searchRoot)).toList();
     }
   }
 
   private List<String> indexedLines(Path root, Path file) {
+    CachedWorkspace cached;
     synchronized (workspaceIndex) {
-      CachedWorkspace cached = workspaceIndex.get(root);
-      if (cached == null) return null;
-      return cached.lines(file);
+      cached = workspaceIndex.get(root);
     }
+    // File decoding and snapshot refresh are scoped to this workspace, not the global LRU. This
+    // allows independent searches to proceed concurrently while still serializing refreshes for a
+    // single file snapshot (and preserving the existing metadata-based stale-file protection).
+    return cached == null ? null : cached.lines(file);
   }
 
   private static final class CachedWorkspace {
     private final Path root;
     private List<Path> files;
+    private long lastInventoryRequest;
     private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>();
 
     private CachedWorkspace(Path root, List<Path> files) {
@@ -159,7 +175,7 @@ public class RepositorySearchService {
       this.files = List.copyOf(files);
     }
 
-    private List<String> lines(Path file) {
+    private synchronized List<String> lines(Path file) {
       try {
         long size = Files.size(file);
         long modified = Files.getLastModifiedTime(file).toMillis();
