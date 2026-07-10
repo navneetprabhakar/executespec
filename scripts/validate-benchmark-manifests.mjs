@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestDir = path.resolve(scriptDir, "../infra/benchmark/manifests");
 const SHA256 = /^[a-f0-9]{64}$/;
+const PROVIDER_SLUG = /^[a-z0-9][a-z0-9._:/-]*$/;
 const REQUIRED_BUDGETS = [
   "passes",
   "tasks",
@@ -25,6 +26,10 @@ export function validateManifest(manifest, file = "<manifest>") {
   if (manifest.schemaVersion !== 1) add("schemaVersion must be 1");
   if (!manifest.suite) add("suite is required");
   if (!manifest.model?.provider || !manifest.model?.matrixId) add("provider and matrixId are required");
+  if (manifest.model?.providerSlug !== null && manifest.model?.providerSlug !== undefined
+      && !PROVIDER_SLUG.test(String(manifest.model.providerSlug))) {
+    add("model.providerSlug must be a lowercase provider slug or null");
+  }
   if (!manifest.results || !Number.isInteger(manifest.results.resolved) || !Number.isInteger(manifest.results.total)) {
     add("results.resolved and results.total must be integers");
   } else {
@@ -40,6 +45,16 @@ export function validateManifest(manifest, file = "<manifest>") {
   }
   if (manifest.dataset?.sha256 !== null && !SHA256.test(manifest.dataset?.sha256 || "")) {
     add("dataset.sha256 must be null or a lowercase SHA-256");
+  }
+  for (const [name, value] of [
+    ["repository.sha", manifest.repository?.sha],
+    ["prompt.sha256", manifest.prompt?.sha256],
+    ["toolSchema.sha256", manifest.toolSchema?.sha256],
+    ["harness.sha256", manifest.harness?.sha256],
+  ]) {
+    if (value !== null && value !== undefined && !SHA256.test(String(value))) {
+      add(`${name} must be null or a lowercase SHA-256`);
+    }
   }
   if ("worker.run-journal.enabled" in (manifest.featureFlags || {})) {
     add("worker.run-journal.enabled is not a real flag; use execution.run-journal.enabled");
