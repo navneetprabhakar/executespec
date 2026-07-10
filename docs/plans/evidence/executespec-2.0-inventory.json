@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "5b6378a23be87efbc7cbe62a68245269a1692ee0",
+      "sha": "d83938975c1e097198591e9585fcb1e239d955a6",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2631,
-      "worktreeFingerprint": "1ce7e3694f38a00f70b26c7d694f1ca5d72fd2e0d3655262143c1d62c5c4b716"
+      "worktreeFingerprint": "292f291d6db206870668826f1db695230d05c4e21c02732940d2b459a4e4195c"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -17,10 +17,10 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "7f11cfd8e6958561280aff6c0e0f9a8ab812c797",
+      "sha": "ad0e9b995b49b2fd6ad9611bc20e874b313e0ca4",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 727,
-      "worktreeFingerprint": "7a82f7dd7e95dc1866729572dc46298e046fcef283b102821d16c16441a3cefb"
+      "worktreeFingerprint": "b06032a9e1adc658c59b7eb53c882939f33a2da23ad4365414064af2c780e323"
     }
   },
   "backend": {
@@ -237,7 +237,7 @@
     ],
     "web": {
       "sourceFiles": 149,
-      "lines": 42922,
+      "lines": 42967,
       "testFiles": 35,
       "routePaths": [
         "*",
