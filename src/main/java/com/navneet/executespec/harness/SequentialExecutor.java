@@ -1,5 +1,6 @@
 package com.navneet.executespec.harness;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -10,7 +11,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.nio.file.Files;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1106,7 +1106,8 @@ to boot — skip it for those.""";
         new com.navneet.executespec.tool.ExecutionContext(
             req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
     java.nio.file.Path evidenceBundle =
-        context.workspaceRoot()
+        context
+            .workspaceRoot()
             .resolve(".agent-context")
             .resolve(com.navneet.executespec.context.ContextEvidenceBundleWriter.FILE_NAME);
     if (Files.exists(evidenceBundle)) {
