@@ -3,32 +3,32 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "dab9daae190f2275062ebf99621b272b33acc57d",
+      "sha": "95e15f856155d13e6d3973e590771a78221b7b71",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2597,
-      "worktreeFingerprint": "8ee3dc2b04439809296e17ea52e5eb1539ac957b2a341157bc01ca7c4e4d7eba"
+      "trackedFiles": 2598,
+      "worktreeFingerprint": "dd82051366323991243407a34895cdd7f1d6360d3a0375b05e53727dc6f0f179"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "7f4d70d5103d665fb9bc6168700a47fca3fe10e3",
+      "sha": "1752de1440f9000872e6af1157d8ef89b11fbca5",
       "branch": "codex/cli-1.0",
       "trackedFiles": 310,
-      "worktreeFingerprint": "96861104a814150833c2ce75e3515e1d1a432053052fb674f727c67426d6e84b"
+      "worktreeFingerprint": "96e3d6720558b5c899098166c716c182f8438d3fc9f0c2251d1c04fb30d6d06e"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "447b95c34c80ef49e4ddb004bb215e0994a296e3",
+      "sha": "d2534afc0c5592ce5abc0ba8fd435b3e2036d87d",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 612,
-      "worktreeFingerprint": "f0de29542c23a196d763caac37815f4a85bf597cc363a77009b1d96445a7c73e"
+      "worktreeFingerprint": "8dfad932c9650d498c4f57cff35f4a9d03acd94e656bde936fedf6b8f14c79f3"
     }
   },
   "backend": {
     "mainJava": {
       "files": 1241,
-      "lines": 193274
+      "lines": 193464
     },
-    "testJavaFiles": 373,
+    "testJavaFiles": 374,
     "controllers": 108,
     "mappingAnnotations": 597,
     "prompts": {
@@ -349,7 +349,7 @@
   },
   "cli": {
     "sourceFiles": 132,
-    "lines": 55023,
+    "lines": 55003,
     "testFiles": 116,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",

@@ -61,10 +61,7 @@ class TaskOutcomeMetricServiceTest {
             .findTop200ByProviderIgnoreCaseAndModelNameIgnoreCaseAndTierIgnoreCaseOrderByCreatedAtDesc(
                 "anthropic", "claude-sonnet-4-6", "BUG_FIX"))
         .thenReturn(
-            List.of(
-                metric("BUG_FIX", true),
-                metric("BUG_FIX", true),
-                metric("BUG_FIX", false)));
+            List.of(metric("BUG_FIX", true), metric("BUG_FIX", true), metric("BUG_FIX", false)));
 
     var prior =
         new TaskOutcomeMetricService(repository)
