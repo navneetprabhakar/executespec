@@ -1,5 +1,5 @@
-import {act} from 'react';
-import {createRoot, type ComponentProps, type Root} from 'react-dom/client';
+import {act, type ComponentProps} from 'react';
+import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from './agentPanels';
@@ -24,6 +24,7 @@ vi.mock('@/stores/useAuthStore', () => {
  * must see for the run-card, activity timeline, and overlays.
  */
 describe('protected transcript visual contract', () => {
+  type RunCard = NonNullable<ComponentProps<typeof AgentConversation>['runCard']>;
   let root: Root | null = null;
   let host: HTMLDivElement | null = null;
 
@@ -71,7 +72,7 @@ describe('protected transcript visual contract', () => {
     onStopRun: vi.fn(),
   };
 
-  const activeRun = {
+  const activeRun: RunCard = {
     runId: 'run-visual-1',
     status: 'WORKING',
     runTitle: 'Add audit logging',
@@ -84,8 +85,32 @@ describe('protected transcript visual contract', () => {
     startedAt: '2026-07-10T00:00:00Z',
     completedAt: null,
     tasks: [
-      {title: 'Wire audit service', status: 'IN_PROGRESS'},
-      {title: 'Add tests', status: 'PENDING'},
+      {
+        taskId: 'audit-service',
+        title: 'Wire audit service',
+        status: 'IN_PROGRESS',
+        assignedModel: 'deepseek-v4-pro-native',
+        inputTokens: 0,
+        outputTokens: 0,
+        durationMs: 0,
+        branchName: null,
+        startedAt: null,
+        completedAt: null,
+        readmeUpdated: false,
+      },
+      {
+        taskId: 'audit-tests',
+        title: 'Add tests',
+        status: 'PENDING',
+        assignedModel: 'deepseek-v4-pro-native',
+        inputTokens: 0,
+        outputTokens: 0,
+        durationMs: 0,
+        branchName: null,
+        startedAt: null,
+        completedAt: null,
+        readmeUpdated: false,
+      },
     ],
     planJson: '{}',
     reviewJson: '{}',
@@ -93,7 +118,7 @@ describe('protected transcript visual contract', () => {
     aiProvider: 'deepseek',
     aiCreditsCharged: 3,
     verifiedScore: null,
-  } as ComponentProps<typeof AgentConversation>['runCard'];
+  };
 
   it('keeps the transcript screenshot landmarks and reconnecting state explicit', () => {
     const rendered = mount(<AgentConversation {...baseConversation} runCard={activeRun} />);
@@ -116,11 +141,11 @@ describe('protected transcript visual contract', () => {
   });
 
   it('marks terminal failure visually without losing the evidence action', () => {
-    const failedRun = {
+    const failedRun: RunCard = {
       ...activeRun,
       status: 'FAILED',
       completedAt: '2026-07-10T00:10:00Z',
-    } as ComponentProps<typeof AgentConversation>['runCard'];
+    };
     const rendered = mount(
       <AgentConversation
         {...baseConversation}
@@ -144,7 +169,7 @@ describe('protected transcript visual contract', () => {
     const top = mount(
       <AgentTopBar
         selected={null}
-        barStatus={{label: 'Ready', tone: 'ready'}}
+        barStatus={{label: 'Ready', tone: 'ok'}}
         scopeLabel={null}
         busy={false}
         settingsOpen
