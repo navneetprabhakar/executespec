@@ -183,8 +183,12 @@ public class LlmRouter {
                     (runId == null || runId.isBlank())
                         ? "text-" + Integer.toHexString(messages.hashCode())
                         : runId,
-                    (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole,
-                    Path.of(System.getProperty("java.io.tmpdir", "/tmp")).toAbsolutePath().normalize()))
+                    (agentRole == null || agentRole.isBlank())
+                        ? "__text__"
+                        : "__text__-" + agentRole,
+                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
+                        .toAbsolutePath()
+                        .normalize()))
             .toolsOverride(List.of())
             .agentRole(agentRole)
             .stepId(stepId)
