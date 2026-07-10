@@ -34,6 +34,6 @@ class FlywayCompatibilityContractTest {
     assertThat(policy)
         .contains("Applied `V*.sql` files are immutable")
         .contains("baseline migration")
-        .contains("upgrade from a database that has applied V256");
+        .contains("upgrade from a database that has applied V257");
   }
 }
