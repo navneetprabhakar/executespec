@@ -168,32 +168,29 @@ async function main() {
     }, auth.token);
 
     await page.goto(`${frontendUrl}/agent`, {waitUntil: 'networkidle'});
-    await page.getByText('Control plane').waitFor({timeout: 20_000});
-    await page.getByText('Managed AI').waitFor({timeout: 20_000});
-    await page.getByText('Pending gates').waitFor({timeout: 20_000});
-    await page.getByText('WEB capabilities').waitFor({timeout: 20_000});
-    results.push(['PASS', 'agent shell rails', 'Control plane, Managed AI, gates, WEB capabilities rendered']);
-
-    await page.getByRole('button', {name: 'New session'}).click();
-    await page.getByText('Create a session to start.').waitFor({timeout: 5_000}).catch(() => {});
-    results.push(['PASS', 'fresh session', 'New WEB agent session requested before prompt smoke']);
-
-    const webCapabilitiesText = await page.locator('.agent-capabilities').innerText();
-    if (/local_code_task|local_git_|shell/i.test(webCapabilitiesText)) {
-      throw new Error(`WEB capabilities leaked local-only actions: ${webCapabilitiesText}`);
-    }
-    results.push(['PASS', 'WEB capability boundary', webCapabilitiesText.replace(/\s+/g, ', ')]);
-
-    await page.locator('textarea').fill('commit all files and push to git');
-    await page.getByRole('button', {name: 'Send'}).click();
-    await page.getByText('LOCAL_TOOL_ACTION', {exact: true}).first().waitFor({timeout: 30_000});
-    await page.getByText('Continue with local hands').waitFor({timeout: 30_000});
-    await page.getByText('Run API').waitFor({timeout: 30_000});
-    await page.getByText('blocked').waitFor({timeout: 30_000});
+    // The agent surface is now the chat-first "Remote sandbox operator" contract. Keep this
+    // smoke deterministic and side-effect free: semantic turn/run acceptance is covered by the
+    // dedicated authenticated scenario harness, while this check proves the protected shell and
+    // WEB/local-hands boundary without spending an LLM call.
+    await page.getByText('Remote sandbox operator').first().waitFor({timeout: 20_000});
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 20_000});
+    await page.getByText('No token usage yet', {exact: true}).waitFor({timeout: 20_000});
+    await page.getByText('Remote sandbox only', {exact: true}).waitFor({timeout: 20_000});
+    await page.getByRole('button', {name: 'Start a new sandbox'}).waitFor({timeout: 20_000});
     results.push([
       'PASS',
-      'local git prompt route',
-      'LOCAL_TOOL_ACTION rendered as local-hands handoff with Run API blocked',
+      'agent shell and sandbox contract',
+      'Remote sandbox operator, Ready state, usage rail, composer contract, and Start a new sandbox rendered',
+    ]);
+
+    const pageText = await page.locator('body').innerText();
+    if (/\b(?:local_code_task|local_git_|LOCAL_TOOL_ACTION)\b/i.test(pageText)) {
+      throw new Error(`WEB surface leaked local-only action names: ${pageText.slice(0, 1200)}`);
+    }
+    results.push([
+      'PASS',
+      'WEB capability boundary',
+      'Protected empty state contains no local tool/action capability names',
     ]);
 
     await page.screenshot({path: screenshot, fullPage: true});
