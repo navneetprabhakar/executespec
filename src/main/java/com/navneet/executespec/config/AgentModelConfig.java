@@ -4,7 +4,6 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 
 import com.google.genai.Client;
-import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -118,9 +117,13 @@ public class AgentModelConfig {
     }
     log.info("[AgentModelConfig] Creating system Anthropic bean ({})", model);
     AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens);
-    if (!AnthropicModelOptions.shouldOmitTemperature(model)) options.temperature(0.0);
-    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options.build()).build();
+    // Do not set a provider-wide temperature default here. Spring AI merges the model's
+    // default options into every request, including requests that switch the model to a newer
+    // Anthropic family. Sonnet 5/Opus 4.7+ reject the otherwise harmless legacy temperature=0.0
+    // field, so a default configured for the startup model (usually Haiku) can break a per-run
+    // frontier-model override before LlmRouter has a chance to omit it.
+    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens).build();
+    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options).build();
   }
 
   /**
