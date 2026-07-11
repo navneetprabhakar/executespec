@@ -7,5 +7,7 @@ public enum LocalHandsState {
   CLIENT_PROTOCOL_ERROR,
   CLIENT_TIMEOUT,
   CLIENT_CANCELLED,
+  /** The JVM restarted; the old worker future cannot consume a later client result. */
+  WORKER_RESTARTED,
   COMPLETED
 }

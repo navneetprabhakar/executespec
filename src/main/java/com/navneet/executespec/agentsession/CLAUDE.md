@@ -104,8 +104,10 @@ turns separately from runs.
   means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
   evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the
   old worker. Persisted calls older than the remote lease are returned as `staleCallIds` and must
-  not be replayed. This is intentionally not a claim of JVM hot-resume; a future checkpoint/resume
-  implementation must requeue the interrupted worker turn explicitly.
+  not be replayed. Crash recovery now uses the persisted worker context/task checkpoint path: it
+  binds a fresh remote session, marks old call ids `WORKER_RESTARTED`, and lets the resumed worker
+  issue a new call from the last clean tool-response boundary. This is bounded checkpoint recovery,
+  not JVM hot-resume; the old provider future is never claimed to be rebound.
 - Startup recovery reconciles persisted child sessions left in `RUNNING` after a JVM restart to
   `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
   and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale

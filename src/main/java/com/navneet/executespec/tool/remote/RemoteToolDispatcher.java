@@ -109,6 +109,20 @@ public class RemoteToolDispatcher {
     reconnect(runId);
   }
 
+  /** Bind a run after JVM crash recovery and close stale calls from the old worker future. */
+  public void registerAfterWorkerRestart(String runId) {
+    Session existing = sessions.putIfAbsent(runId, new Session());
+    if (existing == null) {
+      int closed = stateService.closeForWorkerRestart(runId);
+      log.info(
+          "[RemoteTool] registered recovered session for run {}; closed {} stale call(s)",
+          runId,
+          closed);
+      return;
+    }
+    reconnect(runId);
+  }
+
   /** Tear down a run's session, unblocking any in-flight calls. Called at run terminal. */
   public void unregister(String runId) {
     Session s = sessions.remove(runId);
