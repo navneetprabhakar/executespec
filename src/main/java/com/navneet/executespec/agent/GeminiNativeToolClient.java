@@ -436,23 +436,49 @@ public class GeminiNativeToolClient {
    * Strip it recursively — semantically we lose strictness but the required-fields check still
    * applies.
    */
-  private JsonNode sanitizeSchemaForGemini(JsonNode node) {
+  JsonNode sanitizeSchemaForGemini(JsonNode node) {
+    return sanitizeSchemaForGemini(node, null);
+  }
+
+  private JsonNode sanitizeSchemaForGemini(JsonNode node, String propertyName) {
     if (node.isObject()) {
       ObjectNode copy = objectMapper.createObjectNode();
       node.fields()
           .forEachRemaining(
               e -> {
                 if ("additionalProperties".equals(e.getKey())) return;
-                copy.set(e.getKey(), sanitizeSchemaForGemini(e.getValue()));
+                copy.set(e.getKey(), sanitizeSchemaForGemini(e.getValue(), e.getKey()));
               });
+      // Gemini's schema validator requires an item schema for every ARRAY declaration. A few
+      // compatibility tools intentionally accept generic arrays and omit `items`; preserve their
+      // intent with a permissive object item for plan/todo/edit collections, and a string item for
+      // other unknown collections. Explicit item schemas always win and are recursively sanitized.
+      if ("array".equals(copy.path("type").asText()) && !copy.has("items")) {
+        copy.set("items", defaultArrayItemSchema(propertyName));
+      }
       return copy;
     }
     if (node.isArray()) {
       ArrayNode copy = objectMapper.createArrayNode();
-      node.forEach(el -> copy.add(sanitizeSchemaForGemini(el)));
+      node.forEach(el -> copy.add(sanitizeSchemaForGemini(el, propertyName)));
       return copy;
     }
     return node;
+  }
+
+  private ObjectNode defaultArrayItemSchema(String propertyName) {
+    ObjectNode item = objectMapper.createObjectNode();
+    if (propertyName != null
+        && switch (propertyName) {
+          case "plan", "items", "todos", "edits" -> true;
+          default -> false;
+        }) {
+      item.put("type", "object");
+      item.putObject("properties");
+    } else {
+      item.put("type", "string");
+    }
+    return item;
   }
 
   private ChatResponse parseResponse(JsonNode response, String requestedModel) {
