@@ -855,6 +855,11 @@ model-matrix:
 durability:
   task-checkpoint:
     enabled: true
+  # A workspace-local atomic worker checkpoint complements Redis. It survives a Redis restart
+  # when the run workspace remains available, but does not claim that an in-memory provider future
+  # can be resumed across JVMs.
+  worker-context:
+    enabled: true
 
 agent:
   workspace: ./workspace
