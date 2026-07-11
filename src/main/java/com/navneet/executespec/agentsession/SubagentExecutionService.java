@@ -79,6 +79,15 @@ public class SubagentExecutionService {
     String userId = user.getUser().getId();
     var handle = protocolService.spawn(request, userId, orgId);
     protocolService.start(handle.childSessionId(), userId, orgId);
+    return executeReserved(request, handle, user, orgId);
+  }
+
+  /** Execute a child that was already reserved by the bounded batch path. */
+  Result executeReserved(SpawnRequest request, Handle handle, AppUserDetails user, String orgId) {
+    if (user == null || user.getUser() == null) {
+      throw new SecurityException("authenticated user is required");
+    }
+    String userId = user.getUser().getId();
     AgentSession child =
         sessionRepository
             .findById(handle.childSessionId())
@@ -194,8 +203,10 @@ public class SubagentExecutionService {
     List<BatchFailure> failures = new ArrayList<>();
     List<Future<Result>> futures = new ArrayList<>(reserved.size());
     try (ExecutorService executor = Executors.newFixedThreadPool(reserved.size())) {
-      for (SpawnRequest request : requests) {
-        futures.add(executor.submit(() -> execute(request, user, orgId)));
+      for (int index = 0; index < requests.size(); index++) {
+        SpawnRequest request = requests.get(index);
+        Handle handle = reserved.get(index);
+        futures.add(executor.submit(() -> executeReserved(request, handle, user, orgId)));
       }
       boolean failed = false;
       Set<Integer> processed = new LinkedHashSet<>();

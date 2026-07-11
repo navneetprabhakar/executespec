@@ -55,7 +55,7 @@ turns separately from runs.
   acceptance event when another coordinator wins the slot.
   `POST /api/agent/sessions/{parentSessionId}/subagents/batch` is the bounded fan-out surface: it
   accepts at most four unique requests for the same parent, reserves every child before model
-  execution, then runs the children concurrently on a fixed pool. A sibling failure cancels active
+  execution, consumes those exact persisted child handles (no second spawn), then runs the children concurrently on a fixed pool. A sibling failure cancels active
   children through the parent protocol and the response preserves successful results plus explicit
   request/child failure records. This is real server-side concurrency, not a client-side loop or
   model-prompt claim; all child turns still pass the normal budget and read-only route checks.
