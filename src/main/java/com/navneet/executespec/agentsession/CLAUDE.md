@@ -91,6 +91,12 @@ turns separately from runs.
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
   session contains the complete action stream.
+- `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
+  means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
+  evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the
+  old worker. Persisted calls older than the remote lease are returned as `staleCallIds` and must
+  not be replayed. This is intentionally not a claim of JVM hot-resume; a future checkpoint/resume
+  implementation must requeue the interrupted worker turn explicitly.
 - Startup recovery reconciles persisted child sessions left in `RUNNING` after a JVM restart to
   `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
   and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale

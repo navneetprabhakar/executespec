@@ -68,6 +68,18 @@ public class RemoteToolController {
     return ResponseEntity.ok(dispatcher.reconnect(runId));
   }
 
+  /**
+   * Reports whether reconnect actually re-bound a live worker wait. This is intentionally separate
+   * from the legacy reconnect list response: after a JVM restart the durable action stream can
+   * describe the pending call, but the original in-memory worker future no longer exists.
+   */
+  @GetMapping("/{runId}/tool-session/reconnect-status")
+  public ResponseEntity<RemoteToolDispatcher.ReconnectStatus> reconnectStatus(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+    guard.requireRunWriteAccess(runId, userDetails);
+    return ResponseEntity.ok(dispatcher.reconnectStatus(runId));
+  }
+
   /** Explicit client transport disconnect; pending calls remain resumable until their deadline. */
   @PostMapping("/{runId}/tool-session/disconnect")
   public ResponseEntity<Void> disconnect(
