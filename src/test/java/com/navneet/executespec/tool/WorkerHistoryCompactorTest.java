@@ -2,6 +2,7 @@ package com.navneet.executespec.tool;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -145,6 +146,10 @@ class WorkerHistoryCompactorTest {
     assertThat(out).isNotSameAs(history);
     assertThat(out).hasSizeLessThan(history.size());
     verify(router).call(any());
+    // Headroom is the deterministic safety path and intentionally runs even while the legacy
+    // history-compaction flag is OFF; the flag only gates the older token-trigger fallback.
+    verify(contextPlanner).planHeadroom(anyString(), anyString(), anyLong(), any(), any(), any());
+    verify(featureFlagService, never()).isEnabled(WorkerHistoryCompactor.FLAG_ENABLED);
   }
 
   @Test

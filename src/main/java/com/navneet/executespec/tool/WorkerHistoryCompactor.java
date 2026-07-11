@@ -38,8 +38,10 @@ import lombok.extern.slf4j.Slf4j;
  * note once the last call's input crosses a token threshold — keeping the system prompt + the
  * original task + the most-recent turns verbatim. Mirrors Claude Code's periodic auto-compaction.
  *
- * <p><b>Default OFF</b> behind {@link #FLAG_ENABLED}; with the flag off this is a pass-through and
- * production behaviour is byte-identical.
+ * <p>The legacy token-trigger path is <b>default OFF</b> behind {@link #FLAG_ENABLED}; the
+ * headroom-aware overload used by the production WorkerAgent runs its deterministic planner first
+ * and compacts only when the model-window safety decision is {@code COMPACT}. If model metadata is
+ * unavailable, it falls back to the flag-gated legacy behaviour.
  *
  * <p><b>Tool-pairing safety (load-bearing):</b> the cut is aligned to an {@link AssistantMessage}
  * boundary, so the compactor NEVER splits an {@code AssistantMessage(toolCalls)} from its paired
