@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,13 +79,14 @@ public class RepositorySearchService {
         throw new SecurityException("search root escapes workspace");
       String repoSha = gitSha(root);
       List<Path> files = indexedFiles(root, searchRoot);
-      String fingerprint = fingerprint(files);
+      Map<Path, String> contentHashes = new HashMap<>(files.size());
+      String fingerprint = fingerprint(files, contentHashes);
       Pattern pattern = compile(request);
       List<SearchHit> hits = new ArrayList<>();
       for (Path file : files) {
         if (request.fileGlob() != null
             && !file.getFileName().toString().matches(globRegex(request.fileGlob()))) continue;
-        List<String> lines = indexedLines(root, file);
+        List<String> lines = indexedLines(root, file, contentHashes.get(file));
         if (lines == null) continue;
         for (int i = 0; i < lines.size(); i++) {
           String line = lines.get(i);
@@ -164,7 +166,7 @@ public class RepositorySearchService {
     }
   }
 
-  private List<String> indexedLines(Path root, Path file) {
+  private List<String> indexedLines(Path root, Path file, String contentHash) {
     CachedWorkspace cached;
     synchronized (workspaceIndex) {
       cached = workspaceIndex.get(root);
@@ -172,7 +174,7 @@ public class RepositorySearchService {
     // File decoding and snapshot refresh are scoped to this workspace, not the global LRU. This
     // allows independent searches to proceed concurrently while still serializing refreshes for a
     // single file snapshot (and preserving the existing metadata-based stale-file protection).
-    return cached == null ? null : cached.lines(file);
+    return cached == null ? null : cached.lines(file, contentHash);
   }
 
   private static final class CachedWorkspace {
@@ -186,12 +188,12 @@ public class RepositorySearchService {
       this.files = List.copyOf(files);
     }
 
-    private synchronized List<String> lines(Path file) {
+    private synchronized List<String> lines(Path file, String knownContentHash) {
       try {
         // Metadata is only a useful fast path when the filesystem guarantees a reliable
         // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
         // size and mtime, so compare a streaming content digest before reusing the decoded lines.
-        String contentHash = contentHash(file);
+        String contentHash = knownContentHash == null ? contentHash(file) : knownContentHash;
         FileSnapshot previous = snapshots.get(file);
         if (previous != null && previous.contentHash.equals(contentHash)) {
           return previous.lines;
@@ -333,10 +335,17 @@ public class RepositorySearchService {
   }
 
   private static String fingerprint(List<Path> files) throws IOException {
+    return fingerprint(files, new HashMap<>(files.size()));
+  }
+
+  private static String fingerprint(List<Path> files, Map<Path, String> contentHashes)
+      throws IOException {
     MessageDigest digest = digest();
     for (Path file : files) {
       digest.update(file.toString().getBytes(StandardCharsets.UTF_8));
-      digest.update(contentHash(file).getBytes(StandardCharsets.US_ASCII));
+      String hash = contentHash(file);
+      contentHashes.put(file, hash);
+      digest.update(hash.getBytes(StandardCharsets.US_ASCII));
     }
     return HexFormat.of().formatHex(digest.digest());
   }
