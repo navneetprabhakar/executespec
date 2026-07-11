@@ -228,6 +228,7 @@ scripts/v2-eval.sh   # LOW/MEDIUM/HIGH × anthropic/openai/gemini, outputs scrip
 
 ```bash
 # Required — LLM
+# The Spring AI provider blocks in application.yml resolve these environment variables at startup.
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 
