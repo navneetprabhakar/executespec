@@ -43,7 +43,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
-/** Executes one bounded, read-only persisted SCOUT or VERIFIER child-agent assignment. */
+/** Executes one bounded, read-only persisted role-contract child-agent assignment. */
 @Service
 @RequiredArgsConstructor
 public class SubagentExecutionService {
@@ -144,8 +144,10 @@ public class SubagentExecutionService {
       }
       String summary = sink.summary();
       List<Evidence> evidence = extractEvidence(summary, sink.toolEvidence());
-      if (handle.role() == Role.VERIFIER && evidence.isEmpty()) {
-        throw new IllegalStateException("Verifier returned no file:line evidence");
+      if (handle.role().contract().requiresEvidence() && evidence.isEmpty()) {
+        throw new IllegalStateException(
+            handle.role().name().toLowerCase(java.util.Locale.ROOT)
+                + " returned no file:line evidence");
       }
       persistExecutionTurns(
           child, handle.role(), handle.objective(), summary, usage, sink.turnCount());
@@ -392,11 +394,26 @@ public class SubagentExecutionService {
 
   private static String rolePrompt(Role role, String objective) {
     String contract =
-        role == Role.SCOUT
-            ? "Locate the smallest relevant code surface. Report findings only; do not propose or"
-                + " perform edits. Cite every concrete finding as path:line."
-            : "Independently verify the stated objective against repository evidence. Do not edit,"
-                + " run lifecycle actions, or claim success without path:line citations.";
+        switch (role) {
+          case SCOUT ->
+              "Locate the smallest relevant code surface. Report findings only; do not propose or"
+                  + " perform edits. Cite every concrete finding as path:line.";
+          case VERIFIER ->
+              "Independently verify the stated objective against repository evidence. Do not edit,"
+                  + " run lifecycle actions, or claim success without path:line citations.";
+          case REPRODUCER ->
+              "Trace the smallest deterministic reproduction path using repository evidence only."
+                  + " Do not execute commands or edit files; report prerequisites, expected failure"
+                  + " signatures, and path:line evidence.";
+          case REVIEWER ->
+              "Review the relevant implementation for correctness, regressions, and missing tests."
+                  + " Do not edit or run lifecycle actions; report findings with path:line"
+                  + " evidence.";
+          case DOCS_SCOUT ->
+              "Find the authoritative documentation and contract surfaces relevant to the"
+                  + " objective. Do not edit; report stale or missing documentation with path:line"
+                  + " evidence.";
+        };
     return "ROLE: " + role + " (strictly read-only)\n" + contract + "\n\nOBJECTIVE:\n" + objective;
   }
 

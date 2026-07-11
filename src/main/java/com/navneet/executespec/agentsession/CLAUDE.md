@@ -31,7 +31,7 @@ turns separately from runs.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
 - Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
-  (bounded SCOUT/VERIFIER execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
+  (bounded read-only role-contract execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
   (side-effect-free deterministic parent-coordinator decision),
   `POST /api/agent/sessions/{parentSessionId}/subagents/coordinator` (explicit, feature-flagged
   coordinator-triggered automatic execution), and
@@ -41,7 +41,7 @@ turns separately from runs.
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
   The canonical chat turn exposes the bounded `spawn_subagent` and `spawn_subagents` tools to the
   model; both use the same service/protocol seam and return structured child evidence. The batch
-  tool accepts one to four independent SCOUT/VERIFIER requests, reserves every child before
+  tool accepts one to four independent role-contract requests, reserves every child before
   execution, and returns partial results/failures without granting write, shell, run, or approval
   authority. The REST endpoints are
   compatibility/control-plane surfaces rather than a second execution implementation.
@@ -129,8 +129,8 @@ turns separately from runs.
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
-| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, scout/verifier roles, depth/child/turn/cost guards, explicit start, completion handoff, and cancellation propagation.                     |
-| `SubagentExecutionService.java`            | Executes a persisted SCOUT/VERIFIER child through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires verifier file:line evidence, propagates cancellation, and gates deterministic coordinator-triggered execution. |
+| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned read-only role contracts (SCOUT, VERIFIER, REPRODUCER, REVIEWER, DOCS_SCOUT), depth/child/turn/cost guards, explicit start, completion handoff, and cancellation propagation. |
+| `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
 | `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |

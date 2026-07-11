@@ -71,7 +71,7 @@ public class AgentSessionController {
   }
 
   /**
-   * Execute one bounded, read-only SCOUT/VERIFIER child from a parent agent session.
+   * Execute one bounded, read-only role-contract child from a parent agent session.
    *
    * <p>This is intentionally a synchronous, small control-plane contract: the child has its own
    * persisted session and budget, but it cannot create or approve a pipeline run. Larger fan-out

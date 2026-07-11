@@ -18,6 +18,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Delegation
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Handle;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Result;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.RoleContract;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnRequest;
 
 import org.springframework.stereotype.Service;
@@ -226,7 +227,8 @@ public class SubagentProtocolService {
             request.objective().trim(),
             depth,
             request.maxTurns(),
-            request.maxCostUsd());
+            request.maxCostUsd(),
+            request.role().contract());
     AgentSession child =
         AgentSession.builder()
             .id(childId)
@@ -314,8 +316,9 @@ public class SubagentProtocolService {
     if (completion == null || completion.summary() == null || completion.summary().isBlank()) {
       throw new IllegalArgumentException("completion summary is required");
     }
-    if (metadata.role() == Role.VERIFIER && completion.evidence().isEmpty()) {
-      throw new IllegalArgumentException("verifier completion requires evidence");
+    if (metadata.resolvedContract().requiresEvidence() && completion.evidence().isEmpty()) {
+      throw new IllegalArgumentException(
+          metadata.role().name().toLowerCase(Locale.ROOT) + " completion requires evidence");
     }
     BudgetState budget = authorizeNextTurn(childSessionId, actorUserId, actorOrgId);
     if (budget.turnsUsed() > budget.maxTurns() || budget.costUsd() > budget.maxCostUsd()) {
@@ -393,6 +396,9 @@ public class SubagentProtocolService {
       throw new IllegalArgumentException("parentSessionId is required");
     }
     if (request.role() == null) throw new IllegalArgumentException("role is required");
+    if (request.role().contract().authority() != SubagentProtocol.Authority.READ_ONLY) {
+      throw new IllegalArgumentException("subagent role must have READ_ONLY authority");
+    }
     if (blankToNull(request.objective()) == null) {
       throw new IllegalArgumentException("objective is required");
     }
@@ -568,7 +574,23 @@ public class SubagentProtocolService {
       String objective,
       int depth,
       int maxTurns,
-      double maxCostUsd) {}
+      double maxCostUsd,
+      RoleContract contract) {
+    ChildMetadata(
+        String parentSessionId,
+        String parentTurnId,
+        Role role,
+        String objective,
+        int depth,
+        int maxTurns,
+        double maxCostUsd) {
+      this(parentSessionId, parentTurnId, role, objective, depth, maxTurns, maxCostUsd, null);
+    }
+
+    RoleContract resolvedContract() {
+      return contract == null ? role.contract() : contract;
+    }
+  }
 
   record ParentLink(String childSessionId, ChildMetadata child) {}
 
