@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "2026-07-10",
+  "type": "protected-web-release-capture",
+  "status": "pass",
+  "backend": "http://localhost:8080",
+  "frontend": "http://localhost:5173",
+  "ids": {
+    "successRunId": "web-qa-cb105af7-0141-4299-9bd5-015f936a670b",
+    "failedRunId": "web-qa-b013f0ef-db2f-40d2-8899-68703bc9890e",
+    "gateRunId": "web-qa-ed890592-3f56-4679-8d87-c2e5c683a23b",
+    "agentSessionId": "web-qa-2183f1ac-9a13-455a-90dd-48fc27ef46c1"
+  },
+  "results": [
+    {
+      "surface": "agent",
+      "viewport": "desktop",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/agent-desktop.png",
+      "marker": "Fixture action is ready for approval",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\n7 awaiting approval\nSandbox\n4\nChats\nRelease QA agent evidence\nWaiting for you\nNo token usage yet\n6 approvals\nNew sandbox\nAgent\nRemote sandbox Waiting for approval\nREMOTE SANDBOXES WAITING FOR YOUR APPROVAL\nSandbox plan awaiting approval\nrisk low\nRelease QA approval gate\nstandalone sandbox\n1 tasks\n~1 credits\nOPENAI\njust now\nopens a PR\nDeterministic release evidence fixture\nValidate fixture\nRepo token scoped to selected project\nSecrets are not displayed in chat\nRun events stay in audit trail\nApproval required before code execution\nRetention follows workspace cleanup policy\nOutbound network follows sandbox policy\nApprove & run\nReject\nOpen full plan\nSandbox plan awaiting approval\nrisk low\nRelease QA approval gate\nstandalone sandbox\n1 tasks\n~1 credits\nOPENAI\n1m "
+    },
+    {
+      "surface": "run-success",
+      "viewport": "desktop",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-success-desktop.png",
+      "marker": "Release QA success",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\n7 awaiting approval\nStart\n4\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nOverview\nCode\nSteps\n1\nTimeline\nActivity log\nEvidence\nCost\nPull request\nTests\nAsk\nWork ›\nRelease QA success\nRelease QA success\nShippable\n92 / 100\nClean completion\nSIGNALS\nBuild\ngreen\nTests\n2/2\nReviewer\nclean\nIssues\n0\nFiles\n1 reported · 0 visible\nPipeline\nPASSED\nFile counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered.\nEXECUTION DETAILS\nStatus\nCOMPLETE\nProvider\nopenai\nWorker\nfixture\nAI credits used\n0\nRun credits reserved\n1\nCost\n$0.00\nORIGINAL REQUEST\nRelease QA success\nNEXT ACTION"
+    },
+    {
+      "surface": "run-failed",
+      "viewport": "desktop",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-failed-desktop.png",
+      "marker": "Release QA recovery",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\n7 awaiting approval\nStart\n4\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nOverview\nCode\nSteps\n1\nTimeline\nActivity log\nEvidence\n1\nCost\nPull request\nTests\nAsk\nWork ›\nRelease QA recovery\nRelease QA recovery\nFailed\n38 / 100\nFinal build failed\nRECOVERY PATH\nThis run did not reach a clean result.\nFinal build failed\n1 blocked step\n1 evidence issue\n0 files\nOpen logs\nFailed steps\nEvidence\nFiles\nAsk about it\nSIGNALS\nBuild\ngreen\nTests\n0/2\nReviewer\nclean\nIssues\n1\nFiles\n1 reported · 0 visible\nPipeline\nFAILED\nFile counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered"
+    },
+    {
+      "surface": "run-gate",
+      "viewport": "desktop",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-gate-desktop.png",
+      "marker": "Deterministic release evidence fixture",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\n7 awaiting approval\nStart\n4\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nReview plan\nWork web-qa-ed890592-3f56-4679-8d87-c2e5c683a23b\nDeterministic release evidence fixture\nPlan shape\nSINGLE_SHOT\nSteps\n1\nCredits on approval\n1\nEstimate\n—\nSpend cap\n—\nRun credits reserve the approved work. Managed AI credits debit per successful platform-key model call while work executes. Run credits are refunded if the work fails.\nManaged AI\nUnlimited\nUnlimited AI credits for this tier. Managed-AI credit limits do not block this work; run approval and provider-key policy still apply.\nWORK PLAN · 1 STEP\nValidate fixture\nDONE\nNOT QUITE RIGHT?\n✎ Request changes\nApprove and start work · 1 credit(s)\nCancel"
+    },
+    {
+      "surface": "agent",
+      "viewport": "mobile",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/agent-mobile.png",
+      "marker": "Fixture action is ready for approval",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\nSandbox\nWaiting for you\n6 approvals\nAgent\nRemote sandbox Waiting for approval\nREMOTE SANDBOXES WAITING FOR YOUR APPROVAL\nSandbox plan awaiting approval\nrisk low\nRelease QA approval gate\nstandalone sandbox\n1 tasks\n~1 credits\nOPENAI\njust now\nopens a PR\nDeterministic release evidence fixture\nValidate fixture\nRepo token scoped to selected project\nSecrets are not displayed in chat\nRun events stay in audit trail\nApproval required before code execution\nRetention follows workspace cleanup policy\nOutbound network follows sandbox policy\nApprove & run\nReject\nOpen full plan\nSandbox plan awaiting approval\nrisk low\nRelease QA approval gate\nstandalone sandbox\n1 tasks\n~1 credits\nOPENAI\n1m ago\nopens a PR\nDeterministic release evidence fixture\nValidate fixture\nRepo token sco"
+    },
+    {
+      "surface": "run-success",
+      "viewport": "mobile",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-success-mobile.png",
+      "marker": "Release QA success",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\nExecuteSpec\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nOverview\n⌄\n‹ Work\nRelease QA success\nShippable\n92 / 100\nClean completion\nSIGNALS\nBuild\ngreen\nTests\n2/2\nReviewer\nclean\nIssues\n0\nFiles\n1 reported · 0 visible\nPipeline\nPASSED\nFile counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered.\nEXECUTION DETAILS\nStatus\nCOMPLETE\nProvider\nopenai\nWorker\nfixture\nAI credits used\n0\nRun credits reserved\n1\nCost\n$0.00\nORIGINAL REQUEST\nRelease QA success\nNEXT ACTION\n↻ Iterate in chat\n▶ Preview\n☁ Deploy\n⬇ Report PDF\n⬇ Code ZIP\n⌁ Share\n↻ Try Anthropic\n⋯ More\nHome\nStart\nA"
+    },
+    {
+      "surface": "run-failed",
+      "viewport": "mobile",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-failed-mobile.png",
+      "marker": "Release QA recovery",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\nExecuteSpec\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nOverview\n⌄\n‹ Work\nRelease QA recovery\nFailed\n38 / 100\nFinal build failed\nRECOVERY PATH\nThis run did not reach a clean result.\nFinal build failed\n1 blocked step\n1 evidence issue\n0 files\nOpen logs\nFailed steps\nEvidence\nFiles\nAsk about it\nSIGNALS\nBuild\ngreen\nTests\n0/2\nReviewer\nclean\nIssues\n1\nFiles\n1 reported · 0 visible\nPipeline\nFAILED\nFile counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered.\nEXECUTION DETAILS\nStatus\nFAILED\nProvider\nopenai\nWorker\nfixture\nAI credits used\n0\nRun credits reserved\n1\nCo"
+    },
+    {
+      "surface": "run-gate",
+      "viewport": "mobile",
+      "file": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-agent-release-results/run-gate-mobile.png",
+      "marker": "Deterministic release evidence fixture",
+      "errors": [],
+      "bodyExcerpt": "Skip to main content\nExecuteSpec\nExecuteSpec\nHome\nStart\nAgent\nWork\nProjects\nTeam\nSetup\nRECENT WORK\n6\nPROJECTS\n83\nOPERATOR\nAdmin\nBenchmarks\nENTERPRISE\nReview plan\nWork web-qa-ed890592-3f56-4679-8d87-c2e5c683a23b\nDeterministic release evidence fixture\nPlan shape\nSINGLE_SHOT\nSteps\n1\nCredits on approval\n1\nEstimate\n—\nSpend cap\n—\nRun credits reserve the approved work. Managed AI credits debit per successful platform-key model call while work executes. Run credits are refunded if the work fails.\nManaged AI\nUnlimited\nUnlimited AI credits for this tier. Managed-AI credit limits do not block this work; run approval and provider-key policy still apply.\nWORK PLAN · 1 STEP\nValidate fixture\nDONE\nNOT QUITE RIGHT?\n✎ Request changes\nApprove and start work · 1 credit(s)\nCancel\nHome\nStart\nAgent\nWork\nProjects"
+    }
+  ]
+}

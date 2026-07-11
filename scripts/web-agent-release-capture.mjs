@@ -32,13 +32,20 @@ try {
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) errors.push(`${m.type()}:${m.text()}`); });
     await page.addInitScript((token) => localStorage.setItem('access_token', token), accessToken);
     for (const [surface, url, marker] of [
-      ['agent', '/agent', 'Release QA agent evidence'],
+      ['agent', '/agent', 'Fixture action is ready for approval'],
       ['run-success', `/result/${ids.successRunId}`, 'Release QA success'],
       ['run-failed', `/result/${ids.failedRunId}`, 'Release QA recovery'],
-      ['run-gate', `/result/${ids.gateRunId}`, 'Release QA approval gate'],
+      ['run-gate', `/result/${ids.gateRunId}`, 'Deterministic release evidence fixture'],
     ]) {
-      await page.goto(`${frontend}${url}`, {waitUntil: 'networkidle'});
-      await page.getByText(marker, {exact: false}).first().waitFor({timeout: 20_000});
+      // The agent surface intentionally keeps live polling/stream connections open, so
+      // `networkidle` never settles. DOM readiness plus the required semantic marker is the
+      // meaningful capture boundary and avoids a false timeout on healthy live surfaces.
+      await page.goto(`${frontend}${url}`, {waitUntil: 'domcontentloaded'});
+      await page.waitForFunction(
+        (expected) => document.body?.innerText?.includes(expected),
+        marker,
+        {timeout: 20_000},
+      );
       const file = path.join(outDir, `${surface}-${viewport.name}.png`);
       await page.screenshot({path: file, fullPage: true});
       const body = await page.locator('body').innerText();
