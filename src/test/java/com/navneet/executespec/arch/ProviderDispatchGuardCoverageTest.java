@@ -27,8 +27,6 @@ class ProviderDispatchGuardCoverageTest {
     }
 
     assertThat(source("agent/LlmRouter.java")).contains("ProviderTestBudgetGuard.authorize(");
-    assertThat(source("agent/FallbackLlmRouter.java"))
-        .contains("ProviderTestBudgetGuard.authorize(");
   }
 
   private static String source(String file) throws Exception {

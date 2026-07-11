@@ -75,9 +75,8 @@ import lombok.extern.slf4j.Slf4j;
  * once (each with its own transient retry). Gated by {@link #FAILOVER_FLAG} (default OFF until
  * validated). BYOK-safe: a run on a customer key only fails over to a provider the customer also
  * keyed (never silently to a platform key); {@code deepseek}/{@code openrouter} are never targets.
- * A dedicated {@code ProviderHealthTracker} circuit breaker on this path is still future work (the
- * legacy {@link FallbackLlmRouter} has one); tier-based model resolution happens upstream in {@code
- * ModelResolver}.
+ * Provider health and tier-based model resolution happen in the canonical routing seams upstream in
+ * {@code ModelResolver}; this router owns the actual provider dispatch and bounded retry.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
@@ -131,11 +130,10 @@ public class LlmRouter {
   /**
    * Dispatch a text-only request through the canonical V2 provider transport.
    *
-   * <p>This is the migration seam for legacy non-tool callers. It deliberately does not reproduce
-   * {@link FallbackLlmRouter}'s circuit-breaker or fallback-mode guardrails: the canonical router's
-   * bounded retry and flag-gated failover policy apply, while transport, BYOK resolution,
-   * managed-AI accounting, and telemetry stay in one router. An empty tool override is important
-   * here; text callers must not bind the mutable worker tool registry just to make a request.
+   * <p>This is the canonical seam for text-only callers. The same bounded retry and flag-gated
+   * failover policy apply, while transport, BYOK resolution, managed-AI accounting, and telemetry
+   * stay in one router. An empty tool override is important here; text callers must not bind the
+   * mutable worker tool registry just to make a request.
    *
    * @param provider resolved provider identifier
    * @param model resolved model identifier
