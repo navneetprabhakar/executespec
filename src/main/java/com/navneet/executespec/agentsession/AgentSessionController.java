@@ -29,6 +29,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -72,6 +73,7 @@ public class AgentSessionController {
         null);
   }
 
+  @Autowired
   public AgentSessionController(
       AgentSessionService sessionService,
       AgentActionCatalog actionCatalog,
