@@ -43,9 +43,13 @@ public class ClientCapabilitiesController {
                 "Local-hands execution is accepted only for PAT-authenticated clients.",
                 "The browser/JWT surface cannot submit local execution.")),
         Map.of(
-            "agentSessions", new Endpoint("GET", "/api/agent/sessions", true, "Durable agent sessions"),
-            "agentTurns", new Endpoint("GET", "/api/agent/sessions/{id}/turns", true, "Reloadable turn history"),
-            "runEvents", new Endpoint("GET", "/api/runs/{id}/events", true, "Scoped SSE run events")),
+            "agentSessions",
+                new Endpoint("GET", "/api/agent/sessions", true, "Durable agent sessions"),
+            "agentTurns",
+                new Endpoint(
+                    "GET", "/api/agent/sessions/{id}/turns", true, "Reloadable turn history"),
+            "runEvents",
+                new Endpoint("GET", "/api/runs/{id}/events", true, "Scoped SSE run events")),
         new EventContracts(true, 1, EVENT_TYPES, 12000, true),
         new ToolResultContract(
             true,
@@ -57,7 +61,8 @@ public class ClientCapabilitiesController {
             true,
             List.of("OK", "ERROR", "INTERNAL", "TIMEOUT", "DENIED")),
         new WebFetch(true, true, true, true, true, "untrusted", "explicit read-only web tool"),
-        new ProviderCatalog(true, "/api/health/providers", List.of(), true, "Provider health is read-only."),
+        new ProviderCatalog(
+            true, "/api/health/providers", List.of(), true, "Provider health is read-only."),
         new Governance(true, "/api/v3/governance-policy"),
         new ManagedAi(true, "/api/billing/managed-ai/balance", "/api/billing/managed-ai/policy"));
   }
