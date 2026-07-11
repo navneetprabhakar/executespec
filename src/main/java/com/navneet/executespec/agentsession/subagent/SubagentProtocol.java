@@ -32,7 +32,9 @@ public final class SubagentProtocol {
   }
 
   public enum Authority {
-    READ_ONLY
+    READ_ONLY,
+    /** Reserved for a future IMPLEMENTER; never granted by the current child executor. */
+    WRITE_SINGLE_WRITER
   }
 
   /**
@@ -48,6 +50,24 @@ public final class SubagentProtocol {
       if (authority == null) throw new IllegalArgumentException("role contract authority required");
     }
   }
+
+  /**
+   * Persisted lease-shaped authority record for the future write-capable child protocol.
+   *
+   * <p>This record is deliberately independent of {@link Role}: no current role can request or
+   * exercise write authority. A reservation is scoped, idempotent by request id, and must be
+   * explicitly released before another writer may claim the same scope.
+   */
+  public record WriterReservation(
+      String reservationId,
+      String parentSessionId,
+      String requestId,
+      String scope,
+      String authority,
+      String status,
+      Instant reservedAt,
+      Instant releasedAt,
+      String releaseReason) {}
 
   public record SpawnRequest(
       String requestId,

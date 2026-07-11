@@ -2,8 +2,10 @@ package com.navneet.executespec.agentsession.subagent;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +22,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Result;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.RoleContract;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnRequest;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,6 +64,9 @@ public class SubagentProtocolService {
   static final String EVENT_CHILD_COMPLETED = "SUBAGENT_COMPLETED";
   static final String EVENT_CHILD_CANCELLED = "SUBAGENT_CANCELLED";
   static final String EVENT_COORDINATOR_ACCEPTED = "SUBAGENT_COORDINATOR_ACCEPTED";
+  static final String EVENT_WRITER_RESERVED = "SUBAGENT_WRITER_RESERVED";
+  static final String EVENT_WRITER_RELEASED = "SUBAGENT_WRITER_RELEASED";
+  private static final int MAX_WRITER_SCOPE_CHARS = 512;
 
   private final AgentSessionRepository sessionRepository;
   private final AgentActionEventRepository eventRepository;
@@ -260,6 +266,127 @@ public class SubagentProtocolService {
     return handleFromMetadata(child, metadata);
   }
 
+  /**
+   * Reserves the single-writer boundary for a future IMPLEMENTER execution.
+   *
+   * <p>This is intentionally only an authority reservation: it does not add an IMPLEMENTER role,
+   * dispatch a model, or grant shell/file tools. The pessimistic parent-session lock serializes
+   * competing reservations in one JVM/database, while the append-only events make the lease
+   * recoverable after a restart. A caller must keep the returned id and call {@link
+   * #authorizeWriter} before every future mutation and {@link #releaseWriter} on terminal paths.
+   */
+  @Transactional
+  public WriterReservation reserveWriter(
+      String parentSessionId,
+      String requestId,
+      String scope,
+      String actorUserId,
+      String actorOrgId) {
+    String normalizedRequest = requireText(requestId, "writer requestId");
+    String normalizedScope = requireText(scope, "writer scope");
+    if (normalizedScope.length() > MAX_WRITER_SCOPE_CHARS) {
+      throw new IllegalArgumentException(
+          "writer scope exceeds " + MAX_WRITER_SCOPE_CHARS + " chars");
+    }
+    AgentSession parent =
+        sessionRepository
+            .findByIdForUpdate(parentSessionId)
+            .orElseThrow(
+                () -> new IllegalArgumentException("Agent session not found: " + parentSessionId));
+    requireOwnership(parent, actorUserId, actorOrgId);
+    requireParentActive(parent);
+
+    List<WriterReservation> history = writerHistory(parentSessionId, normalizedScope);
+    String reservationId = writerReservationId(parentSessionId, normalizedScope, normalizedRequest);
+    Optional<WriterReservation> sameRequest =
+        history.stream().filter(item -> reservationId.equals(item.reservationId())).findFirst();
+    if (sameRequest.isPresent()) {
+      WriterReservation prior = sameRequest.get();
+      if ("ACTIVE".equals(prior.status())) return prior;
+      throw new IllegalStateException("writer request was already released; use a new requestId");
+    }
+    Optional<WriterReservation> active =
+        history.stream().filter(item -> "ACTIVE".equals(item.status())).findFirst();
+    if (active.isPresent()) {
+      throw new IllegalStateException(
+          "single-writer scope is already reserved by " + active.get().reservationId());
+    }
+    Instant now = Instant.now();
+    WriterReservation reservation =
+        new WriterReservation(
+            reservationId,
+            parentSessionId,
+            normalizedRequest,
+            normalizedScope,
+            SubagentProtocol.Authority.WRITE_SINGLE_WRITER.name(),
+            "ACTIVE",
+            now,
+            null,
+            null);
+    append(parentSessionId, null, normalizedRequest, EVENT_WRITER_RESERVED, reservation);
+    return reservation;
+  }
+
+  /** Fail-closed authority check used by the future mutation executor before each write. */
+  @Transactional(readOnly = true)
+  public WriterReservation authorizeWriter(
+      String parentSessionId,
+      String reservationId,
+      String scope,
+      String actorUserId,
+      String actorOrgId) {
+    requireText(reservationId, "writer reservationId");
+    String normalizedScope = requireText(scope, "writer scope");
+    AgentSession parent = requireOwnedSession(parentSessionId, actorUserId, actorOrgId);
+    requireParentActive(parent);
+    WriterReservation reservation =
+        writerHistory(parentSessionId, normalizedScope).stream()
+            .filter(item -> reservationId.equals(item.reservationId()))
+            .filter(item -> "ACTIVE".equals(item.status()))
+            .findFirst()
+            .orElseThrow(() -> new SecurityException("writer reservation is not active"));
+    if (!normalizedScope.equals(reservation.scope())) {
+      throw new SecurityException("writer reservation scope mismatch");
+    }
+    return reservation;
+  }
+
+  /** Releases an active writer reservation; repeated release is idempotent. */
+  @Transactional
+  public WriterReservation releaseWriter(
+      String parentSessionId,
+      String reservationId,
+      String reason,
+      String actorUserId,
+      String actorOrgId) {
+    String normalizedId = requireText(reservationId, "writer reservationId");
+    AgentSession parent =
+        sessionRepository
+            .findByIdForUpdate(parentSessionId)
+            .orElseThrow(
+                () -> new IllegalArgumentException("Agent session not found: " + parentSessionId));
+    requireOwnership(parent, actorUserId, actorOrgId);
+    WriterReservation current =
+        writerHistory(parentSessionId, null).stream()
+            .filter(item -> normalizedId.equals(item.reservationId()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("writer reservation not found"));
+    if ("RELEASED".equals(current.status())) return current;
+    WriterReservation released =
+        new WriterReservation(
+            current.reservationId(),
+            current.parentSessionId(),
+            current.requestId(),
+            current.scope(),
+            current.authority(),
+            "RELEASED",
+            current.reservedAt(),
+            Instant.now(),
+            blankToDefault(reason, "released"));
+    append(parentSessionId, null, normalizedId, EVENT_WRITER_RELEASED, released);
+    return released;
+  }
+
   /** Fail-closed budget/cancellation check that an executor calls before each child turn. */
   @Transactional(readOnly = true)
   public BudgetState authorizeNextTurn(
@@ -413,6 +540,41 @@ public class SubagentProtocolService {
         || request.maxCostUsd() > MAX_COST_USD_PER_CHILD) {
       throw new IllegalArgumentException("maxCostUsd must be > 0 and <= " + MAX_COST_USD_PER_CHILD);
     }
+  }
+
+  private List<WriterReservation> writerHistory(String parentSessionId, String scope) {
+    List<AgentActionEvent> reserved = safeEvents(parentSessionId, EVENT_WRITER_RESERVED);
+    List<AgentActionEvent> released = safeEvents(parentSessionId, EVENT_WRITER_RELEASED);
+    List<AgentActionEvent> all = new java.util.ArrayList<>(reserved.size() + released.size());
+    all.addAll(reserved);
+    all.addAll(released);
+    all.sort(
+        Comparator.comparing(
+                AgentActionEvent::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .thenComparing(
+                AgentActionEvent::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
+    java.util.Map<String, WriterReservation> latest = new java.util.LinkedHashMap<>();
+    for (AgentActionEvent event : all) {
+      WriterReservation reservation = read(event.getPayloadJson(), WriterReservation.class);
+      if (scope == null || scope.equals(reservation.scope())) {
+        latest.put(reservation.reservationId(), reservation);
+      }
+    }
+    return List.copyOf(latest.values());
+  }
+
+  private static String writerReservationId(
+      String parentSessionId, String scope, String requestId) {
+    return UUID.nameUUIDFromBytes(
+            ("subagent-writer:" + parentSessionId + ":" + scope + ":" + requestId)
+                .getBytes(StandardCharsets.UTF_8))
+        .toString();
+  }
+
+  private static String requireText(String value, String label) {
+    String normalized = blankToNull(value);
+    if (normalized == null) throw new IllegalArgumentException(label + " is required");
+    return normalized;
   }
 
   private int depthOf(String sessionId) {

@@ -22,6 +22,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Completion
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Evidence;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnRequest;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,90 @@ class SubagentProtocolServiceTest {
             });
     assertThatThrownBy(() -> Role.valueOf("IMPLEMENTER"))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void writerReservationIsPersistedAndIdempotentWithoutGrantingImplementerRole() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RESERVED))
+        .thenReturn(List.of());
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RELEASED))
+        .thenReturn(List.of());
+
+    WriterReservation reservation =
+        service.reserveWriter("parent", "write-1", "repo:/workspace", "user", "org");
+
+    assertThat(reservation.status()).isEqualTo("ACTIVE");
+    assertThat(reservation.authority())
+        .isEqualTo(SubagentProtocol.Authority.WRITE_SINGLE_WRITER.name());
+    assertThat(reservation.reservationId()).isNotBlank();
+    verify(events).save(any(AgentActionEvent.class));
+  }
+
+  @Test
+  void activeWriterReservationRejectsConcurrentClaimAndReleaseIsDurable() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
+    WriterReservation active =
+        new WriterReservation(
+            "writer-a",
+            "parent",
+            "a",
+            "repo:/workspace",
+            "WRITE_SINGLE_WRITER",
+            "ACTIVE",
+            Instant.now(),
+            null,
+            null);
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RESERVED))
+        .thenReturn(List.of(event("parent", "reserved", active)));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RELEASED))
+        .thenReturn(List.of());
+
+    assertThatThrownBy(() -> service.reserveWriter("parent", "b", "repo:/workspace", "user", "org"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("already reserved");
+
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RESERVED))
+        .thenReturn(List.of(event("parent", "reserved", active)));
+    WriterReservation released =
+        service.releaseWriter("parent", "writer-a", "completed", "user", "org");
+    assertThat(released.status()).isEqualTo("RELEASED");
+    assertThat(released.releaseReason()).isEqualTo("completed");
+  }
+
+  @Test
+  void writerAuthorizationFailsClosedAfterRelease() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    WriterReservation released =
+        new WriterReservation(
+            "writer-a",
+            "parent",
+            "a",
+            "repo:/workspace",
+            "WRITE_SINGLE_WRITER",
+            "RELEASED",
+            Instant.now().minusSeconds(10),
+            Instant.now(),
+            "done");
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RESERVED))
+        .thenReturn(List.of(event("parent", "reserved", released)));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_WRITER_RELEASED))
+        .thenReturn(List.of());
+
+    assertThatThrownBy(
+            () -> service.authorizeWriter("parent", "writer-a", "repo:/workspace", "user", "org"))
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("not active");
   }
 
   @Test
