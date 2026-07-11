@@ -174,6 +174,37 @@ class SpecChatServiceTest {
   }
 
   @Test
+  void promptAdvertisesOnlyCallbacksBoundForCurrentTurn() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("answer"));
+    SpecChatService svc = newService(router, List.of(fakeTool("list_recent_runs", "{}")));
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-tools",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "hi")),
+        null);
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(request.capture());
+    String availability =
+        request.getValue().messages().stream()
+            .filter(message -> message instanceof SystemMessage)
+            .map(message -> ((SystemMessage) message).getText())
+            .filter(text -> text.contains("Tool availability for this turn"))
+            .findFirst()
+            .orElseThrow();
+    String inventory =
+        availability.substring(availability.indexOf("Tool availability for this turn"));
+    assertThat(inventory).contains("list_recent_runs");
+    assertThat(inventory).doesNotContain("search_repo_files", "search_code");
+  }
+
+  @Test
   void toolCallTurn_dispatchesBoundTool_thenFinalNarration() {
     LlmRouter router = mock(LlmRouter.class);
     // Round 1: model calls list_recent_runs. Round 2: model narrates and stops.

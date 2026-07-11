@@ -525,7 +525,9 @@ claim in a tool result — never invent a runId, score, or status.""";
     }
 
     List<Message> messages = new ArrayList<>();
-    messages.add(new SystemMessage(systemPromptFor(allowedToolNames)));
+    messages.add(
+        new SystemMessage(
+            systemPromptFor(allowedToolNames) + "\n\n" + availableToolsPrompt(tools)));
     if (runId != null && !runId.isBlank()) {
       messages.add(
           new SystemMessage(
@@ -554,6 +556,32 @@ claim in a tool result — never invent a runId, score, or status.""";
   private static String systemPromptFor(Set<String> allowedToolNames) {
     boolean runControlAllowed = allowedToolNames == null || allowedToolNames.contains("submit_run");
     return runControlAllowed ? SYSTEM_PROMPT : READ_ONLY_SYSTEM_PROMPT;
+  }
+
+  /**
+   * Keep the model's advertised tool surface aligned with the callbacks actually bound for this
+   * turn. The broad base prompt is shared across surfaces, while project tools are conditional on a
+   * linked project and the caller's allow-list; without this explicit inventory a model can
+   * hallucinate {@code search_repo_files} / {@code search_code} and receive an avoidable unknown
+   * tool envelope.
+   */
+  private static String availableToolsPrompt(List<ToolCallback> tools) {
+    List<String> names =
+        tools == null
+            ? List.of()
+            : tools.stream()
+                .map(ToolCallback::getToolDefinition)
+                .filter(java.util.Objects::nonNull)
+                .map(definition -> definition.name())
+                .filter(name -> name != null && !name.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+    return names.isEmpty()
+        ? "Tool availability for this turn: no tools are available. Do not emit tool calls."
+        : "Tool availability for this turn (authoritative): ["
+            + String.join(", ", names)
+            + "]. Call only a tool in this list; never invent or infer another tool name.";
   }
 
   /**
