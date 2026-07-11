@@ -926,6 +926,11 @@ public class WorkerAgent {
       // Dispatch every tool call. completeTask short-circuits the loop.
       List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
       String completionSummary = null;
+      // Count only writes that actually reached the workspace.  A rejected write (stale read,
+      // forbidden path, etc.) is not an edit burst and must not trigger an expensive server-side
+      // test run.  The broader progress watchdog still records the attempted tool call below so
+      // a model cannot hide a stuck loop behind repeated failed writes.
+      int successfulEditsThisIter = 0;
       // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
       // call for the next LLM turn; its output is the most likely to be re-referenced by the
       // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
@@ -1286,6 +1291,9 @@ public class WorkerAgent {
             parallelReads.containsKey(safeId(tc.id()))
                 ? parallelReads.get(safeId(tc.id()))
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
+        if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
+          successfulEditsThisIter++;
+        }
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
         // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
@@ -1396,12 +1404,9 @@ public class WorkerAgent {
       // did not — so the model gets ground truth exactly when it has (implicitly) moved on to the
       // next thing. Bounded per task; green results are one line, red results carry the failing
       // tail so the fix is grounded in real output, not a re-guess.
-      final boolean rawWriteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
       if (autoVerifyOn) {
-        if (rawWriteThisIter) {
-          for (AssistantMessage.ToolCall tc : calls) {
-            if (isWriteTool(tc.name())) editsSinceAutoVerify++;
-          }
+        if (successfulEditsThisIter > 0) {
+          editsSinceAutoVerify += successfulEditsThisIter;
         } else if (lastIterHadWrite
             && editsSinceAutoVerify > 0
             && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
@@ -1420,7 +1425,10 @@ public class WorkerAgent {
                 AUTO_VERIFY_MAX_RUNS_PER_TASK);
           }
         }
-        lastIterHadWrite = rawWriteThisIter;
+        // A failed write does not close a successful edit burst.  Keep the marker tied to actual
+        // workspace mutation so the next non-write iteration observes and verifies the prior
+        // successful edits instead of running tests after a failed attempt.
+        lastIterHadWrite = successfulEditsThisIter > 0;
       }
       // v2 — worst current same-signature failure streak (0 when off/empty).
       final int worstFailureStreak =

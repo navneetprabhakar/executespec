@@ -48,7 +48,7 @@ class WorkerAgentAutoVerifyTest {
                 AssistantMessage.builder().content("").toolCalls(List.of(calls)).build())));
   }
 
-  private record Fixture(WorkerAgent worker, WorkspaceTestRunner runner) {}
+  private record Fixture(WorkerAgent worker, WorkspaceTestRunner runner, Tool write) {}
 
   private static TestExecutionSummary summary(int total, int passed, int failed, int errors) {
     return TestExecutionSummary.builder()
@@ -111,7 +111,7 @@ class WorkerAgentAutoVerifyTest {
             null,
             null,
             runner);
-    return new Fixture(worker, runner);
+    return new Fixture(worker, runner, write);
   }
 
   private static WorkerTaskRequest request() {
@@ -151,5 +151,17 @@ class WorkerAgentAutoVerifyTest {
     assertThat(result.outcome()).isEqualTo(WorkerResult.Outcome.COMPLETED);
     assertThat(result.iterations()).isEqualTo(3);
     verify(f.runner).runTestsDetailed(anyString(), any());
+  }
+
+  @Test
+  void does_not_run_suite_for_rejected_write() {
+    Fixture f = fixture(summary(5, 5, 0, 0), 20);
+    when(f.write.execute(any(), any()))
+        .thenReturn(ToolResult.err(ToolResult.ErrorKind.STALE_READ, "read is stale"));
+
+    WorkerResult result = f.worker.run(request());
+
+    assertThat(result.outcome()).isEqualTo(WorkerResult.Outcome.COMPLETED);
+    verify(f.runner, org.mockito.Mockito.never()).runTestsDetailed(anyString(), any());
   }
 }
