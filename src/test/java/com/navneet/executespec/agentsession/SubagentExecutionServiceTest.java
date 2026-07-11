@@ -326,4 +326,39 @@ class SubagentExecutionServiceTest {
       worker.shutdownNow();
     }
   }
+
+  @Test
+  void batchRetainsCompletedSuccessWhenEarlierSiblingFails() throws Exception {
+    SpawnRequest second =
+        new SpawnRequest("req-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 4, 0.5);
+    Handle secondHandle =
+        new Handle(
+            "child-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 1, 4, 0.5, "RUNNING");
+    when(protocol.spawn(second, "user", "org")).thenReturn(secondHandle);
+    when(protocol.start("child-2", "user", "org")).thenReturn(secondHandle);
+    Result secondResult =
+        new Result(secondHandle, "second", java.util.List.of(), 1, 0.01, Instant.now());
+    CountDownLatch secondCompleted = new CountDownLatch(1);
+    SubagentExecutionService spy = org.mockito.Mockito.spy(service);
+    doAnswer(
+            invocation -> {
+              SpawnRequest candidate = invocation.getArgument(0, SpawnRequest.class);
+              if (candidate.requestId().equals("req-2")) {
+                secondCompleted.countDown();
+                return secondResult;
+              }
+              assertThat(secondCompleted.await(2, TimeUnit.SECONDS)).isTrue();
+              throw new IllegalStateException("first child failed");
+            })
+        .when(spy)
+        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+
+    var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
+
+    assertThat(batch.results()).extracting(Result::summary).containsExactly("second");
+    assertThat(batch.failures())
+        .extracting(SubagentProtocol.BatchFailure::requestId)
+        .containsExactly("req");
+    assertThat(batch.failures().getFirst().reason()).isEqualTo("first child failed");
+  }
 }
