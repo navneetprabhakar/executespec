@@ -101,4 +101,54 @@ class RunLifecycleServiceCrashClaimTest {
     Mockito.verify(runRepo, Mockito.times(2))
         .claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
   }
+
+  @Test
+  void exhaustedRecoveryAttemptsTerminallyFailWithoutAnotherClaim() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("crash-claim-exhausted")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(com.navneet.executespec.recovery.StartupRunResumer.MAX_RESUME_ATTEMPTS)
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo,
+            null,
+            null,
+            null,
+            null,
+            controlPort,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.EXHAUSTED);
+    verify(controlPort)
+        .terminate(
+            run.getRunId(),
+            "FAILED",
+            "resume cap reached after "
+                + com.navneet.executespec.recovery.StartupRunResumer.MAX_RESUME_ATTEMPTS
+                + " attempts",
+            null);
+    verify(runRepo, never())
+        .claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
+  }
 }
