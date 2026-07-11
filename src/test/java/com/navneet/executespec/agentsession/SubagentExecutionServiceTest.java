@@ -307,7 +307,7 @@ class SubagentExecutionServiceTest {
                   : secondResult;
             })
         .when(spy)
-        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+        .executeReserved(any(SpawnRequest.class), any(Handle.class), eq(user), eq("org"));
 
     var worker = java.util.concurrent.Executors.newSingleThreadExecutor();
     try {
@@ -319,8 +319,9 @@ class SubagentExecutionServiceTest {
       assertThat(batch.results()).extracting(Result::summary).containsExactly("first", "second");
       assertThat(batch.failures()).isEmpty();
       assertThat(maximum.get()).isEqualTo(2);
-      verify(protocol).spawn(request, "user", "org");
-      verify(protocol).spawn(second, "user", "org");
+      verify(protocol, org.mockito.Mockito.times(1)).spawn(request, "user", "org");
+      verify(protocol, org.mockito.Mockito.times(1)).spawn(second, "user", "org");
+      verify(protocol, org.mockito.Mockito.times(1)).start("child-2", "user", "org");
     } finally {
       release.countDown();
       worker.shutdownNow();
@@ -351,7 +352,7 @@ class SubagentExecutionServiceTest {
               throw new IllegalStateException("first child failed");
             })
         .when(spy)
-        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+        .executeReserved(any(SpawnRequest.class), any(Handle.class), eq(user), eq("org"));
 
     var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
 
@@ -393,7 +394,7 @@ class SubagentExecutionServiceTest {
               }
             })
         .when(spy)
-        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+        .executeReserved(any(SpawnRequest.class), any(Handle.class), eq(user), eq("org"));
 
     var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
 
