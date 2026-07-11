@@ -182,6 +182,9 @@ class SubagentProtocolServiceTest {
         .containsExactly(
             SubagentProtocolService.EVENT_CHILD_CREATED,
             SubagentProtocolService.EVENT_CHILD_SPAWNED);
+    assertThat(persisted.getAllValues())
+        .extracting(AgentActionEvent::getActionId)
+        .containsExactly("req-1", "req-1");
     assertThat(
             json.readTree(persisted.getAllValues().getFirst().getPayloadJson())
                 .path("contract")
@@ -407,6 +410,14 @@ class SubagentProtocolServiceTest {
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "child", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(List.of(event("child", SubagentProtocolService.EVENT_CHILD_CREATED, metadata)));
+    var parentLink =
+        new SubagentProtocolService.ParentLink(
+            "child",
+            new SubagentProtocolService.ChildMetadata(
+                "parent", "turn", Role.VERIFIER, "verify", 1, 3, 0.5));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of(event("parent", "spawn", "request-action", parentLink)));
     when(turns.countBySessionId("child")).thenReturn(1L);
     when(turns.findBySessionIdOrderBySequenceAsc("child")).thenReturn(List.of(turn(1, 0.12)));
 
@@ -433,12 +444,21 @@ class SubagentProtocolServiceTest {
     assertThat(persisted.getAllValues())
         .extracting(AgentActionEvent::getSessionId)
         .containsExactly("child", "parent");
+    assertThat(persisted.getAllValues())
+        .extracting(AgentActionEvent::getActionId)
+        .containsExactly("request-action", "request-action");
   }
 
   private AgentActionEvent event(String sessionId, String type, Object payload) throws Exception {
+    return event(sessionId, type, null, payload);
+  }
+
+  private AgentActionEvent event(String sessionId, String type, String actionId, Object payload)
+      throws Exception {
     return AgentActionEvent.builder()
         .id("event-" + sessionId + "-" + type)
         .sessionId(sessionId)
+        .actionId(actionId)
         .type(type)
         .payloadJson(json.writeValueAsString(payload))
         .createdAt(Instant.now())
