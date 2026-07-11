@@ -364,16 +364,23 @@ export default function IdeAgent() {
     try {
       const session = await ensureSession();
       for (const file of list) {
-        const meta = await api.uploadAgentAttachment(session.id, file);
-        dispatch({
-          type: 'attachment:add',
-          attachment: {
-            attachmentId: meta.attachmentId,
-            filename: meta.filename,
-            mimeType: meta.mimeType,
-            extractedChars: meta.extractedChars,
-          },
-        });
+        const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+        try {
+          const meta = await api.uploadAgentAttachment(session.id, file);
+          dispatch({
+            type: 'attachment:add',
+            attachment: {
+              attachmentId: meta.attachmentId,
+              filename: meta.filename,
+              mimeType: meta.mimeType,
+              extractedChars: meta.extractedChars,
+              previewUrl,
+            },
+          });
+        } catch (error) {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          throw error;
+        }
       }
     } catch (e) {
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Upload failed.'});
@@ -402,6 +409,9 @@ export default function IdeAgent() {
     const message = (seed ?? state.input).trim();
     if (!message || state.status === 'streaming' || state.status === 'toolRunning') return;
     const attachmentIds = state.attachments.map((a) => a.attachmentId);
+    state.attachments.forEach((attachment) => {
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    });
     dispatch({type: 'stream:start', message});
     const abort = new AbortController();
     abortRef.current = abort;
@@ -666,6 +676,7 @@ export default function IdeAgent() {
         runCard={runCard}
         runCost={runCost}
         runStreamStatus={liveRun.status}
+        routingState={state.routingState}
         hasNewActivity={hasNewActivity}
         input={state.input}
         attachments={state.attachments}
@@ -677,7 +688,11 @@ export default function IdeAgent() {
         onSend={() => void send()}
         onStop={stop}
         onAddFiles={(files) => void handleFiles(files)}
-        onRemoveAttachment={(id) => dispatch({type: 'attachment:remove', attachmentId: id})}
+        onRemoveAttachment={(id) => {
+          const attachment = state.attachments.find((item) => item.attachmentId === id);
+          if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+          dispatch({type: 'attachment:remove', attachmentId: id});
+        }}
         onConfirmAction={(pending) => void confirmAction(pending)}
         onApproveGate={(gate) => void approveGate(gate)}
         onRejectGate={(gate) => void rejectGate(gate)}

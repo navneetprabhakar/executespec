@@ -1446,6 +1446,14 @@
   font-size: 11px;
   max-width: 220px;
 }
+.agent-attach-thumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--ide-border);
+  flex: 0 0 auto;
+}
 .agent-attach-chip-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4032,6 +4040,30 @@
 }
 .agent-msg.user .agent-msg-body {
   font-size: 13px;
+}
+.agent-route-decision {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 8px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--ide-accent) 35%, var(--ide-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ide-accent) 7%, var(--ide-surface-2));
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+}
+.agent-route-decision strong {
+  color: var(--ide-fg-bright);
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+.agent-route-decision-label {
+  color: var(--ide-accent);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .agent-runcard.cancelled {
   border-color: var(--ide-border);

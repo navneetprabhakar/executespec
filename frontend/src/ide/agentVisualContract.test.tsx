@@ -52,6 +52,7 @@ describe('protected transcript visual contract', () => {
     gates: [],
     runCost: 0.14,
     runStreamStatus: 'RECONNECTING',
+    routingState: null,
     hasNewActivity: true,
     input: '',
     attachments: [],
@@ -188,6 +189,47 @@ describe('protected transcript visual contract', () => {
     expect(evidence).not.toBeNull();
     expect(evidence?.querySelector('summary')?.textContent).toContain('Verification evidence');
     expect(evidence?.querySelector('p')?.textContent).toContain('Build passed');
+  });
+
+  it('renders an image attachment preview and the semantic intent route inline', () => {
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[]}
+        hasNewActivity={false}
+        runStreamStatus='IDLE'
+        routingState={{
+          route: 'CODE_RUN_REQUIRED',
+          confidence: 0.92,
+          reasonCode: 'explicit_code_mutation_request',
+          runApiAllowed: true,
+        }}
+        runCard={null}
+        attachments={[
+          {
+            attachmentId: 'img-1',
+            filename: 'screen.png',
+            mimeType: 'image/png',
+            extractedChars: 0,
+            previewUrl: 'blob:test-image',
+          },
+        ]}
+      />,
+    );
+
+    expect(rendered.querySelector('[data-agent-region="route-decision"]')?.textContent).toContain(
+      'CODE RUN REQUIRED',
+    );
+    expect(rendered.querySelector('[data-agent-region="route-decision"]')?.textContent).toContain(
+      '92% confidence',
+    );
+    expect(rendered.querySelector('.agent-attach-thumb')?.getAttribute('src')).toBe(
+      'blob:test-image',
+    );
+    expect(rendered.querySelector('input[type="file"]')?.getAttribute('accept')).toContain(
+      'image/png',
+    );
   });
 
   it('exposes settings and chats as distinct modal screenshot surfaces', () => {

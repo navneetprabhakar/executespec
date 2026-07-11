@@ -55,6 +55,8 @@ export type AgentAttachmentLite = {
   filename: string;
   mimeType: string;
   extractedChars: number;
+  /** Local-only preview; the server remains authoritative for attachment bytes. */
+  previewUrl?: string;
 };
 
 export type AgentState = {
