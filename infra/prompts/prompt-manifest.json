@@ -899,5 +899,151 @@
         "WORKER_GOAL"
       ]
     }
+  ],
+  "runtimeCoverage": [
+    {
+      "id": "worker-build",
+      "caller": "harness.SequentialExecutor.composeSystemPrompt",
+      "sourceFile": "src/main/java/com/navneet/executespec/harness/SequentialExecutor.java",
+      "sourceTokens": [
+        "loadProviderFragment",
+        "loadProjectTypeFragments",
+        "loadScaffoldForProjectType"
+      ],
+      "role": "WORKER",
+      "mode": "BUILD",
+      "profile": "worker-build",
+      "tools": [
+        "readFile",
+        "writeFile",
+        "editFile",
+        "listFiles",
+        "searchFiles",
+        "shell",
+        "buildProject",
+        "completeTask"
+      ],
+      "providers": [
+        "anthropic",
+        "deepseek",
+        "fireworks",
+        "gemini",
+        "openai",
+        "openrouter"
+      ],
+      "providerModes": [
+        "build"
+      ],
+      "projectTypes": [
+        "fullstack",
+        "node-backend",
+        "node-frontend",
+        "spring-boot",
+        "python",
+        "go",
+        "rust"
+      ],
+      "scaffolds": [
+        "fullstack",
+        "node-backend",
+        "node-frontend",
+        "spring-boot",
+        "python",
+        "go",
+        "rust"
+      ],
+      "fragments": [
+        "api-url-rules",
+        "backend-robustness",
+        "fullstack-directory",
+        "module-system",
+        "preview-defaults",
+        "router-isolation"
+      ]
+    },
+    {
+      "id": "patch-worker",
+      "caller": "engine.CodeGenEngineImpl.buildSystemPrompt",
+      "sourceFile": "src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java",
+      "sourceTokens": [
+        "loadProviderPatchFragment",
+        "prompts/fragments/provider/"
+      ],
+      "role": "WORKER",
+      "mode": "PATCH",
+      "profile": "patch-worker",
+      "tools": [
+        "readFile",
+        "writeFile",
+        "editFile",
+        "listFiles",
+        "searchFiles",
+        "shell",
+        "runTests",
+        "completeTask"
+      ],
+      "providers": [
+        "anthropic",
+        "deepseek",
+        "fireworks",
+        "gemini",
+        "openai",
+        "openrouter"
+      ],
+      "providerModes": [
+        "patch"
+      ]
+    },
+    {
+      "id": "terminal-worker",
+      "caller": "terminalbench.TerminalBenchRunService.systemPromptForProvider",
+      "sourceFile": "src/main/java/com/navneet/executespec/terminalbench/TerminalBenchRunService.java",
+      "sourceTokens": [
+        "loadTerminalProviderFragment",
+        "prompts/fragments/provider/"
+      ],
+      "role": "WORKER",
+      "mode": "TERMINAL_BENCH",
+      "profile": "terminal-worker",
+      "tools": [
+        "remoteToolDispatcher"
+      ],
+      "providers": [
+        "anthropic",
+        "deepseek",
+        "openrouter"
+      ],
+      "providerModes": [
+        "terminal"
+      ]
+    },
+    {
+      "id": "readymade-scaffold-reference",
+      "caller": "readymade.entity.ReadymadeVariant",
+      "sourceFile": "src/main/java/com/navneet/executespec/readymade/entity/ReadymadeVariant.java",
+      "sourceTokens": [
+        "prompts/scaffolds/<key>.md",
+        "scaffold_key"
+      ],
+      "role": "PLANNER",
+      "mode": "BUILD",
+      "profile": "readymade-recipe",
+      "tools": [
+        "submitPlan"
+      ],
+      "scaffolds": [
+        "all",
+        "fullstack",
+        "go",
+        "java",
+        "node-backend",
+        "node-frontend",
+        "python",
+        "react-native-expo",
+        "rust",
+        "spring-boot",
+        "static-html"
+      ]
+    }
   ]
 }

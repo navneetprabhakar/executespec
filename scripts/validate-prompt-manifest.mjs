@@ -51,6 +51,47 @@ export function validatePromptManifest(manifest, repositoryRoot = root) {
       }
     }
   }
+
+  for (const coverage of manifest.runtimeCoverage ?? []) {
+    if (!coverage.id || !coverage.caller || !coverage.role || !coverage.mode || !coverage.profile) {
+      errors.push(`invalid runtime coverage identity: ${coverage.id ?? '<unnamed>'}`);
+      continue;
+    }
+    const sourceFile = path.join(repositoryRoot, coverage.sourceFile ?? '');
+    if (!coverage.sourceFile || !fs.existsSync(sourceFile)) {
+      errors.push(`missing runtime coverage caller: ${coverage.id} -> ${coverage.sourceFile ?? '<none>'}`);
+    } else {
+      const source = fs.readFileSync(sourceFile, 'utf8');
+      for (const token of coverage.sourceTokens ?? []) {
+        if (!source.includes(token)) {
+          errors.push(`missing runtime coverage source token: ${coverage.id} -> ${token}`);
+        }
+      }
+    }
+    if (!Array.isArray(coverage.tools) || coverage.tools.length === 0) {
+      errors.push(`runtime coverage has no tool identity: ${coverage.id}`);
+    }
+    for (const provider of coverage.providers ?? []) {
+      for (const mode of coverage.providerModes ?? []) {
+        const relative = `src/main/resources/prompts/fragments/provider/${provider}/${mode}.md`;
+        if (!fs.existsSync(path.join(repositoryRoot, relative))) {
+          errors.push(`missing runtime provider fragment: ${coverage.id} -> ${relative}`);
+        }
+      }
+    }
+    for (const fragment of coverage.fragments ?? []) {
+      const relative = `src/main/resources/prompts/fragments/${fragment}.md`;
+      if (!fs.existsSync(path.join(repositoryRoot, relative))) {
+        errors.push(`missing runtime project fragment: ${coverage.id} -> ${relative}`);
+      }
+    }
+    for (const scaffold of coverage.scaffolds ?? []) {
+      const relative = `src/main/resources/prompts/scaffolds/${scaffold}.md`;
+      if (!fs.existsSync(path.join(repositoryRoot, relative))) {
+        errors.push(`missing runtime scaffold: ${coverage.id} -> ${relative}`);
+      }
+    }
+  }
   return errors;
 }
 
