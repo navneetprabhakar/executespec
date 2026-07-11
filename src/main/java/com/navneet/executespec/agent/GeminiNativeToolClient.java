@@ -317,7 +317,8 @@ public class GeminiNativeToolClient {
           for (var media : um.getMedia()) {
             ObjectNode inline = parts.addObject().putObject("inlineData");
             inline.put("mimeType", media.getMimeType().toString());
-            inline.put("data", java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
+            inline.put(
+                "data", java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
           }
         }
       } else if (m instanceof AssistantMessage am) {

@@ -205,7 +205,9 @@ public class AgentAttachmentService {
         .toList();
   }
 
-  /** Add server-loaded image bytes to the final user message; never trusts client-provided bytes. */
+  /**
+   * Add server-loaded image bytes to the final user message; never trusts client-provided bytes.
+   */
   public List<java.util.Map<String, Object>> withMediaAttachments(
       List<java.util.Map<String, Object>> conversation,
       String sessionId,
