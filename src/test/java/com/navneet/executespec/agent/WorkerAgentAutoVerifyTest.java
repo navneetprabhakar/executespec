@@ -34,7 +34,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
-/** Pins the schema-free edit-burst auto-verify completion boundary (V255, flag default OFF). */
+/** Pins the schema-free edit-burst auto-verify completion boundary (V259, default ON). */
 class WorkerAgentAutoVerifyTest {
 
   private static AssistantMessage.ToolCall call(String name, String args) {

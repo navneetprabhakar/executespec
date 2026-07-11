@@ -1583,7 +1583,7 @@ to boot — skip it for those.""";
             .progressV2(
                 featureFlagService != null
                     && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-            // auto-verify (V255, default OFF): server-side edit-burst test runs with
+            // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
             .autoVerify(
                 featureFlagService != null
