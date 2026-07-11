@@ -58,7 +58,9 @@ class AgentRecordedTurnService {
     }
     sessionRepo.save(session);
 
-    eventRecorder.append(sessionId, turn.getId(), "INTENT", orchestratorDecision);
+    // Reuse the persisted turn id as the compatibility action id so Web and CLI replay clients
+    // can correlate the intent event without depending on client-local state.
+    eventRecorder.append(sessionId, turn.getId(), turn.getId(), "INTENT", orchestratorDecision);
 
     return new TurnResponse(
         turn.getId(),

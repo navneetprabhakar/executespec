@@ -26,11 +26,20 @@ class AgentEventRecorder {
     return append(sessionId, turnId, null, type, payload);
   }
 
-  AgentActionEvent appendAction(String sessionId, String actionId, String type, Object payload) {
-    return append(sessionId, null, actionId, type, payload);
+  /**
+   * Records a turn event with an explicit action correlation id. Compatibility turn recording
+   * predates action events, but replay clients still need a stable cross-surface identifier.
+   */
+  AgentActionEvent append(
+      String sessionId, String turnId, String actionId, String type, Object payload) {
+    return appendInternal(sessionId, turnId, actionId, type, payload);
   }
 
-  private AgentActionEvent append(
+  AgentActionEvent appendAction(String sessionId, String actionId, String type, Object payload) {
+    return appendInternal(sessionId, null, actionId, type, payload);
+  }
+
+  private AgentActionEvent appendInternal(
       String sessionId, String turnId, String actionId, String type, Object payload) {
     return eventRepo.save(
         AgentActionEvent.builder()
