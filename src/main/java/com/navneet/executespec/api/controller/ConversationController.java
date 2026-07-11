@@ -87,11 +87,9 @@ public class ConversationController {
       }
     }
 
-    // Pin the pre-flight chat to Anthropic Haiku (LIGHTWEIGHT) via callDirect, which
-    // bypasses the fallback chain AND the per-runId provider pin store. The shared
-    // runId="conversation" pin (set by an earlier call) was reordering the chain to
-    // Gemini Flash — a thinking model whose reasoning tokens ate the output budget
-    // and truncated the spec. callDirect forces the exact provider+model.
+    // Pin the pre-flight chat to Anthropic Haiku (LIGHTWEIGHT) through the canonical
+    // text seam. Supplying the provider and resolved model explicitly keeps this
+    // short-lived conversation from inheriting a different account/run route.
     String model = modelRegistry.lightweightModelFor("anthropic");
     // 4096 leaves room for a full consolidated spec on the "Use as spec" turn;
     // clarifying questions stop early so the higher cap costs nothing there.
