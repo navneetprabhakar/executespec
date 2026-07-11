@@ -144,6 +144,26 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void replayToleratesLegacyEventWithoutSequenceWithoutAdvancingCursor() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc("s1"))
+        .thenReturn(
+            List.of(
+                AgentActionEvent.builder()
+                    .id("legacy-event")
+                    .sessionId("s1")
+                    .type("TEXT")
+                    .streamSequence(null)
+                    .build()));
+
+    var replay = service.replayEvents("s1", null, user());
+
+    assertThat(replay.events()).extracting("id").containsExactly("legacy-event");
+    assertThat(replay.lastSequence()).isZero();
+    assertThat(replay.snapshot()).isTrue();
+  }
+
+  @Test
   void listsBoundedTurnsBeforeCursorWithStoredTraceHydration() throws Exception {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
     when(turnRepo.findBySessionIdOrderBySequenceAsc("s1"))
