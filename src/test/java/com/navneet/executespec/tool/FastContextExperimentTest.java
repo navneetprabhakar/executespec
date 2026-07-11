@@ -77,6 +77,33 @@ class FastContextExperimentTest {
   }
 
   @Test
+  void unavailableExplorerFailsClosedToDeterministicBaseline() throws Exception {
+    Files.writeString(root.resolve("src.java"), "other\n");
+    var request =
+        new RepositorySearchService.SearchRequest(
+            "missing", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+
+    var report =
+        new FastContextExperiment()
+            .run(
+                root,
+                List.of(
+                    new FastContextExperiment.FixtureCase(
+                        "unavailable", request, Set.of("src.java"), true)),
+                null,
+                FastContextExperiment.InvocationPolicy.SELECTIVE);
+
+    // An unavailable optional explorer must never turn an empty baseline into a synthetic
+    // success or an adoption decision. Production callers remain on deterministic search.
+    assertThat(report.explorerEngine()).isEqualTo("UNAVAILABLE");
+    assertThat(report.explorerInvocations()).isZero();
+    assertThat(report.explorerMatches()).isZero();
+    assertThat(report.decision()).isEqualTo(FastContextExperiment.Decision.BASELINE_ONLY);
+    assertThat(report.baselineMeanRecall()).isZero();
+    assertThat(report.explorerMeanRecall()).isNaN();
+  }
+
+  @Test
   void syntheticPairedTraceCalculatesPrecisionLatencyAndCostAndAdoptsOnlyNoRegression()
       throws Exception {
     Files.writeString(root.resolve("good.java"), "target\n");
