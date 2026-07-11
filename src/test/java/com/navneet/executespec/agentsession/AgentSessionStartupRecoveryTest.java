@@ -33,6 +33,7 @@ class AgentSessionStartupRecoveryTest {
             .updatedAt(Instant.now().minusSeconds(300))
             .build();
     when(sessions.findByStatus("RUNNING")).thenReturn(List.of(child));
+    when(sessions.findByIdForUpdate("child-1")).thenReturn(java.util.Optional.of(child));
 
     assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
     assertThat(child.getStatus()).isEqualTo("CANCELLED");
@@ -64,6 +65,7 @@ class AgentSessionStartupRecoveryTest {
             .updatedAt(Instant.now())
             .build();
     when(sessions.findByStatus("RUNNING")).thenReturn(List.of(live));
+    when(sessions.findByIdForUpdate("live-1")).thenReturn(java.util.Optional.of(live));
 
     assertThat(recovery.reconcileRunningSessions()).isZero();
     assertThat(live.getStatus()).isEqualTo("RUNNING");
@@ -71,6 +73,39 @@ class AgentSessionStartupRecoveryTest {
     verify(events, org.mockito.Mockito.never())
         .appendAction(
             eq("live-1"),
+            org.mockito.ArgumentMatchers.any(),
+            eq("SUBAGENT_RECOVERY"),
+            org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void peerTerminalTransitionWinsBeforeRecoveryWrites() {
+    AgentSession staleSnapshot =
+        AgentSession.builder()
+            .id("peer-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("RUNNING")
+            .updatedAt(Instant.now().minusSeconds(300))
+            .build();
+    AgentSession peerState =
+        AgentSession.builder()
+            .id("peer-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("COMPLETED")
+            .updatedAt(Instant.now())
+            .build();
+    when(sessions.findByStatus("RUNNING")).thenReturn(List.of(staleSnapshot));
+    when(sessions.findByIdForUpdate("peer-1")).thenReturn(java.util.Optional.of(peerState));
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+    verify(sessions, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+    verify(events, org.mockito.Mockito.never())
+        .appendAction(
+            eq("peer-1"),
             org.mockito.ArgumentMatchers.any(),
             eq("SUBAGENT_RECOVERY"),
             org.mockito.ArgumentMatchers.any());
