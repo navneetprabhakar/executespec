@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V258** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V261** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -192,6 +192,12 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 5. **`executespec-docs/backend/reason-log/2026-06.md`** when an in-flight item changes status or a new decision is recorded.
 6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`executespec-docs/backend/design/*`** when tokens / theming / a11y commitments change.
 7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
+
+### Current-state corrections (2026-07-11)
+
+- The current migration head is V261; older V258 references in this file are historical and must not be used as release facts.
+- `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
+- Current source-size facts are RunOrchestrator 4,140 lines, `frontend/src/lib/api/core.ts` 2,177 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 
 For trivial typo fixes you may write `skip doc-refresh: trivial typo` in the commit message. Otherwise doc-refresh artefacts go in the same commit as the code, not a separate follow-up.
 
