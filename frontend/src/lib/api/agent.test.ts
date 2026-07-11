@@ -107,11 +107,12 @@ describe('agent API SSE helpers', () => {
 
   it('requests cursor-based event backfill', async () => {
     localStorage.setItem('access_token', 'test-token');
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({events: [], lastSequence: 7, snapshot: false}), {
-        status: 200,
-        headers: {'content-type': 'application/json'},
-      }),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({events: [], lastSequence: 7, snapshot: false}), {
+          status: 200,
+          headers: {'content-type': 'application/json'},
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -120,7 +121,9 @@ describe('agent API SSE helpers', () => {
     expect(response.lastSequence).toBe(7);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/agent/sessions/s1/events/replay?after=6',
-      expect.objectContaining({headers: expect.objectContaining({Authorization: 'Bearer test-token'})}),
+      expect.objectContaining({
+        headers: expect.objectContaining({Authorization: 'Bearer test-token'}),
+      }),
     );
   });
 
