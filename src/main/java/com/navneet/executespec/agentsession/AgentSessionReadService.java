@@ -66,10 +66,15 @@ class AgentSessionReadService {
             ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId)
             : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
                 sessionId, after);
-    long last =
-        events.isEmpty()
-            ? (after == null || after < 0 ? 0 : after)
-            : events.getLast().getStreamSequence();
+    long last = after == null || after < 0 ? 0 : after;
+    // V262 makes stream_sequence non-null for new rows, but tolerate a legacy/corrupt row rather
+    // than turning an authenticated reconnect into a 500. Null-sequence events remain visible in
+    // the replay payload; the cursor advances only to the greatest durable sequence available.
+    for (AgentActionEvent event : events) {
+      if (event.getStreamSequence() != null) {
+        last = Math.max(last, event.getStreamSequence());
+      }
+    }
     return new AgentEventReplayResponse(events, last, after == null || after < 0);
   }
 
