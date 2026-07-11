@@ -515,3 +515,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (RL-2026-05-015). Planner/worker/reviewer all resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`); YAML-matrix + F3 per-org overrides take effect.
 - ~~**10 legacy access-guard sites**~~ — **resolved** (corrected 2026-05-24). `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is now an empty, closed set (35/35 cleared); any new violator fails the build.
 - **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
+
+### Current release-slice corrections (2026-07-11)
+
+- `tool/RepositorySearchService` keeps content-SHA fingerprints for working-tree freshness and now classifies deterministic symbol hits as definitions, imports, test references, call sites, or ordinary references. This is still syntax/heuristic evidence, not a language-aware relationship graph; the full relationship-index gate remains open.
+- `SubagentExecutionServiceTest` covers interruption of an in-flight sibling after a child failure; single-child provider calls still rely on existing turn/cost/HTTP bounds rather than an independent subagent wall-clock timeout.

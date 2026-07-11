@@ -92,7 +92,8 @@ public class RepositorySearchService {
           String line = lines.get(i);
           SymbolMatch symbolMatch =
               request.mode() == SearchMode.SYMBOL
-                  ? symbolMatch(request.query(), line, request.caseSensitive())
+                  ? symbolMatch(
+                      request.query(), line, request.caseSensitive(), file.getFileName().toString())
                   : null;
           if (request.mode() == SearchMode.SYMBOL && symbolMatch == null) continue;
           if (request.mode() != SearchMode.SYMBOL && !pattern.matcher(line).find()) continue;
@@ -386,8 +387,11 @@ public class RepositorySearchService {
 
   public enum MatchType {
     SYMBOL_DEFINITION(0),
-    SYMBOL_REFERENCE(1),
-    TEXT(2);
+    IMPORT(1),
+    TEST_REFERENCE(2),
+    CALL_SITE(3),
+    SYMBOL_REFERENCE(4),
+    TEXT(5);
 
     private final int rank;
 
@@ -497,7 +501,8 @@ public class RepositorySearchService {
 
   private record SymbolMatch(MatchType type, String reason) {}
 
-  private static SymbolMatch symbolMatch(String symbol, String line, boolean caseSensitive) {
+  private static SymbolMatch symbolMatch(
+      String symbol, String line, boolean caseSensitive, String fileName) {
     Pattern token =
         Pattern.compile(
             "(?<![A-Za-z0-9_$])" + Pattern.quote(symbol) + "(?![A-Za-z0-9_$])",
@@ -511,7 +516,12 @@ public class RepositorySearchService {
             + escaped
             + "(?:\\b|\\s*\\()";
     String assignedDeclaration = "(?:^|\\s)(?:const|let|var)\\s+" + escaped + "\\s*=.*";
-    String methodDeclaration = "(?:^|\\s)[A-Za-z_$][\\w$<>\\[\\], ?]*\\s+" + escaped + "\\s*\\(";
+    String methodDeclaration =
+        "^\\s*(?:(?:public|private|protected|static|final|abstract|async|export|default|"
+            + "override|virtual|synchronized|sealed|open|internal|readonly)\\s+)*"
+            + "[A-Za-z_$][\\w$<>\\[\\], ?]*\\s+"
+            + escaped
+            + "\\s*\\(";
     boolean definition =
         Pattern.compile(declaration).matcher(line).find()
             || Pattern.compile(assignedDeclaration).matcher(line).find()
@@ -519,7 +529,26 @@ public class RepositorySearchService {
             || Pattern.compile("^\\s*(?:async\\s+)?(?:def|class)\\s+" + escaped + "\\b")
                 .matcher(line)
                 .find();
-    if (!definition) return new SymbolMatch(MatchType.SYMBOL_REFERENCE, "exact symbol reference");
+    if (!definition) {
+      String normalized = line.trim().toLowerCase(Locale.ROOT);
+      if (normalized.startsWith("import ")
+          || normalized.startsWith("from ")
+          || normalized.startsWith("using ")
+          || normalized.contains("require(")) {
+        return new SymbolMatch(MatchType.IMPORT, "exact import/module reference");
+      }
+      String lowerFile = fileName.toLowerCase(Locale.ROOT);
+      if (lowerFile.contains("test")
+          || lowerFile.contains("spec")
+          || normalized.contains("@test")
+          || normalized.matches(".*\\b(describe|it|test)\\s*\\(.*")) {
+        return new SymbolMatch(MatchType.TEST_REFERENCE, "exact test reference");
+      }
+      if (Pattern.compile("\\b" + Pattern.quote(symbol) + "\\s*\\(").matcher(line).find()) {
+        return new SymbolMatch(MatchType.CALL_SITE, "exact call site");
+      }
+      return new SymbolMatch(MatchType.SYMBOL_REFERENCE, "exact symbol reference");
+    }
     String language =
         line.contains("def ")
             ? "Python"
