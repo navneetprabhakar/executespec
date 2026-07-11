@@ -63,7 +63,7 @@ public class NativeToolsTestController {
   // application.yml) get merged into call-time options and Spring AI 1.1.4 serializes the
   // legacy max_tokens field into extra_body for gpt-5.x reasoning models, which the
   // chat-completions endpoint rejects. Build a fresh model inline with cleared defaults
-  // (mirrors V1 FallbackLlmRouter.buildOpenAiModel pattern at FallbackLlmRouter.java:613-621).
+  // (mirrors the canonical OpenAI-wire model construction used by LlmRouter).
   public NativeToolsTestController(
       OpenAiNativeToolClient openAiNativeToolClient,
       @Qualifier("anthropicChatModel") ObjectProvider<AnthropicChatModel> anthropicModelProvider,

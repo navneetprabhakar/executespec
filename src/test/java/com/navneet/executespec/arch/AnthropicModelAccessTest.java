@@ -46,9 +46,6 @@ class AnthropicModelAccessTest {
    *   <li>{@code LlmRouter} — owns dispatch + the per-key cache. This is THE place that turns a
    *       customer BYOK key into a model on the V2 path; every other consumer should call this
    *       instead of grabbing the singleton.
-   *   <li>{@code FallbackLlmRouter} — V1 router. Already implements its own per-key Anthropic model
-   *       construction via {@code buildAnthropicModel} (BYOK-aware by design). Kept until V1
-   *       callers (chat copilot, project-doc generators, accuracy assessment) migrate to V2.
    *   <li>{@code NativeToolsTestController} — test/smoke endpoint. Resolves the platform bean
    *       intentionally — it tests the bean, not customer dispatch.
    * </ul>
@@ -57,7 +54,6 @@ class AnthropicModelAccessTest {
       new TreeSet<>(
           Set.of(
               "AgentModelConfig",
-              "FallbackLlmRouter", // V1, already BYOK-aware via buildAnthropicModel
               "LlmRouter", // V2 router — main BYOK entry point
               "NativeToolsTestController" // test-only smoke
               ));

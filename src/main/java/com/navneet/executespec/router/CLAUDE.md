@@ -44,7 +44,7 @@ Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). Users can sti
 
 Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. `OPENROUTER`, `DEEPSEEK`, and `FIREWORKS` are intentionally NOT in any failover chain — they are explicit BYOK / operator routes that the operator/admin opted into, and silently switching off them would defeat the cost / data-residency / latency reason they picked them.
 
-`FallbackLlmRouter` (**deprecated — RL-2026-05-041, no new callers; migrate text-only callers to `LlmRouter.callText`**) honours `FallbackMode.NO_FALLBACK` for callers that need strict provider isolation (used when `-Dexecutespec.strict-provider=true`). `ProjectDocGeneratorService` and `RunTitleSummarizer` are migrated text-only callers; `callText` uses an explicit empty tool set so metadata calls do not bind worker tools.
+All text-only callers now use `LlmRouter.callText` (or `callTextStrict` when cross-provider failover is prohibited), with an explicit empty tool set so metadata calls do not bind worker tools. The former compatibility router was removed in ExecuteSpec 2.0; there is one provider transport, one retry/failover policy, and one usage ledger.
 
 ## Circuit breaker
 
@@ -53,7 +53,7 @@ Per `application.yml failover-order:`, when a provider fails the router walks th
 - **Recovery:** unhealthy key has 180s TTL → auto-expires → provider assumed healthy again.
 - **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues).
 - **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider).
-- **Integration:** `FallbackLlmRouter` checks health before each provider attempt; records success/failure after each call. `LlmRouter` (V2 native-tool and `callText` path) owns bounded same-provider retry and flag-gated YAML-chain failover; both paths remain transport-disabled in ordinary tests.
+- **Integration:** `LlmRouter` (native-tool and `callText` paths) owns bounded same-provider retry and flag-gated YAML-chain failover; ordinary tests remain transport-disabled.
 
 ## Known tech debt
 
