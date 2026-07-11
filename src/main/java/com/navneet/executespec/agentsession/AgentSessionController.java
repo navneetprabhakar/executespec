@@ -23,7 +23,9 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.subagent.ImplementerMutationService;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
 import org.springframework.http.MediaType;
@@ -40,11 +42,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import io.micrometer.context.ContextSnapshotFactory;
-import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/agent")
-@RequiredArgsConstructor
 public class AgentSessionController {
 
   private final AgentSessionService sessionService;
@@ -52,6 +52,37 @@ public class AgentSessionController {
   private final AgentStreamTurnRunner streamTurnRunner;
   private final AgentAttachmentService attachmentService;
   private final SubagentExecutionService subagentExecutionService;
+  private final ImplementerMutationService implementerMutationService;
+
+  public AgentSessionController(
+      AgentSessionService sessionService,
+      AgentActionCatalog actionCatalog,
+      AgentStreamTurnRunner streamTurnRunner,
+      AgentAttachmentService attachmentService,
+      SubagentExecutionService subagentExecutionService) {
+    this(
+        sessionService,
+        actionCatalog,
+        streamTurnRunner,
+        attachmentService,
+        subagentExecutionService,
+        null);
+  }
+
+  public AgentSessionController(
+      AgentSessionService sessionService,
+      AgentActionCatalog actionCatalog,
+      AgentStreamTurnRunner streamTurnRunner,
+      AgentAttachmentService attachmentService,
+      SubagentExecutionService subagentExecutionService,
+      ImplementerMutationService implementerMutationService) {
+    this.sessionService = sessionService;
+    this.actionCatalog = actionCatalog;
+    this.streamTurnRunner = streamTurnRunner;
+    this.attachmentService = attachmentService;
+    this.subagentExecutionService = subagentExecutionService;
+    this.implementerMutationService = implementerMutationService;
+  }
 
   @GetMapping("/actions")
   public List<AgentActionDescriptor> actions() {
@@ -104,6 +135,57 @@ public class AgentSessionController {
     }
     return subagentExecutionService.executeBatch(requests, user, orgId(user));
   }
+
+  /** Reserve the explicit single-writer scope used by the CLI/VS Code implementer seam. */
+  @PostMapping("/sessions/{sessionId}/writer/reserve")
+  public WriterReservation reserveWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterReserveRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer reservation is required");
+    return implementerMutationService.reserve(
+        sessionId, request.requestId(), request.scope(), user, orgId(user));
+  }
+
+  /**
+   * Execute one explicitly authorized writeFile/editFile mutation; WEB is rejected in the service.
+   */
+  @PostMapping("/sessions/{sessionId}/writer/mutate")
+  public com.navneet.executespec.tool.ToolResult mutateWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterMutationRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer mutation is required");
+    return implementerMutationService.mutate(
+        sessionId,
+        request.reservationId(),
+        request.scope(),
+        request.toolName(),
+        request.args(),
+        user,
+        orgId(user));
+  }
+
+  /** Release a writer reservation; repeated release is idempotent. */
+  @PostMapping("/sessions/{sessionId}/writer/release")
+  public WriterReservation releaseWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterReleaseRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer release is required");
+    return implementerMutationService.release(
+        sessionId, request.reservationId(), request.reason(), user, orgId(user));
+  }
+
+  record WriterReserveRequest(String requestId, String scope) {}
+
+  record WriterMutationRequest(
+      String reservationId,
+      String scope,
+      String toolName,
+      com.fasterxml.jackson.databind.JsonNode args) {}
+
+  record WriterReleaseRequest(String reservationId, String reason) {}
 
   /**
    * Execute a child only when an explicit deterministic coordinator trigger is supplied. The

@@ -100,8 +100,11 @@ turns separately from runs.
   pessimistic parent-session lock and append-only `SUBAGENT_WRITER_RESERVED` /
   `SUBAGENT_WRITER_RELEASED` events to permit at most one active reservation per explicit workspace
   scope. `authorizeWriter` must be called before every mutation and `releaseWriter` is
-  terminal/idempotent. This is only a persisted reservation contract; no current role is
-  IMPLEMENTER, no executor grants write tools, and read-only child behavior remains unchanged.
+  terminal/idempotent. `ImplementerMutationService` is the deliberately narrow opt-in execution
+  seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
+  sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
+  `writeFile`/`editFile`; it is not a model loop and WEB sessions are rejected. Read-only child
+  behavior remains unchanged.
 - Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
@@ -135,7 +138,8 @@ turns separately from runs.
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
-| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned read-only role contracts (SCOUT, VERIFIER, REPRODUCER, REVIEWER, DOCS_SCOUT), depth/child/turn/cost guards, explicit start, completion handoff, and cancellation propagation. |
+| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned role contracts (read-only SCOUT/VERIFIER/REPRODUCER/REVIEWER/DOCS_SCOUT plus disabled-by-default IMPLEMENTER_V1), depth/child/turn/cost guards, explicit start, completion handoff, cancellation propagation, and single-writer reservation events. |
+| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, ownership, local-hands surface, workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
 | `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
