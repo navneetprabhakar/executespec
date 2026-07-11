@@ -47,6 +47,7 @@ public class RepositorySearchService {
           "worktrees");
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
+  private static final int HASH_BUFFER_BYTES = 64 * 1024;
 
   /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
   private static final int MAX_INDEXED_WORKSPACES = 4;
@@ -187,14 +188,16 @@ public class RepositorySearchService {
 
     private synchronized List<String> lines(Path file) {
       try {
-        long size = Files.size(file);
-        long modified = Files.getLastModifiedTime(file).toMillis();
+        // Metadata is only a useful fast path when the filesystem guarantees a reliable
+        // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
+        // size and mtime, so compare a streaming content digest before reusing the decoded lines.
+        String contentHash = contentHash(file);
         FileSnapshot previous = snapshots.get(file);
-        if (previous != null && previous.size == size && previous.modified == modified) {
+        if (previous != null && previous.contentHash.equals(contentHash)) {
           return previous.lines;
         }
         List<String> current = Files.readAllLines(file);
-        snapshots.put(file, new FileSnapshot(size, modified, current));
+        snapshots.put(file, new FileSnapshot(contentHash, current));
         return current;
       } catch (IOException | OutOfMemoryError e) {
         snapshots.remove(file);
@@ -203,7 +206,7 @@ public class RepositorySearchService {
     }
   }
 
-  private record FileSnapshot(long size, long modified, List<String> lines) {}
+  private record FileSnapshot(String contentHash, List<String> lines) {}
 
   private static Pattern compile(SearchRequest request) {
     if (request.mode() == SearchMode.SYMBOL) {
@@ -333,10 +336,21 @@ public class RepositorySearchService {
     MessageDigest digest = digest();
     for (Path file : files) {
       digest.update(file.toString().getBytes(StandardCharsets.UTF_8));
-      digest.update(Long.toString(Files.size(file)).getBytes(StandardCharsets.UTF_8));
-      digest.update(
-          Long.toString(Files.getLastModifiedTime(file).toMillis())
-              .getBytes(StandardCharsets.UTF_8));
+      digest.update(contentHash(file).getBytes(StandardCharsets.US_ASCII));
+    }
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  /**
+   * Content identity for a single file. The digest is streamed with a fixed-size buffer so a large
+   * source file never becomes a second full in-memory copy merely to detect freshness.
+   */
+  private static String contentHash(Path file) throws IOException {
+    MessageDigest digest = digest();
+    try (var input = Files.newInputStream(file)) {
+      byte[] buffer = new byte[HASH_BUFFER_BYTES];
+      int read;
+      while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
     }
     return HexFormat.of().formatHex(digest.digest());
   }
