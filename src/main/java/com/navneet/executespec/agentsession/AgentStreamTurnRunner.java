@@ -89,6 +89,9 @@ public class AgentStreamTurnRunner {
           AgentStreamTurnSupport.withAttachmentBlock(
               AgentStreamTurnSupport.conversationOrCurrentMessage(request),
               attachmentService.injectionBlock(ctx.sessionId(), request.attachmentIds()));
+      conversation =
+          attachmentService.withMediaAttachments(
+              conversation, ctx.sessionId(), request.attachmentIds());
       if (ctx.model() == null || ctx.model().isBlank()) {
         specChatService.runTurn(
             sink,

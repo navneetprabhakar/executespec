@@ -310,7 +310,16 @@ public class GeminiNativeToolClient {
         ObjectNode turn = contents.addObject();
         turn.put("role", "user");
         ArrayNode parts = turn.putArray("parts");
-        parts.addObject().put("text", um.getText());
+        if (um.getText() != null && !um.getText().isBlank()) {
+          parts.addObject().put("text", um.getText());
+        }
+        if (um.getMedia() != null) {
+          for (var media : um.getMedia()) {
+            ObjectNode inline = parts.addObject().putObject("inlineData");
+            inline.put("mimeType", media.getMimeType().toString());
+            inline.put("data", java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
+          }
+        }
       } else if (m instanceof AssistantMessage am) {
         ObjectNode turn = contents.addObject();
         turn.put("role", "model");

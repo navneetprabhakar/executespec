@@ -69,7 +69,11 @@ turns separately from runs.
   uploads go through `AgentAttachmentService` (`POST /api/agent/sessions/{id}/attachments`): every
   file is type/size/extract/injection-validated and stored sanitized in `AgentAttachmentStore`
   (Redis), then injected server-side as untrusted-delimited context via
-  `StreamTurnRequest.attachmentIds` — never the raw bytes, never client-controlled delimiting.
+  `StreamTurnRequest.attachmentIds` — never client-controlled delimiting. PNG/JPEG/GIF/WebP
+  uploads stay capped at 10 MB and are retained as short-lived raw bytes for provider-native image
+  parts; OpenAI-wire, Gemini, and Anthropic forced-tool requests receive the bytes as image data,
+  while unsupported binary formats remain rejected. Image bytes never enter textual logs or the
+  untrusted text block.
 - Run-scoped web agent sessions persist `agent_session.run_id` (V246). Creation must validate the
   run through `RunAccessGuard`; if the caller also sends `projectId`, it must match the run's
   project. Streaming turns pass the scoped run id into `SpecChatService` as context instead of
