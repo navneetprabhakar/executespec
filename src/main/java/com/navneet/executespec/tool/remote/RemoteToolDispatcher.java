@@ -154,7 +154,9 @@ public class RemoteToolDispatcher {
                 emit(call);
               });
     }
-    return stateService.pending(runId);
+    // A fresh JVM has no worker future to rebind. Return only lease-valid evidence so an old
+    // client cannot accidentally replay a call that has already exceeded its remote wait window.
+    return freshPending(stateService.pending(runId));
   }
 
   /**
@@ -174,10 +176,7 @@ public class RemoteToolDispatcher {
             .filter(call -> call.updatedAt() != null && call.updatedAt().isBefore(cutoff))
             .map(LocalHandsStateService.PendingCall::callId)
             .toList();
-    List<LocalHandsStateService.PendingCall> fresh =
-        durable.stream()
-            .filter(call -> call.updatedAt() == null || !call.updatedAt().isBefore(cutoff))
-            .toList();
+    List<LocalHandsStateService.PendingCall> fresh = freshPending(durable);
     if (session != null) {
       return new ReconnectStatus("CONNECTED", true, fresh, stale);
     }
@@ -192,6 +191,14 @@ public class RemoteToolDispatcher {
       boolean workerWaitRebound,
       List<LocalHandsStateService.PendingCall> pendingCalls,
       List<String> staleCallIds) {}
+
+  private List<LocalHandsStateService.PendingCall> freshPending(
+      List<LocalHandsStateService.PendingCall> calls) {
+    Instant cutoff = Instant.now().minusMillis(Math.max(0L, restartRecoveryWindowMs));
+    return calls.stream()
+        .filter(call -> call.updatedAt() == null || !call.updatedAt().isBefore(cutoff))
+        .toList();
+  }
 
   /** Reloadable pending calls for clients that reconnect without an active SSE replay cursor. */
   public List<LocalHandsStateService.PendingCall> pendingCalls(String runId) {
