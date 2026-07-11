@@ -60,7 +60,7 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
-  void spawnPersistsBoundedChildAndBidirectionalLinks() {
+  void spawnPersistsBoundedChildAndBidirectionalLinks() throws Exception {
     AgentSession parent = parent("parent", "ACTIVE");
     when(sessions.findById("parent")).thenReturn(Optional.of(parent));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
