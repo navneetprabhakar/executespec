@@ -44,7 +44,7 @@ import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -65,7 +65,7 @@ import lombok.extern.slf4j.Slf4j;
  * bodies) follow in the second batch.
  */
 @Component
-@RequiredArgsConstructor
+@AllArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @Slf4j
 public class RunLifecycleService {
 
