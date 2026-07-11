@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.SessionSnapshot;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
@@ -60,7 +61,7 @@ class AgentSessionReadService {
   }
 
   AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
-    requireSession(sessionId, user);
+    AgentSession session = requireSession(sessionId, user);
     List<AgentActionEvent> events =
         after == null || after < 0
             ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId)
@@ -88,7 +89,15 @@ class AgentSessionReadService {
         last = Math.max(last, event.getStreamSequence());
       }
     }
-    return new AgentEventReplayResponse(events, last, after == null || after < 0);
+    boolean snapshot = after == null || after < 0;
+    return new AgentEventReplayResponse(
+        events,
+        last,
+        snapshot,
+        snapshot
+            ? new SessionSnapshot(
+                session.getId(), session.getStatus(), session.getTitle(), session.getUpdatedAt())
+            : null);
   }
 
   List<AgentTurnResponse> listTurns(
