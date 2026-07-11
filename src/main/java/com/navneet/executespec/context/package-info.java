@@ -36,8 +36,10 @@
  * CODEBASE_CONTEXT.md} and {@code decisions.md}. Any reader must use {@code
  * ContextEvidenceBundleWriter.readCurrent(...)} so a source edit invalidates the bundle instead of
  * replaying stale evidence. The current release writes this sidecar for inspection and recovery
- * preparation; cross-run consumption remains a follow-up until a durable project-scoped handoff
- * store is wired.
+ * preparation; its additive {@code handoff} object carries goal, explicit hypothesis (empty when
+ * the context agent did not provide one), changed files, observed failures, and do-not-repeat
+ * decisions. Cross-run consumption remains a follow-up until a durable project-scoped handoff store
+ * is wired.
  *
  * <h2>Access patterns</h2>
  *

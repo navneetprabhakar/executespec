@@ -85,6 +85,15 @@ public class ContextEvidenceBundleWriter {
     evidence.put("reviewerSummary", cap(input.reviewerSummary(), MAX_TEXT_CHARS));
     evidence.put("recentDecisions", cap(input.recentDecisions(), MAX_TEXT_CHARS));
 
+    // Structured handoff state is additive to the legacy evidence fields. Empty hypothesis is
+    // intentional: this component persists what was observed, never an inferred claim.
+    ObjectNode handoff = root.putObject("handoff");
+    handoff.put("goal", cap(input.runGoal(), MAX_TEXT_CHARS));
+    handoff.put("hypothesis", cap(input.hypothesis(), MAX_TEXT_CHARS));
+    putList(handoff, "changedFiles", input.changedFiles());
+    putList(handoff, "failures", input.failures());
+    putList(handoff, "doNotRepeat", input.doNotRepeat());
+
     Path temp = contextDir.resolve(FILE_NAME + ".tmp-" + safeRunId(runId));
     Files.writeString(
         temp,
