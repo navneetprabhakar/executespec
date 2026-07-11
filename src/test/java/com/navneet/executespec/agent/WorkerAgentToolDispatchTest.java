@@ -3,6 +3,8 @@ package com.navneet.executespec.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -30,6 +32,7 @@ import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
+import com.navneet.executespec.tool.WorkerHistoryCompactor;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -88,6 +91,14 @@ class WorkerAgentToolDispatchTest {
 
   private WorkerAgent newWorker(
       List<ChatResponse> seq, String unknownTool, SseBroadcaster broadcaster) {
+    return newWorker(seq, unknownTool, broadcaster, null);
+  }
+
+  private WorkerAgent newWorker(
+      List<ChatResponse> seq,
+      String unknownTool,
+      SseBroadcaster broadcaster,
+      WorkerHistoryCompactor historyCompactor) {
     LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
@@ -123,7 +134,7 @@ class WorkerAgentToolDispatchTest {
         runRepo,
         broadcaster,
         null,
-        null,
+        historyCompactor,
         // VBC (V235) — WorkspaceTestRunner; null = verify-before-complete gate off.
         null);
   }
@@ -161,6 +172,44 @@ class WorkerAgentToolDispatchTest {
     assertTrue(
         result.toolCallLog().stream().anyMatch(s -> s.contains("readFile") && s.contains("-> ERR")),
         "Malformed tool args must be recorded as an ERR tool-call log entry for waste guards.");
+  }
+
+  @Test
+  @DisplayName("production worker loop invokes headroom-aware context planner seam")
+  void workerAlwaysPassesModelOutputAndBoundToolsToContextCompactor() {
+    WorkerHistoryCompactor historyCompactor = mock(WorkerHistoryCompactor.class);
+    lenient()
+        .when(
+            historyCompactor.compactIfNeeded(
+                anyList(),
+                anyString(),
+                anyString(),
+                any(ExecutionContext.class),
+                anyLong(),
+                anyString(),
+                any(),
+                anyList()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    WorkerAgent worker =
+        newWorker(
+            List.of(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}"))),
+            null,
+            mock(SseBroadcaster.class),
+            historyCompactor);
+
+    WorkerResult result = worker.run(req());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    verify(historyCompactor)
+        .compactIfNeeded(
+            anyList(),
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            any(ExecutionContext.class),
+            eq(0L),
+            eq("do thing"),
+            eq(4096),
+            anyList());
   }
 
   @Test
