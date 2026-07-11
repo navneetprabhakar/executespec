@@ -71,4 +71,21 @@ class ContextEvidenceBundleWriterTest {
 
     assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
   }
+
+  @Test
+  void rejectsBundleWhenEitherFingerprintSourceIsMissing() throws Exception {
+    Path contextDir = tempDir.resolve(".agent-context");
+    Files.createDirectories(contextDir);
+    Files.writeString(contextDir.resolve("CODEBASE_CONTEXT.md"), "context");
+    Files.writeString(contextDir.resolve("decisions.md"), "decisions");
+    var input =
+        new ContextAgentInput(
+            "context", "diff", List.of(), List.of(), List.of(), "", "", "run-1", "goal");
+    var writer = new ContextEvidenceBundleWriter(new ObjectMapper());
+
+    writer.write(tempDir, input, "run-1");
+    Files.delete(contextDir.resolve("decisions.md"));
+
+    assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
+  }
 }
