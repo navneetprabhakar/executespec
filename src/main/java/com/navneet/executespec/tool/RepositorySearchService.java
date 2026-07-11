@@ -173,7 +173,7 @@ public class RepositorySearchService {
     }
     // File decoding and snapshot refresh are scoped to this workspace, not the global LRU. This
     // allows independent searches to proceed concurrently while still serializing refreshes for a
-    // single file snapshot (and preserving the existing metadata-based stale-file protection).
+    // single file snapshot while retaining content-based stale-file protection.
     return cached == null ? null : cached.lines(file, contentHash);
   }
 
