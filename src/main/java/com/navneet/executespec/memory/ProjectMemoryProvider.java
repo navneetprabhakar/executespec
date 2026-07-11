@@ -27,16 +27,20 @@ public class ProjectMemoryProvider {
 
   private static final int MAX_MEMORY_TOKENS = 12000;
 
+  /** Conservative character budget (four characters per token) for planner memory. */
+  static final int MAX_MEMORY_CHARS = MAX_MEMORY_TOKENS * 4;
+
   /** Renders the full memory context (snapshot + last 10 entries). Empty if no history. */
   public String buildPlannerContext(String projectId) {
     if (projectId == null || projectId.isBlank()) return "";
-    StringBuilder ctx = new StringBuilder();
+    StringBuilder snapshotBlock = new StringBuilder();
 
     Optional<ProjectMemorySnapshot> snapshot =
         snapshotRepo.findTopByProjectIdOrderByVersionDesc(projectId);
     if (snapshot.isPresent()) {
       ProjectMemorySnapshot s = snapshot.get();
-      ctx.append("## PROJECT HISTORY (R")
+      snapshotBlock
+          .append("## PROJECT HISTORY (R")
           .append(s.getCoversRunsFrom())
           .append("-R")
           .append(s.getCoversRunsTo())
@@ -47,15 +51,38 @@ public class ProjectMemoryProvider {
 
     List<ProjectRunLedger> recent =
         ledgerRepo.findTop10ByProjectIdAndCompactedIntoIsNullOrderByRunNumberDesc(projectId);
-    if (!recent.isEmpty()) {
-      ctx.append("## RECENT RUNS\n");
-      // Render chronologically for readability.
-      for (int i = recent.size() - 1; i >= 0; i--) {
-        ctx.append(recent.get(i).getEntry()).append("\n\n");
+    // The snapshot is the durable project baseline and always wins over recency. Select only the
+    // newest complete ledger entries that fit after that baseline; never emit an oversized prompt
+    // block and silently rely on provider truncation.
+    int remainingChars = MAX_MEMORY_CHARS;
+    String snapshot = truncate(snapshotBlock.toString(), remainingChars);
+    remainingChars -= snapshot.length();
+    List<String> selectedRecent = new java.util.ArrayList<>();
+    if (remainingChars > 0 && !recent.isEmpty()) {
+      // Repository order is newest-first. Add newest entries first, then render chronologically.
+      int sectionOverhead = "## RECENT RUNS\n".length();
+      remainingChars -= Math.min(remainingChars, sectionOverhead);
+      for (ProjectRunLedger entry : recent) {
+        String rendered = truncate(entry.getEntry(), remainingChars);
+        String candidate = rendered + "\n\n";
+        if (rendered.isBlank() || candidate.length() > remainingChars) break;
+        selectedRecent.add(rendered);
+        remainingChars -= candidate.length();
       }
     }
+    StringBuilder ctx = new StringBuilder(snapshot);
+    if (!selectedRecent.isEmpty()) {
+      ctx.append("## RECENT RUNS\n");
+      for (int i = selectedRecent.size() - 1; i >= 0; i--) {
+        ctx.append(selectedRecent.get(i)).append("\n\n");
+      }
+    }
+    return ctx.toString();
+  }
 
-    return ctx.length() == 0 ? "" : ctx.toString();
+  private static String truncate(String value, int maxChars) {
+    if (value == null || value.isEmpty() || maxChars <= 0) return "";
+    return value.length() <= maxChars ? value : value.substring(0, maxChars);
   }
 
   public MemoryStats getStats(String projectId) {
@@ -69,12 +96,13 @@ public class ProjectMemoryProvider {
     int recentTokens =
         recent.stream().mapToInt(e -> e.getTokenCount() != null ? e.getTokenCount() : 0).sum();
 
+    int measuredTokens = (int) Math.ceil((snapTokens + recentTokens) * 1.0);
     return new MemoryStats(
         total,
         snapshot.map(ProjectMemorySnapshot::getVersion).orElse(0),
         snapshot.map(ProjectMemorySnapshot::getCoversRunsTo).orElse(0),
         recent.size(),
-        snapTokens + recentTokens,
+        Math.min(MAX_MEMORY_TOKENS, measuredTokens),
         MAX_MEMORY_TOKENS);
   }
 
