@@ -166,7 +166,7 @@ Production Flyway is strict: `application-prod.yml` disables automatic baselinin
 - LLM calls go through `LlmRouter` (native tools or `callText`). Never call providers directly.
 - Run ownership fields (`createdByUserId`, `orgId`, `projectId`) and submit-time continuation policy markers stamped BEFORE async pipeline thread starts (race-condition fix).
 - Gate-loss fallback: `approve()` → if gate missing → auto-fail with message.
-- Sliding-window LLM context: first 2 + last 18 messages.
+- Context is planned by model window and reserved headroom; the worker keeps full history while compaction is explicitly policy-controlled.
 - Token-cost control: `readFile` full reads cap at 60KB/2000 lines with **head-first** truncation at a line boundary (output is byte-exact from line 1 so `editFile` can match it; range reads untruncated) — RL-2026-05-062 replaced the old 5KB head+tail-with-a-hole that made `editFile` unable to match any region the model never saw. `shell` / `buildProject` 6k chars inline (`ToolOutput.budget` — full log spilled to disk + a `readFile` path). NOTE: the V2 worker keeps its FULL conversation history (no sliding window); `ToolOutputCompactor` + `WorkerHistoryCompactor` (default OFF, `worker.tool-compactor.enabled` / `worker.history-compaction.enabled`) are the context-compaction levers. The "first 2 + last 18" sliding window applies only to legacy `FallbackLlmRouter` non-tool agents.
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21` before any Maven command on macOS dev.
 - Payment-webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`).
