@@ -636,7 +636,12 @@ to boot — skip it for those.""";
       // about task N (assessment Gap 5: cross-task coherence was deferred entirely to the
       // reviewer wiring pass). Accumulated unconditionally (cheap strings); INJECTED only when
       // the flag is on.
-      List<String> runJournal = new ArrayList<>();
+      // Keep the prompt-local journal warm while retaining the last bounded entries on the
+      // workspace. A crash/restart can therefore restore cross-task context without replaying the
+      // provider transcript or treating the journal as authoritative task state.
+      java.nio.file.Path journalWorkspace = req.runContext().workspaceRoot();
+      List<String> runJournal =
+          new ArrayList<>(com.navneet.executespec.context.RunJournalStore.load(journalWorkspace));
       for (int i = 0; i < taskCount; i++) {
         // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
         // calls {@code future.cancel(true)} which interrupts THIS thread, but
@@ -702,7 +707,10 @@ to boot — skip it for those.""";
 
         recordTaskOutcomeMetric(req, task, outcome);
         outcomes.add(outcome);
-        runJournal.add(journalEntry(task, outcome));
+        String journalEntry = journalEntry(task, outcome);
+        runJournal.removeIf(existing -> existing.startsWith(task.id() + " ("));
+        runJournal.add(journalEntry);
+        com.navneet.executespec.context.RunJournalStore.save(journalWorkspace, runJournal);
         metrics.recordTaskStatus(outcome.status().name());
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
