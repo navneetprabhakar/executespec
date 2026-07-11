@@ -106,7 +106,10 @@ class ContextPlannerTest {
     assertThat(decision.contextWindowTokens()).isEqualTo(128_000);
     assertThat(decision.outputReserveTokens()).isEqualTo(8_000);
     assertThat(decision.safetyReserveTokens()).isEqualTo(10_240);
-    assertThat(decision.availableHeadroomTokens()).isEqualTo(40_000);
+    assertThat(decision.futureToolReserveTokens()).isEqualTo(2_048);
+    assertThat(decision.verificationReserveTokens()).isEqualTo(2_048);
+    assertThat(decision.handoffReserveTokens()).isEqualTo(2_000);
+    assertThat(decision.availableHeadroomTokens()).isEqualTo(23_664);
   }
 
   @Test
@@ -116,7 +119,7 @@ class ContextPlannerTest {
     var decision = planner.planHeadroom("openai", "model-64k", 52_000, 8_000, List.of(), List.of());
 
     assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.COMPACT);
-    assertThat(decision.availableHeadroomTokens()).isEqualTo(4_000);
+    assertThat(decision.availableHeadroomTokens()).isEqualTo(-7_216);
     assertThat(decision.safetyReserveTokens()).isEqualTo(5_120);
   }
 

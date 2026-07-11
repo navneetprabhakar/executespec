@@ -44,13 +44,17 @@
  * TTL down if pressure observed.
  *
  * <p>{@code ContextPlanner} provides deterministic priority/freshness selection and model-window
- * headroom decisions. {@code ContextEvidenceAssembler} uses the selector for optional handoff lists
- * while preserving goal, diff, reviewer and decision text as mandatory evidence; it never selects
- * or reorders tool messages. The assembler removes repeated search hits and estimates each optional
- * entry at the bundle writer's 1,000-character cap before spending its 6,000-token budget, so
- * duplicate or overlong hits cannot crowd out distinct evidence that will actually be serialized.
- * Worker headroom decisions also emit low-cardinality Micrometer evidence through {@code
- * executespec.context.headroom.decisions} and {@code
+ * headroom decisions. Worker headroom subtracts the model's output reservation, provider safety
+ * margin, a bounded next-tool-result reserve, a verification/repair reserve, and a handoff/journal
+ * reserve before deciding whether the history must compact. This keeps the full context window from
+ * being treated as usable input and preserves room for the next action after a large tool response
+ * or provider handoff. {@code ContextEvidenceAssembler} uses the selector for optional handoff
+ * lists while preserving goal, diff, reviewer and decision text as mandatory evidence; it never
+ * selects or reorders tool messages. The assembler removes repeated search hits and estimates each
+ * optional entry at the bundle writer's 1,000-character cap before spending its 6,000-token budget,
+ * so duplicate or overlong hits cannot crowd out distinct evidence that will actually be
+ * serialized. Worker headroom decisions also emit low-cardinality Micrometer evidence through
+ * {@code executespec.context.headroom.decisions} and {@code
  * executespec.context.headroom.available_tokens}; provider is bounded and model names are
  * deliberately excluded from metric tags so enterprise model overrides cannot create unbounded time
  * series. This is a local deterministic optimization; it does not require a FastContext/Microsoft

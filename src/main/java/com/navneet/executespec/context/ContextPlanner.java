@@ -23,6 +23,16 @@ public class ContextPlanner {
 
   static final double SAFETY_RATIO = 0.08;
   static final int MIN_SAFETY_TOKENS = 4_096;
+
+  /** Reserve space for the next tool-result envelope, not just the current request output. */
+  static final int MIN_TOOL_RESULT_RESERVE_TOKENS = 2_048;
+
+  /** Keep a small deterministic budget for test/build failure evidence and repair instructions. */
+  static final int MIN_VERIFICATION_RESERVE_TOKENS = 2_048;
+
+  /** Keep a handoff/journal reserve so a provider switch can carry the task state forward. */
+  static final int MIN_HANDOFF_RESERVE_TOKENS = 1_024;
+
   static final int CHARS_PER_TOKEN_ESTIMATE = 4;
   static final int MESSAGE_OVERHEAD_TOKENS = 12;
 
@@ -118,11 +128,20 @@ public class ContextPlanner {
               : modelRegistry.maxOutputForModel(model);
       outputReserve = Math.max(0, outputReserve);
       int safetyReserve = Math.max(MIN_SAFETY_TOKENS, (int) Math.ceil(window * SAFETY_RATIO));
+      int toolResultReserve = reserveFromOutput(outputReserve, MIN_TOOL_RESULT_RESERVE_TOKENS);
+      int verificationReserve = reserveFromOutput(outputReserve, MIN_VERIFICATION_RESERVE_TOKENS);
+      int handoffReserve = reserveFromOutput(outputReserve, MIN_HANDOFF_RESERVE_TOKENS);
       long estimatedInput =
           Math.max(Math.max(0L, lastReportedInputTokens), estimateInputTokens(messages, tools));
-      long available = (long) window - estimatedInput - outputReserve;
-      HeadroomAction action =
-          available < safetyReserve ? HeadroomAction.COMPACT : HeadroomAction.CONTINUE;
+      long available =
+          (long) window
+              - estimatedInput
+              - outputReserve
+              - safetyReserve
+              - toolResultReserve
+              - verificationReserve
+              - handoffReserve;
+      HeadroomAction action = available < 0 ? HeadroomAction.COMPACT : HeadroomAction.CONTINUE;
       return record(
           new HeadroomDecision(
               action,
@@ -132,15 +151,24 @@ public class ContextPlanner {
               estimatedInput,
               outputReserve,
               safetyReserve,
+              toolResultReserve,
+              verificationReserve,
+              handoffReserve,
               available,
               action == HeadroomAction.COMPACT
-                  ? "reserved output and safety margin exceed remaining model-window headroom"
-                  : "model-window headroom is sufficient after output and safety reserves"));
+                  ? "output, safety, tool-result, verification, and handoff reserves exceed"
+                      + " model-window headroom"
+                  : "model-window headroom is sufficient after output, safety, tool-result,"
+                      + " verification, and handoff reserves"));
     } catch (RuntimeException e) {
       return record(
           HeadroomDecision.unavailable(
               provider, model, "context planning failed: " + e.getMessage()));
     }
+  }
+
+  private static int reserveFromOutput(int outputReserve, int minimum) {
+    return Math.max(minimum, (int) Math.ceil(Math.max(0, outputReserve) * 0.25));
   }
 
   /**
@@ -223,15 +251,45 @@ public class ContextPlanner {
       long estimatedInputTokens,
       int outputReserveTokens,
       int safetyReserveTokens,
+      int futureToolReserveTokens,
+      int verificationReserveTokens,
+      int handoffReserveTokens,
       long availableHeadroomTokens,
       String reason) {
+
+    /** Compatibility constructor for callers that only supplied output and safety reserves. */
+    public HeadroomDecision(
+        HeadroomAction action,
+        String provider,
+        String model,
+        int contextWindowTokens,
+        long estimatedInputTokens,
+        int outputReserveTokens,
+        int safetyReserveTokens,
+        long availableHeadroomTokens,
+        String reason) {
+      this(
+          action,
+          provider,
+          model,
+          contextWindowTokens,
+          estimatedInputTokens,
+          outputReserveTokens,
+          safetyReserveTokens,
+          0,
+          0,
+          0,
+          availableHeadroomTokens,
+          reason);
+    }
+
     public boolean shouldCompact() {
       return action == HeadroomAction.COMPACT;
     }
 
     public static HeadroomDecision unavailable(String provider, String model, String reason) {
       return new HeadroomDecision(
-          HeadroomAction.UNAVAILABLE, provider, model, 0, 0, 0, 0, 0, reason);
+          HeadroomAction.UNAVAILABLE, provider, model, 0, 0, 0, 0, 0, 0, 0, 0, reason);
     }
   }
 
