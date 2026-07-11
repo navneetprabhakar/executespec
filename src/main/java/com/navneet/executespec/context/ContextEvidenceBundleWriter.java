@@ -125,8 +125,16 @@ public class ContextEvidenceBundleWriter {
       }
       if (!runId.equals(root.path("runId").asText())) return Optional.empty();
       JsonNode sources = root.path("sources");
-      String contextHash = sha256(readSource(contextDir.resolve("CODEBASE_CONTEXT.md")));
-      String decisionsHash = sha256(readSource(contextDir.resolve("decisions.md")));
+      Path contextSource = contextDir.resolve("CODEBASE_CONTEXT.md");
+      Path decisionsSource = contextDir.resolve("decisions.md");
+      // An absent source is not an empty, current source. Treating both missing files as the
+      // SHA-256 of an empty string would let a copied bundle appear trustworthy in a partially
+      // initialized workspace, defeating the stale-evidence guard.
+      if (!Files.isRegularFile(contextSource) || !Files.isRegularFile(decisionsSource)) {
+        return Optional.empty();
+      }
+      String contextHash = sha256(readSource(contextSource));
+      String decisionsHash = sha256(readSource(decisionsSource));
       if (!contextHash.equals(sources.path("contextDocumentSha256").asText())
           || !decisionsHash.equals(sources.path("decisionsSha256").asText())) {
         return Optional.empty();
