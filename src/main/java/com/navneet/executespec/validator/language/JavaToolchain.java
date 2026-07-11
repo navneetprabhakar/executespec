@@ -62,24 +62,12 @@ public class JavaToolchain implements LanguageToolchain {
       String gradleCmd = resolveGradleCommand(projectRoot);
       if (gradleCmd == null) {
         log.warn("Gradle project detected but no gradle/gradlew available — skipping type check");
-        return GateResult.builder()
-            .gate(ValidationGate.TYPE_CHECK)
-            .passed(true)
-            .duration(Duration.ZERO)
-            .errors(Collections.emptyList())
-            .rawOutput(
-                "Gradle project detected but gradle/gradlew not available — skipping type check")
-            .build();
+        return GateResult.unmeasured(
+            ValidationGate.TYPE_CHECK, "Gradle project detected but gradle/gradlew not available");
       }
       args = List.of(gradleCmd, "compileJava", "-q", "--no-daemon");
     } else {
-      return GateResult.builder()
-          .gate(ValidationGate.TYPE_CHECK)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No build tool detected — skipping type check")
-          .build();
+      return GateResult.unmeasured(ValidationGate.TYPE_CHECK, "No build tool detected");
     }
 
     ProcessResult result =
@@ -101,13 +89,7 @@ public class JavaToolchain implements LanguageToolchain {
   @Override
   public GateResult lintCheck(Path projectRoot, Path filePath, Duration timeout) {
     // Checkstyle/SpotBugs — skip for v1
-    return GateResult.builder()
-        .gate(ValidationGate.LINT)
-        .passed(true)
-        .duration(Duration.ZERO)
-        .errors(Collections.emptyList())
-        .rawOutput("Java lint check not configured — skipping")
-        .build();
+    return GateResult.unmeasured(ValidationGate.LINT, "Java lint check is not configured");
   }
 
   @Override
@@ -121,25 +103,14 @@ public class JavaToolchain implements LanguageToolchain {
             || Files.exists(projectRoot.resolve("build.gradle.kts"));
 
     if (!isMaven && !isGradle) {
-      return GateResult.builder()
-          .gate(ValidationGate.UNIT_TEST)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No build tool detected — skipping tests")
-          .build();
+      return GateResult.unmeasured(ValidationGate.UNIT_TEST, "No build tool detected");
     }
 
     if (isGradle) {
       String gradleCmd = resolveGradleCommand(projectRoot);
       if (gradleCmd == null) {
-        return GateResult.builder()
-            .gate(ValidationGate.UNIT_TEST)
-            .passed(true)
-            .duration(Duration.ZERO)
-            .errors(Collections.emptyList())
-            .rawOutput("Gradle project but gradle/gradlew not available — skipping tests")
-            .build();
+        return GateResult.unmeasured(
+            ValidationGate.UNIT_TEST, "Gradle project but gradle/gradlew not available");
       }
       ProcessResult result =
           processExecutor.execute(
@@ -161,13 +132,7 @@ public class JavaToolchain implements LanguageToolchain {
 
     // Maven path
     if (!Files.exists(projectRoot.resolve("pom.xml"))) {
-      return GateResult.builder()
-          .gate(ValidationGate.UNIT_TEST)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No Maven build tool — skipping tests")
-          .build();
+      return GateResult.unmeasured(ValidationGate.UNIT_TEST, "No Maven build tool");
     }
 
     // Check if test file exists
@@ -187,13 +152,7 @@ public class JavaToolchain implements LanguageToolchain {
                 .build());
 
     if (findResult.getOutput() == null || findResult.getOutput().trim().isEmpty()) {
-      return GateResult.builder()
-          .gate(ValidationGate.UNIT_TEST)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No test file found for " + fileName + " — skipping")
-          .build();
+      return GateResult.unmeasured(ValidationGate.UNIT_TEST, "No test file found for " + fileName);
     }
 
     ProcessResult result =
