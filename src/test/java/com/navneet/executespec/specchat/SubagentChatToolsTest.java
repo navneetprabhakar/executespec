@@ -13,6 +13,7 @@ import com.navneet.executespec.agentsession.SubagentExecutionService;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
@@ -23,6 +24,7 @@ class SubagentChatToolsTest {
   private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
   private final SubagentExecutionService execution = mock(SubagentExecutionService.class);
   private final ObjectProvider<SubagentExecutionService> provider = mock(ObjectProvider.class);
+  private final FeatureFlagService flags = mock(FeatureFlagService.class);
   private final AppUserDetails user =
       new AppUserDetails(
           AppUser.builder().id("user-1").email("u@example.com").status("ACTIVE").build(), null);
@@ -100,5 +102,40 @@ class SubagentChatToolsTest {
     assertThat(response.path("result").path("evidence").get(0).path("citation").asText())
         .isEqualTo("src/Auth.java:42");
     verify(execution).execute(any(), any(), any());
+  }
+
+  @Test
+  void enabledCoordinatorLaneUsesAuditedCoordinatorExecution() throws Exception {
+    when(provider.getObject()).thenReturn(execution);
+    when(flags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG)).thenReturn(true);
+    when(execution.evaluateDelegation(any(), any(), any()))
+        .thenReturn(
+            new SubagentProtocol.DelegationDecision(
+                "parent", SubagentProtocol.Role.SCOUT, true, "eligible", 1, 0, 4, 0, 0, "child"));
+    SubagentProtocol.Result result =
+        new SubagentProtocol.Result(
+            new SubagentProtocol.Handle(
+                "child",
+                "parent",
+                "turn-1",
+                SubagentProtocol.Role.SCOUT,
+                "scan",
+                1,
+                4,
+                0.5,
+                "COMPLETED"),
+            "found src/App.java:10",
+            java.util.List.of(),
+            1,
+            0.01,
+            java.time.Instant.now());
+    when(execution.executeCoordinator(any(), any(), any())).thenReturn(result);
+
+    ToolCallback tool = new SubagentChatTools(provider, json, flags).bind(user, "parent", "turn-1");
+    JsonNode response = json.readTree(tool.call("{\"role\":\"SCOUT\",\"objective\":\"scan\"}"));
+
+    assertThat(response.path("ok").asBoolean()).isTrue();
+    verify(execution).executeCoordinator(any(), any(), any());
+    verify(execution, never()).execute(any(), any(), any());
   }
 }

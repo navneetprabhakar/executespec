@@ -53,7 +53,7 @@ public class SubagentExecutionService {
   private final RunCostTracker costTracker;
   private final FeatureFlagService featureFlagService;
 
-  static final String COORDINATOR_AUTO_FLAG = "agent.subagents.coordinator-auto.enabled";
+  public static final String COORDINATOR_AUTO_FLAG = "agent.subagents.coordinator-auto.enabled";
 
   /** Side-effect-free parent coordinator probe; no model call or child session is created. */
   public DelegationDecision evaluateDelegation(
