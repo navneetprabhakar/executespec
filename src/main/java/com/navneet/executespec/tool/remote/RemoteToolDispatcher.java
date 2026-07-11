@@ -83,7 +83,19 @@ public class RemoteToolDispatcher {
 
   private static final class Session {
     final Map<String, PendingRemoteCall> pending = new ConcurrentHashMap<>();
+
+    /** True once this process has an in-memory worker wait that a result can unblock. */
+    volatile boolean workerWaitRebound;
+
     volatile boolean connected = true;
+
+    Session() {
+      this(true);
+    }
+
+    Session(boolean workerWaitRebound) {
+      this.workerWaitRebound = workerWaitRebound;
+    }
   }
 
   private record PendingRemoteCall(
@@ -111,7 +123,7 @@ public class RemoteToolDispatcher {
 
   /** Bind a run after JVM crash recovery and close stale calls from the old worker future. */
   public void registerAfterWorkerRestart(String runId) {
-    Session existing = sessions.putIfAbsent(runId, new Session());
+    Session existing = sessions.putIfAbsent(runId, new Session(false));
     if (existing == null) {
       int closed = stateService.closeForWorkerRestart(runId);
       log.info(
@@ -195,7 +207,7 @@ public class RemoteToolDispatcher {
             .toList();
     List<LocalHandsStateService.PendingCall> fresh = freshPending(durable);
     if (session != null) {
-      return new ReconnectStatus("CONNECTED", true, fresh, stale);
+      return new ReconnectStatus("CONNECTED", session.workerWaitRebound, fresh, stale);
     }
     if (!fresh.isEmpty() || !stale.isEmpty()) {
       return new ReconnectStatus("RESTART_REQUIRES_NEW_RUN", false, fresh, stale);
@@ -237,6 +249,7 @@ public class RemoteToolDispatcher {
     if (s == null) {
       return errorEnvelope("INTERNAL", "no remote session bound for run " + runId);
     }
+    s.workerWaitRebound = true;
     String callId = UUID.randomUUID().toString();
     CompletableFuture<String> future = new CompletableFuture<>();
     String permissionKind = permissionKind(toolName);

@@ -351,6 +351,17 @@ class RemoteToolDispatcherTest {
     verify(stateService).closeForWorkerRestart("r1");
   }
 
+  @Test
+  void recoveredSession_doesNotClaimWorkerWaitUntilResumedWorkerDispatches() {
+    when(stateService.closeForWorkerRestart("r1")).thenReturn(0);
+
+    dispatcher.registerAfterWorkerRestart("r1");
+
+    RemoteToolDispatcher.ReconnectStatus status = dispatcher.reconnectStatus("r1");
+    assertThat(status.state()).isEqualTo("CONNECTED");
+    assertThat(status.workerWaitRebound()).isFalse();
+  }
+
   private void assertPermissionKind(String toolName, String expected) throws Exception {
     setUp();
     dispatcher.register("r1");
