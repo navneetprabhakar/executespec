@@ -29,6 +29,12 @@ Continuation approval scope: approved blocked-continuation retries carry both `u
 
 Continuation provider availability: task-boundary `SequentialExecutor` advice now resolves run-specific provider availability through `AvailableProviderResolver` and passes it to `GoalContinuationAdvisor`. Candidate ranking keeps unavailable providers visible but forced below threshold, preventing automatic `STEP_UP_MODEL` / `CHANGE_PROVIDER` actions from selecting providers without keys or allowed org policy. The same availability map is also supplied by `RunOrchestrator` for post-review continuation.
 
+Actual provider/model handoffs also write a bounded atomic `.agent-context/provider-handoff.json` dossier
+with the from/to route, decision, reason, and observed failure. When a continuation snapshot is
+reloaded, the worker receives one explicit durable handoff note telling it to inspect the existing
+workspace and verify the failure rather than blindly repeating the prior route. This is evidence
+for bounded retry/recovery, not a claim that an in-flight provider future survived a JVM boundary.
+
 ## Pipeline sequencing (PRODUCTION mode)
 
 1. `RunOrchestrator.submitRun(req)` persists the run row + estimate.
