@@ -20,6 +20,11 @@
  *   the workspace is available; it cannot resurrect an in-memory provider call or prove a
  *   cross-JVM worker handoff.
  *
+ * Run journal:
+ *   {@code <workspace>/.agent-context/run-journal.json}, a bounded atomic list of the latest
+ *   task outcome summaries. The executor reloads it on restart and replaces entries by task id;
+ *   it is prompt context only, never authoritative task state or proof of hot handoff.
+ *
  * Auxiliary keys (Phase 8):
  *   v2:agent-ctx-index:{runId}    Set of taskIds with persisted context (TTL 86400)
  *   v2:agent-ctx-meta:{runId}:{taskId}  Hash of metadata (iteration, lastWriteAt, byteSize) (TTL 86400)
