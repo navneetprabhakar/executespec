@@ -563,9 +563,10 @@ public class GeminiNativeToolClient {
       //                                 stable across iterations. The 2026-05-08 stagnation-
       //                                 message-as-SystemMessage bug invalidated the prefix;
       //                                 see WorkerAgentStagnationTest for the regression pin.
-      //                             (2) explicit caching — caller POSTs to /v1beta/cachedContents
-      //                                 to mint a cache resource then references it by ID.
-      //                                 Not yet implemented; tracked as Phase 2 of the cache audit.
+      //                             (2) explicit caching — when the feature flag is enabled, this
+      //                                 client mints a /v1beta/cachedContents resource and
+      //                                 references it by ID, with fail-safe inline retry on any
+      //                                 stale/unsupported cache response.
       //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (we use gemini-3-pro-preview
       //                             and gemini-3-flash-preview). Gemini bills these at the
       //                             OUTPUT rate. Previously dropped → under-billing whenever
