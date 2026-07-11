@@ -14,6 +14,8 @@ public interface AgentTurnRepository extends JpaRepository<AgentTurn, String> {
 
   long countBySessionId(String sessionId);
 
+  boolean existsByIdAndSessionId(String id, String sessionId);
+
   @Query(
       """
       SELECT t FROM AgentTurn t

@@ -280,9 +280,27 @@ public class SubagentExecutionService {
       if (request == null || !parent.equals(request.parentSessionId())) {
         throw new IllegalArgumentException("all batch requests must share one parent session");
       }
+      validateParentTurn(request);
       if (!requestIds.add(request.requestId())) {
         throw new IllegalArgumentException("batch request ids must be unique");
       }
+    }
+  }
+
+  /** Validate every foreign-key-bearing parent turn before reserving any batch child. */
+  private void validateParentTurn(SpawnRequest request) {
+    String parentTurnId = request.parentTurnId();
+    if (parentTurnId == null || parentTurnId.isBlank()) return;
+    AgentTurn parentTurn =
+        turnRepository
+            .findById(parentTurnId)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "parentTurnId does not belong to parent session: " + parentTurnId));
+    if (!request.parentSessionId().equals(parentTurn.getSessionId())) {
+      throw new IllegalArgumentException(
+          "parentTurnId does not belong to parent session: " + parentTurnId);
     }
   }
 

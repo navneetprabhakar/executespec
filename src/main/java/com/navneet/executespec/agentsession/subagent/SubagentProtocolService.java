@@ -86,6 +86,7 @@ public class SubagentProtocolService {
       SpawnRequest request, String actorUserId, String actorOrgId) {
     validateSpawnRequest(request);
     AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    validateParentTurn(parent, request.parentTurnId());
     String childId = childId(parent.getId(), request.requestId());
     AgentSession existing = sessionRepository.findById(childId).orElse(null);
     if (existing != null) {
@@ -143,6 +144,7 @@ public class SubagentProtocolService {
     validateSpawnRequest(request);
     AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
     requireParentActive(parent);
+    validateParentTurn(parent, request.parentTurnId());
     append(
         parent.getId(),
         request.parentTurnId(),
@@ -189,6 +191,7 @@ public class SubagentProtocolService {
     validateSpawnRequest(request);
     AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
     requireParentActive(parent);
+    validateParentTurn(parent, request.parentTurnId());
 
     // Resolve idempotency before enforcing capacity. A retry of an already-accepted request must
     // return its original child even when that child filled the parent's final available slot.
@@ -556,6 +559,15 @@ public class SubagentProtocolService {
         || request.maxCostUsd() <= 0
         || request.maxCostUsd() > MAX_COST_USD_PER_CHILD) {
       throw new IllegalArgumentException("maxCostUsd must be > 0 and <= " + MAX_COST_USD_PER_CHILD);
+    }
+  }
+
+  private void validateParentTurn(AgentSession parent, String parentTurnId) {
+    String normalizedTurnId = blankToNull(parentTurnId);
+    if (normalizedTurnId == null) return;
+    if (!turnRepository.existsByIdAndSessionId(normalizedTurnId, parent.getId())) {
+      throw new IllegalArgumentException(
+          "parentTurnId does not belong to parent session: " + normalizedTurnId);
     }
   }
 
