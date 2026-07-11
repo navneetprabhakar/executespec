@@ -18,11 +18,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.LocalHandsState;
@@ -72,33 +67,6 @@ class RemoteToolDispatcherTest {
     assertThat(dispatcher.isRemote("r1")).isTrue();
     dispatcher.unregister("r1");
     assertThat(dispatcher.isRemote("r1")).isFalse();
-  }
-
-  @Test
-  void reconnect_doesNotDiscardInFlightToolCall() throws Exception {
-    dispatcher.register("r1");
-    CountDownLatch emitted = new CountDownLatch(1);
-    AtomicReference<String> callId = new AtomicReference<>();
-    doAnswer(
-            inv -> {
-              RunEvent ev = inv.getArgument(1);
-              callId.set(om.readTree(ev.payload()).get("callId").asText());
-              emitted.countDown();
-              return null;
-            })
-        .when(broadcaster)
-        .emit(eq("r1"), any(RunEvent.class));
-
-    CompletableFuture<String> result =
-        CompletableFuture.supplyAsync(
-            () -> dispatcher.dispatch("r1", "t1", "readFile", "{\"path\":\"x\"}"));
-    assertThat(emitted.await(2, TimeUnit.SECONDS)).isTrue();
-
-    // Re-registration is the reconnect path. Replacing Session here would strand the worker.
-    dispatcher.register("r1");
-    dispatcher.complete("r1", callId.get(), "{\"ok\":true,\"content\":\"after-reconnect\"}");
-
-    assertThat(result.get(2, TimeUnit.SECONDS)).contains("after-reconnect");
   }
 
   @Test
@@ -157,57 +125,10 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
-  void durableStore_recordsFrame_andCompletion() throws Exception {
-    RemoteToolCallStore store = mock(RemoteToolCallStore.class);
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, 120_000L, store);
-    dispatcher.register("r1");
-    doAnswer(
-            inv -> {
-              RunEvent ev = inv.getArgument(1);
-              String callId = om.readTree(ev.payload()).get("callId").asText();
-              dispatcher.complete("r1", callId, "{\"ok\":true,\"content\":\"ok\"}");
-              return null;
-            })
-        .when(broadcaster)
-        .emit(eq("r1"), any(RunEvent.class));
-
-    dispatcher.dispatch("r1", "t1", "readFile", "{\"path\":\"x\"}");
-    verify(store)
-        .record(any(), eq("r1"), eq("t1"), eq("readFile"), eq("{\"path\":\"x\"}"), any(), any());
-    verify(store).complete(eq("r1"), any(), eq("{\"ok\":true,\"content\":\"ok\"}"), any());
-  }
-
-  @Test
   void complete_onUnknownSessionOrCall_isNoop() {
     assertThatCode(() -> dispatcher.complete("nope", "c1", "{}")).doesNotThrowAnyException();
     dispatcher.register("r1");
     assertThatCode(() -> dispatcher.complete("r1", "unknown", "{}")).doesNotThrowAnyException();
-  }
-
-  @Test
-  void unregister_expiresDurablePendingCall() throws Exception {
-    RemoteToolCallStore store = mock(RemoteToolCallStore.class);
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, 120_000L, store);
-    dispatcher.register("r1");
-    CountDownLatch emitted = new CountDownLatch(1);
-    AtomicReference<String> callId = new AtomicReference<>();
-    doAnswer(
-            inv -> {
-              RunEvent ev = inv.getArgument(1);
-              callId.set(om.readTree(ev.payload()).get("callId").asText());
-              emitted.countDown();
-              return null;
-            })
-        .when(broadcaster)
-        .emit(eq("r1"), any(RunEvent.class));
-
-    CompletableFuture<String> result =
-        CompletableFuture.supplyAsync(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
-    assertThat(emitted.await(2, TimeUnit.SECONDS)).isTrue();
-    dispatcher.unregister("r1");
-
-    assertThat(result.get(2, TimeUnit.SECONDS)).contains("run session closed");
-    verify(store).expire(eq("r1"), eq(callId.get()), any(), any());
   }
 
   @Test

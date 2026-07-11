@@ -8,10 +8,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agentsession.LocalHandsState;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -39,7 +42,7 @@ public class RemoteToolDispatcher {
 
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
-  private final RemoteToolCallStore callStore;
+  private final LocalHandsStateService stateService;
 
   /**
    * How long a server-side tool call blocks for the client to execute and reply. Configurable via
@@ -50,64 +53,185 @@ public class RemoteToolDispatcher {
    */
   private final long toolTimeoutMs;
 
-  private final Map<String, Session> sessions = new ConcurrentHashMap<>();
+  /** Persisted calls older than this are not offered as a restart handoff. */
+  private final long restartRecoveryWindowMs;
 
-  public RemoteToolDispatcher(
-      SseBroadcaster broadcaster,
-      ObjectMapper objectMapper,
-      @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs) {
-    this(broadcaster, objectMapper, toolTimeoutMs, null);
-  }
+  private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
   @Autowired
   public RemoteToolDispatcher(
       SseBroadcaster broadcaster,
       ObjectMapper objectMapper,
-      @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs,
-      RemoteToolCallStore callStore) {
+      LocalHandsStateService stateService,
+      @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs) {
+    this(broadcaster, objectMapper, stateService, toolTimeoutMs, toolTimeoutMs);
+  }
+
+  /** Visible for tests; restart recovery must remain bounded by the original remote lease. */
+  RemoteToolDispatcher(
+      SseBroadcaster broadcaster,
+      ObjectMapper objectMapper,
+      LocalHandsStateService stateService,
+      long toolTimeoutMs,
+      long restartRecoveryWindowMs) {
     this.broadcaster = broadcaster;
     this.objectMapper = objectMapper;
+    this.stateService = stateService;
     this.toolTimeoutMs = toolTimeoutMs;
-    this.callStore = callStore;
+    this.restartRecoveryWindowMs = restartRecoveryWindowMs;
   }
 
   private static final class Session {
-    final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    final Map<String, PendingRemoteCall> pending = new ConcurrentHashMap<>();
+
+    /** True once this process has an in-memory worker wait that a result can unblock. */
+    volatile boolean workerWaitRebound;
+
+    volatile boolean connected = true;
+
+    Session() {
+      this(true);
+    }
+
+    Session(boolean workerWaitRebound) {
+      this.workerWaitRebound = workerWaitRebound;
+    }
   }
+
+  private record PendingRemoteCall(
+      String callId,
+      String runId,
+      String taskId,
+      String toolName,
+      String argsJson,
+      String permissionKind,
+      String frameJson,
+      AtomicLong deadlineNanos,
+      CompletableFuture<String> future) {}
 
   /**
    * Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client.
    */
   public void register(String runId) {
-    if (runId == null || runId.isBlank()) {
-      return;
-    }
-    // Registration is also the reconnect path. Do not replace an existing session: doing so
-    // drops the in-flight futures that the worker is currently waiting on and turns a harmless
-    // client reconnect into a synthetic INTERNAL tool failure. A terminal unregister still tears
-    // the session down explicitly.
     Session existing = sessions.putIfAbsent(runId, new Session());
     if (existing == null) {
       log.info("[RemoteTool] registered local-execution session for run {}", runId);
-    } else {
-      log.info("[RemoteTool] reconnected local-execution session for run {}", runId);
+      return;
     }
+    reconnect(runId);
+  }
+
+  /** Bind a run after JVM crash recovery and close stale calls from the old worker future. */
+  public void registerAfterWorkerRestart(String runId) {
+    Session existing = sessions.putIfAbsent(runId, new Session(false));
+    if (existing == null) {
+      int closed = stateService.closeForWorkerRestart(runId);
+      log.info(
+          "[RemoteTool] registered recovered session for run {}; closed {} stale call(s)",
+          runId,
+          closed);
+      return;
+    }
+    reconnect(runId);
   }
 
   /** Tear down a run's session, unblocking any in-flight calls. Called at run terminal. */
   public void unregister(String runId) {
     Session s = sessions.remove(runId);
     if (s != null) {
-      String error = errorEnvelope("INTERNAL", "run session closed");
-      s.pending.forEach(
-          (callId, future) -> {
-            future.complete(error);
-            if (callStore != null) {
-              callStore.expire(runId, callId, error, Instant.now());
-            }
-          });
+      s.pending
+          .values()
+          .forEach(
+              call -> {
+                record(call, LocalHandsState.CLIENT_CANCELLED);
+                call.future()
+                    .complete(errorEnvelope("CLIENT_CANCELLED", "local-hands run session closed"));
+              });
       log.info("[RemoteTool] unregistered local-execution session for run {}", runId);
     }
+  }
+
+  /**
+   * Mark a client transport as disconnected without failing the worker's pending tool calls. A new
+   * client can retrieve and resume them through {@link #reconnect}.
+   */
+  public void disconnect(String runId) {
+    Session session = sessions.get(runId);
+    if (session == null) {
+      return;
+    }
+    session.connected = false;
+    session.pending.values().forEach(call -> record(call, LocalHandsState.AWAITING_CLIENT));
+    log.info(
+        "[RemoteTool] local client disconnected for run {}; {} call(s) remain pending",
+        runId,
+        session.pending.size());
+  }
+
+  /** Re-emit every in-flight call after a client reconnects and return durable pending state. */
+  public List<LocalHandsStateService.PendingCall> reconnect(String runId) {
+    Session session = sessions.get(runId);
+    if (session != null) {
+      session.connected = true;
+      session
+          .pending
+          .values()
+          .forEach(
+              call -> {
+                call.deadlineNanos().set(deadlineAfterTimeout());
+                record(call, LocalHandsState.CLIENT_RECONNECTED);
+                emit(call);
+              });
+    }
+    // A fresh JVM has no worker future to rebind. Return only lease-valid evidence so an old
+    // client cannot accidentally replay a call that has already exceeded its remote wait window.
+    return freshPending(stateService.pending(runId));
+  }
+
+  /**
+   * Describes whether a reconnect can actually rebind an in-memory worker wait.
+   *
+   * <p>A fresh JVM has durable evidence of the call but not the blocked provider future. It must
+   * therefore never pretend that a tool result can resume the old worker. Clients use this additive
+   * status endpoint to distinguish a live handoff from a restart that requires a new run (or an
+   * explicit future checkpoint/resume implementation).
+   */
+  public ReconnectStatus reconnectStatus(String runId) {
+    Session session = sessions.get(runId);
+    List<LocalHandsStateService.PendingCall> durable = stateService.pending(runId);
+    Instant cutoff = Instant.now().minusMillis(Math.max(0L, restartRecoveryWindowMs));
+    List<String> stale =
+        durable.stream()
+            .filter(call -> call.updatedAt() != null && call.updatedAt().isBefore(cutoff))
+            .map(LocalHandsStateService.PendingCall::callId)
+            .toList();
+    List<LocalHandsStateService.PendingCall> fresh = freshPending(durable);
+    if (session != null) {
+      return new ReconnectStatus("CONNECTED", session.workerWaitRebound, fresh, stale);
+    }
+    if (!fresh.isEmpty() || !stale.isEmpty()) {
+      return new ReconnectStatus("RESTART_REQUIRES_NEW_RUN", false, fresh, stale);
+    }
+    return new ReconnectStatus("NO_PENDING_CALLS", false, List.of(), List.of());
+  }
+
+  public record ReconnectStatus(
+      String state,
+      boolean workerWaitRebound,
+      List<LocalHandsStateService.PendingCall> pendingCalls,
+      List<String> staleCallIds) {}
+
+  private List<LocalHandsStateService.PendingCall> freshPending(
+      List<LocalHandsStateService.PendingCall> calls) {
+    Instant cutoff = Instant.now().minusMillis(Math.max(0L, restartRecoveryWindowMs));
+    return calls.stream()
+        .filter(call -> call.updatedAt() == null || !call.updatedAt().isBefore(cutoff))
+        .toList();
+  }
+
+  /** Reloadable pending calls for clients that reconnect without an active SSE replay cursor. */
+  public List<LocalHandsStateService.PendingCall> pendingCalls(String runId) {
+    return stateService.pending(runId);
   }
 
   public boolean isRemote(String runId) {
@@ -125,37 +249,46 @@ public class RemoteToolDispatcher {
     if (s == null) {
       return errorEnvelope("INTERNAL", "no remote session bound for run " + runId);
     }
+    s.workerWaitRebound = true;
     String callId = UUID.randomUUID().toString();
     CompletableFuture<String> future = new CompletableFuture<>();
-    s.pending.put(callId, future);
+    String permissionKind = permissionKind(toolName);
     try {
       String frameJson = frame(callId, runId, taskId, toolName, argsJson);
-      if (callStore != null) {
-        callStore.record(callId, runId, taskId, toolName, argsJson, frameJson, Instant.now());
-      }
-      broadcaster.emit(
-          runId,
-          RunEvent.toolCall(
-              runId, taskId, frameJson, callId, toolName, argsJson, permissionKind(toolName)));
-      return future.get(toolTimeoutMs, TimeUnit.MILLISECONDS);
+      PendingRemoteCall call =
+          new PendingRemoteCall(
+              callId,
+              runId,
+              taskId,
+              toolName,
+              argsJson,
+              permissionKind,
+              frameJson,
+              new AtomicLong(deadlineAfterTimeout()),
+              future);
+      s.pending.put(callId, call);
+      record(call, LocalHandsState.AWAITING_CLIENT);
+      emit(call);
+      return await(call);
     } catch (TimeoutException e) {
-      String error =
-          errorEnvelope(
-              "INTERNAL", "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
-      if (callStore != null) callStore.expire(runId, callId, error, Instant.now());
-      return error;
+      PendingRemoteCall call = s.pending.get(callId);
+      if (call != null) {
+        record(call, LocalHandsState.CLIENT_TIMEOUT);
+      }
+      return errorEnvelope(
+          "CLIENT_TIMEOUT",
+          "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      String error =
-          errorEnvelope("INTERNAL", "interrupted awaiting client tool '" + toolName + "'");
-      if (callStore != null) callStore.expire(runId, callId, error, Instant.now());
-      return error;
+      PendingRemoteCall call = s.pending.get(callId);
+      if (call != null) {
+        record(call, LocalHandsState.CLIENT_CANCELLED);
+      }
+      return errorEnvelope(
+          "CLIENT_CANCELLED", "interrupted awaiting client tool '" + toolName + "'");
     } catch (Exception e) {
-      String error =
-          errorEnvelope(
-              "INTERNAL", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
-      if (callStore != null) callStore.expire(runId, callId, error, Instant.now());
-      return error;
+      return errorEnvelope(
+          "REMOTE_DISPATCH", "remote dispatch of '" + toolName + "' failed: " + e.getMessage());
     } finally {
       s.pending.remove(callId);
     }
@@ -168,20 +301,71 @@ public class RemoteToolDispatcher {
       log.debug("[RemoteTool] result for unknown session (run={}, callId={})", runId, callId);
       return;
     }
-    CompletableFuture<String> f = s.pending.get(callId);
-    if (f != null) {
-      f.complete(resultEnvelopeJson);
-      if (callStore != null) {
-        callStore.complete(runId, callId, resultEnvelopeJson, Instant.now());
-      }
+    PendingRemoteCall call = s.pending.get(callId);
+    if (call != null) {
+      record(call, LocalHandsState.COMPLETED);
+      call.future().complete(resultEnvelopeJson);
     } else {
       log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
     }
   }
 
-  /** Returns durable pending frames for a reconnect/operator recovery surface. */
-  public List<RemoteToolCallStore.PendingCall> pendingCalls(String runId) {
-    return callStore == null ? List.of() : callStore.pending(runId);
+  /** Fail a malformed client frame immediately instead of leaving the worker blocked to timeout. */
+  public boolean rejectMalformed(String runId, String callId) {
+    Session session = sessions.get(runId);
+    if (session == null) return false;
+    PendingRemoteCall call = session.pending.get(callId);
+    if (call == null) return false;
+    record(call, LocalHandsState.CLIENT_PROTOCOL_ERROR);
+    return call.future()
+        .complete(
+            errorEnvelope(
+                "CLIENT_PROTOCOL_ERROR", "client returned a malformed tool-result envelope"));
+  }
+
+  private String await(PendingRemoteCall call)
+      throws InterruptedException, java.util.concurrent.ExecutionException, TimeoutException {
+    while (true) {
+      long deadline = call.deadlineNanos().get();
+      long remaining = deadline - System.nanoTime();
+      if (remaining <= 0) throw new TimeoutException();
+      try {
+        return call.future().get(remaining, TimeUnit.NANOSECONDS);
+      } catch (TimeoutException timeout) {
+        // A reconnect renews the deadline. If it raced with this wait expiring, wait against the
+        // renewed lease instead of converting a healthy handoff into CLIENT_TIMEOUT.
+        if (call.deadlineNanos().get() > deadline) continue;
+        throw timeout;
+      }
+    }
+  }
+
+  private long deadlineAfterTimeout() {
+    return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(toolTimeoutMs);
+  }
+
+  private void emit(PendingRemoteCall call) {
+    broadcaster.emit(
+        call.runId(),
+        RunEvent.toolCall(
+            call.runId(),
+            call.taskId(),
+            call.frameJson(),
+            call.callId(),
+            call.toolName(),
+            call.argsJson(),
+            call.permissionKind()));
+  }
+
+  private void record(PendingRemoteCall call, LocalHandsState state) {
+    stateService.record(
+        call.runId(),
+        call.callId(),
+        state,
+        call.taskId(),
+        call.toolName(),
+        call.permissionKind(),
+        call.frameJson());
   }
 
   private String frame(
@@ -215,8 +399,6 @@ public class RemoteToolDispatcher {
               "lsp",
               "ast_search",
               "astSearch",
-              "spawn_subagent",
-              "spawnSubagent",
               "update_plan",
               "updatePlan",
               "todo",
