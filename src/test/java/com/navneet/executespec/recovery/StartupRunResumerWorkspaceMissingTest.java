@@ -1,10 +1,21 @@
 package com.navneet.executespec.recovery;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+
+import com.navneet.executespec.integration.RunLifecycleService;
+import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -61,5 +72,31 @@ class StartupRunResumerWorkspaceMissingTest {
     m.setAccessible(true);
     boolean missing = (Boolean) m.invoke(resumer, "any-run");
     assertThat(missing).isFalse();
+  }
+
+  @Test
+  @DisplayName("leaves an awaiting plan gate durable across startup recovery")
+  void awaitingApproval_isNotFailedOrRedispatched() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    SseBroadcaster sse = mock(SseBroadcaster.class);
+    org.springframework.beans.factory.ObjectProvider<RunLifecycleService> lifecycle =
+        mock(org.springframework.beans.factory.ObjectProvider.class);
+    PipelineRun gated =
+        PipelineRun.builder()
+            .runId("gated")
+            .status("AWAITING_APPROVAL")
+            .harnessVersion("v2")
+            .build();
+    when(runs.findByStatusIn(org.mockito.ArgumentMatchers.anyList())).thenReturn(List.of(gated));
+    StartupRunResumer isolated = new StartupRunResumer(runs, tasks, sse, lifecycle);
+
+    isolated.scanAndRecover();
+
+    assertThat(gated.getStatus()).isEqualTo("AWAITING_APPROVAL");
+    verify(runs, never()).save(gated);
+    verify(lifecycle, never()).getObject();
+    verify(sse, never())
+        .emit(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
   }
 }
