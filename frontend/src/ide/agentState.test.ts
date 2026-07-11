@@ -198,9 +198,11 @@ describe('agentState', () => {
     expect(runPhaseLabel('AWAITING_APPROVAL')).toBe('Waiting for approval');
     expect(runPhaseLabel('WORKING')).toBe('Coding');
     expect(runPhaseLabel('COMPLETE')).toBe('Done');
+    expect(runPhaseLabel('PARTIAL')).toBe('Done with warnings');
     expect(runPhaseLabel('FAILED')).toBe('Failed');
 
     expect(isTerminalRunStatus('COMPLETE')).toBe(true);
+    expect(isTerminalRunStatus('PARTIAL')).toBe(true);
     expect(isTerminalRunStatus('WORKING')).toBe(false);
 
     expect(runOpenPath('r1', 'AWAITING_APPROVAL')).toBe('/plan/r1');
@@ -210,10 +212,11 @@ describe('agentState', () => {
     expect(
       runProgress([
         {status: 'COMPLETE', title: 'a'},
-        {status: 'WORKING', title: 'b'},
-        {status: 'PENDING', title: 'c'},
+        {status: 'PARTIAL', title: 'b'},
+        {status: 'FAILED', title: 'c'},
+        {status: 'WORKING', title: 'd'},
       ]),
-    ).toEqual({done: 1, total: 3, pct: 33, current: 'b'});
+    ).toEqual({done: 3, total: 4, pct: 75, current: 'd'});
     expect(runProgress([])).toEqual({done: 0, total: 0, pct: 0, current: null});
   });
 
