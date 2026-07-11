@@ -1130,6 +1130,18 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
+    ProviderHandoffDossier.write(
+        req.runContext().workspaceRoot(),
+        runId,
+        task.id(),
+        outcome.dispatchedProvider(),
+        outcome.dispatchedModel(),
+        candidate.provider(),
+        candidate.model(),
+        decision.decision().name(),
+        reason,
+        outcome.smokeTestOutput());
+
     // Preserve the worker's latest investigation when handing the same task to a different
     // provider/model. The workspace is shared, but starting with a fresh conversation makes the
     // replacement model repeat repository exploration and can undo the value of the escalation.
@@ -1185,6 +1197,23 @@ to boot — skip it for those.""";
     try {
       var snapshot = contextStore.load(context).orElse(null);
       if (snapshot != null) {
+        var dossier =
+            ProviderHandoffDossier.read(context.workspaceRoot(), context.runId(), context.taskId());
+        if (dossier.isPresent()) {
+          var history = new ArrayList<>(snapshot.history());
+          history.add(
+              new org.springframework.ai.chat.messages.UserMessage(
+                  ProviderHandoffDossier.recoveryNote(dossier.get())));
+          snapshot =
+              com.navneet.executespec.context.SavedContext.builder()
+                  .runId(snapshot.runId())
+                  .taskId(snapshot.taskId())
+                  .iteration(snapshot.iteration())
+                  .history(history)
+                  .savedAt(snapshot.savedAt())
+                  .sizeBytes(snapshot.sizeBytes())
+                  .build();
+        }
         log.info(
             "Continuation handoff run={} task={} resumes snapshot iter={}",
             context.runId(),
