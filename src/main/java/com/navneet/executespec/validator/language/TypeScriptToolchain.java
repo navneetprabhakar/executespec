@@ -51,13 +51,7 @@ public class TypeScriptToolchain implements LanguageToolchain {
   @Override
   public GateResult typeCheck(Path projectRoot, Path filePath, Duration timeout) {
     if (!Files.exists(projectRoot.resolve("tsconfig.json"))) {
-      return GateResult.builder()
-          .gate(ValidationGate.TYPE_CHECK)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No tsconfig.json found — skipping type check")
-          .build();
+      return GateResult.unmeasured(ValidationGate.TYPE_CHECK, "No tsconfig.json found");
     }
 
     ProcessResult result =
@@ -90,13 +84,7 @@ public class TypeScriptToolchain implements LanguageToolchain {
             || Files.exists(projectRoot.resolve("eslint.config.mjs"));
 
     if (!hasConfig) {
-      return GateResult.builder()
-          .gate(ValidationGate.LINT)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No ESLint config found — skipping lint")
-          .build();
+      return GateResult.unmeasured(ValidationGate.LINT, "No ESLint config found");
     }
 
     ProcessResult result =
@@ -147,13 +135,7 @@ public class TypeScriptToolchain implements LanguageToolchain {
             || Files.exists(projectRoot.resolve(specFilePath));
 
     if (!testExists) {
-      return GateResult.builder()
-          .gate(ValidationGate.UNIT_TEST)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No test file found for " + fileName + " — skipping")
-          .build();
+      return GateResult.unmeasured(ValidationGate.UNIT_TEST, "No test file found for " + fileName);
     }
 
     String actualTestFile =
