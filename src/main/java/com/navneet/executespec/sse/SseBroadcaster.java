@@ -48,8 +48,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * Events are appended to a Redis List {@code sse:replay:{runId}} (capped at {@link
  * #MAX_REPLAY_EVENTS}, 24h TTL). Clients reconnecting with {@code Last-Event-ID: N} receive all
- * events from sequence N+1 onward. The SSE {@code id} field carries the list index (0-based) as the
- * sequence number.
+ * events from sequence N+1 onward. Sequence numbers are independent of the bounded list index, so
+ * trimming old entries never reuses an SSE id.
  */
 @Component
 @Slf4j
@@ -66,6 +66,7 @@ public class SseBroadcaster {
 
   private static final String CHANNEL_PREFIX = "sse:";
   private static final String REPLAY_PREFIX = "sse:replay:";
+  private static final String SEQUENCE_PREFIX = "sse:sequence:";
   private static final Duration REPLAY_TTL = Duration.ofHours(24);
 
   /** Unique ID for this JVM instance — used to suppress echo from Redis pub/sub. */
@@ -199,7 +200,7 @@ public class SseBroadcaster {
     deliverLocal(runId, json, seqNum);
 
     // Publish to Redis pub/sub for other instances
-    publishToRedis(runId, json);
+    publishToRedis(runId, json, seqNum);
 
     // Spring event for local listeners (Slack notifications, etc.)
     try {
@@ -218,7 +219,7 @@ public class SseBroadcaster {
     if (json == null) return;
     long seqNum = appendToReplayLog(runId, json);
     deliverLocal(runId, json, seqNum);
-    publishToRedis(runId, json);
+    publishToRedis(runId, json, seqNum);
   }
 
   /** Complete the SSE stream for a run (run finished or validation complete). */
@@ -256,17 +257,36 @@ public class SseBroadcaster {
     }
   }
 
-  /** Appends JSON to the Redis replay list, trims to MAX_REPLAY_EVENTS, returns 0-based index. */
+  /** Appends JSON to the Redis replay list with a monotonic per-run sequence. */
   private long appendToReplayLog(String runId, String json) {
     String key = REPLAY_PREFIX + runId;
+    String sequenceKey = SEQUENCE_PREFIX + runId;
     try {
-      Long size = redis.opsForList().rightPush(key, json);
-      redis.opsForList().trim(key, -MAX_REPLAY_EVENTS, -1);
-      redis.expire(key, REPLAY_TTL);
-      return size != null ? size - 1 : 0; // 0-based index
+      Long sequence = redis.opsForValue().increment(sequenceKey);
+      if (sequence == null) return 0;
+      appendReplayEntry(runId, json, sequence);
+      return sequence;
     } catch (Exception e) {
       log.debug("[SSE] Redis replay log write failed for run {}: {}", runId, e.getMessage());
       return 0;
+    }
+  }
+
+  /** Store an event with an origin sequence, used when mirroring Redis pub/sub to this JVM. */
+  private void appendReplayEntry(String runId, String json, long sequence) {
+    if (sequence <= 0) {
+      appendToReplayLog(runId, json);
+      return;
+    }
+    String key = REPLAY_PREFIX + runId;
+    try {
+      redis.expire(SEQUENCE_PREFIX + runId, REPLAY_TTL);
+      String entry = mapper.writeValueAsString(Map.of("seq", sequence, "payload", json));
+      redis.opsForList().rightPush(key, entry);
+      redis.opsForList().trim(key, -MAX_REPLAY_EVENTS, -1);
+      redis.expire(key, REPLAY_TTL);
+    } catch (Exception e) {
+      log.debug("[SSE] Redis replay mirror failed for run {}: {}", runId, e.getMessage());
     }
   }
 
@@ -281,8 +301,12 @@ public class SseBroadcaster {
       List<String> raw = redis.opsForList().range(REPLAY_PREFIX + runId, 0, -1);
       if (raw == null || raw.isEmpty()) return java.util.List.of();
       List<java.util.Map<String, Object>> out = new java.util.ArrayList<>(raw.size());
-      for (String json : raw) {
+      for (String entry : raw) {
         try {
+          com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
+          // New entries carry a sequence wrapper. Return the original RunEvent shape to keep the
+          // run-detail Logs API backward compatible; raw entries are legacy replay rows.
+          String json = node.has("payload") ? node.path("payload").asText() : entry;
           out.add(mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
         } catch (Exception ignore) {
           // skip a single malformed entry; keep the rest of the log
@@ -295,10 +319,11 @@ public class SseBroadcaster {
     }
   }
 
-  private void publishToRedis(String runId, String json) {
+  private void publishToRedis(String runId, String json, long sequence) {
     try {
       // Wrap with instance marker to suppress echo on receive
-      String msg = "{\"from\":\"" + INSTANCE_ID + "\",\"data\":" + json + "}";
+      String msg =
+          "{\"from\":\"" + INSTANCE_ID + "\",\"seq\":" + sequence + ",\"data\":" + json + "}";
       redis.convertAndSend(CHANNEL_PREFIX + runId, msg);
     } catch (Exception e) {
       log.debug("[SSE] Redis publish failed for run {}: {}", runId, e.getMessage());
@@ -307,19 +332,38 @@ public class SseBroadcaster {
 
   private void replayMissedEvents(String runId, String lastEventId, SseEmitter emitter) {
     try {
-      long fromIndex = Long.parseLong(lastEventId) + 1;
+      long lastSequence = Long.parseLong(lastEventId);
       String key = REPLAY_PREFIX + runId;
-      List<String> missed = redis.opsForList().range(key, fromIndex, -1);
-      if (missed == null || missed.isEmpty()) return;
+      List<String> entries = redis.opsForList().range(key, 0, -1);
+      if (entries == null || entries.isEmpty()) return;
+      List<ReplayEntry> missed = new ArrayList<>();
+      for (int i = 0; i < entries.size(); i++) {
+        String entry = entries.get(i);
+        try {
+          com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
+          if (node.has("seq") && node.has("payload")) {
+            long sequence = node.path("seq").asLong(-1);
+            if (sequence > lastSequence) {
+              missed.add(new ReplayEntry(sequence, node.path("payload").asText()));
+            }
+          } else if (i > lastSequence) {
+            // Compatibility with rows written before monotonic sequence IDs were introduced.
+            missed.add(new ReplayEntry(i, entry));
+          }
+        } catch (Exception ignored) {
+          log.debug("[SSE] Skipping malformed replay entry for run {}", runId);
+        }
+      }
+      if (missed.isEmpty()) return;
       log.debug(
           "[SSE] Replaying {} missed events for run {} from seq {}",
           missed.size(),
           runId,
-          fromIndex);
-      for (int i = 0; i < missed.size(); i++) {
-        long seqNum = fromIndex + i;
+          lastSequence + 1);
+      for (ReplayEntry replay : missed) {
         try {
-          emitter.send(SseEmitter.event().id(String.valueOf(seqNum)).data(missed.get(i)));
+          emitter.send(
+              SseEmitter.event().id(String.valueOf(replay.sequence())).data(replay.payload()));
         } catch (Exception e) {
           log.debug("[SSE] Replay send failed for run {}: {}", runId, e.getMessage());
           break;
@@ -332,6 +376,8 @@ public class SseBroadcaster {
       log.debug("[SSE] Replay failed for run {}: {}", runId, e.getMessage());
     }
   }
+
+  private record ReplayEntry(long sequence, String payload) {}
 
   private String serialize(RunEvent event) {
     try {
@@ -364,16 +410,19 @@ public class SseBroadcaster {
         // Suppress echo — this instance already delivered locally on emit()
         if (INSTANCE_ID.equals(from)) return;
 
+        long sequence = node.path("seq").asLong(0);
+        String json = mapper.writeValueAsString(node.get("data"));
+
         // Check if this instance has any local clients for this run
         List<SseEmitter> clients = emitters.get(runId);
         if (clients == null || clients.isEmpty()) return;
 
-        String json = mapper.writeValueAsString(node.get("data"));
-        // Deliver without setting an id (cross-instance delivery, id already set on origin)
         List<SseEmitter> dead = new ArrayList<>();
         for (SseEmitter emitter : clients) {
           try {
-            emitter.send(SseEmitter.event().data(json));
+            SseEmitter.SseEventBuilder builder = SseEmitter.event().data(json);
+            if (sequence > 0) builder.id(String.valueOf(sequence));
+            emitter.send(builder);
           } catch (Throwable t) {
             dead.add(emitter);
           }
