@@ -482,6 +482,12 @@ public class TierEvalRunner {
         v = new ValidationVerdict(0, "validator threw: " + e.getMessage());
       }
       boolean ok = wr.outcome() != WorkerResult.Outcome.ERROR;
+      String workerDiagnostic =
+          wr.outcome() == WorkerResult.Outcome.ERROR
+                  && wr.finalAssistantText() != null
+                  && !wr.finalAssistantText().isBlank()
+              ? "; workerError=" + truncate(wr.finalAssistantText(), 240)
+              : "";
       return TierEvalResult.builder()
           .caseName(testCase.name())
           .tier(AgentTier.WORKHORSE)
@@ -506,6 +512,7 @@ public class TierEvalRunner {
                   + wr.toolCallsDispatched()
                   + " tool calls, outcome="
                   + wr.outcome()
+                  + workerDiagnostic
                   + "]")
           .promptFingerprint(hashPrompt(workerPrompt + "\n" + testCase.taskPrompt()))
           .build();
