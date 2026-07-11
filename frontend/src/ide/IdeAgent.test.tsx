@@ -909,4 +909,59 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('91/100');
     expect(host.textContent).toContain('Review evidence');
   });
+
+  it('replays durable turns when the POST-SSE body ends without a terminal event', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.streamAgentTurn.mockRejectedValue(
+      new Error(
+        'Agent stream ended before the turn completed. Refresh the conversation and retry.',
+      ),
+    );
+    api.listAgentTurns.mockResolvedValueOnce([]).mockResolvedValue([
+      {
+        turnId: 't3',
+        sessionId: 's1',
+        sequence: 3,
+        userMessage: 'Inspect the current test failure',
+        assistantSummary: 'The server persisted this turn before the stream disconnected.',
+        intentType: 'CHAT_ONLY',
+        intentConfidence: 0.9,
+        route: 'CHAT_ONLY',
+        reasonCode: 'question',
+        actionType: null,
+        proposedActionJson: null,
+        linkedRunId: null,
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 0,
+        costUsd: 0.001,
+        status: 'COMPLETED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+
+    ({host, root} = await renderAgent('/agent'));
+    const textarea = host.querySelector('textarea');
+    if (!textarea) throw new Error('Agent composer textarea was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Inspect the current test failure');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const send = [...host.querySelectorAll('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Send',
+    );
+    if (!send) throw new Error('Agent send button was not rendered.');
+    await act(async () => {
+      send.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await flush();
+    await flush();
+
+    expect(api.listAgentTurns.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(host.textContent).toContain(
+      'The server persisted this turn before the stream disconnected.',
+    );
+    expect(host.textContent).toContain('Agent stream ended before the turn completed');
+  });
 });
