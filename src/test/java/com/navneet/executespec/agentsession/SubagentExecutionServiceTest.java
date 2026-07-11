@@ -361,4 +361,47 @@ class SubagentExecutionServiceTest {
         .containsExactly("req");
     assertThat(batch.failures().getFirst().reason()).isEqualTo("first child failed");
   }
+
+  @Test
+  void batchInterruptsAnInFlightSiblingAfterTheFirstChildFails() throws Exception {
+    SpawnRequest second =
+        new SpawnRequest("req-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 4, 0.5);
+    Handle secondHandle =
+        new Handle(
+            "child-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 1, 4, 0.5, "RUNNING");
+    when(protocol.spawn(second, "user", "org")).thenReturn(secondHandle);
+    when(protocol.start("child-2", "user", "org")).thenReturn(secondHandle);
+
+    CountDownLatch secondEntered = new CountDownLatch(1);
+    CountDownLatch secondInterrupted = new CountDownLatch(1);
+    SubagentExecutionService spy = org.mockito.Mockito.spy(service);
+    doAnswer(
+            invocation -> {
+              SpawnRequest candidate = invocation.getArgument(0, SpawnRequest.class);
+              if (candidate.requestId().equals("req")) {
+                assertThat(secondEntered.await(2, TimeUnit.SECONDS)).isTrue();
+                throw new IllegalStateException("first child failed");
+              }
+              secondEntered.countDown();
+              try {
+                new CountDownLatch(1).await();
+                return new Result(secondHandle, "unexpected", java.util.List.of(), 1, 0.01, Instant.now());
+              } catch (InterruptedException interrupted) {
+                secondInterrupted.countDown();
+                throw new CancellationException("sibling interrupted");
+              }
+            })
+        .when(spy)
+        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+
+    var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
+
+    assertThat(secondInterrupted.await(2, TimeUnit.SECONDS)).isTrue();
+    assertThat(batch.results()).isEmpty();
+    assertThat(batch.failures())
+        .extracting(SubagentProtocol.BatchFailure::requestId)
+        .containsExactly("req", "req-2");
+    assertThat(batch.failures().get(1).reason()).isEqualTo("cancelled after sibling failure");
+    verify(protocol).cancelChildren(eq("parent"), any(), eq("user"), eq("org"));
+  }
 }
