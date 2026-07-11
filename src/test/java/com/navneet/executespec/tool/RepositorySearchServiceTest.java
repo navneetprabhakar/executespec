@@ -2,7 +2,6 @@ package com.navneet.executespec.tool;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -251,6 +250,7 @@ class RepositorySearchServiceTest {
   void relationshipsAreWorkspaceConfinedAndPaged() throws Exception {
     Files.writeString(root.resolve("Widget.java"), "class Widget {}\n");
     Files.writeString(root.resolve("WidgetTest.java"), "@Test void widget() { Widget(); }\n");
+    Files.writeString(root.resolve("Runner.java"), "class Runner { void run() { Widget(); } }\n");
     var service = new RepositorySearchService();
 
     var page =
@@ -258,7 +258,7 @@ class RepositorySearchServiceTest {
             root,
             new RepositorySearchService.RelationshipRequest("Widget", true, ".", "*.java", 1, 1));
     assertThat(page.edges()).hasSize(1);
-    assertThat(page.totalRelationships()).isEqualTo(1);
+    assertThat(page.totalRelationships()).isEqualTo(2);
     assertThat(page.hasMore()).isFalse();
 
     assertThatThrownBy(
