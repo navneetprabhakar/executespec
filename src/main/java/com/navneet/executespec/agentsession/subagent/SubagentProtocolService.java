@@ -425,7 +425,14 @@ public class SubagentProtocolService {
   /** Claims a READY child for execution. Idempotent while the child is already RUNNING. */
   @Transactional
   public Handle start(String childSessionId, String actorUserId, String actorOrgId) {
-    AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
+    // Claim the READY row under a database lock. A plain findById allows two coordinators to both
+    // observe READY and dispatch the same child before either transaction commits RUNNING.
+    AgentSession child =
+        sessionRepository
+            .findByIdForUpdate(childSessionId)
+            .orElseThrow(
+                () -> new IllegalArgumentException("Agent session not found: " + childSessionId));
+    requireOwnership(child, actorUserId, actorOrgId);
     ChildMetadata metadata = metadataOf(childSessionId);
     if ("RUNNING".equals(child.getStatus())) return handleFromMetadata(child, metadata);
     if (!"READY".equals(child.getStatus())) {

@@ -421,6 +421,29 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void startClaimsChildWithRowLockBeforePublishingStartedEvents() throws Exception {
+    AgentSession child = parent("child", "READY");
+    var metadata =
+        new SubagentProtocolService.ChildMetadata("parent", "turn", Role.SCOUT, "scan", 1, 2, 0.25);
+    when(sessions.findByIdForUpdate("child")).thenReturn(Optional.of(child));
+    when(sessions.findById("child")).thenReturn(Optional.of(child));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "child", SubagentProtocolService.EVENT_CHILD_CREATED))
+        .thenReturn(List.of(event("child", SubagentProtocolService.EVENT_CHILD_CREATED, metadata)));
+    when(turns.countBySessionId("child")).thenReturn(0L);
+    when(turns.findBySessionIdOrderBySequenceAsc("child")).thenReturn(List.of());
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of());
+
+    var handle = service.start("child", "user", "org");
+
+    assertThat(handle.status()).isEqualTo("RUNNING");
+    assertThat(child.getStatus()).isEqualTo("RUNNING");
+    verify(sessions).findByIdForUpdate("child");
+  }
+
+  @Test
   void verifierCompletionRequiresEvidenceAndPersistsHotHandoff() throws Exception {
     AgentSession child = parent("child", "RUNNING");
     var metadata =
