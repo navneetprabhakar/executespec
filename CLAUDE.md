@@ -404,7 +404,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | ------ | ----------------------------------------------------------------------------- | --------------------------------- |
 | GET    | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications.             |
 | GET    | `/api/models/available`                                                       | Model matrix (YAML-derived).      |
-| GET    | `/api/feature-flags` + POST `/{key}`                                          | Feature flag admin (SUPER_ADMIN). |
+| GET    | `/api/admin/feature-flags` + POST `/{key}`                                   | Feature flag admin (SUPER_ADMIN). |
 
 ## Key file locations
 
