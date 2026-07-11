@@ -9,6 +9,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -92,7 +93,7 @@ public class SearchFilesTool implements Tool {
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Regular expression to search for"
+    "description": "Regular expression, or exact identifier when mode is SYMBOL"
     },
     "directory": {
       "type": "string",
@@ -101,6 +102,11 @@ public class SearchFilesTool implements Tool {
     "filePattern": {
       "type": "string",
       "description": "Optional glob to filter filenames (e.g. '*.java', '*.{ts,tsx}')"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["REGEX", "EXACT", "SYMBOL"],
+      "description": "Search mode; defaults to REGEX for compatibility. SYMBOL ranks exact declarations first."
     },
     "maxResults": {
       "type": "integer",
@@ -127,6 +133,12 @@ public class SearchFilesTool implements Tool {
     }
     String dir = args.path("directory").asText(null);
     String filePattern = args.path("filePattern").asText(null);
+    RepositorySearchService.SearchMode mode;
+    try {
+      mode = parseMode(args.path("mode").asText(null));
+    } catch (IllegalArgumentException e) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+    }
     int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
     maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
     final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
@@ -135,13 +147,7 @@ public class SearchFilesTool implements Tool {
           repositorySearchService.search(
               ctx.workspaceRoot(),
               new RepositorySearchService.SearchRequest(
-                  patternStr,
-                  RepositorySearchService.SearchMode.REGEX,
-                  true,
-                  dir,
-                  filePattern,
-                  maxResults,
-                  offset));
+                  patternStr, mode, true, dir, filePattern, maxResults, offset));
       if (structured.hits().isEmpty()) return ToolResult.ok("(no matches)");
       StringBuilder typed = new StringBuilder();
       typed
@@ -151,6 +157,10 @@ public class SearchFilesTool implements Tool {
           .append(structured.repositorySha())
           .append("; inventory=")
           .append(structured.inventoryFingerprint())
+          .append(
+              mode == RepositorySearchService.SearchMode.SYMBOL
+                  ? "; repositoryFingerprint=" + structured.repositoryFingerprint()
+                  : "")
           .append('\n');
       for (RepositorySearchService.SearchHit hit : structured.hits()) {
         typed
@@ -159,6 +169,10 @@ public class SearchFilesTool implements Tool {
             .append(hit.line())
             .append(':')
             .append(hit.preview())
+            .append(
+                mode == RepositorySearchService.SearchMode.SYMBOL
+                    ? " [" + hit.matchType() + "] {reason=" + hit.relevanceReason() + '}'
+                    : "")
             .append('\n');
       }
       return ToolResult.ok(typed.toString().trim());
@@ -221,6 +235,15 @@ public class SearchFilesTool implements Tool {
     } catch (IOException ioe) {
       log.warn("searchFiles IO error pattern={}", patternStr, ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+    }
+  }
+
+  private static RepositorySearchService.SearchMode parseMode(String raw) {
+    if (raw == null || raw.isBlank()) return RepositorySearchService.SearchMode.REGEX;
+    try {
+      return RepositorySearchService.SearchMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("mode must be REGEX, EXACT, or SYMBOL");
     }
   }
 
