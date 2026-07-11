@@ -39,6 +39,8 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.stereotype.Component;
 
@@ -66,6 +68,22 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class RunLifecycleService {
+
+  /** Compatibility constructor retained for focused lifecycle tests and older embedders. */
+  public RunLifecycleService(
+      PipelineRunRepository runRepo, AgentTaskRepository taskRepo, SseBroadcaster broadcaster,
+      Metrics metrics, GateStore gateStore, RunControlPort controlPort, AgentProperties agentProps,
+      ObjectMapper objectMapper, PipelineExecutorPool pool, SequentialExecutor executor,
+      ReviewerAgent reviewer, RunCostTracker costTracker, RunTokenAttributor tokenAttributor,
+      RunKeyContextStore keyContextStore, WorkspaceRestoreService workspaceRestoreService,
+      RunPersistenceWriter persistenceWriter, RunContextComposer contextComposer,
+      RunValidationKickoff validationKickoff, ModelResolver modelResolver,
+      ValidationReportRepository validationReportRepository) {
+    this(runRepo, taskRepo, broadcaster, metrics, gateStore, controlPort, agentProps, objectMapper,
+        pool, executor, reviewer, costTracker, tokenAttributor, keyContextStore,
+        workspaceRestoreService, persistenceWriter, contextComposer, validationKickoff,
+        modelResolver, validationReportRepository, null, null);
+  }
 
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
@@ -102,6 +120,8 @@ public class RunLifecycleService {
   private final RunValidationKickoff validationKickoff;
   private final ModelResolver modelResolver;
   private final ValidationReportRepository validationReportRepository;
+  private final FeatureFlagService featureFlagService;
+  private final RemoteToolDispatcher remoteToolDispatcher;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -614,6 +634,7 @@ public class RunLifecycleService {
       Path workspace,
       boolean fromReviewing) {
     Instant startedAt = Instant.now();
+    boolean localRun = false;
     try {
       // Re-resolve BYOK keys for this resumed run — same pattern as runPipeline().
       try {
@@ -631,6 +652,20 @@ public class RunLifecycleService {
       if (row == null) {
         log.warn("resume run={} row vanished mid-resume", runId);
         return;
+      }
+      // Local-hands intent is durable; never fall back to server-side tools after a JVM restart.
+      // A missing client therefore remains a bounded remote-tool wait/error, not an unsafe shell
+      // execution. The feature flag is still an operator kill switch.
+      boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+      if (row.isLocalExecutionRequested() && !localHandsEnabled) {
+        log.error("resume run={} local-hands intent cannot be honoured: feature flag disabled", runId);
+        controlPort.terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
+        return;
+      }
+      localRun = row.isLocalExecutionRequested() && localHandsEnabled;
+      if (localRun) {
+        remoteToolDispatcher.register(runId);
+        log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
       String model = row.getWorkerModel();
@@ -651,7 +686,8 @@ public class RunLifecycleService {
                       .model(model)
                       .runContext(rootCtx)
                       .maxIterationsPerTask(null)
-                      .enableSmokeTests(true)
+                      .enableSmokeTests(!localRun)
+                      .localHandsMode(localRun)
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
                       .workspaceSummary(
@@ -696,6 +732,14 @@ public class RunLifecycleService {
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
+    } finally {
+      if (localRun) {
+        try {
+          remoteToolDispatcher.unregister(runId);
+        } catch (Exception ignored) {
+          log.debug("resume run={} local-hands unregister failed", runId);
+        }
+      }
     }
   }
 

@@ -197,7 +197,7 @@ public class RunController {
 
     // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
     PipelineRun run =
-        v2Orchestrator.submitRun(
+        v2Orchestrator.submitRunWithLocalExecution(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
             req.repoUrl(),
@@ -217,9 +217,11 @@ public class RunController {
             Boolean.TRUE.equals(req.tddMode()),
             req.branch(),
             req.prReviewComments(),
+            com.navneet.executespec.state.RunMode.BUILD,
             req.requireConfirmationBeforeExpensiveContinuation(),
             req.requireBenchmarkPriorForAutomaticContinuation(),
-            req.lowComplexityWorkerStartTier());
+            req.lowComplexityWorkerStartTier(),
+            localExecutionRequested);
 
     // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's

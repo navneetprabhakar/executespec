@@ -124,6 +124,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RunOrchestrator implements RunControlPort {
 
+  /** Recovery policy: persisted client intent may only resume through the local-hands transport. */
+  static boolean shouldResumeLocalHands(boolean persistedIntent, boolean localHandsEnabled) {
+    return persistedIntent && localHandsEnabled;
+  }
+
   /**
    * Back-compat classification for {@link PlannerRequest}. Live planning strategy flows through
    * {@link com.navneet.executespec.agent.SmartClassifierAgent} and {@link PlanStrategy}; this enum
@@ -238,6 +243,9 @@ public class RunOrchestrator implements RunControlPort {
 
   private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
+  /** Submit-time handoff used to stamp local intent before the async pipeline can start. */
+  private final ThreadLocal<Boolean> submitLocalExecutionIntent = new ThreadLocal<>();
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -321,6 +329,28 @@ public class RunOrchestrator implements RunControlPort {
    * <p>Signature originally mirrored V1's {@code PipelineHarness.submitRun(...)} (since deleted) so
    * the controller could delegate with zero argument transformation.
    */
+  /** Full submit variant that stamps local-hands intent atomically with the run row. */
+  public PipelineRun submitRunWithLocalExecution(
+      String userRequest, String source, String repoUrl, String repoMode, String githubPat,
+      String githubOwner, boolean skipApproval, boolean autoMerge, String modelName,
+      String aiProvider, String createdByUserId, String orgId, String projectId,
+      String executionMode, List<UUID> selectedRepoIds, String figmaUrl, boolean tddMode,
+      String branchOverride, String prReviewComments, String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation, String lowComplexityWorkerStartTier,
+      boolean localExecutionRequested) {
+    submitLocalExecutionIntent.set(localExecutionRequested);
+    try {
+      return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
+          skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId, projectId,
+          executionMode, selectedRepoIds, figmaUrl, tddMode, branchOverride, prReviewComments,
+          runMode, requireConfirmationBeforeExpensiveContinuation,
+          requireBenchmarkPriorForAutomaticContinuation, lowComplexityWorkerStartTier);
+    } finally {
+      submitLocalExecutionIntent.remove();
+    }
+  }
+
   public PipelineRun submitRun(
       String userRequest,
       String source,
@@ -845,6 +875,7 @@ public class RunOrchestrator implements RunControlPort {
             .totalOutputTokens(0)
             .figmaUrl(figmaUrl)
             .selectedRepoIds(serializeRepoIds(selectedRepoIds))
+            .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
             .build();
     run = runRepo.save(run);
 
@@ -1239,11 +1270,21 @@ public class RunOrchestrator implements RunControlPort {
       // are
       // all skipped below). Flag OFF ⇒ false ⇒ every branch below is inert and prod is
       // byte-identical.
+      boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+      boolean persistedLocalIntent =
+          runRepo.findById(runId).map(PipelineRun::isLocalExecutionRequested).orElse(false);
+      boolean continuationLocalIntent =
+          approvedPlanContinuation != null && approvedPlanContinuation.localRun();
+      if ((persistedLocalIntent || continuationLocalIntent) && !localHandsEnabled) {
+        log.error("V2 run={} local-hands intent cannot be honoured: feature flag is disabled", runId);
+        terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
+        return;
+      }
       localRun =
           approvedPlanContinuation != null
               ? approvedPlanContinuation.localRun()
-              : featureFlagService.isEnabled("worker.local-hands.enabled")
-                  && runLocalExecutionFlag.consume(runId);
+              : localHandsEnabled
+                  && (runLocalExecutionFlag.consume(runId) || persistedLocalIntent);
       boolean requireContinuationConfirmation =
           approvedPlanContinuation != null
               ? approvedPlanContinuation.requireContinuationConfirmation()
