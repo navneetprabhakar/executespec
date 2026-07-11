@@ -189,6 +189,29 @@ class RepositorySearchServiceTest {
   }
 
   @Test
+  void symbolModeClassifiesImportTestAndCallSiteEvidence() throws Exception {
+    Files.writeString(
+        root.resolve("Widget.java"),
+        "import com.example.Widget;\nclass Runner { void run() { Widget(); } }\n");
+    Files.writeString(
+        root.resolve("WidgetTest.java"), "@Test void widget() { Widget value = new Widget(); }\n");
+
+    var result =
+        new RepositorySearchService()
+            .search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    "Widget", RepositorySearchService.SearchMode.SYMBOL, true, null, null, 50, 0));
+
+    assertThat(result.hits())
+        .extracting(RepositorySearchService.SearchHit::matchType)
+        .contains(
+            RepositorySearchService.MatchType.IMPORT,
+            RepositorySearchService.MatchType.TEST_REFERENCE,
+            RepositorySearchService.MatchType.CALL_SITE);
+  }
+
+  @Test
   void citationValidationRejectsWorkingTreeMutation() throws Exception {
     Path file = root.resolve("src/Widget.java");
     Files.createDirectories(file.getParent());
