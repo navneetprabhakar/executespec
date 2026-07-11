@@ -88,6 +88,7 @@ import com.navneet.executespec.testgen.TestGenOrchestrator;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -282,6 +283,9 @@ public class RunOrchestrator implements RunControlPort {
   /** runId → in-flight pipeline future; the cancel/pause/halt interrupt handle (invariant #4). */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
+  /** Stable process label used by the database-backed execution lease. */
+  private static final String EXECUTION_INSTANCE_ID = executionInstanceId();
+
   @Value("${execution.continuation.post-review.enabled:true}")
   private boolean postReviewContinuationEnabled = true;
 
@@ -307,11 +311,37 @@ public class RunOrchestrator implements RunControlPort {
   @Override
   public void putActiveRun(String runId, Future<?> future) {
     activeRuns.put(runId, future);
+    // Register the lease before the pipeline can outlive this JVM. A startup scanner on another
+    // replica must see a live owner rather than interpreting a null heartbeat as a crash.
+    runRepo.claimExecutionOwner(runId, EXECUTION_INSTANCE_ID, Instant.now());
   }
 
   @Override
   public Future<?> removeActiveRun(String runId) {
     return activeRuns.remove(runId);
+  }
+
+  /** Refreshes leases for locally owned futures so rolling restarts cannot duplicate live work. */
+  @Scheduled(fixedRate = 30_000, initialDelay = 30_000)
+  void refreshExecutionHeartbeats() {
+    Instant heartbeat = Instant.now();
+    activeRuns.forEach(
+        (runId, future) -> {
+          if (future == null || future.isDone() || future.isCancelled()) {
+            activeRuns.remove(runId, future);
+            return;
+          }
+          runRepo.refreshExecutionHeartbeat(runId, EXECUTION_INSTANCE_ID, heartbeat);
+        });
+  }
+
+  private static String executionInstanceId() {
+    String host = System.getenv("HOSTNAME");
+    if (host == null || host.isBlank()) {
+      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
+    }
+    host = host == null || host.isBlank() ? "unknown" : host.trim();
+    return host.length() <= 128 ? host : host.substring(0, 128);
   }
 
   /**
@@ -996,7 +1026,7 @@ public class RunOrchestrator implements RunControlPort {
                 activeRuns.remove(runIdFinal);
               }
             });
-    activeRuns.put(runIdFinal, future);
+    putActiveRun(runIdFinal, future);
     return run;
   }
 

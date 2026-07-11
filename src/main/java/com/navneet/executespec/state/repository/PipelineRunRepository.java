@@ -95,6 +95,35 @@ public interface PipelineRunRepository
       @Param("staleBefore") Instant staleBefore,
       @Param("instanceId") String instanceId);
 
+  /**
+   * Claims execution ownership for a locally submitted/resumed pipeline without loading the full
+   * row. The owner compare-and-set prevents a second JVM from taking over a live worker while the
+   * worker's heartbeat is being refreshed.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.executingInstance = :instanceId, r.executionHeartbeat ="
+          + " :heartbeat WHERE r.runId = :runId AND r.status IN ('QUEUED', 'PLANNING',"
+          + " 'APPROVAL_RESUMING', 'WORKING', 'REVIEWING') AND (r.executingInstance IS NULL OR"
+          + " r.executingInstance = :instanceId)")
+  int claimExecutionOwner(
+      @Param("runId") String runId,
+      @Param("instanceId") String instanceId,
+      @Param("heartbeat") Instant heartbeat);
+
+  /** Refreshes a live worker lease only when this JVM still owns the run. */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.executionHeartbeat = :heartbeat "
+          + "WHERE r.runId = :runId AND r.executingInstance = :instanceId "
+          + "AND r.status IN ('QUEUED', 'PLANNING', 'APPROVAL_RESUMING', 'WORKING', 'REVIEWING')")
+  int refreshExecutionHeartbeat(
+      @Param("runId") String runId,
+      @Param("instanceId") String instanceId,
+      @Param("heartbeat") Instant heartbeat);
+
   List<PipelineRun> findByStatusIn(List<String> statuses);
 
   Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
