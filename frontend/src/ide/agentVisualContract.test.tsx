@@ -191,6 +191,44 @@ describe('protected transcript visual contract', () => {
     expect(evidence?.querySelector('p')?.textContent).toContain('Build passed');
   });
 
+  it('keeps approval actions explicit for narrow transcript layouts', () => {
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[]}
+        runStreamStatus='IDLE'
+        runCard={null}
+        gates={[
+          {
+            runId: 'gate-visual-1',
+            projectId: null,
+            projectName: null,
+            title: 'Add a deliberately long audit-log approval title that must wrap',
+            status: 'AWAITING_APPROVAL',
+            submittedAt: '2026-07-10T00:00:00Z',
+            provider: 'deepseek',
+            model: 'deepseek-v4-pro-native',
+            estimatedCostUsd: 0.2,
+            hardCapUsd: 1,
+            creditsRequired: 1,
+            risk: 'LOW',
+            summary: 'Review the plan before the sandbox starts.',
+            recommendedAction: 'APPROVE',
+            tasks: ['Wire audit service'],
+          },
+        ]}
+      />,
+    );
+
+    const gate = rendered.querySelector('.agent-gate-card');
+    expect(gate).not.toBeNull();
+    expect(gate?.querySelector('.agent-card-actions')?.children).toHaveLength(3);
+    expect(gate?.querySelector('button')?.textContent).toContain('Add a deliberately long');
+    expect(gate?.textContent).toContain('Approve & run');
+    expect(gate?.textContent).toContain('Open full plan');
+  });
+
   it('renders an image attachment preview and the semantic intent route inline', () => {
     const rendered = mount(
       <AgentConversation
