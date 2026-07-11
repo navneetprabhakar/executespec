@@ -78,11 +78,13 @@ public class SearchFilesTool implements Tool {
 
   @Override
   public String description() {
-    return "Recursively searches file contents for a regex pattern. Returns matching lines with "
-        + "file:line prefixes plus a total match count. Filter file types via filePattern (glob, "
-        + "e.g. '*.java'). Page large result sets with maxResults + offset, or narrow the pattern. "
-        + "Use this to localize the exact file:line of a symbol before reading/editing — it is "
-        + "cheaper than reading whole files. Build and VCS folders are always skipped.";
+    return "Recursively searches file contents for a regex pattern. Returns matching lines with"
+        + " file:line prefixes plus a total match count. Filter file types via filePattern"
+        + " (glob, e.g. '*.java'). Page large result sets with maxResults + offset, or"
+        + " narrow the pattern. Use this to localize the exact file:line of a symbol before"
+        + " reading/editing — it is cheaper than reading whole files. Use mode RELATIONSHIPS"
+        + " for bounded import, test-to-source, and call-site edges. Build and VCS folders"
+        + " are always skipped.";
   }
 
   @Override
@@ -105,8 +107,8 @@ public class SearchFilesTool implements Tool {
     },
     "mode": {
       "type": "string",
-      "enum": ["REGEX", "EXACT", "SYMBOL"],
-      "description": "Search mode; defaults to REGEX for compatibility. SYMBOL ranks exact declarations first."
+      "enum": ["REGEX", "EXACT", "SYMBOL", "RELATIONSHIPS"],
+      "description": "Search mode; defaults to REGEX. SYMBOL ranks declarations; RELATIONSHIPS returns bounded import/test/call-site edges for the identifier."
     },
     "maxResults": {
       "type": "integer",
@@ -133,15 +135,54 @@ public class SearchFilesTool implements Tool {
     }
     String dir = args.path("directory").asText(null);
     String filePattern = args.path("filePattern").asText(null);
+    int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
+    maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
+    final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
+    String rawMode = args.path("mode").asText(null);
+    if ("RELATIONSHIPS".equalsIgnoreCase(rawMode)) {
+      try {
+        RepositorySearchService.RelationshipResult relationships =
+            repositorySearchService.relationships(
+                ctx.workspaceRoot(),
+                new RepositorySearchService.RelationshipRequest(
+                    patternStr, true, dir, filePattern, maxResults, offset));
+        if (relationships.edges().isEmpty()) return ToolResult.ok("(no relationships)");
+        StringBuilder typed =
+            new StringBuilder()
+                .append(relationships.totalRelationships())
+                .append(relationships.hasMore() ? "+" : "")
+                .append(" relationship(s); repositoryFingerprint=")
+                .append(relationships.repositoryFingerprint())
+                .append('\n');
+        for (RepositorySearchService.RelationshipEdge edge : relationships.edges()) {
+          typed
+              .append(edge.relationshipType())
+              .append(' ')
+              .append(edge.sourcePath())
+              .append(':')
+              .append(edge.line())
+              .append(" -> ")
+              .append(edge.targetPath() == null ? "?" : edge.targetPath())
+              .append(" [")
+              .append(edge.preview())
+              .append("]\n");
+        }
+        return ToolResult.ok(typed.toString().trim());
+      } catch (IllegalArgumentException e) {
+        return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+      } catch (SecurityException e) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, e.getMessage());
+      } catch (RuntimeException e) {
+        log.warn("relationship search failed", e);
+        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "relationship search failed");
+      }
+    }
     RepositorySearchService.SearchMode mode;
     try {
       mode = parseMode(args.path("mode").asText(null));
     } catch (IllegalArgumentException e) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
     }
-    int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
-    maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
-    final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
     try {
       RepositorySearchService.SearchResult structured =
           repositorySearchService.search(
@@ -243,7 +284,7 @@ public class SearchFilesTool implements Tool {
     try {
       return RepositorySearchService.SearchMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("mode must be REGEX, EXACT, or SYMBOL");
+      throw new IllegalArgumentException("mode must be REGEX, EXACT, SYMBOL, or RELATIONSHIPS");
     }
   }
 
