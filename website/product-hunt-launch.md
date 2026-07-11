@@ -22,7 +22,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 | **Pricing tag** | — | `Freemium` (Free → $20 Pro → $50 BYOK → $50/seat Team → Enterprise) |
 | **Platforms** | — | `Web` |
 | **Website** | — | `https://executespec.ai` |
-| **Demo video** | — | TODO — 60-90s: spec → plan gate (with price) → live execution → verified score → real PR |
+| **Demo video** | — | POST-GOAL — replace the legacy `website/media/hero.webm` with a fresh 60-90s 2.0 capture: spec → plan gate (with price) → live execution → verified score → real PR |
 
 ## 2 · 260-char description (paste-ready)
 
@@ -99,7 +99,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
 2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
-3. ⬜ **Demo video** — 60-90s. Script: (a) paste spec → plan gate shows tasks + price (10s), (b) approve → watch tasks execute via live log (20s), (c) reviewer passes (10s), (d) verified score + real PR on GitHub (15s), (e) share the verified report link (5s).
+3. ⬜ **Demo video** — POST-GOAL. The checked-in hero is a legacy recording and must not be presented as 2.0 evidence. Capture the script after release QA: (a) paste spec → plan gate shows tasks + price (10s), (b) approve → watch tasks execute via live log (20s), (c) reviewer passes (10s), (d) verified score + real PR on GitHub (15s), (e) share the verified report link (5s).
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 
