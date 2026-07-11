@@ -69,6 +69,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunLifecycleService {
 
+  /** A heartbeat newer than this means another JVM still owns the run. */
+  private static final java.time.Duration CRASH_RECOVERY_HEARTBEAT_STALE_AFTER =
+      java.time.Duration.ofMinutes(2);
+
+  /** Stable, non-secret owner label persisted with a recovery claim for operator diagnostics. */
+  private static final String RECOVERY_INSTANCE_ID = recoveryInstanceId();
+
   /** Compatibility constructor retained for focused lifecycle tests and older embedders. */
   public RunLifecycleService(
       PipelineRunRepository runRepo,
@@ -541,6 +548,35 @@ public class RunLifecycleService {
       return RunOrchestrator.CrashResumeOutcome.EXHAUSTED;
     }
 
+    // Claim before touching the workspace or submitting to the pool. Startup recovery may run
+    // concurrently on two JVMs during a rolling restart; only the caller that advances the
+    // durable attempt counter may proceed. A recent heartbeat means the original worker is still
+    // alive, so this caller must leave the run untouched and let that worker finish.
+    Instant claimAt = Instant.now();
+    int nextAttempt = attempts + 1;
+    int claimed =
+        runRepo.claimCrashResume(
+            runId,
+            attempts,
+            nextAttempt,
+            claimAt,
+            claimAt.minus(CRASH_RECOVERY_HEARTBEAT_STALE_AFTER),
+            RECOVERY_INSTANCE_ID);
+    if (claimed != 1) {
+      log.info(
+          "resumeAfterCrash run={} recovery claim lost (attempt={} or live heartbeat); leaving run"
+              + " untouched",
+          runId,
+          attempts);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+    // Keep the in-memory row coherent for any downstream diagnostics; the database update above
+    // is the source of truth and deliberately avoids a stale full-entity save.
+    run.setResumeAttempts(nextAttempt);
+    run.setResumedAt(claimAt);
+    run.setExecutingInstance(RECOVERY_INSTANCE_ID);
+    run.setExecutionHeartbeat(claimAt);
+
     // Workspace must be on this node. Cross-node resume needs GCS shipping (chunk #3 of the
     // pause/resume design — same constraint as the existing PAUSED resume path).
     java.nio.file.Path workspace =
@@ -573,9 +609,6 @@ public class RunLifecycleService {
 
     // PLANNING crash → just re-run the planner (cheap) by calling the standard runPipeline.
     if ("PLANNING".equals(status)) {
-      run.setResumeAttempts(attempts + 1);
-      run.setResumedAt(java.time.Instant.now());
-      runRepo.save(run);
       log.info(
           "resumeAfterCrash run={} status=PLANNING attempt={} re-running planner",
           runId,
@@ -621,9 +654,6 @@ public class RunLifecycleService {
       return RunOrchestrator.CrashResumeOutcome.PLAN_MISSING;
     }
 
-    run.setResumeAttempts(attempts + 1);
-    run.setResumedAt(java.time.Instant.now());
-    runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, status));
     broadcaster.emit(
         runId,
@@ -651,6 +681,15 @@ public class RunLifecycleService {
             });
     controlPort.putActiveRun(runId, future);
     return RunOrchestrator.CrashResumeOutcome.OK;
+  }
+
+  private static String recoveryInstanceId() {
+    String host = System.getenv("HOSTNAME");
+    if (host == null || host.isBlank()) {
+      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
+    }
+    host = host == null || host.isBlank() ? "unknown" : host.trim();
+    return host.length() <= 128 ? host : host.substring(0, 128);
   }
 
   /**

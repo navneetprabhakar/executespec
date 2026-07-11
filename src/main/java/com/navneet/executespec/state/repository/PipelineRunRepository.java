@@ -68,6 +68,33 @@ public interface PipelineRunRepository
           + "WHERE r.runId = :runId AND r.status = 'AWAITING_APPROVAL'")
   int claimApprovalResume(@Param("runId") String runId, @Param("resumedAt") Instant resumedAt);
 
+  /**
+   * Atomically claim one crash-recovery attempt.
+   *
+   * <p>The boot scanner can run concurrently on two JVMs during a rolling restart. A
+   * read-modify-write of {@code resume_attempts} lets both instances dispatch the same run. The
+   * compare-and-set below makes the attempt counter the durable recovery lease: only one caller can
+   * advance it, and a recent execution heartbeat protects a still-live worker from being mistaken
+   * for a crashed one.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.resumeAttempts = :nextAttempt, r.resumedAt = :resumedAt, "
+          + "r.executingInstance = :instanceId, r.executionHeartbeat = :resumedAt "
+          + "WHERE r.runId = :runId "
+          + "AND r.status IN ('PLANNING', 'WORKING', 'REVIEWING') "
+          + "AND (r.resumeAttempts = :expectedAttempt "
+          + "     OR (r.resumeAttempts IS NULL AND :expectedAttempt = 0)) "
+          + "AND (r.executionHeartbeat IS NULL OR r.executionHeartbeat < :staleBefore)")
+  int claimCrashResume(
+      @Param("runId") String runId,
+      @Param("expectedAttempt") int expectedAttempt,
+      @Param("nextAttempt") int nextAttempt,
+      @Param("resumedAt") Instant resumedAt,
+      @Param("staleBefore") Instant staleBefore,
+      @Param("instanceId") String instanceId);
+
   List<PipelineRun> findByStatusIn(List<String> statuses);
 
   Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
