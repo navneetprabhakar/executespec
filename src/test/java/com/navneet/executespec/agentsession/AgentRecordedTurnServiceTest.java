@@ -74,6 +74,8 @@ class AgentRecordedTurnServiceTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("INTENT");
+    assertThat(event.getValue().getTurnId()).isEqualTo(turn.getValue().getId());
+    assertThat(event.getValue().getActionId()).isEqualTo(turn.getValue().getId());
     assertThat(event.getValue().getPayloadJson()).contains("READ_ONLY_CODE_HELP");
     verify(sessionRepo).save(session);
   }
@@ -97,6 +99,8 @@ class AgentRecordedTurnServiceTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("INTENT");
+    assertThat(event.getValue().getTurnId()).isEqualTo(turn.getValue().getId());
+    assertThat(event.getValue().getActionId()).isEqualTo(turn.getValue().getId());
   }
 
   @Test
