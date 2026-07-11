@@ -304,9 +304,10 @@ public class SseBroadcaster {
       for (String entry : raw) {
         try {
           com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
-          // New entries carry a sequence wrapper. Return the original RunEvent shape to keep the
-          // run-detail Logs API backward compatible; raw entries are legacy replay rows.
-          String json = node.has("payload") ? node.path("payload").asText() : entry;
+          // New entries carry both a sequence and payload wrapper. A legacy RunEvent also has a
+          // payload field, so checking payload alone would incorrectly unwrap the event body and
+          // drop that row from the run-detail Logs API.
+          String json = node.has("seq") && node.has("payload") ? node.path("payload").asText() : entry;
           out.add(mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
         } catch (Exception ignore) {
           // skip a single malformed entry; keep the rest of the log
