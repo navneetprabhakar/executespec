@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.LinkedHashMap;
@@ -102,6 +104,19 @@ class ModelProviderCandidateServiceTest {
             score ->
                 assertThat(score.reasons())
                     .contains("provider/model candidate evaluated in bounded parallel batch"));
+  }
+
+  @Test
+  void snapshotsBenchmarkSignalsOncePerRoutingDecision() {
+    service.buildCandidates(
+        ModelProviderCandidateRequest.builder()
+            .taskCategory("BUG_FIX")
+            .requiredQualityThreshold(60.0)
+            .build());
+
+    // Candidate evaluation may be parallel, but all candidates must consume one consistent
+    // benchmark snapshot rather than multiplying the repository read by model count.
+    verify(benchmarkRunRepository, times(1)).findTop50ByStatusOrderByCreatedAtDesc("DONE");
   }
 
   @Test

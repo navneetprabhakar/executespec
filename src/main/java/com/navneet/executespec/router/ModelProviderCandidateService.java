@@ -62,6 +62,10 @@ public class ModelProviderCandidateService {
         request == null ? ModelProviderCandidateRequest.builder().build() : request;
     Set<String> allowedProviders = normalizeSet(req.providerAllowList());
     Set<String> allowedModels = normalizeSet(req.modelAllowList());
+    // Benchmark rows are a snapshot for this routing decision. Read them once instead of issuing
+    // the same repository query once per model candidate (the matrix commonly contains dozens of
+    // models, and candidate evaluation may run in parallel).
+    List<ModelProviderCapabilitySignal> externalSignals = externalSignals(req);
 
     List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries =
         modelRegistry.allModels().entrySet().stream()
@@ -81,9 +85,9 @@ public class ModelProviderCandidateService {
             .toList();
 
     if (shouldBuildSignalsInParallel(entries)) {
-      return buildSignalsParallel(entries, req);
+      return buildSignalsParallel(entries, req, externalSignals);
     }
-    return buildSignalsSequential(entries, req, false);
+    return buildSignalsSequential(entries, req, false, externalSignals);
   }
 
   private boolean shouldBuildSignalsInParallel(
@@ -93,7 +97,8 @@ public class ModelProviderCandidateService {
 
   private List<ModelProviderCapabilitySignal> buildSignalsParallel(
       List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
-      ModelProviderCandidateRequest request) {
+      ModelProviderCandidateRequest request,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     int parallelism = Math.min(entries.size(), maxParallelTasks());
     List<String> labels = entries.stream().map(this::candidateLabel).toList();
     log.info(
@@ -109,7 +114,13 @@ public class ModelProviderCandidateService {
               .map(
                   entry ->
                       executor.submit(
-                          () -> signalFor(entry.getKey(), entry.getValue(), request, true)))
+                          () ->
+                              signalFor(
+                                  entry.getKey(),
+                                  entry.getValue(),
+                                  request,
+                                  true,
+                                  externalSignals)))
               .toList();
       List<ModelProviderCapabilitySignal> out = new ArrayList<>(futures.size());
       for (Future<ModelProviderCapabilitySignal> future : futures) {
@@ -126,22 +137,26 @@ public class ModelProviderCandidateService {
       log.warn(
           "ModelProviderCandidateService parallelProviderEvaluation interrupted; falling back to"
               + " sequential");
-      return buildSignalsSequential(entries, request, false);
+      return buildSignalsSequential(entries, request, false, externalSignals);
     } catch (ExecutionException | RuntimeException ex) {
       log.warn(
           "ModelProviderCandidateService parallelProviderEvaluation failed: {}; falling back to"
               + " sequential",
           ex.getMessage());
-      return buildSignalsSequential(entries, request, false);
+      return buildSignalsSequential(entries, request, false, externalSignals);
     }
   }
 
   private List<ModelProviderCapabilitySignal> buildSignalsSequential(
       List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
       ModelProviderCandidateRequest request,
-      boolean parallelEvaluation) {
+      boolean parallelEvaluation,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     return entries.stream()
-        .map(entry -> signalFor(entry.getKey(), entry.getValue(), request, parallelEvaluation))
+        .map(
+            entry ->
+                signalFor(
+                    entry.getKey(), entry.getValue(), request, parallelEvaluation, externalSignals))
         .toList();
   }
 
@@ -159,11 +174,12 @@ public class ModelProviderCandidateService {
       String model,
       ModelMatrixProperties.ModelConfig config,
       ModelProviderCandidateRequest request,
-      boolean parallelEvaluation) {
+      boolean parallelEvaluation,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     String canonicalModel = modelRegistry.canonicalize(model);
     String provider = providerFor(canonicalModel, config);
     List<ModelProviderCapabilitySignal> external =
-        externalSignals(request).stream()
+        externalSignals.stream()
             .filter(signal -> matches(signal, provider, canonicalModel, request.taskCategory()))
             .toList();
 
