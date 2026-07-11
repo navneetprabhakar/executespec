@@ -174,6 +174,9 @@ turns separately from runs.
   reloadable `/runs/{runId}/agent` sessions.
 - `V247__agent_action_event_action_id.sql` adds `agent_action_event.action_id` for reloadable
   action lifecycle correlation across permission prompts, local tool events, and action results.
+- `V262__agent_event_replay_cursor.sql` adds a durable database-assigned `stream_sequence` cursor
+  and replay index. `/events` remains the compatibility list; `/events/replay?after=` returns a
+  cursor envelope for stream interruption and visibility-resume backfill.
 
 ## Tests
 

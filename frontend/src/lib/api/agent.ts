@@ -193,6 +193,13 @@ export interface AgentActionEvent {
   type: string;
   payloadJson: string | null;
   createdAt: string;
+  streamSequence?: number | null;
+}
+
+export interface AgentEventReplayResponse {
+  events: AgentActionEvent[];
+  lastSequence: number;
+  snapshot: boolean;
 }
 
 export interface AgentRunConfirmationRequest {
@@ -281,6 +288,14 @@ export const listAgentTurns = (
 
 export const listAgentEvents = (sessionId: string) =>
   req<AgentActionEvent[]>(`/agent/sessions/${encodeURIComponent(sessionId)}/events`);
+
+/** Cursor-based event backfill. Omit `after` for a complete state snapshot. */
+export const replayAgentEvents = (sessionId: string, after?: number | null) => {
+  const query = after != null ? `?after=${encodeURIComponent(String(after))}` : '';
+  return req<AgentEventReplayResponse>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/events/replay${query}`,
+  );
+};
 
 export const planAgentAction = (sessionId: string, body: AgentActionPlanRequest) =>
   req<AgentActionPlanResponse>(`/agent/v2/sessions/${encodeURIComponent(sessionId)}/actions/plan`, {

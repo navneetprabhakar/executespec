@@ -44,6 +44,12 @@ public final class AgentSessionDtos {
       Instant createdAt,
       Instant updatedAt) {}
 
+  /** Replayable session event page. {@code snapshot} is true when the page is a full state view. */
+  public record AgentEventReplayResponse(
+      List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+      long lastSequence,
+      boolean snapshot) {}
+
   public record RepoContext(
       String cwdName,
       String gitRemote,

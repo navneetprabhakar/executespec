@@ -8,6 +8,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRespo
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentResponse;
@@ -175,6 +176,15 @@ public class AgentSessionController {
   public List<AgentActionEvent> sessionEvents(
       @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
     return sessionService.listEvents(sessionId, user);
+  }
+
+  /** Cursor-based event replay used after a stream interruption or tab resume. */
+  @GetMapping("/sessions/{sessionId}/events/replay")
+  public AgentEventReplayResponse replaySessionEvents(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(required = false) Long after) {
+    return sessionService.replayEvents(sessionId, after, user);
   }
 
   @GetMapping("/sessions/{sessionId}/turns")

@@ -93,6 +93,7 @@ export type AgentAction =
   | {type: 'session:select'; sessionId: string | null}
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
   | {type: 'events:set'; events: StreamTimelineItem[]}
+  | {type: 'events:append'; events: StreamTimelineItem[]}
   | {type: 'gates:set'; gates: api.AgentGateDecisionCard[]}
   | {type: 'managed-ai:set'; balance: api.ManagedAiBalance | null}
   | {type: 'input:set'; input: string}
@@ -167,6 +168,11 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return {...state, turns: action.turns};
     case 'events:set':
       return {...state, streamEvents: action.events};
+    case 'events:append': {
+      const seen = new Set(state.streamEvents.map((event) => event.id));
+      const appended = action.events.filter((event) => !seen.has(event.id));
+      return {...state, streamEvents: [...state.streamEvents, ...appended]};
+    }
     case 'gates:set':
       return {...state, gates: action.gates};
     case 'managed-ai:set':
