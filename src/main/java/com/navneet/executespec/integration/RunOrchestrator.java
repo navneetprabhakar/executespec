@@ -110,13 +110,13 @@ import lombok.extern.slf4j.Slf4j;
  * tracking (Phase 11.B), code view (11.C), and GitHub push (11.D) layer on top in subsequent
  * commits.
  *
- * <p><b>Not yet implemented</b>:
+ * <p><b>Compatibility notes</b>:
  *
  * <ul>
- *   <li>Plan gate — V2 runs skip {@code AWAITING_APPROVAL}, go straight to {@code WORKING}
- *   <li>Batch execution — V2 only supports realtime for now
- *   <li>Preview / deploy / GitHub push — separate phases
- *   <li>Credits / billing — Phase 11.B hooks {@code CostEstimator}
+ *   <li>Production runs persist a non-blocking {@code AWAITING_APPROVAL} plan gate; prototype and
+ *       explicitly integration-triggered runs may bypass it.
+ *   <li>Batch execution remains a separate operator path; realtime execution is the default.
+ *   <li>Preview, deploy, GitHub push, and billing are integrated through their dedicated services.
  * </ul>
  */
 @Service
