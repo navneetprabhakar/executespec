@@ -29,6 +29,13 @@ class ProviderDispatchGuardCoverageTest {
     assertThat(source("agent/LlmRouter.java")).contains("ProviderTestBudgetGuard.authorize(");
   }
 
+  @Test
+  void retiredCompatibilityRouterDoesNotReturn() {
+    assertThat(Path.of("src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java"))
+        .as("ExecuteSpec 2.0 must have one canonical provider router")
+        .doesNotExist();
+  }
+
   private static String source(String file) throws Exception {
     return Files.readString(Path.of("src/main/java/com/navneet/executespec").resolve(file));
   }
