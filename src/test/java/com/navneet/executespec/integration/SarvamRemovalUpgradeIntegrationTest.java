@@ -35,6 +35,13 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
       assertThat(result.migrationsExecuted).isEqualTo(7);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
+
+      // A deploy retry must be a no-op: Flyway must not replay the forward cleanup or mutate the
+      // preserved terminal/audit rows a second time.
+      var rerun = flyway(dataSource, schema, null).migrate();
+      assertThat(rerun.migrationsExecuted).isZero();
+      assertActiveDispatchStateWasReset(jdbc);
+      assertHistoricalEvidenceWasPreserved(jdbc);
     } finally {
       jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
     }
