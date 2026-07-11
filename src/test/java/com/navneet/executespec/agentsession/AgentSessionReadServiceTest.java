@@ -164,6 +164,22 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void replayRejectsStaleRowsAndNeverRegressesCursor() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+        .thenReturn(
+            List.of(
+                AgentActionEvent.builder().id("stale").streamSequence(9L).build(),
+                AgentActionEvent.builder().id("fresh").streamSequence(12L).build(),
+                AgentActionEvent.builder().id("legacy").streamSequence(null).build()));
+
+    var replay = service.replayEvents("s1", 10L, user());
+
+    assertThat(replay.events()).extracting("id").containsExactly("fresh", "legacy");
+    assertThat(replay.lastSequence()).isEqualTo(12L);
+  }
+
+  @Test
   void listsBoundedTurnsBeforeCursorWithStoredTraceHydration() throws Exception {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
     when(turnRepo.findBySessionIdOrderBySequenceAsc("s1"))

@@ -67,6 +67,19 @@ class AgentSessionReadService {
             : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
                 sessionId, after);
     long last = after == null || after < 0 ? 0 : after;
+    if (after != null && after >= 0) {
+      // Keep the cursor contract defensive even if a replica/query implementation returns a stale
+      // row. Legacy null-sequence rows remain visible for compatibility, but a durable sequence
+      // at or below the caller's cursor must never be replayed as a new event.
+      events =
+          events.stream()
+              .filter(
+                  event ->
+                      event != null
+                          && (event.getStreamSequence() == null
+                              || event.getStreamSequence() > after))
+              .toList();
+    }
     // V262 makes stream_sequence non-null for new rows, but tolerate a legacy/corrupt row rather
     // than turning an authenticated reconnect into a 500. Null-sequence events remain visible in
     // the replay payload; the cursor advances only to the greatest durable sequence available.
