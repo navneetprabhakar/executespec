@@ -386,6 +386,7 @@ export function runPhaseLabel(status?: string | null): string {
   if (s === 'REVIEWING') return 'Reviewing';
   if (s === 'TESTING') return 'Testing';
   if (['COMPLETE', 'COMPLETED'].includes(s)) return 'Done';
+  if (s === 'PARTIAL') return 'Done with warnings';
   if (s === 'FAILED') return 'Failed';
   if (s === 'CANCELLED') return 'Cancelled';
   if (s === 'PAUSED') return 'Paused';
@@ -393,7 +394,7 @@ export function runPhaseLabel(status?: string | null): string {
 }
 
 export function isTerminalRunStatus(status?: string | null): boolean {
-  return ['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'ERROR'].includes(
+  return ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED', 'ERROR'].includes(
     (status || '').toUpperCase(),
   );
 }
@@ -407,7 +408,9 @@ export function runProgress(
   const list = tasks ?? [];
   const total = list.length;
   const isDone = (s?: string | null) =>
-    ['COMPLETE', 'COMPLETED', 'DONE'].includes((s || '').toUpperCase());
+    ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED', 'BLOCKED', 'DONE'].includes(
+      (s || '').toUpperCase(),
+    );
   const isRunning = (s?: string | null) =>
     ['WORKING', 'IN_PROGRESS', 'RUNNING'].includes((s || '').toUpperCase());
   const done = list.filter((t) => isDone(t.status)).length;
