@@ -106,9 +106,9 @@ import lombok.extern.slf4j.Slf4j;
  * working unchanged — {@code GET /api/runs/{id}} returns V2 runs as V1-shaped JSON. The only
  * distinguishing field is {@code harnessVersion = "v2"}.
  *
- * <p><b>Phase 11.A scope</b>: entity persistence, status lifecycle mapping, plan + task rows. Cost
- * tracking (Phase 11.B), code view (11.C), and GitHub push (11.D) layer on top in subsequent
- * commits.
+ * <p>The V2 path now owns the complete run lifecycle on top of those compatibility tables,
+ * including cost attribution, code/evidence views, validation, and SCM handoff through their
+ * dedicated collaborators.
  *
  * <p><b>Compatibility notes</b>:
  *
