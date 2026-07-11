@@ -127,8 +127,8 @@ public class WorkerAgent {
   /**
    * VBC verify-before-complete (RL-2026-06-…) — server-runs the project's own test suite at the
    * {@code completeTask} boundary when {@link WorkerTaskRequest#verifyBeforeComplete()} is set
-   * (flag {@code worker.verify-before-complete.enabled}, V235, default OFF). Unlike the
-   * model-dependent {@code requireTestVerification}/{@code requireBuildVerification} soft gates
+   * (flag {@code worker.verify-before-complete.enabled}, V235, graduated ON by V239/V259). Unlike
+   * the model-dependent {@code requireTestVerification}/{@code requireBuildVerification} soft gates
    * (which only check whether the MODEL recently called runTests/buildProject), this RUNS the tests
    * itself, server-side — so a worker that never verifies is still caught. Called DIRECTLY (not via
    * the flag-gated {@code runWorkspaceTests} TOOL) so VBC is decoupled from {@code

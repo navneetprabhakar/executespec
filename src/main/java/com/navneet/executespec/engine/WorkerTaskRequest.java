@@ -114,11 +114,11 @@ import lombok.Builder;
  *     TerminalBenchRunService} (TB) and {@code CodeGenEngineImpl} (PATCH, behind {@code
  *     worker.critic-pass.enabled}, default OFF). Null/false ⇒ no critic pass (byte-identical).
  * @param verifyBeforeComplete VBC verify-before-complete (RL-2026-06-…, flag {@code
- *     worker.verify-before-complete.enabled}, V235, default OFF). When true, the worker SERVER-RUNS
- *     the project's own test suite at the FIRST {@code completeTask} — distinct from the {@code
- *     requireTestVerification}/{@code requireBuildVerification} soft gates, which only check
- *     whether the MODEL recently ran tests/build. A worker that calls completeTask without ever
- *     verifying is therefore still caught. Tests run via {@link
+ *     worker.verify-before-complete.enabled}, graduated ON by V239/V259). When true, the worker
+ *     SERVER-RUNS the project's own test suite at the FIRST {@code completeTask} — distinct from
+ *     the {@code requireTestVerification}/{@code requireBuildVerification} soft gates, which only
+ *     check whether the MODEL recently ran tests/build. A worker that calls completeTask without
+ *     ever verifying is therefore still caught. Tests run via {@link
  *     com.navneet.executespec.smoketest.WorkspaceTestRunner} DIRECTLY (not the flag-gated {@code
  *     runWorkspaceTests} tool), so VBC is independent of {@code worker.build-tdd.enabled} (V217)
  *     and carries no model-visible schema change (sidesteps the RL-2026-05-061 schema-stall class).
@@ -136,8 +136,8 @@ import lombok.Builder;
  *     the run; (e) the corrective nudge drops the "an imperfect edit beats zero" directive
  *     (benchmark-diff logic, wrong for customer PRs). Null/false ⇒ the RL-2026-05-005 write-only
  *     engine runs byte-identically.
- * @param autoVerify harness-resolution Phase 2 (flag {@code worker.auto-verify.enabled}, V255,
- *     default OFF). When true, the SERVER runs the resolved test suite after each edit burst (an
+ * @param autoVerify harness-resolution Phase 2 (flag {@code worker.auto-verify.enabled}, V259,
+ *     default ON). When true, the SERVER runs the resolved test suite after each edit burst (an
  *     iteration with no write following iterations that had writes) and injects the result — counts
  *     + failing-output tail — as an observation. No model-visible schema change (the RL-2026-05-061
  *     stall class is structurally avoided), deterministic (fires for every model, including ones
