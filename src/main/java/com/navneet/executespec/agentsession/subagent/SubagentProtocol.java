@@ -10,7 +10,43 @@ public final class SubagentProtocol {
 
   public enum Role {
     SCOUT,
-    VERIFIER
+    VERIFIER,
+    REPRODUCER,
+    REVIEWER,
+    DOCS_SCOUT;
+
+    /** The durable authority contract for this role. Implementer is intentionally absent. */
+    public RoleContract contract() {
+      return switch (this) {
+        case SCOUT -> new RoleContract("SCOUT_V1", Authority.READ_ONLY, false);
+        case VERIFIER -> new RoleContract("VERIFIER_V1", Authority.READ_ONLY, true);
+        case REPRODUCER -> new RoleContract("REPRODUCER_V1", Authority.READ_ONLY, true);
+        case REVIEWER -> new RoleContract("REVIEWER_V1", Authority.READ_ONLY, true);
+        case DOCS_SCOUT -> new RoleContract("DOCS_SCOUT_V1", Authority.READ_ONLY, true);
+      };
+    }
+
+    public static String acceptedNames() {
+      return "SCOUT, VERIFIER, REPRODUCER, REVIEWER, or DOCS_SCOUT";
+    }
+  }
+
+  public enum Authority {
+    READ_ONLY
+  }
+
+  /**
+   * Versioned role contract persisted with each child-created event.
+   *
+   * <p>All currently executable roles deliberately share READ_ONLY authority. A write-capable
+   * IMPLEMENTER role is not represented until a separate single-writer protocol exists.
+   */
+  public record RoleContract(String id, Authority authority, boolean requiresEvidence) {
+    public RoleContract {
+      if (id == null || id.isBlank())
+        throw new IllegalArgumentException("role contract id required");
+      if (authority == null) throw new IllegalArgumentException("role contract authority required");
+    }
   }
 
   public record SpawnRequest(

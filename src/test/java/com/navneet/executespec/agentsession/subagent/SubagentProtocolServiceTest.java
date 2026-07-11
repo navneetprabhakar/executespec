@@ -44,6 +44,22 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void roleContractsAreReadOnlyVersionedAndExcludeImplementer() {
+    assertThat(Role.values())
+        .containsExactly(
+            Role.SCOUT, Role.VERIFIER, Role.REPRODUCER, Role.REVIEWER, Role.DOCS_SCOUT);
+    assertThat(Role.values())
+        .allSatisfy(
+            role -> {
+              assertThat(role.contract().id()).endsWith("_V1");
+              assertThat(role.contract().authority())
+                  .isEqualTo(SubagentProtocol.Authority.READ_ONLY);
+            });
+    assertThatThrownBy(() -> Role.valueOf("IMPLEMENTER"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   void spawnPersistsBoundedChildAndBidirectionalLinks() {
     AgentSession parent = parent("parent", "ACTIVE");
     when(sessions.findById("parent")).thenReturn(Optional.of(parent));
@@ -74,6 +90,12 @@ class SubagentProtocolServiceTest {
         .containsExactly(
             SubagentProtocolService.EVENT_CHILD_CREATED,
             SubagentProtocolService.EVENT_CHILD_SPAWNED);
+    assertThat(
+            json.readTree(persisted.getAllValues().getFirst().getPayloadJson())
+                .path("contract")
+                .path("id")
+                .asText())
+        .isEqualTo("SCOUT_V1");
   }
 
   @Test

@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Canonical model-facing subagent action for chat/agent sessions.
  *
- * <p>The child is always a bounded, read-only SCOUT or VERIFIER. The service owns persistence,
+ * <p>The child is always a bounded, read-only role-contract child. The service owns persistence,
  * eligibility, budgets, cancellation and model execution; this adapter only validates arguments and
  * exposes the result as a structured tool envelope. {@link ObjectProvider} avoids a bean cycle
  * because the child execution service itself uses {@link SpecChatService} for its bounded turns.
@@ -56,23 +56,23 @@ public class SubagentChatTools {
         DefaultToolDefinition.builder()
             .name("spawn_subagent")
             .description(
-                "Delegate one bounded read-only repository task to a SCOUT or VERIFIER child. "
+                "Delegate one bounded read-only repository task to a role-contract child. "
                     + "Use only when independent evidence gathering or verification will help; "
                     + "the child cannot edit files, run a coding run, or approve a plan.")
             .inputSchema(
                 """
-                {
-                  "type": "object",
-                  "properties": {
-                    "role": {"type":"string", "enum":["SCOUT","VERIFIER"]},
-                    "objective": {"type":"string", "minLength":1, "maxLength":2000},
-                    "maxTurns": {"type":"integer", "minimum":1, "maximum":8},
-                    "maxCostUsd": {"type":"number", "minimum":0.01, "maximum":2.0}
-                  },
-                  "required": ["role", "objective"],
-                  "additionalProperties": false
-                }
-                """)
+{
+  "type": "object",
+  "properties": {
+    "role": {"type":"string", "enum":["SCOUT","VERIFIER","REPRODUCER","REVIEWER","DOCS_SCOUT"]},
+    "objective": {"type":"string", "minLength":1, "maxLength":2000},
+    "maxTurns": {"type":"integer", "minimum":1, "maximum":8},
+    "maxCostUsd": {"type":"number", "minimum":0.01, "maximum":2.0}
+  },
+  "required": ["role", "objective"],
+  "additionalProperties": false
+}
+""")
             .build();
     return new SimpleToolCallback(
         definition,
@@ -92,7 +92,7 @@ public class SubagentChatTools {
             role =
                 SubagentProtocol.Role.valueOf(textOrDefault(input, "role", "SCOUT").toUpperCase());
           } catch (IllegalArgumentException ex) {
-            return error("role must be SCOUT or VERIFIER");
+            return error("role must be " + SubagentProtocol.Role.acceptedNames());
           }
           int maxTurns = boundedInt(input, "maxTurns", 4, 1, 8);
           double maxCostUsd = boundedDouble(input, "maxCostUsd", 0.50, 0.01, 2.0);
@@ -151,36 +151,36 @@ public class SubagentChatTools {
         DefaultToolDefinition.builder()
             .name("spawn_subagents")
             .description(
-                "Delegate 1-4 independent bounded read-only repository tasks concurrently. "
-                    + "Each child must be SCOUT or VERIFIER; children cannot edit files, run a "
-                    + "coding run, approve a plan, or use shell tools. Results may be partial if "
-                    + "one child fails.")
+                "Delegate 1-4 independent bounded read-only repository tasks concurrently. Each"
+                    + " child must use a read-only role contract; children cannot edit files, run a"
+                    + " coding run, approve a plan, or use shell tools. Results may be partial if"
+                    + " one child fails.")
             .inputSchema(
                 """
-                {
-                  "type":"object",
-                  "properties":{
-                    "requests":{
-                      "type":"array",
-                      "minItems":1,
-                      "maxItems":4,
-                      "items":{
-                        "type":"object",
-                        "properties":{
-                          "role":{"type":"string","enum":["SCOUT","VERIFIER"]},
-                          "objective":{"type":"string","minLength":1,"maxLength":2000},
-                          "maxTurns":{"type":"integer","minimum":1,"maximum":8},
-                          "maxCostUsd":{"type":"number","minimum":0.01,"maximum":2.0}
-                        },
-                        "required":["role","objective"],
-                        "additionalProperties":false
-                      }
-                    }
-                  },
-                  "required":["requests"],
-                  "additionalProperties":false
-                }
-                """)
+{
+  "type":"object",
+  "properties":{
+    "requests":{
+      "type":"array",
+      "minItems":1,
+      "maxItems":4,
+      "items":{
+        "type":"object",
+        "properties":{
+          "role":{"type":"string","enum":["SCOUT","VERIFIER","REPRODUCER","REVIEWER","DOCS_SCOUT"]},
+          "objective":{"type":"string","minLength":1,"maxLength":2000},
+          "maxTurns":{"type":"integer","minimum":1,"maximum":8},
+          "maxCostUsd":{"type":"number","minimum":0.01,"maximum":2.0}
+        },
+        "required":["role","objective"],
+        "additionalProperties":false
+      }
+    }
+  },
+  "required":["requests"],
+  "additionalProperties":false
+}
+""")
             .build();
     return new SimpleToolCallback(
         definition,
@@ -235,7 +235,7 @@ public class SubagentChatTools {
     try {
       role = SubagentProtocol.Role.valueOf(textOrDefault(child, "role", "").toUpperCase());
     } catch (IllegalArgumentException ex) {
-      throw new IllegalArgumentException("role must be SCOUT or VERIFIER");
+      throw new IllegalArgumentException("role must be " + SubagentProtocol.Role.acceptedNames());
     }
     int maxTurns = strictInt(child, "maxTurns", 4, 1, 8);
     double maxCostUsd = strictDouble(child, "maxCostUsd", 0.50, 0.01, 2.0);
