@@ -39,8 +39,11 @@ turns separately from runs.
   Both the decision and spawn paths require the authenticated session owner; child execution is
   read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
-  The canonical chat turn also exposes the bounded `spawn_subagent` tool to the model; it uses the
-  same service/protocol seam and returns structured child evidence, so the REST endpoints are
+  The canonical chat turn exposes the bounded `spawn_subagent` and `spawn_subagents` tools to the
+  model; both use the same service/protocol seam and return structured child evidence. The batch
+  tool accepts one to four independent SCOUT/VERIFIER requests, reserves every child before
+  execution, and returns partial results/failures without granting write, shell, run, or approval
+  authority. The REST endpoints are
   compatibility/control-plane surfaces rather than a second execution implementation.
   When the operator enables `agent.subagents.coordinator-auto.enabled`, that model-requested tool
   path upgrades to the coordinator reservation boundary and emits the same atomic
@@ -279,8 +282,9 @@ turns separately from runs.
   turns.
 - `AgentStreamTurnSupportTest` pins stream support policy: read-only tool allowlist,
   conversation fallback behavior, and client-disconnect detection.
-- `SubagentChatToolsTest` pins eligibility fail-closed behavior, default legacy execution, and the
-  feature-flagged coordinator audit lane.
+- `SubagentChatToolsTest` pins eligibility fail-closed behavior, default legacy execution, strict
+  batch schema/budget validation, structured partial batch results, and the feature-flagged
+  coordinator audit lane.
 - `OrchestratorRoutingPromptCatalogTest` and `OrchestratorRoutingPromptEvalRunnerTest` pin shared
   prompt schemas and fail-closed model-eval scoring without requiring live credentials.
 - `OrchestratorControllerTest`, `AgentOrchestratorTurnServiceTest`,

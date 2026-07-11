@@ -138,4 +138,48 @@ class SubagentChatToolsTest {
     verify(execution).executeCoordinator(any(), any(), any());
     verify(execution, never()).execute(any(), any(), any());
   }
+
+  @Test
+  void batchToolExposesStrictSchemaAndReturnsStructuredPartialResults() throws Exception {
+    when(provider.getObject()).thenReturn(execution);
+    SubagentProtocol.BatchResult batch =
+        new SubagentProtocol.BatchResult(
+            java.util.List.of(),
+            java.util.List.of(new SubagentProtocol.BatchFailure("request", "child", "timed out")));
+    when(execution.executeBatch(any(), any(), any())).thenReturn(batch);
+
+    ToolCallback tool = new SubagentChatTools(provider, json).bindBatch(user, "parent", "turn-1");
+    JsonNode response =
+        json.readTree(
+            tool.call("{\"requests\":[{\"role\":\"SCOUT\",\"objective\":\"find routes\"}]}"));
+
+    assertThat(tool.getToolDefinition().inputSchema())
+        .contains("\"maxItems\":4", "\"additionalProperties\":false");
+    assertThat(response.path("ok").asBoolean()).isTrue();
+    assertThat(response.path("partial").asBoolean()).isTrue();
+    assertThat(response.path("failures").get(0).path("reason").asText()).isEqualTo("timed out");
+    verify(execution).executeBatch(any(), any(), any());
+    verify(execution, never()).execute(any(), any(), any());
+  }
+
+  @Test
+  void batchToolRejectsMutationFieldsAndOutOfRangeBudgetsBeforeExecution() throws Exception {
+    when(provider.getObject()).thenReturn(execution);
+    ToolCallback tool = new SubagentChatTools(provider, json).bindBatch(user, "parent", "turn-1");
+
+    JsonNode unknown =
+        json.readTree(
+            tool.call(
+                "{\"requests\":[{\"role\":\"SCOUT\",\"objective\":\"scan\",\"shell\":true}]}"));
+    JsonNode tooExpensive =
+        json.readTree(
+            tool.call(
+                "{\"requests\":[{\"role\":\"SCOUT\",\"objective\":\"scan\",\"maxCostUsd\":3}]}"));
+
+    assertThat(unknown.path("ok").asBoolean()).isFalse();
+    assertThat(unknown.path("error").asText()).contains("unsupported request field");
+    assertThat(tooExpensive.path("ok").asBoolean()).isFalse();
+    assertThat(tooExpensive.path("error").asText()).contains("maxCostUsd");
+    verify(execution, never()).executeBatch(any(), any(), any());
+  }
 }

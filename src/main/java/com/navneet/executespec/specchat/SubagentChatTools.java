@@ -69,7 +69,8 @@ public class SubagentChatTools {
                     "maxTurns": {"type":"integer", "minimum":1, "maximum":8},
                     "maxCostUsd": {"type":"number", "minimum":0.01, "maximum":2.0}
                   },
-                  "required": ["role", "objective"]
+                  "required": ["role", "objective"],
+                  "additionalProperties": false
                 }
                 """)
             .build();
@@ -142,6 +143,132 @@ public class SubagentChatTools {
             return error(ex.getMessage() == null ? "subagent execution failed" : ex.getMessage());
           }
         });
+  }
+
+  /** Bind the model-visible bounded fan-out tool while preserving the legacy single-child tool. */
+  public ToolCallback bindBatch(AppUserDetails user, String parentSessionId, String parentTurnId) {
+    ToolDefinition definition =
+        DefaultToolDefinition.builder()
+            .name("spawn_subagents")
+            .description(
+                "Delegate 1-4 independent bounded read-only repository tasks concurrently. "
+                    + "Each child must be SCOUT or VERIFIER; children cannot edit files, run a "
+                    + "coding run, approve a plan, or use shell tools. Results may be partial if "
+                    + "one child fails.")
+            .inputSchema(
+                """
+                {
+                  "type":"object",
+                  "properties":{
+                    "requests":{
+                      "type":"array",
+                      "minItems":1,
+                      "maxItems":4,
+                      "items":{
+                        "type":"object",
+                        "properties":{
+                          "role":{"type":"string","enum":["SCOUT","VERIFIER"]},
+                          "objective":{"type":"string","minLength":1,"maxLength":2000},
+                          "maxTurns":{"type":"integer","minimum":1,"maximum":8},
+                          "maxCostUsd":{"type":"number","minimum":0.01,"maximum":2.0}
+                        },
+                        "required":["role","objective"],
+                        "additionalProperties":false
+                      }
+                    }
+                  },
+                  "required":["requests"],
+                  "additionalProperties":false
+                }
+                """)
+            .build();
+    return new SimpleToolCallback(
+        definition,
+        input -> {
+          if (user == null || user.getUser() == null)
+            return error("authenticated user is required");
+          if (parentSessionId == null || parentSessionId.isBlank())
+            return error("parent session is required");
+          JsonNode requestsNode = input == null ? null : input.get("requests");
+          if (requestsNode == null || !requestsNode.isArray())
+            return error("requests array is required");
+          if (requestsNode.isEmpty() || requestsNode.size() > 4)
+            return error("requests must contain 1 to 4 children");
+          java.util.List<SubagentProtocol.SpawnRequest> requests = new java.util.ArrayList<>();
+          try {
+            for (JsonNode child : requestsNode)
+              requests.add(parseBatchRequest(child, parentSessionId, parentTurnId));
+            SubagentProtocol.BatchResult batch =
+                executionService.getObject().executeBatch(requests, user, orgId(user));
+            ObjectNode envelope = json.createObjectNode();
+            envelope.put("ok", true);
+            envelope.put("partial", !batch.failures().isEmpty());
+            envelope.set("results", json.valueToTree(batch.results()));
+            envelope.set("failures", json.valueToTree(batch.failures()));
+            return envelope;
+          } catch (IllegalArgumentException ex) {
+            return error(ex.getMessage());
+          } catch (RuntimeException ex) {
+            log.warn("spawn_subagents failed for session {}: {}", parentSessionId, ex.getMessage());
+            return error(
+                ex.getMessage() == null ? "subagent batch execution failed" : ex.getMessage());
+          }
+        });
+  }
+
+  private SubagentProtocol.SpawnRequest parseBatchRequest(
+      JsonNode child, String parentSessionId, String parentTurnId) {
+    if (child == null || !child.isObject())
+      throw new IllegalArgumentException("each request must be an object");
+    java.util.Iterator<String> fields = child.fieldNames();
+    while (fields.hasNext()) {
+      String field = fields.next();
+      if (!java.util.Set.of("role", "objective", "maxTurns", "maxCostUsd").contains(field)) {
+        throw new IllegalArgumentException("unsupported request field: " + field);
+      }
+    }
+    String objective = text(child, "objective");
+    if (objective == null || objective.isBlank() || objective.length() > 2_000) {
+      throw new IllegalArgumentException("objective must contain 1 to 2000 characters");
+    }
+    SubagentProtocol.Role role;
+    try {
+      role = SubagentProtocol.Role.valueOf(textOrDefault(child, "role", "").toUpperCase());
+    } catch (IllegalArgumentException ex) {
+      throw new IllegalArgumentException("role must be SCOUT or VERIFIER");
+    }
+    int maxTurns = strictInt(child, "maxTurns", 4, 1, 8);
+    double maxCostUsd = strictDouble(child, "maxCostUsd", 0.50, 0.01, 2.0);
+    return new SubagentProtocol.SpawnRequest(
+        UUID.randomUUID().toString(),
+        parentSessionId,
+        parentTurnId,
+        role,
+        objective.trim(),
+        maxTurns,
+        maxCostUsd);
+  }
+
+  private static int strictInt(JsonNode input, String field, int fallback, int min, int max) {
+    JsonNode value = input.get(field);
+    if (value == null || value.isNull()) return fallback;
+    if (!value.isIntegralNumber() || value.asLong() < min || value.asLong() > max) {
+      throw new IllegalArgumentException(
+          field + " must be an integer between " + min + " and " + max);
+    }
+    return value.intValue();
+  }
+
+  private static double strictDouble(
+      JsonNode input, String field, double fallback, double min, double max) {
+    JsonNode value = input.get(field);
+    if (value == null || value.isNull()) return fallback;
+    double parsed = value.isNumber() ? value.asDouble() : Double.NaN;
+    if (!Double.isFinite(parsed) || parsed < min || parsed > max) {
+      throw new IllegalArgumentException(
+          field + " must be a number between " + min + " and " + max);
+    }
+    return parsed;
   }
 
   private boolean coordinatorAutoEnabled() {
