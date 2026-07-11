@@ -6,9 +6,9 @@ best-effort: a failed model call must never fail the customer run.
 ## Routing contract
 
 `MemoryCompactionService` is a text-only metadata summarizer. It resolves the lightweight
-`RunLedgerAgent` model and calls `LlmRouter.callText` with an explicit empty tool set. Do not add
-new `FallbackLlmRouter` callers here; the canonical text seam owns provider transport, usage
-accounting, retry, failover, and telemetry.
+`RunLedgerAgent` model and calls `LlmRouter.callText` with an explicit empty tool set. The canonical
+text seam owns provider transport, usage accounting, retry, failover, and telemetry. The retired
+compatibility router is not part of the ExecuteSpec 2.0 runtime.
 
 `RunLedgerAgent` also uses `LlmRouter.callText`; its run-completion path is best-effort and catches
 all transport failures, while canonical retry/failover and managed-AI accounting remain centralized
