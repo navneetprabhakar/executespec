@@ -3900,13 +3900,15 @@ to boot — skip it for those.""";
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
+      int[] profileThresholds =
+          capabilityStagnationThresholds(resolved.providerName(), resolved.getModel());
       return new TierConfig(
           resolved.providerName(),
           resolved.getModel(),
           maxIter,
           maxTokens,
-          stagnationWarnAfter,
-          stagnationForceAfter,
+          profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
+          profileThresholds[1] > 0 ? profileThresholds[1] : stagnationForceAfter,
           wallClockSeconds,
           forceSalvageTool);
     } catch (Exception e) {
@@ -3916,15 +3918,67 @@ to boot — skip it for those.""";
           tier,
           runProvider,
           runModel);
+      int[] profileThresholds = capabilityStagnationThresholds(runProvider, runModel);
       return new TierConfig(
           runProvider,
           runModel,
           maxIter,
           maxTokens,
-          stagnationWarnAfter,
-          stagnationForceAfter,
+          profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
+          profileThresholds[1] > 0 ? profileThresholds[1] : stagnationForceAfter,
           wallClockSeconds,
           forceSalvageTool);
+    }
+  }
+
+  /**
+   * Resolve optional model-specific stagnation thresholds without changing the default ladder.
+   * Profiles are deliberately advisory: malformed, partial, or unsafe values are ignored and the
+   * complexity defaults remain in force. Keeping this lookup at the tier-config boundary makes
+   * model tuning effective for both normal and continuation reruns while avoiding a second routing
+   * implementation in the worker loop.
+   */
+  private int[] capabilityStagnationThresholds(String provider, String model) {
+    if (matrixProps == null || matrixProps.getCapabilityProfiles() == null) return new int[] {0, 0};
+    try {
+      var profiles = matrixProps.getCapabilityProfiles();
+      com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile profile = null;
+      if (provider != null && model != null) {
+        String modelKey = provider + "/" + model;
+        profile = profiles.get(modelKey);
+        if (profile == null) {
+          profile =
+              profiles.entrySet().stream()
+                  .filter(e -> e.getKey().equalsIgnoreCase(modelKey))
+                  .map(Map.Entry::getValue)
+                  .findFirst()
+                  .orElse(null);
+        }
+      }
+      if (profile == null && provider != null) {
+        profile = profiles.get(provider);
+        if (profile == null) {
+          profile =
+              profiles.entrySet().stream()
+                  .filter(e -> e.getKey().equalsIgnoreCase(provider))
+                  .map(Map.Entry::getValue)
+                  .findFirst()
+                  .orElse(null);
+        }
+      }
+      if (profile == null) return new int[] {0, 0};
+      int warn = profile.getStagnationWarnAfter() == null ? 0 : profile.getStagnationWarnAfter();
+      int force = profile.getStagnationForceAfter() == null ? 0 : profile.getStagnationForceAfter();
+      // The worker requires force > warn; reject a partial/unsafe profile rather than silently
+      // creating a loop that can never reach its force boundary.
+      return warn > 0 && force > warn ? new int[] {warn, force} : new int[] {0, 0};
+    } catch (RuntimeException e) {
+      log.warn(
+          "Ignoring malformed capability profile provider={} model={}: {}",
+          provider,
+          model,
+          e.getMessage());
+      return new int[] {0, 0};
     }
   }
 
