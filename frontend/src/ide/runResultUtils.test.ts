@@ -12,6 +12,7 @@ import {
   hasRunCostEvidence,
   isNoisyLogEvent,
   isFailedTerminalStatus,
+  isTestExecutionTerminal,
   lineDiff,
   logIcon,
   logLabel,
@@ -289,6 +290,14 @@ describe('runResultUtils', () => {
       canRerunTests: true,
       emptyMessage: 'No test report yet.',
     });
+  });
+
+  it('recognizes only terminal manual test execution states', () => {
+    expect(isTestExecutionTerminal('EXECUTING')).toBe(false);
+    expect(isTestExecutionTerminal('COMPILED')).toBe(false);
+    expect(isTestExecutionTerminal('COMPLETED')).toBe(true);
+    expect(isTestExecutionTerminal('failed')).toBe(true);
+    expect(isTestExecutionTerminal(null)).toBe(false);
   });
 
   it('diagnoses reviewing runs from task, report, test, and retained-log evidence', () => {

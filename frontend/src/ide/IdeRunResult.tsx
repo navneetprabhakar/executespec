@@ -48,6 +48,9 @@ import {
   SEV,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
+  isTestExecutionTerminal,
+  TEST_EXECUTION_MAX_POLLS,
+  TEST_EXECUTION_POLL_INTERVAL_MS,
   TABS,
   TAB_LABEL,
   testRerunState,
@@ -225,6 +228,7 @@ export default function IdeRunResult() {
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
+  const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -339,6 +343,51 @@ export default function IdeRunResult() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // Manual test execution is accepted asynchronously. Reconcile the report
+  // and plan until the backend marks the plan terminal, so the Tests tab does
+  // not remain stuck at the pre-execution 0/0 snapshot. The bound prevents a
+  // broken preview/runner from creating an unbounded request loop.
+  useEffect(() => {
+    if (!runId || !testRunPending) return;
+    let cancelled = false;
+    let polls = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      polls += 1;
+      const [nextTests, nextPlan] = await Promise.all([
+        api.getTestReport(runId),
+        api.getTestPlan(runId),
+      ]);
+      if (cancelled) return;
+      if (nextTests) setTests(nextTests);
+      if (nextPlan) setTestPlan(nextPlan);
+
+      const status = nextTests?.status || nextPlan?.status;
+      if (isTestExecutionTerminal(status)) {
+        setTestRunPending(false);
+        setMsg(
+          status?.toUpperCase() === 'FAILED'
+            ? 'Test run failed. Review the test errors below.'
+            : 'Test run complete — results refreshed.',
+        );
+        return;
+      }
+      if (polls >= TEST_EXECUTION_MAX_POLLS) {
+        setTestRunPending(false);
+        setMsg('Test run is still processing. Refresh Tests later to see the final report.');
+        return;
+      }
+      timer = setTimeout(poll, TEST_EXECUTION_POLL_INTERVAL_MS);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, testRunPending]);
+
   useEffect(() => {
     if (!runId || eventLog) return;
     const s = (run?.status || '').toUpperCase();
@@ -429,6 +478,21 @@ export default function IdeRunResult() {
       setMsg(ok(r));
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Failed.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function rerunTests() {
+    if (!runId || testRunPending || busy === 'runtests') return;
+    setBusy('runtests');
+    setMsg('');
+    try {
+      await api.runTests(runId);
+      setTestRunPending(true);
+      setMsg('Test run queued — waiting for results…');
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Could not queue tests.');
     } finally {
       setBusy('');
     }
@@ -2337,23 +2401,22 @@ export default function IdeRunResult() {
               <button
                 className='ide-btn ghost'
                 style={{marginLeft: 'auto', padding: '4px 10px'}}
-                disabled={busy === 'runtests' || !canRerunTests}
+                disabled={busy === 'runtests' || testRunPending || !canRerunTests}
                 title={
                   canRerunTests
                     ? 'Queue a test run for this workspace'
                     : 'No generated code or test plan is available to re-run'
                 }
-                onClick={() =>
-                  action(
-                    'runtests',
-                    () => api.runTests(runId),
-                    () => 'Test run queued.',
-                  )
-                }
+                onClick={() => void rerunTests()}
               >
-                ↻ Re-run tests
+                {testRunPending ? '⏳ Tests running…' : '↻ Re-run tests'}
               </button>
             </h1>
+            {testRunPending && (
+              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+                Tests are running against the preview. This panel will refresh automatically.
+              </div>
+            )}
             {!tests ? (
               <div className='ide-empty'>{noCodeTestMessage}</div>
             ) : (

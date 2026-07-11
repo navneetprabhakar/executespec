@@ -177,6 +177,18 @@ export function testRerunState({
   return {canRerunTests, emptyMessage};
 }
 
+/**
+ * Manual test execution is queued by the API and completes asynchronously. Keep
+ * the result surface honest while that work is in flight instead of treating the
+ * first 0/0 response as the final report.
+ */
+export function isTestExecutionTerminal(status?: string | null): boolean {
+  return ['COMPLETED', 'FAILED'].includes((status || '').toUpperCase());
+}
+
+export const TEST_EXECUTION_POLL_INTERVAL_MS = 2000;
+export const TEST_EXECUTION_MAX_POLLS = 45;
+
 export function fileCountSummary({
   reportedFiles,
   workspaceFiles,
