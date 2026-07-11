@@ -45,6 +45,7 @@ public class AgentAttachmentStore {
       long sizeBytes,
       int extractedChars,
       String sanitizedText,
+      byte[] rawBytes,
       String createdAt) {
 
     public static StoredAttachment of(
@@ -63,6 +64,26 @@ public class AgentAttachmentStore {
           sizeBytes,
           text.length(),
           text,
+          null,
+          Instant.now().toString());
+    }
+
+    public static StoredAttachment image(
+        String attachmentId,
+        String sessionId,
+        String filename,
+        String mimeType,
+        long sizeBytes,
+        byte[] rawBytes) {
+      return new StoredAttachment(
+          attachmentId,
+          sessionId,
+          filename,
+          mimeType,
+          sizeBytes,
+          0,
+          "",
+          rawBytes == null ? null : rawBytes.clone(),
           Instant.now().toString());
     }
   }

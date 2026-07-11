@@ -229,7 +229,20 @@ public class OpenAiNativeToolClient {
     } else if (m instanceof UserMessage um) {
       ObjectNode n = messages.addObject();
       n.put("role", "user");
-      n.put("content", um.getText());
+      if (um.getMedia() == null || um.getMedia().isEmpty()) {
+        n.put("content", um.getText());
+      } else {
+        ArrayNode parts = n.putArray("content");
+        if (um.getText() != null && !um.getText().isBlank()) {
+          parts.addObject().put("type", "text").put("text", um.getText());
+        }
+        for (var media : um.getMedia()) {
+          ObjectNode image = parts.addObject();
+          image.put("type", "image_url");
+          String mime = media.getMimeType().toString();
+          image.putObject("image_url").put("url", "data:" + mime + ";base64," + java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
+        }
+      }
     } else if (m instanceof AssistantMessage am) {
       ObjectNode n = messages.addObject();
       n.put("role", "assistant");
