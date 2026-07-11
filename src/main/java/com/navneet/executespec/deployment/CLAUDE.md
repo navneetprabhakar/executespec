@@ -77,7 +77,9 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 - TestPreviewCoordinator reuses existing preview via `previewService.getStatus()` check
 - Preview NOT stopped after test execution (stays up for user's full 5-min TTL)
 - Deployment cleanup via scheduled job (DeploymentCleanupJob)
-- All `gcloud`/`docker` subprocess calls have timeouts (deploy: 10min, delete: 5min, list: 2min)
+- All `gcloud`/`docker` subprocess calls have timeouts (deploy: 10min, delete: 5min, list: 2min).
+  `DockerExecutor` drains subprocess output concurrently and bounds it to 1 MiB so a silent or
+  pipe-filling Docker command cannot block before its timeout is applied.
 - Stdout/stderr read in parallel (CompletableFuture) to prevent pipe buffer deadlock
 - Virtual threads wrapped with `ContextSnapshotFactory.captureAll().wrap()` for trace propagation
 - ACTIVE_PREVIEWS gauge decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
