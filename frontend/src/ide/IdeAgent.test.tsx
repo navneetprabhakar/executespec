@@ -313,6 +313,24 @@ describe('IdeAgent', () => {
     expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
   });
 
+  it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
+    ({host, root} = await renderAgent('/agent'));
+    const baseline = api.listAgentSessions.mock.calls.length;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await flush();
+
+    expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(baseline);
+    expect(api.listAgentGates.mock.calls.length).toBeGreaterThan(1);
+    expect(api.listAgentTurns.mock.calls.length).toBeGreaterThan(1);
+    expect(host.textContent).toContain('Web agent');
+  });
+
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
     api.getManagedAiBalance.mockResolvedValue({
       ...managedAi,

@@ -299,6 +299,22 @@ export default function IdeAgent() {
     void load();
   }, [load]);
 
+  // Mobile browsers routinely suspend the tab while the operator switches apps.
+  // Reconcile durable sessions, gates, and the selected transcript when the tab
+  // becomes visible again so the cockpit does not keep a stale approval/run
+  // state after a backgrounded stream or a server-side action. Do not refresh
+  // during an active POST-SSE turn: the stream's durable replay path owns that
+  // transition and a concurrent load could overwrite optimistic activity.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (state.status === 'streaming' || state.status === 'toolRunning') return;
+      void load();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [load, state.status]);
+
   useEffect(() => {
     if (!state.selectedId) {
       dispatch({type: 'turns:set', turns: []});
