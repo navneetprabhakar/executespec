@@ -33,6 +33,8 @@ import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.InitialRoutingDecision;
+import com.navneet.executespec.router.InitialRoutingService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.ModelResolver;
@@ -343,6 +345,10 @@ to boot — skip it for those.""";
       gcsTaskCheckpointService;
 
   private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
+
+  /** Optional in source-compatible test constructors; Spring supplies the routing seam. */
+  private InitialRoutingService initialRoutingService;
+
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
@@ -353,7 +359,6 @@ to boot — skip it for those.""";
   /** Optional only for source-compatible unit construction; Spring always supplies it. */
   private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
 
-  @Autowired
   public SequentialExecutor(
       WorkerAgent worker,
       BuildProjectTool buildProjectTool,
@@ -392,6 +397,49 @@ to boot — skip it for those.""";
         goalContinuationAdvisor,
         repoOrientationService);
     this.taskOutcomeMetricService = taskOutcomeMetricService;
+  }
+
+  @Autowired
+  public SequentialExecutor(
+      WorkerAgent worker,
+      BuildProjectTool buildProjectTool,
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      SseBroadcaster broadcaster,
+      AgentTaskRepository taskRepo,
+      ModelResolver modelResolver,
+      com.navneet.executespec.router.ModelMatrixProperties matrixProps,
+      com.navneet.executespec.project.rag.RetrievalService retrievalService,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.context.ContextStore contextStore,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
+      com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
+      InitialRoutingService initialRoutingService,
+      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService) {
+    this(
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        matrixProps,
+        retrievalService,
+        inLoopTestRunner,
+        featureFlagService,
+        contextStore,
+        costTracker,
+        gcsTaskCheckpointService,
+        availableProviderResolver,
+        goalContinuationAdvisor,
+        repoOrientationService,
+        taskOutcomeMetricService);
+    this.initialRoutingService = initialRoutingService;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -1432,6 +1480,68 @@ to boot — skip it for those.""";
     return executeOne(task, plan, req, isFinalTask, null);
   }
 
+  /**
+   * Resolves the route for a first worker attempt through the canonical candidate/ranking seam.
+   * Retries and resumed workers deliberately bypass this method's selection path.
+   */
+  InitialRoutingDecision initialRouteFor(
+      PlannedTask task,
+      ExecutionRequest req,
+      String currentProvider,
+      String currentModel,
+      boolean firstAttempt) {
+    if (!firstAttempt
+        || initialRoutingService == null
+        || featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_INITIAL_ROUTING)) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("initial routing disabled or route is not a first attempt"));
+    }
+    if (req != null && Boolean.TRUE.equals(req.routePinned())) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("route pinned; initial routing kept the explicit provider/model"));
+    }
+    String category = taskCategory(task);
+    try {
+      return initialRoutingService.decide(
+          currentProvider,
+          currentModel,
+          com.navneet.executespec.router.ModelProviderCandidateRequest.builder()
+              .taskCategory(category)
+              .requiredQualityThreshold(requiredGoalQualityThreshold(category))
+              .providerAvailability(providerAvailability(req.runContext().runId()))
+              .providerPreferenceOrder(providerPreferenceOrder(currentProvider))
+              .build());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Initial route selection failed closed for task={} provider={} model={}: {}",
+          task == null ? null : task.id(),
+          currentProvider,
+          currentModel,
+          ex.getMessage());
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("initial route selection failed closed"));
+    }
+  }
+
   private TaskOutcome executeOne(
       PlannedTask task,
       Plan plan,
@@ -1476,6 +1586,22 @@ to boot — skip it for those.""";
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
         providerModelOverride == null ? req.model() : providerModelOverride.model();
+    InitialRoutingDecision initialRoute =
+        initialRouteFor(
+            task,
+            req,
+            requestedProvider,
+            requestedModel,
+            providerModelOverride == null && resumeFrom == null);
+    requestedProvider = initialRoute.provider();
+    requestedModel = initialRoute.model();
+    if (initialRoute.changed()) {
+      log.info(
+          "Executor task={} initial route changed {} -> {} (observed evidence)",
+          task.id(),
+          providerModelOverride == null ? req.provider() + "/" + req.model() : "override",
+          initialRoute.routeLabel());
+    }
 
     String refDocs = fetchReferenceDocs(req.projectId(), task);
     String systemPrompt =
@@ -1521,6 +1647,11 @@ to boot — skip it for those.""";
             requestedModel,
             req.projectId() != null,
             req.lowComplexityWorkerStartTier());
+    if (initialRoute.changed()) {
+      // ModelResolver normally resolves the tier's YAML model. An evidence-backed initial
+      // decision is already a concrete provider/model candidate, so preserve both halves of it.
+      cfg = cfg.withProviderModel(initialRoute.provider(), initialRoute.model());
+    }
     if (providerModelOverride != null) {
       cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
     }
@@ -4279,6 +4410,9 @@ to boot — skip it for those.""";
   /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
   public static final String FLAG_CROSS_PROVIDER_FALLBACK =
       "worker.cross-provider-fallback.enabled";
+
+  /** Initial worker-route selection from observed candidate evidence; default OFF. */
+  public static final String FLAG_INITIAL_ROUTING = "execution.initial-routing.enabled";
 
   /**
    * Context retention across task retries (RL-2026-05-052, T3.14). When ON, the retry path loads

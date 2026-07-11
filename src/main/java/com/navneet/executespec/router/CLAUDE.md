@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-06-10 (1.0.0-M1).
 
-User-selected provider routing with YAML as the single source of truth and a Redis-backed circuit breaker.
+User-selected provider routing with YAML as the single source of truth and a Redis-backed circuit breaker. V260 seeds the evidence-gated initial worker-route flag; keep it OFF until observed quality evidence is sufficient.
 
 ## Key files
 
