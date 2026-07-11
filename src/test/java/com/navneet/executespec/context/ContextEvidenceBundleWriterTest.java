@@ -31,7 +31,11 @@ class ContextEvidenceBundleWriterTest {
             "PASS",
             "recent",
             "run-1",
-            "ship it");
+            "ship it",
+            "try the narrow seam",
+            List.of("src/A.java"),
+            List.of("build failed: missing import"),
+            List.of("Do not repeat broad refactor"));
 
     var writer = new ContextEvidenceBundleWriter(new ObjectMapper());
     Path written = writer.write(tempDir, input, "run-1");
@@ -42,6 +46,13 @@ class ContextEvidenceBundleWriterTest {
     assertThat(bundle.path("evidence").path("newPackages")).hasSize(1);
     assertThat(bundle.path("evidence").path("newFiles")).hasSize(1);
     assertThat(bundle.path("sources").path("contextDocumentSha256").asText()).hasSize(64);
+    assertThat(bundle.path("handoff").path("goal").asText()).isEqualTo("ship it");
+    assertThat(bundle.path("handoff").path("hypothesis").asText()).isEqualTo("try the narrow seam");
+    assertThat(bundle.path("handoff").path("changedFiles").get(0).asText()).isEqualTo("src/A.java");
+    assertThat(bundle.path("handoff").path("failures").get(0).asText())
+        .isEqualTo("build failed: missing import");
+    assertThat(bundle.path("handoff").path("doNotRepeat").get(0).asText())
+        .isEqualTo("Do not repeat broad refactor");
   }
 
   @Test
