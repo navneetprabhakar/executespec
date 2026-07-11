@@ -761,7 +761,7 @@ to boot — skip it for those.""";
       // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
       // state gets the same cleanup. Both calls are best-effort; failures are logged only.
       if (contextStore != null) {
-        contextStore.deleteAll(runId);
+        contextStore.deleteAll(runId, req.runContext().workspaceRoot());
       }
       clearCrossProviderState(runId);
       clearContinuationActionState(runId);

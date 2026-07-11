@@ -55,8 +55,8 @@ public class ProjectMemoryProvider {
     // newest complete ledger entries that fit after that baseline; never emit an oversized prompt
     // block and silently rely on provider truncation.
     int remainingChars = MAX_MEMORY_CHARS;
-    String snapshot = truncate(snapshotBlock.toString(), remainingChars);
-    remainingChars -= snapshot.length();
+    String snapshotText = truncate(snapshotBlock.toString(), remainingChars);
+    remainingChars -= snapshotText.length();
     List<String> selectedRecent = new java.util.ArrayList<>();
     if (remainingChars > 0 && !recent.isEmpty()) {
       // Repository order is newest-first. Add newest entries first, then render chronologically.
@@ -70,7 +70,7 @@ public class ProjectMemoryProvider {
         remainingChars -= candidate.length();
       }
     }
-    StringBuilder ctx = new StringBuilder(snapshot);
+    StringBuilder ctx = new StringBuilder(snapshotText);
     if (!selectedRecent.isEmpty()) {
       ctx.append("## RECENT RUNS\n");
       for (int i = selectedRecent.size() - 1; i >= 0; i--) {

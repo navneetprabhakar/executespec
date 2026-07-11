@@ -13,6 +13,13 @@
  * TTL         : 86400 seconds (24 hours), set on every write via SET ... EX 86400
  * Eviction    : Redis default (allkeys-lru) — TTL is the primary lifecycle control
  *
+ * Workspace checkpoint (enabled by {@code durability.worker-context.enabled}):
+ *   {@code <workspace>/.agent-context/worker/{taskId}.json}, written atomically on each snapshot
+ *   save. Redis remains the fast path; the workspace checkpoint is the bounded restart fallback
+ *   when Redis is unavailable or the key has expired. It restores conversation state only when
+ *   the workspace is available; it cannot resurrect an in-memory provider call or prove a
+ *   cross-JVM worker handoff.
+ *
  * Auxiliary keys (Phase 8):
  *   v2:agent-ctx-index:{runId}    Set of taskIds with persisted context (TTL 86400)
  *   v2:agent-ctx-meta:{runId}:{taskId}  Hash of metadata (iteration, lastWriteAt, byteSize) (TTL 86400)

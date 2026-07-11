@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -14,8 +15,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.tool.ExecutionContext;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,36 +34,48 @@ class ContextStoreTest {
   @Mock private StringRedisTemplate redis;
   @Mock private ValueOperations<String, String> ops;
 
+  @TempDir Path tempDir;
+
+  private ExecutionContext context;
+
+  @BeforeEach
+  void setUp() {
+    context = new ExecutionContext("run-1", "task-1", tempDir);
+  }
+
   @Test
   void failsOpenWhenRedisAbsent() {
     ContextStore store = new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
-    ExecutionContext ctx = context();
 
-    assertThat(store.save(ctx, List.of(new UserMessage("hello")), 3)).isZero();
-    assertThat(store.load(ctx)).isEmpty();
-    assertThat(store.exists(ctx)).isFalse();
+    assertThat(store.save(context, List.of(new UserMessage("hello")), 3)).isPositive();
+    assertThat(store.load(context)).isPresent();
+    assertThat(store.exists(context)).isTrue();
+    store.delete(context);
+    assertThat(store.load(context)).isEmpty();
+    assertThat(store.exists(context)).isFalse();
     assertThat(store.deleteAll("run-1")).isZero();
 
-    verify(metrics).recordContextSave("skipped", 0);
+    verify(metrics).recordContextSave(eq("disk"), anyInt());
   }
 
   @Test
   void saveAndLoadRoundTripsMessagesThroughRedis() {
     ContextStore store = new ContextStore(new ObjectMapper(), metrics, redis);
-    ExecutionContext ctx = context();
     when(redis.opsForValue()).thenReturn(ops);
     ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
 
     int bytes =
         store.save(
-            ctx, List.of(new SystemMessage("system prompt"), new UserMessage("user prompt")), 7);
+            context,
+            List.of(new SystemMessage("system prompt"), new UserMessage("user prompt")),
+            7);
 
     assertThat(bytes).isPositive();
-    verify(ops).set(eq(ContextStore.keyFor(ctx)), json.capture(), eq(Duration.ofHours(24)));
+    verify(ops).set(eq(ContextStore.keyFor(context)), json.capture(), eq(Duration.ofHours(24)));
     verify(metrics).recordContextSave(eq("ok"), anyInt());
 
-    when(ops.get(ContextStore.keyFor(ctx))).thenReturn(json.getValue());
-    SavedContext saved = store.load(ctx).orElseThrow();
+    when(ops.get(ContextStore.keyFor(context))).thenReturn(json.getValue());
+    SavedContext saved = store.load(context).orElseThrow();
 
     assertThat(saved.runId()).isEqualTo("run-1");
     assertThat(saved.taskId()).isEqualTo("task-1");
@@ -72,7 +87,29 @@ class ContextStoreTest {
     assertThat(saved.history().get(1).getText()).isEqualTo("user prompt");
   }
 
-  private static ExecutionContext context() {
-    return new ExecutionContext("run-1", "task-1", Path.of("/tmp/executespec-context-test"));
+  @Test
+  void loadsWorkspaceCheckpointWhenRedisKeyIsMissingAfterRestart() {
+    ContextStore first = new ContextStore(new ObjectMapper(), metrics, redis);
+    when(redis.opsForValue()).thenReturn(ops);
+    first.save(context, List.of(new UserMessage("survive restart")), 11);
+
+    ContextStore restarted =
+        new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
+    SavedContext saved = restarted.load(context).orElseThrow();
+
+    assertThat(saved.iteration()).isEqualTo(11);
+    assertThat(saved.history()).singleElement().isInstanceOf(UserMessage.class);
+    assertThat(saved.history().get(0).getText()).isEqualTo("survive restart");
+    assertThat(Files.isRegularFile(ContextStore.diskCheckpointPath(context))).isTrue();
+  }
+
+  @Test
+  void deleteAllRemovesWorkspaceCheckpointsAtRunEnd() {
+    ContextStore store = new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
+    store.save(context, List.of(new UserMessage("cleanup me")), 4);
+
+    assertThat(store.deleteAll("run-1", tempDir)).isEqualTo(1);
+    assertThat(Files.exists(ContextStore.diskCheckpointPath(context))).isFalse();
+    assertThat(store.load(context)).isEmpty();
   }
 }
