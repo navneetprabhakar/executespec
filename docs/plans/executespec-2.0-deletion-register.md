@@ -45,6 +45,7 @@ being retained under compatibility aliases.
 | Literal NUL bytes in `WorkerAgent.java` and `GeminiNativeToolClient.java` | DONE; escaped delimiters preserve behavior and repository source-text gate prevents recurrence |
 | Backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | Backend aliases/stub deleted in M2 cleanup; CLI fake aliases already deleted. Persisted child protocol remains the replacement before any delegation UX ships. |
 | Deprecated `PatchAgent` wrapper | DONE — deleted after `CodeGenEngine`/PATCH characterization; `prompts/patch-agent.md` remains because `CodeGenEngineImpl` owns and actively assembles it |
+| `FallbackLlmRouter` compatibility router | DONE — deleted after all production text callers moved to `LlmRouter.callText`; canonical routing, retry, failover and usage accounting now have one transport |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
@@ -66,7 +67,6 @@ being retained under compatibility aliases.
 | AgentIntentLegacyAdapter, recorded-turn POST, no-op summary email | Explicit deprecation responses and metrics | Protocol v2 rollout |
 | Legacy string run-event payload and old envelopes | Translate to semantic events | Web/CLI/VS Code contract adoption |
 | Client-owned conversation payload/local JSON | One-time import/cache only | Durable-turn sync verified |
-| `FallbackLlmRouter` | Compatibility/evaluation-only router; PromptOptimiserAgent and ContextAgent no longer inject or call it | Continue caller-by-caller migration; delete only after compatibility/evaluation paths are removed |
 | Old renderer flags | Development rollback only | Must not ship as supported CLI 1.0 modes |
 
 ## Decomposition targets, not automatic deletions
