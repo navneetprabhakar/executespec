@@ -15,9 +15,14 @@ import {
   planStatusPhrase,
 } from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {useRunStore} from '@/stores/useRunStore';
+import {useSse} from '@/hooks/useSse';
 
-// Plan-approval gate. Polls the work item; auto-routes to Live (executing) or Result
-// (terminal). When AWAITING_APPROVAL, shows the plan + credits/cap + Approve.
+// Plan-approval gate. Loads the work item once, then follows the authenticated,
+// replayable run SSE stream; auto-routes to Live (executing) or Result (terminal).
+// Keeping this on the same scoped SSE contract as Live/Result means a tab resume
+// cannot miss the transition out of AWAITING_APPROVAL (the hook replays from the
+// last event id and fetches a durable detail on reconnect).
 export default function IdePlan() {
   const {runId = ''} = useParams();
   const navigate = useNavigate();
@@ -29,28 +34,36 @@ export default function IdePlan() {
   const [feedback, setFeedback] = useState('');
   const [editing, setEditing] = useState(false);
   const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
+  useSse(runId || null);
+  const streamedRun = useRunStore((state) =>
+    state.activeRun?.runId === runId ? state.activeRun : null,
+  );
 
   useEffect(() => {
     if (!runId) return;
-    let stop = false;
-    const poll = () =>
-      api
-        .getRun(runId)
-        .then((r) => {
-          if (stop) return;
-          setRun(r);
-          const s = (r.status || '').toUpperCase();
-          if (isPlanExecutingStatus(s)) navigate(`/live/${runId}`, {replace: true});
-          else if (isPlanTerminalStatus(s)) navigate(`/result/${runId}`, {replace: true});
-        })
-        .catch(() => {});
-    poll();
-    const t = setInterval(poll, 2000);
+    let cancelled = false;
+    api
+      .getRun(runId)
+      .then((r) => {
+        if (!cancelled) setRun(r);
+      })
+      .catch(() => {});
     return () => {
-      stop = true;
-      clearInterval(t);
+      cancelled = true;
     };
   }, [runId, navigate]);
+
+  // RUN_DETAIL replay updates the shared run store. Keep the page-local copy so
+  // existing plan rendering and approval actions remain unchanged.
+  useEffect(() => {
+    if (streamedRun) setRun(streamedRun);
+  }, [streamedRun]);
+
+  useEffect(() => {
+    const status = (run?.status || '').toUpperCase();
+    if (isPlanExecutingStatus(status)) navigate(`/live/${runId}`, {replace: true});
+    else if (isPlanTerminalStatus(status)) navigate(`/result/${runId}`, {replace: true});
+  }, [run, runId, navigate]);
 
   useEffect(() => {
     api
