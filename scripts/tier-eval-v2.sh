@@ -72,7 +72,9 @@ fi
 
 echo "→ Rendering markdown to ${MD_OUT}"
 jq -r '
-  def fmtCost: . | tostring | if test("e") then . else (. * 10000 | round / 10000 | tostring) end;
+  # Some provider transports serialize costUsd as a JSON string while others emit a number.
+  # Normalize before formatting so a successful eval cannot fail during report rendering.
+  def fmtCost: tonumber | (. * 10000 | round / 10000 | tostring);
   "# Tier Eval v2 — \(.startedAt)\n",
   "Evaluation ID: `\(.evaluationId)`",
   "Duration: \(.durationMs / 1000 | floor)s",
