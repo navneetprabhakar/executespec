@@ -240,7 +240,14 @@ public class OpenAiNativeToolClient {
           ObjectNode image = parts.addObject();
           image.put("type", "image_url");
           String mime = media.getMimeType().toString();
-          image.putObject("image_url").put("url", "data:" + mime + ";base64," + java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
+          image
+              .putObject("image_url")
+              .put(
+                  "url",
+                  "data:"
+                      + mime
+                      + ";base64,"
+                      + java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
         }
       }
     } else if (m instanceof AssistantMessage am) {

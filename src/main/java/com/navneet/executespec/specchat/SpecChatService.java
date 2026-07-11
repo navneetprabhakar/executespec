@@ -24,12 +24,12 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.content.Media;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.util.MimeTypeUtils;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeTypeUtils;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -627,7 +627,8 @@ claim in a tool result — never invent a runId, score, or status.""";
           for (Object raw : mediaRows) {
             if (!(raw instanceof Map<?, ?> row)) continue;
             String mime = row.get("mimeType") == null ? "" : String.valueOf(row.get("mimeType"));
-            String base64 = row.get("dataBase64") == null ? "" : String.valueOf(row.get("dataBase64"));
+            String base64 =
+                row.get("dataBase64") == null ? "" : String.valueOf(row.get("dataBase64"));
             if (base64.isBlank() || !mime.startsWith("image/")) continue;
             try {
               byte[] bytes = java.util.Base64.getDecoder().decode(base64);
@@ -637,7 +638,9 @@ claim in a tool result — never invent a runId, score, or status.""";
                       new ByteArrayResource(bytes) {
                         @Override
                         public String getFilename() {
-                          return row.get("filename") == null ? "attachment" : String.valueOf(row.get("filename"));
+                          return row.get("filename") == null
+                              ? "attachment"
+                              : String.valueOf(row.get("filename"));
                         }
                       }));
             } catch (IllegalArgumentException ignored) {

@@ -51,6 +51,7 @@ public class RemoteToolDispatcher {
    * worker).
    */
   private final long toolTimeoutMs;
+
   /** Persisted calls older than this are not offered as a restart handoff. */
   private final long restartRecoveryWindowMs;
 
@@ -163,9 +164,9 @@ public class RemoteToolDispatcher {
    * Describes whether a reconnect can actually rebind an in-memory worker wait.
    *
    * <p>A fresh JVM has durable evidence of the call but not the blocked provider future. It must
-   * therefore never pretend that a tool result can resume the old worker. Clients use this
-   * additive status endpoint to distinguish a live handoff from a restart that requires a new run
-   * (or an explicit future checkpoint/resume implementation).
+   * therefore never pretend that a tool result can resume the old worker. Clients use this additive
+   * status endpoint to distinguish a live handoff from a restart that requires a new run (or an
+   * explicit future checkpoint/resume implementation).
    */
   public ReconnectStatus reconnectStatus(String runId) {
     Session session = sessions.get(runId);
