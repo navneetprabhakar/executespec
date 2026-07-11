@@ -84,7 +84,14 @@ class ApiContractTest {
     try (var paths = Files.list(API_DIR)) {
       apiSource =
           paths
+              // Test fixtures intentionally call relative URLs and are not production transport
+              // call sites; scanning them creates false route-drift failures.
               .filter(p -> p.toString().endsWith(".ts"))
+              .filter(
+                  p -> {
+                    String name = p.getFileName().toString();
+                    return !name.endsWith(".test.ts") && !name.endsWith(".spec.ts");
+                  })
               .map(
                   p -> {
                     try {
