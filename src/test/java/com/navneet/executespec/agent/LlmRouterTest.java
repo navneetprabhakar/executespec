@@ -186,6 +186,7 @@ class LlmRouterTest {
     AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
     assertThat(options.getCacheOptions().getStrategy())
         .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY);
+    assertThat(options.getTemperature()).isNull();
   }
 
   @Test
