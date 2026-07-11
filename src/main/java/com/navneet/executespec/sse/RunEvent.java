@@ -2,6 +2,7 @@ package com.navneet.executespec.sse;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.cost.RunCostTracker;
@@ -61,6 +62,56 @@ public record RunEvent(
         Instant.now(),
         1,
         data == null ? Map.of() : Map.copyOf(data));
+  }
+
+  /**
+   * Machine-readable evidence for the route selected for a task's first worker attempt. The legacy
+   * payload is intentionally a short human summary; structured clients can use the typed fields to
+   * explain why a route changed (or why the caller's route was retained).
+   */
+  public static RunEvent initialRoutingDecision(
+      String runId,
+      String taskId,
+      String currentProvider,
+      String currentModel,
+      String selectedProvider,
+      String selectedModel,
+      boolean changed,
+      boolean observedQualityEvidenceUsed,
+      List<String> consideredCandidates,
+      List<String> rejectedCandidates,
+      List<String> reasons) {
+    String from = safeRoute(currentProvider, currentModel);
+    String to = safeRoute(selectedProvider, selectedModel);
+    String payload =
+        changed ? "Initial route: " + from + " -> " + to : "Initial route retained: " + to;
+    return withData(
+        "INITIAL_ROUTING_DECISION",
+        runId,
+        taskId,
+        payload,
+        "currentProvider",
+        currentProvider,
+        "currentModel",
+        currentModel,
+        "selectedProvider",
+        selectedProvider,
+        "selectedModel",
+        selectedModel,
+        "changed",
+        changed,
+        "observedQualityEvidenceUsed",
+        observedQualityEvidenceUsed,
+        "consideredCandidates",
+        consideredCandidates == null ? List.of() : List.copyOf(consideredCandidates),
+        "rejectedCandidates",
+        rejectedCandidates == null ? List.of() : List.copyOf(rejectedCandidates),
+        "reasons",
+        reasons == null ? List.of() : List.copyOf(reasons));
+  }
+
+  private static String safeRoute(String provider, String model) {
+    return (provider == null ? "?" : provider) + "/" + (model == null ? "?" : model);
   }
 
   /**
