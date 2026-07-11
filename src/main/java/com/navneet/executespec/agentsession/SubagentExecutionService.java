@@ -413,6 +413,9 @@ public class SubagentExecutionService {
               "Find the authoritative documentation and contract surfaces relevant to the"
                   + " objective. Do not edit; report stale or missing documentation with path:line"
                   + " evidence.";
+          case IMPLEMENTER ->
+              "Implementer execution is only available through the explicit single-writer"
+                  + " mutation seam; do not use this read-only child executor.";
         };
     return "ROLE: " + role + " (strictly read-only)\n" + contract + "\n\nOBJECTIVE:\n" + objective;
   }

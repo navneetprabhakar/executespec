@@ -13,7 +13,8 @@ public final class SubagentProtocol {
     VERIFIER,
     REPRODUCER,
     REVIEWER,
-    DOCS_SCOUT;
+    DOCS_SCOUT,
+    IMPLEMENTER;
 
     /** The durable authority contract for this role. Implementer is intentionally absent. */
     public RoleContract contract() {
@@ -23,11 +24,12 @@ public final class SubagentProtocol {
         case REPRODUCER -> new RoleContract("REPRODUCER_V1", Authority.READ_ONLY, true);
         case REVIEWER -> new RoleContract("REVIEWER_V1", Authority.READ_ONLY, true);
         case DOCS_SCOUT -> new RoleContract("DOCS_SCOUT_V1", Authority.READ_ONLY, true);
+        case IMPLEMENTER -> new RoleContract("IMPLEMENTER_V1", Authority.WRITE_SINGLE_WRITER, true);
       };
     }
 
     public static String acceptedNames() {
-      return "SCOUT, VERIFIER, REPRODUCER, REVIEWER, or DOCS_SCOUT";
+      return "SCOUT, VERIFIER, REPRODUCER, REVIEWER, DOCS_SCOUT, or IMPLEMENTER";
     }
   }
 

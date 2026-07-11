@@ -45,19 +45,26 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
-  void roleContractsAreReadOnlyVersionedAndExcludeImplementer() {
+  void roleContractsAreVersionedAndImplementerIsWriteReserved() {
     assertThat(Role.values())
         .containsExactly(
-            Role.SCOUT, Role.VERIFIER, Role.REPRODUCER, Role.REVIEWER, Role.DOCS_SCOUT);
+            Role.SCOUT,
+            Role.VERIFIER,
+            Role.REPRODUCER,
+            Role.REVIEWER,
+            Role.DOCS_SCOUT,
+            Role.IMPLEMENTER);
     assertThat(Role.values())
+        .filteredOn(role -> role != Role.IMPLEMENTER)
         .allSatisfy(
             role -> {
               assertThat(role.contract().id()).endsWith("_V1");
               assertThat(role.contract().authority())
                   .isEqualTo(SubagentProtocol.Authority.READ_ONLY);
             });
-    assertThatThrownBy(() -> Role.valueOf("IMPLEMENTER"))
-        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(Role.IMPLEMENTER.contract().id()).isEqualTo("IMPLEMENTER_V1");
+    assertThat(Role.IMPLEMENTER.contract().authority())
+        .isEqualTo(SubagentProtocol.Authority.WRITE_SINGLE_WRITER);
   }
 
   @Test
