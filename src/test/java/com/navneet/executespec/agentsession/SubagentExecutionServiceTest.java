@@ -385,7 +385,8 @@ class SubagentExecutionServiceTest {
               secondEntered.countDown();
               try {
                 new CountDownLatch(1).await();
-                return new Result(secondHandle, "unexpected", java.util.List.of(), 1, 0.01, Instant.now());
+                return new Result(
+                    secondHandle, "unexpected", java.util.List.of(), 1, 0.01, Instant.now());
               } catch (InterruptedException interrupted) {
                 secondInterrupted.countDown();
                 throw new CancellationException("sibling interrupted");
