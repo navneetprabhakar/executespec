@@ -212,6 +212,63 @@ class RepositorySearchServiceTest {
   }
 
   @Test
+  void relationshipsExposeImportsTestsAndCallsAgainstFreshRepositoryFingerprint() throws Exception {
+    Files.writeString(root.resolve("Widget.java"), "package demo; public class Widget {}\n");
+    Files.writeString(
+        root.resolve("Runner.java"),
+        "import demo.Widget;\nclass Runner { void run() { Widget(); } }\n");
+    Files.writeString(
+        root.resolve("WidgetTest.java"), "@Test void widget() { Widget value = new Widget(); }\n");
+
+    var service = new RepositorySearchService();
+    var result =
+        service.relationships(
+            root, new RepositorySearchService.RelationshipRequest("Widget", null, "*.java", 50));
+
+    assertThat(result.engine()).isEqualTo("java-deterministic-relationship-index");
+    assertThat(result.repositoryFingerprint()).hasSize(64);
+    assertThat(result.edges())
+        .extracting(RepositorySearchService.RelationshipEdge::relationshipType)
+        .containsExactly(
+            RepositorySearchService.RelationshipType.IMPORT,
+            RepositorySearchService.RelationshipType.TEST_TO_SOURCE,
+            RepositorySearchService.RelationshipType.CALL_SITE);
+    assertThat(result.edges())
+        .allSatisfy(edge -> assertThat(edge.targetPath()).isEqualTo("Widget.java"));
+    assertThat(result.edges().get(0).repositoryFingerprint())
+        .isEqualTo(result.inventoryFingerprint());
+
+    Files.writeString(root.resolve("Widget.java"), "package demo; public class Other {}\n");
+    var changed =
+        service.relationships(
+            root, new RepositorySearchService.RelationshipRequest("Widget", null, "*.java", 50));
+    assertThat(changed.repositoryFingerprint()).isNotEqualTo(result.repositoryFingerprint());
+  }
+
+  @Test
+  void relationshipsAreWorkspaceConfinedAndPaged() throws Exception {
+    Files.writeString(root.resolve("Widget.java"), "class Widget {}\n");
+    Files.writeString(root.resolve("WidgetTest.java"), "@Test void widget() { Widget(); }\n");
+    var service = new RepositorySearchService();
+
+    var page =
+        service.relationships(
+            root,
+            new RepositorySearchService.RelationshipRequest("Widget", true, ".", "*.java", 1, 1));
+    assertThat(page.edges()).hasSize(1);
+    assertThat(page.totalRelationships()).isEqualTo(1);
+    assertThat(page.hasMore()).isFalse();
+
+    assertThatThrownBy(
+            () ->
+                service.relationships(
+                    root,
+                    new RepositorySearchService.RelationshipRequest(
+                        "Widget", true, "..", "*.java", 50, 0)))
+        .isInstanceOf(SecurityException.class);
+  }
+
+  @Test
   void citationValidationRejectsWorkingTreeMutation() throws Exception {
     Path file = root.resolve("src/Widget.java");
     Files.createDirectories(file.getParent());

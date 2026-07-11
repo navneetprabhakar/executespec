@@ -136,6 +136,100 @@ public class RepositorySearchService {
   }
 
   /**
+   * Builds a bounded relationship view for one identifier from the same workspace-confined,
+   * content-fingerprinted search inventory used by {@link #search(Path, SearchRequest)}.
+   *
+   * <p>This is intentionally a deterministic lexical index slice, not a compiler-backed call graph:
+   * imports, test references, and call sites are linked to the best matching declaration when one
+   * is present. Consumers must inspect {@link RelationshipResult#repositoryFingerprint()} before
+   * reusing edges after a working-tree mutation.
+   */
+  public RelationshipResult relationships(Path workspace, RelationshipRequest request) {
+    if (workspace == null
+        || request == null
+        || request.symbol() == null
+        || request.symbol().isBlank()) {
+      throw new IllegalArgumentException("workspace and non-blank symbol are required");
+    }
+    SearchResult all = searchAllSymbolHits(workspace, request);
+    Map<String, String> declarations = new HashMap<>();
+    for (SearchHit hit : all.hits()) {
+      if (hit.matchType() == MatchType.SYMBOL_DEFINITION) {
+        declarations.putIfAbsent(hit.path(), hit.path());
+      }
+    }
+    List<RelationshipEdge> edges = new ArrayList<>();
+    for (SearchHit hit : all.hits()) {
+      RelationshipType type =
+          switch (hit.matchType()) {
+            case IMPORT -> RelationshipType.IMPORT;
+            case TEST_REFERENCE -> RelationshipType.TEST_TO_SOURCE;
+            case CALL_SITE -> RelationshipType.CALL_SITE;
+            default -> null;
+          };
+      if (type == null) continue;
+      String target = declarations.isEmpty() ? null : declarations.keySet().iterator().next();
+      edges.add(
+          new RelationshipEdge(
+              hit.path(),
+              target,
+              hit.line(),
+              hit.column(),
+              type,
+              request.symbol(),
+              hit.preview(),
+              hit.freshness(),
+              hit.repositoryFingerprint()));
+    }
+    edges.sort(
+        Comparator.comparingInt((RelationshipEdge edge) -> edge.relationshipType().rank())
+            .thenComparing(RelationshipEdge::sourcePath)
+            .thenComparingInt(RelationshipEdge::line)
+            .thenComparing(edge -> edge.targetPath() == null ? "" : edge.targetPath()));
+    int from = Math.min(request.offset(), edges.size());
+    int to = Math.min(from + request.limit(), edges.size());
+    return new RelationshipResult(
+        all.repositorySha(),
+        all.inventoryFingerprint(),
+        all.repositoryFingerprint(),
+        List.copyOf(edges.subList(from, to)),
+        edges.size(),
+        to < edges.size(),
+        to,
+        "java-deterministic-relationship-index");
+  }
+
+  private SearchResult searchAllSymbolHits(Path workspace, RelationshipRequest request) {
+    List<SearchHit> hits = new ArrayList<>();
+    SearchResult page;
+    int offset = 0;
+    do {
+      page =
+          search(
+              workspace,
+              new SearchRequest(
+                  request.symbol(),
+                  SearchMode.SYMBOL,
+                  request.caseSensitive(),
+                  request.relativeRoot(),
+                  request.fileGlob(),
+                  200,
+                  offset));
+      hits.addAll(page.hits());
+      offset = page.nextOffset();
+    } while (page.hasMore() && hits.size() < MAX_HITS);
+    return new SearchResult(
+        page.repositorySha(),
+        page.inventoryFingerprint(),
+        page.queryFingerprint(),
+        List.copyOf(hits),
+        hits.size(),
+        page.hasMore(),
+        hits.size(),
+        page.engine());
+  }
+
+  /**
    * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
    * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it can
    * contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter backend
@@ -403,6 +497,60 @@ public class RepositorySearchService {
       return rank;
     }
   }
+
+  public enum RelationshipType {
+    IMPORT(0),
+    TEST_TO_SOURCE(1),
+    CALL_SITE(2);
+
+    private final int rank;
+
+    RelationshipType(int rank) {
+      this.rank = rank;
+    }
+
+    int rank() {
+      return rank;
+    }
+  }
+
+  public record RelationshipRequest(
+      String symbol,
+      boolean caseSensitive,
+      String relativeRoot,
+      String fileGlob,
+      int limit,
+      int offset) {
+    public RelationshipRequest {
+      limit = Math.max(1, Math.min(200, limit <= 0 ? 50 : limit));
+      offset = Math.max(0, offset);
+    }
+
+    public RelationshipRequest(String symbol, String relativeRoot, String fileGlob, int limit) {
+      this(symbol, true, relativeRoot, fileGlob, limit, 0);
+    }
+  }
+
+  public record RelationshipEdge(
+      String sourcePath,
+      String targetPath,
+      int line,
+      int column,
+      RelationshipType relationshipType,
+      String symbol,
+      String preview,
+      String freshness,
+      String repositoryFingerprint) {}
+
+  public record RelationshipResult(
+      String repositorySha,
+      String inventoryFingerprint,
+      String repositoryFingerprint,
+      List<RelationshipEdge> edges,
+      int totalRelationships,
+      boolean hasMore,
+      int nextOffset,
+      String engine) {}
 
   public record SearchRequest(
       String query,
