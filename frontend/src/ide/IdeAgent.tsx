@@ -415,8 +415,10 @@ export default function IdeAgent() {
     dispatch({type: 'stream:start', message});
     const abort = new AbortController();
     abortRef.current = abort;
+    let activeSessionId: string | null = null;
     try {
       const session = await ensureSession();
+      activeSessionId = session.id;
       await api.streamAgentTurn(
         session.id,
         {
@@ -477,6 +479,20 @@ export default function IdeAgent() {
       dispatch({type: 'stream:done'});
       await refreshAfterMutation(session.id);
     } catch (e) {
+      // A POST-SSE response can end after the server has persisted the turn (for
+      // example when a proxy drops the body after the final tool result). Reset
+      // the optimistic composer state and replay durable turns before showing the
+      // transport error. This keeps Web recovery semantically identical to a
+      // reload and never fabricates a completed assistant message from partial
+      // tokens.
+      dispatch({type: 'stream:stop'});
+      if (activeSessionId) {
+        try {
+          await refreshAfterMutation(activeSessionId);
+        } catch {
+          // Preserve the original stream error; replay is best-effort.
+        }
+      }
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Agent turn failed.'});
     } finally {
       abortRef.current = null;
