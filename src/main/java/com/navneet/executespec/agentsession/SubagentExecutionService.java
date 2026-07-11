@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -21,8 +25,11 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.BatchFailure;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.BatchResult;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.DelegationDecision;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Evidence;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Handle;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Result;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.Role;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnRequest;
@@ -153,6 +160,124 @@ public class SubagentExecutionService {
       }
       throw e;
     }
+  }
+
+  /**
+   * Executes a small, bounded fan-out concurrently while reserving every child first.
+   *
+   * <p>Reservation happens serially through the protocol service so capacity and tree budgets are
+   * enforced before any model call starts. The model turns then run on at most four workers. A
+   * failed child cancels still-running siblings through the canonical parent cancellation path;
+   * successful siblings and their durable evidence are returned to the caller.
+   */
+  public BatchResult executeBatch(List<SpawnRequest> requests, AppUserDetails user, String orgId) {
+    if (user == null || user.getUser() == null) {
+      throw new SecurityException("authenticated user is required");
+    }
+    validateBatch(requests);
+    String parentSessionId = requests.getFirst().parentSessionId();
+    List<Handle> reserved = new ArrayList<>(requests.size());
+    try {
+      for (SpawnRequest request : requests) {
+        Handle handle = protocolService.spawn(request, user.getUser().getId(), orgId);
+        protocolService.start(handle.childSessionId(), user.getUser().getId(), orgId);
+        reserved.add(handle);
+      }
+    } catch (RuntimeException reservationFailure) {
+      cancelReserved(reserved, reservationFailure, user, orgId);
+      throw reservationFailure;
+    }
+
+    List<Result> results = new ArrayList<>();
+    List<BatchFailure> failures = new ArrayList<>();
+    List<Future<Result>> futures = new ArrayList<>(reserved.size());
+    try (ExecutorService executor = Executors.newFixedThreadPool(reserved.size())) {
+      for (SpawnRequest request : requests) {
+        futures.add(executor.submit(() -> execute(request, user, orgId)));
+      }
+      boolean failed = false;
+      for (int index = 0; index < futures.size(); index++) {
+        Future<Result> future = futures.get(index);
+        try {
+          results.add(future.get());
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          failed = true;
+          failures.add(failure(requests.get(index), reserved.get(index), "batch interrupted"));
+          cancelReserved(reserved, interrupted, user, orgId);
+          break;
+        } catch (ExecutionException executionFailure) {
+          failed = true;
+          failures.add(
+              failure(requests.get(index), reserved.get(index), rootMessage(executionFailure)));
+          cancelReserved(reserved, executionFailure, user, orgId);
+          break;
+        }
+      }
+      if (failed) {
+        for (int index = 0; index < futures.size(); index++) {
+          Future<Result> future = futures.get(index);
+          if (!future.isDone()) future.cancel(true);
+        }
+        for (int index = results.size() + failures.size(); index < futures.size(); index++) {
+          if (!futures.get(index).isDone()) {
+            failures.add(
+                failure(
+                    requests.get(index), reserved.get(index), "cancelled after sibling failure"));
+          }
+        }
+      }
+    }
+    return new BatchResult(results, failures);
+  }
+
+  private void validateBatch(List<SpawnRequest> requests) {
+    if (requests == null || requests.isEmpty()) {
+      throw new IllegalArgumentException("at least one subagent request is required");
+    }
+    if (requests.size() > SubagentProtocolService.MAX_CHILDREN_PER_PARENT) {
+      throw new IllegalArgumentException(
+          "batch child limit is " + SubagentProtocolService.MAX_CHILDREN_PER_PARENT);
+    }
+    String parent = requests.getFirst() == null ? null : requests.getFirst().parentSessionId();
+    if (parent == null || parent.isBlank()) {
+      throw new IllegalArgumentException("batch parent session id is required");
+    }
+    Set<String> requestIds = new LinkedHashSet<>();
+    for (SpawnRequest request : requests) {
+      if (request == null || !parent.equals(request.parentSessionId())) {
+        throw new IllegalArgumentException("all batch requests must share one parent session");
+      }
+      if (!requestIds.add(request.requestId())) {
+        throw new IllegalArgumentException("batch request ids must be unique");
+      }
+    }
+  }
+
+  private void cancelReserved(
+      List<Handle> reserved, Throwable cause, AppUserDetails user, String orgId) {
+    if (reserved.isEmpty()) return;
+    try {
+      protocolService.cancelChildren(
+          reserved.getFirst().parentSessionId(),
+          "batch stopped: " + rootMessage(cause),
+          user.getUser().getId(),
+          orgId);
+    } catch (RuntimeException ignored) {
+      // The original reservation/model failure is the useful response; protocol cancellation is
+      // best-effort because another worker may have already reached a terminal state.
+    }
+  }
+
+  private static BatchFailure failure(SpawnRequest request, Handle handle, String reason) {
+    return new BatchFailure(request.requestId(), handle.childSessionId(), reason);
+  }
+
+  private static String rootMessage(Throwable throwable) {
+    Throwable current = throwable;
+    while (current.getCause() != null) current = current.getCause();
+    String message = current.getMessage();
+    return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
   }
 
   /**

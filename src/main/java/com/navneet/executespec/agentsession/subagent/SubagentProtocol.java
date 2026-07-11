@@ -76,6 +76,19 @@ public final class SubagentProtocol {
     }
   }
 
+  /**
+   * Ordered result envelope for bounded fan-out. A batch is allowed to return partial evidence: one
+   * child failing must not hide the successful siblings or their persisted citations.
+   */
+  public record BatchResult(List<Result> results, List<BatchFailure> failures) {
+    public BatchResult {
+      results = results == null ? List.of() : List.copyOf(results);
+      failures = failures == null ? List.of() : List.copyOf(failures);
+    }
+  }
+
+  public record BatchFailure(String requestId, String childSessionId, String reason) {}
+
   public record BudgetState(
       String childSessionId,
       long turnsUsed,

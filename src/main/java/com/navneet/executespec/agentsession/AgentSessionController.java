@@ -89,6 +89,21 @@ public class AgentSessionController {
     return subagentExecutionService.execute(request, user, orgId(user));
   }
 
+  /** Execute up to four reserved read-only children concurrently and return partial evidence. */
+  @PostMapping("/sessions/{sessionId}/subagents/batch")
+  public SubagentProtocol.BatchResult executeSubagentBatch(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody List<SubagentProtocol.SpawnRequest> requests) {
+    if (requests == null
+        || requests.isEmpty()
+        || requests.stream()
+            .anyMatch(request -> request == null || !sessionId.equals(request.parentSessionId()))) {
+      throw new IllegalArgumentException("all batch requests must match the parent session id");
+    }
+    return subagentExecutionService.executeBatch(requests, user, orgId(user));
+  }
+
   /**
    * Execute a child only when an explicit deterministic coordinator trigger is supplied. The
    * endpoint is opt-in and remains read-only with respect to the parent repository/run authority.

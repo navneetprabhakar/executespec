@@ -13,6 +13,9 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
@@ -273,5 +276,54 @@ class SubagentExecutionServiceTest {
         .isInstanceOf(CancellationException.class)
         .hasMessageContaining("parent cancelled");
     verify(protocol).cancel(eq("child"), any(), eq("user"), eq("org"));
+  }
+
+  @Test
+  void batchReservesChildrenThenExecutesSiblingsConcurrently() throws Exception {
+    SpawnRequest second =
+        new SpawnRequest("req-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 4, 0.5);
+    Handle secondHandle =
+        new Handle(
+            "child-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 1, 4, 0.5, "RUNNING");
+    when(protocol.spawn(second, "user", "org")).thenReturn(secondHandle);
+    when(protocol.start("child-2", "user", "org")).thenReturn(secondHandle);
+    Result firstResult = new Result(running, "first", java.util.List.of(), 1, 0.01, Instant.now());
+    Result secondResult =
+        new Result(secondHandle, "second", java.util.List.of(), 1, 0.01, Instant.now());
+    SubagentExecutionService spy = org.mockito.Mockito.spy(service);
+    CountDownLatch entered = new CountDownLatch(2);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicInteger active = new AtomicInteger();
+    AtomicInteger maximum = new AtomicInteger();
+    doAnswer(
+            invocation -> {
+              int now = active.incrementAndGet();
+              maximum.accumulateAndGet(now, Math::max);
+              entered.countDown();
+              assertThat(release.await(2, TimeUnit.SECONDS)).isTrue();
+              active.decrementAndGet();
+              return invocation.getArgument(0, SpawnRequest.class).requestId().equals("req")
+                  ? firstResult
+                  : secondResult;
+            })
+        .when(spy)
+        .execute(any(SpawnRequest.class), eq(user), eq("org"));
+
+    var worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    try {
+      var future =
+          worker.submit(() -> spy.executeBatch(java.util.List.of(request, second), user, "org"));
+      assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+      release.countDown();
+      var batch = future.get(2, TimeUnit.SECONDS);
+      assertThat(batch.results()).extracting(Result::summary).containsExactly("first", "second");
+      assertThat(batch.failures()).isEmpty();
+      assertThat(maximum.get()).isEqualTo(2);
+      verify(protocol).spawn(request, "user", "org");
+      verify(protocol).spawn(second, "user", "org");
+    } finally {
+      release.countDown();
+      worker.shutdownNow();
+    }
   }
 }
