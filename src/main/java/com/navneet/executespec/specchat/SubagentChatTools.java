@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agentsession.SubagentExecutionService;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -15,7 +16,6 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -27,12 +27,27 @@ import lombok.extern.slf4j.Slf4j;
  * because the child execution service itself uses {@link SpecChatService} for its bounded turns.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class SubagentChatTools {
 
   private final ObjectProvider<SubagentExecutionService> executionService;
   private final ObjectMapper json;
+  private final FeatureFlagService featureFlags;
+
+  /** Compatibility constructor for package-local tests and callers predating coordinator audit. */
+  public SubagentChatTools(
+      ObjectProvider<SubagentExecutionService> executionService, ObjectMapper json) {
+    this(executionService, json, null);
+  }
+
+  public SubagentChatTools(
+      ObjectProvider<SubagentExecutionService> executionService,
+      ObjectMapper json,
+      FeatureFlagService featureFlags) {
+    this.executionService = executionService;
+    this.json = json;
+    this.featureFlags = featureFlags;
+  }
 
   public ToolCallback bind(AppUserDetails user, String parentSessionId, String parentTurnId) {
     ToolDefinition definition =
@@ -102,7 +117,21 @@ public class SubagentChatTools {
               envelope.put("error", "subagent delegation is not eligible");
               return envelope;
             }
-            SubagentProtocol.Result result = execution.execute(request, user, orgId(user));
+            SubagentProtocol.Result result;
+            if (coordinatorAutoEnabled()) {
+              // When the operator enables the coordinator lane, model-requested delegation uses
+              // the same audited reservation boundary as the core coordinator endpoint. The
+              // default remains the legacy explicit model tool path so existing installations do
+              // not change spend or event semantics merely by upgrading.
+              result =
+                  execution.executeCoordinator(
+                      new SubagentProtocol.CoordinatorExecutionRequest(
+                          request, true, "COORDINATOR", eligibility.childSessionId()),
+                      user,
+                      orgId(user));
+            } else {
+              result = execution.execute(request, user, orgId(user));
+            }
             envelope.put("ok", true);
             envelope.set("result", json.valueToTree(result));
             return envelope;
@@ -111,6 +140,11 @@ public class SubagentChatTools {
             return error(ex.getMessage() == null ? "subagent execution failed" : ex.getMessage());
           }
         });
+  }
+
+  private boolean coordinatorAutoEnabled() {
+    return featureFlags != null
+        && featureFlags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG);
   }
 
   private static String orgId(AppUserDetails user) {

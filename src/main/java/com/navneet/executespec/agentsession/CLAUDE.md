@@ -42,6 +42,9 @@ turns separately from runs.
   The canonical chat turn also exposes the bounded `spawn_subagent` tool to the model; it uses the
   same service/protocol seam and returns structured child evidence, so the REST endpoints are
   compatibility/control-plane surfaces rather than a second execution implementation.
+  When the operator enables `agent.subagents.coordinator-auto.enabled`, that model-requested tool
+  path upgrades to the coordinator reservation boundary and emits the same atomic
+  `SUBAGENT_COORDINATOR_ACCEPTED` audit event; the default-off path remains backward compatible.
   The coordinator endpoint additionally requires `automatic=true`, `trigger=COORDINATOR`, a fresh
   eligible decision, and `agent.subagents.coordinator-auto.enabled=true`; it never grants write or
   run authority. Child reservation and `SUBAGENT_COORDINATOR_ACCEPTED` parent activity are written
@@ -258,6 +261,8 @@ turns separately from runs.
   turns.
 - `AgentStreamTurnSupportTest` pins stream support policy: read-only tool allowlist,
   conversation fallback behavior, and client-disconnect detection.
+- `SubagentChatToolsTest` pins eligibility fail-closed behavior, default legacy execution, and the
+  feature-flagged coordinator audit lane.
 - `OrchestratorRoutingPromptCatalogTest` and `OrchestratorRoutingPromptEvalRunnerTest` pin shared
   prompt schemas and fail-closed model-eval scoring without requiring live credentials.
 - `OrchestratorControllerTest`, `AgentOrchestratorTurnServiceTest`,
