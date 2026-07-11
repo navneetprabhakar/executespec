@@ -70,6 +70,19 @@ class SubagentExecutionServiceTest {
   void setUp() {
     service =
         new SubagentExecutionService(protocol, sessions, turns, orchestrator, chat, costs, flags);
+    when(turns.findById(any()))
+        .thenAnswer(
+            invocation ->
+                Optional.of(
+                    AgentTurn.builder()
+                        .id(invocation.getArgument(0))
+                        .sessionId("parent")
+                        .orgId("org")
+                        .userId("user")
+                        .sequence(1)
+                        .intentType("CHAT")
+                        .intentConfidence(1.0)
+                        .build()));
     request = new SpawnRequest("req", "parent", "parent-turn", Role.VERIFIER, "check auth", 4, 0.5);
     running =
         new Handle(
@@ -326,6 +339,29 @@ class SubagentExecutionServiceTest {
       release.countDown();
       worker.shutdownNow();
     }
+  }
+
+  @Test
+  void batchRejectsForeignParentTurnBeforeReservingAnyChild() {
+    SpawnRequest foreign =
+        new SpawnRequest("req-foreign", "parent", "foreign-turn", Role.SCOUT, "scan", 2, 0.1);
+    when(turns.findById("foreign-turn"))
+        .thenReturn(
+            Optional.of(
+                AgentTurn.builder()
+                    .id("foreign-turn")
+                    .sessionId("another-parent")
+                    .orgId("org")
+                    .userId("user")
+                    .sequence(1)
+                    .intentType("CHAT")
+                    .intentConfidence(1.0)
+                    .build()));
+
+    assertThatThrownBy(() -> service.executeBatch(java.util.List.of(request, foreign), user, "org"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("parentTurnId does not belong to parent session");
+    verify(protocol, org.mockito.Mockito.never()).spawn(any(), eq("user"), eq("org"));
   }
 
   @Test

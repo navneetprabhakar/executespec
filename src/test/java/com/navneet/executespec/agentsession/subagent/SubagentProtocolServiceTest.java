@@ -42,6 +42,26 @@ class SubagentProtocolServiceTest {
     service = new SubagentProtocolService(sessions, events, turns, json);
     when(events.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(sessions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(turns.existsByIdAndSessionId(any(), any())).thenReturn(true);
+  }
+
+  @Test
+  void spawnRejectsParentTurnFromAnotherSessionBeforePersistingAnything() {
+    AgentSession parent = parent("parent", "ACTIVE");
+    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(turns.existsByIdAndSessionId("foreign-turn", "parent")).thenReturn(false);
+
+    assertThatThrownBy(
+            () ->
+                service.spawn(
+                    new SpawnRequest(
+                        "req-foreign", "parent", "foreign-turn", Role.SCOUT, "scan", 2, 0.1),
+                    "user",
+                    "org"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("parentTurnId does not belong to parent session");
+    verify(sessions, org.mockito.Mockito.never()).save(any());
+    verify(events, org.mockito.Mockito.never()).save(any());
   }
 
   @Test
