@@ -14,6 +14,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ public class SubagentChatTools {
     this(executionService, json, null);
   }
 
+  @Autowired
   public SubagentChatTools(
       ObjectProvider<SubagentExecutionService> executionService,
       ObjectMapper json,
