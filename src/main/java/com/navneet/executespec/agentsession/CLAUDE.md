@@ -103,8 +103,12 @@ turns separately from runs.
   terminal/idempotent. `ImplementerMutationService` is the deliberately narrow opt-in execution
   seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
   sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
-  `writeFile`/`editFile`; it is not a model loop and WEB sessions are rejected. Read-only child
-  behavior remains unchanged.
+  `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded WORKHORSE model loop
+  behind that seam: read/search/diff plus file mutation and build/test tools are allowlisted, the
+  reservation is rechecked before every round and mutation, checkpoints are persisted before and
+  after the pass, terminal turns are recorded, and the reservation is released on success/failure.
+  It remains disabled by default and WEB sessions are rejected. Read-only child behavior remains
+  unchanged.
 - Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
@@ -140,6 +144,7 @@ turns separately from runs.
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned role contracts (read-only SCOUT/VERIFIER/REPRODUCER/REVIEWER/DOCS_SCOUT plus disabled-by-default IMPLEMENTER_V1), depth/child/turn/cost guards, explicit start, completion handoff, cancellation propagation, and single-writer reservation events. |
 | `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, ownership, local-hands surface, workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerExecutionService.java` | Disabled-by-default bounded WORKHORSE IMPLEMENTER loop; binds the allowlisted read/edit/build/test tools, routes mutations through the reservation seam, persists checkpoints and terminal turn evidence, and releases the reservation on terminal paths. |
 | `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |

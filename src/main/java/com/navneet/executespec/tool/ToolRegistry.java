@@ -3,6 +3,7 @@ package com.navneet.executespec.tool;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -155,6 +156,26 @@ public class ToolRegistry {
   }
 
   /**
+   * Binds a deliberately small implementer tool set. Mutation calls are routed through the supplied
+   * authorization function after schema parsing; read/test tools execute normally. This prevents a
+   * model loop from bypassing the persisted single-writer reservation.
+   */
+  public List<ToolCallback> bindForImplementer(
+      ExecutionContext ctx,
+      Set<String> allowedNames,
+      BiFunction<String, JsonNode, ToolResult> authorizedMutation) {
+    return allTools.stream()
+        .filter(this::isToolBound)
+        .filter(tool -> allowedNames == null || allowedNames.contains(tool.name()))
+        .map(
+            tool ->
+                (ToolCallback)
+                    new ContextBoundToolCallback(
+                        tool, ctx, objectMapper, remoteToolDispatcher, authorizedMutation))
+        .collect(Collectors.toList());
+  }
+
+  /**
    * Worker-restricted bind — same as {@link #bind(ExecutionContext)} but excludes any tool listed
    * in {@link #WORKER_DENY_TOOLS} (currently just {@code gitCommit}). Use this instead of {@code
    * bind} when constructing the worker's LLM request so the model can't get itself stuck in a
@@ -265,8 +286,17 @@ public class ToolRegistry {
       Tool tool,
       ExecutionContext ctx,
       ObjectMapper objectMapper,
-      RemoteToolDispatcher remoteToolDispatcher)
+      RemoteToolDispatcher remoteToolDispatcher,
+      BiFunction<String, JsonNode, ToolResult> authorizedMutation)
       implements ToolCallback {
+
+    ContextBoundToolCallback(
+        Tool tool,
+        ExecutionContext ctx,
+        ObjectMapper objectMapper,
+        RemoteToolDispatcher remoteToolDispatcher) {
+      this(tool, ctx, objectMapper, remoteToolDispatcher, null);
+    }
 
     @Override
     public ToolDefinition getToolDefinition() {
@@ -303,7 +333,11 @@ public class ToolRegistry {
         return errorEnvelope(ToolResult.ErrorKind.INVALID_ARGS, argErr.get());
       }
       try {
-        ToolResult result = tool.execute(args, ctx);
+        ToolResult result =
+            authorizedMutation != null
+                    && ("writeFile".equals(tool.name()) || "editFile".equals(tool.name()))
+                ? authorizedMutation.apply(tool.name(), args)
+                : tool.execute(args, ctx);
         return switch (result) {
           case ToolResult.Ok ok -> okEnvelope(ok.content());
           case ToolResult.Err err -> errorEnvelope(err.kind(), err.message());

@@ -23,6 +23,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.subagent.ImplementerExecutionService;
 import com.navneet.executespec.agentsession.subagent.ImplementerMutationService;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
@@ -53,6 +54,7 @@ public class AgentSessionController {
   private final AgentAttachmentService attachmentService;
   private final SubagentExecutionService subagentExecutionService;
   private final ImplementerMutationService implementerMutationService;
+  private final ImplementerExecutionService implementerExecutionService;
 
   public AgentSessionController(
       AgentSessionService sessionService,
@@ -66,6 +68,7 @@ public class AgentSessionController {
         streamTurnRunner,
         attachmentService,
         subagentExecutionService,
+        null,
         null);
   }
 
@@ -75,13 +78,15 @@ public class AgentSessionController {
       AgentStreamTurnRunner streamTurnRunner,
       AgentAttachmentService attachmentService,
       SubagentExecutionService subagentExecutionService,
-      ImplementerMutationService implementerMutationService) {
+      ImplementerMutationService implementerMutationService,
+      ImplementerExecutionService implementerExecutionService) {
     this.sessionService = sessionService;
     this.actionCatalog = actionCatalog;
     this.streamTurnRunner = streamTurnRunner;
     this.attachmentService = attachmentService;
     this.subagentExecutionService = subagentExecutionService;
     this.implementerMutationService = implementerMutationService;
+    this.implementerExecutionService = implementerExecutionService;
   }
 
   @GetMapping("/actions")
@@ -166,6 +171,26 @@ public class AgentSessionController {
         orgId(user));
   }
 
+  /** Execute a bounded model-driven IMPLEMENTER pass over an already reserved writer scope. */
+  @PostMapping("/sessions/{sessionId}/writer/execute")
+  public ImplementerExecutionService.ExecutionResult executeWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterExecutionRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer execution is required");
+    return implementerExecutionService.execute(
+        sessionId,
+        request.reservationId(),
+        request.scope(),
+        request.objective(),
+        request.provider(),
+        request.model(),
+        request.maxRounds(),
+        request.parentTurnId(),
+        user,
+        orgId(user));
+  }
+
   /** Release a writer reservation; repeated release is idempotent. */
   @PostMapping("/sessions/{sessionId}/writer/release")
   public WriterReservation releaseWriter(
@@ -186,6 +211,15 @@ public class AgentSessionController {
       com.fasterxml.jackson.databind.JsonNode args) {}
 
   record WriterReleaseRequest(String reservationId, String reason) {}
+
+  record WriterExecutionRequest(
+      String reservationId,
+      String scope,
+      String objective,
+      String provider,
+      String model,
+      int maxRounds,
+      String parentTurnId) {}
 
   /**
    * Execute a child only when an explicit deterministic coordinator trigger is supplied. The
