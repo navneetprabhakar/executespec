@@ -20,3 +20,8 @@ attribution.
 `ProjectRunLedger` stores one idempotent digest per run. `MemoryCompactionService` only marks
 entries compacted after a bounded, non-empty snapshot is produced; failures return without
 mutating ledger state.
+
+`ProjectMemoryProvider` enforces a conservative 12,000-token (48,000-character) planner-memory
+budget. The durable snapshot is selected before recent ledger entries; recent entries are included
+newest-first only when complete entries fit, then rendered chronologically. Provider-side context
+truncation is therefore not relied upon for project memory.
