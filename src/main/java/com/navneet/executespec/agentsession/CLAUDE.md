@@ -96,6 +96,12 @@ turns separately from runs.
   verifier completion requires cited evidence. Spawn also reserves against the complete descendant
   tree (48 turns / $8 requested-cost ceiling rooted at one parent), so nested fan-out cannot
   multiply an otherwise valid per-child budget. The foundation does not dispatch a model itself.
+  The future write-capable path has a separate, fail-closed authority seam: `reserveWriter` uses a
+  pessimistic parent-session lock and append-only `SUBAGENT_WRITER_RESERVED` /
+  `SUBAGENT_WRITER_RELEASED` events to permit at most one active reservation per explicit workspace
+  scope. `authorizeWriter` must be called before every mutation and `releaseWriter` is
+  terminal/idempotent. This is only a persisted reservation contract; no current role is
+  IMPLEMENTER, no executor grants write tools, and read-only child behavior remains unchanged.
 - Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
