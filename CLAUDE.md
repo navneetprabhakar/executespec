@@ -70,6 +70,8 @@ JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). OAuth authorization reque
 
 ### Security
 
+`RemoteToolDispatcher` uses an explicit Spring-selected constructor for runtime dependencies; its bounded test constructor cannot be selected during application startup.
+
 8-layer defense-in-depth: request validation → input sanitization (`InputSanitizer` — NFKC + zero-width strip + base64 decode+scan) → LLM prompt defense → code abuse scanning (`CodeAbuseScanner` — crypto, shells, PowerShell, DNS exfil, cloud metadata, obfuscation) → shell sandbox (`ShellSandboxPolicy`) → file sandbox → process isolation → container hardening. Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Three guardrail levels (LOW / MEDIUM / HIGH) flip via `security.guardrail_level` flag.
 
 Cleanroom containers (SWE-bench / ProgramBench) run with `--rm --network none -v <hostDir>:/workspace`. `ShellTool` + `BuildProjectTool` consult `ProgramBenchContainerStore` per invocation; when a containerId is set for the run, the tool dispatches via `docker exec` instead of host shell.
