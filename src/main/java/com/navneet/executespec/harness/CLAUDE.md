@@ -55,6 +55,8 @@ PATCH mode: `RunOrchestrator.runPatchPipeline` calls `CodeGenEngine.solve`, whic
 
 **One progress signal** in `WorkerAgent` (RL-2026-05-005, unifying the old Lever A + Lever C + stagnation warn/force): `itersSinceProgress` counts consecutive iterations with no `writeFile`/`editFile`; crossing `progressWarnAfter` (per-tier `req.stagnationWarnAfter`) injects ONE corrective UserMessage nudge — which also fires on a premature text-only stop; crossing `progressForceAfter` force-terminates with `COMPLETED_BY_STAGNATION`. **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / progress-force when `totalWriteCalls=0`) and the dollar budget cap survive unchanged. UserMessage (not SystemMessage) so Gemini's implicit-cache prefix stays intact.
 
+Model-specific tuning is an optional, fail-closed overlay: `model-matrix.capability-profiles` may supply `stagnationWarnAfter` / `stagnationForceAfter` for `provider/model` (or provider) keys. `SequentialExecutor.tierConfigFor` applies a profile only when both values are positive and `force > warn`; absent, malformed, or partial profiles preserve the complexity defaults. This keeps per-model tuning auditable without changing behavior while the capability matrix is empty.
+
 ## Concurrency
 
 - **Bounded thread pool** at the orchestrator entry: `ThreadPoolExecutor` with `CallerRunsPolicy` backpressure. Size = `PoolSizing.coreMultiple(1, 4, 16)`.
