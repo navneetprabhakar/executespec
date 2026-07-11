@@ -8,7 +8,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AgentActionEventRepository extends JpaRepository<AgentActionEvent, String> {
 
+  List<AgentActionEvent> findBySessionIdOrderByStreamSequenceAsc(String sessionId);
+
+  /** Legacy chronological view retained for recovery heuristics. */
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
+
+  List<AgentActionEvent> findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+      String sessionId, long after);
 
   List<AgentActionEvent> findByTurnIdOrderByCreatedAtAsc(String turnId);
 

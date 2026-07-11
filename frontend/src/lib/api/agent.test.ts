@@ -4,6 +4,7 @@ import {
   confirmAgentRunProposal,
   createAgentSession,
   parseAgentSseFrame,
+  replayAgentEvents,
   streamAgentTurn,
 } from './agent';
 
@@ -102,6 +103,25 @@ describe('agent API SSE helpers', () => {
     expect(action).toBe('create_cloud_run');
     expect(tokens).toEqual(['hi']);
     expect(cost).toBe(0.01);
+  });
+
+  it('requests cursor-based event backfill', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({events: [], lastSequence: 7, snapshot: false}), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await replayAgentEvents('s1', 6);
+
+    expect(response.lastSequence).toBe(7);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/agent/sessions/s1/events/replay?after=6',
+      expect.objectContaining({headers: expect.objectContaining({Authorization: 'Bearer test-token'})}),
+    );
   });
 
   it('does not treat a transport EOF before done as a successful turn', async () => {

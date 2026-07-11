@@ -7,6 +7,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
@@ -72,6 +73,11 @@ public class AgentSessionService {
   public List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
     requireOrg(user);
     return sessionReadService.listEvents(sessionId, user);
+  }
+
+  public AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.replayEvents(sessionId, after, user);
   }
 
   public List<AgentTurnResponse> listTurns(

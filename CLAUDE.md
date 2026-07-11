@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V261** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V262** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -512,7 +512,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 ### Known tech debt
 
-**Current source facts (2026-07-11):** migration head is V261; `RunOrchestrator.java` is 4,140 lines, `frontend/src/lib/api/core.ts` is 2,177 lines, and `frontend/src/signal/pages/ExtraPages.tsx` is 377 lines. The benchmark-prior continuation default is false in active YAML. Local-hands restart recovery closes stale calls as `WORKER_RESTARTED` and resumes from a clean checkpoint, but cannot rebind an in-memory provider future across JVMs.
+**Current source facts (2026-07-11):** migration head is V262; `RunOrchestrator.java` is 4,140 lines, `frontend/src/lib/api/core.ts` is 2,177 lines, and `frontend/src/signal/pages/ExtraPages.tsx` is 377 lines. The benchmark-prior continuation default is false in active YAML. Local-hands restart recovery closes stale calls as `WORKER_RESTARTED` and resumes from a clean checkpoint, but cannot rebind an in-memory provider future across JVMs. Agent-session action events now carry a durable database-assigned replay cursor through V262; `/events` remains compatibility-only while `/events/replay?after=` is the cursor-aware path.
 
 > **Full register: [`docs/tech-debt.md`](docs/tech-debt.md)** (audited 2026-05-24 — backend + frontend, severity-ranked). The highlights below are the items most likely to bite next.
 

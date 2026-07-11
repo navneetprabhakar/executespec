@@ -19,6 +19,7 @@ const api = vi.hoisted(() => ({
   getManagedAiBalance: vi.fn(),
   listAgentTurns: vi.fn(),
   listAgentEvents: vi.fn(),
+  replayAgentEvents: vi.fn(),
   createAgentSession: vi.fn(),
   streamAgentTurn: vi.fn(),
   confirmAgentRunProposal: vi.fn(),
@@ -137,6 +138,7 @@ function setHappyPathMocks() {
   ]);
   api.getManagedAiBalance.mockResolvedValue(managedAi);
   api.listAgentEvents.mockResolvedValue([]);
+  api.replayAgentEvents.mockResolvedValue({events: [], lastSequence: 0, snapshot: true});
   api.listAgentTurns.mockResolvedValue([
     {
       turnId: 't0',
@@ -547,22 +549,26 @@ describe('IdeAgent', () => {
 
   it('hydrates persisted subagent activity inline without a new route', async () => {
     api.listAgentGates.mockResolvedValue([]);
-    api.listAgentEvents.mockResolvedValue([
-      {
-        id: 'event-1',
-        sessionId: 's1',
-        actionId: null,
-        type: 'SUBAGENT_COMPLETED',
-        payloadJson: JSON.stringify({summary: 'SCOUT returned cited files'}),
-        createdAt: '2026-06-20T00:00:02Z',
-      },
-    ]);
+    api.replayAgentEvents.mockResolvedValue({
+      events: [
+        {
+          id: 'event-1',
+          sessionId: 's1',
+          actionId: null,
+          type: 'SUBAGENT_COMPLETED',
+          payloadJson: JSON.stringify({summary: 'SCOUT returned cited files'}),
+          createdAt: '2026-06-20T00:00:02Z',
+        },
+      ],
+      lastSequence: 1,
+      snapshot: true,
+    });
 
     ({host, root} = await renderAgent('/agent'));
     await flush();
     await flush();
 
-    expect(api.listAgentEvents).toHaveBeenCalledWith('s1');
+    expect(api.replayAgentEvents).toHaveBeenCalledWith('s1');
     expect(host.textContent).toContain('SUBAGENT COMPLETED');
     expect(host.textContent).toContain('SCOUT returned cited files');
   });

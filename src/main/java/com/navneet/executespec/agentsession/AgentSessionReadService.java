@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
@@ -54,7 +55,22 @@ class AgentSessionReadService {
 
   List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
     requireSession(sessionId, user);
+    // Compatibility route remains chronological; new clients use /events/replay for cursors.
     return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId);
+  }
+
+  AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
+    requireSession(sessionId, user);
+    List<AgentActionEvent> events =
+        after == null || after < 0
+            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId)
+            : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+                sessionId, after);
+    long last =
+        events.isEmpty()
+            ? (after == null || after < 0 ? 0 : after)
+            : events.getLast().getStreamSequence();
+    return new AgentEventReplayResponse(events, last, after == null || after < 0);
   }
 
   List<AgentTurnResponse> listTurns(

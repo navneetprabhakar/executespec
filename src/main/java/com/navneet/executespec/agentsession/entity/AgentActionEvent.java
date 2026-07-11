@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.DynamicInsert;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -18,6 +19,7 @@ import lombok.NoArgsConstructor;
 /** Append-only event stream for agent-session actions and intent decisions. */
 @Entity
 @Table(name = "agent_action_event")
+@DynamicInsert
 @Data
 @Builder
 @NoArgsConstructor
@@ -45,4 +47,8 @@ public class AgentActionEvent {
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();
+
+  /** Database-assigned monotonic cursor used for reconnect/backfill. */
+  @Column(name = "stream_sequence", nullable = false, insertable = false, updatable = false)
+  private Long streamSequence;
 }

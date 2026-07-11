@@ -123,6 +123,7 @@ export default function IdeAgent() {
   const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  const eventCursorRef = useRef(0);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
   const liveRun = useAgentRunStream(state.activeRun);
@@ -222,10 +223,16 @@ export default function IdeAgent() {
   const loadTurns = useCallback(async (sessionId: string) => {
     const rows = await api.listAgentTurns(sessionId, {limit: 50});
     dispatch({type: 'turns:set', turns: rows});
-    if (typeof api.listAgentEvents !== 'function') return;
     try {
-      const events = (await api.listAgentEvents(sessionId)) ?? [];
-      dispatch({type: 'events:set', events: persistedEventTimeline(events)});
+      if (typeof api.replayAgentEvents === 'function') {
+        const replay = await api.replayAgentEvents(sessionId);
+        eventCursorRef.current = replay.lastSequence || 0;
+        dispatch({type: 'events:set', events: persistedEventTimeline(replay.events)});
+      } else if (typeof api.listAgentEvents === 'function') {
+        // Compatibility with older servers and reduced test clients.
+        const events = (await api.listAgentEvents(sessionId)) ?? [];
+        dispatch({type: 'events:set', events: persistedEventTimeline(events)});
+      }
     } catch {
       // Historical event replay is additive; a missing event endpoint must not hide turns.
     }
@@ -504,6 +511,13 @@ export default function IdeAgent() {
       dispatch({type: 'stream:stop'});
       if (activeSessionId) {
         try {
+          if (typeof api.replayAgentEvents === 'function') {
+            const replay = await api.replayAgentEvents(activeSessionId, eventCursorRef.current);
+            eventCursorRef.current = replay.lastSequence || eventCursorRef.current;
+            if (replay.events.length > 0) {
+              dispatch({type: 'events:append', events: persistedEventTimeline(replay.events)});
+            }
+          }
           await refreshAfterMutation(activeSessionId);
         } catch {
           // Preserve the original stream error; replay is best-effort.
