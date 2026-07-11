@@ -161,6 +161,8 @@ class AgentSessionReadServiceTest {
     assertThat(replay.events()).extracting("id").containsExactly("legacy-event");
     assertThat(replay.lastSequence()).isZero();
     assertThat(replay.snapshot()).isTrue();
+    assertThat(replay.session().id()).isEqualTo("s1");
+    assertThat(replay.session().status()).isEqualTo("ACTIVE");
   }
 
   @Test

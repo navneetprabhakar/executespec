@@ -44,11 +44,24 @@ public final class AgentSessionDtos {
       Instant createdAt,
       Instant updatedAt) {}
 
-  /** Replayable session event page. {@code snapshot} is true when the page is a full state view. */
+  /** Replayable session event page. Initial pages also carry the durable session state snapshot. */
   public record AgentEventReplayResponse(
       List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
       long lastSequence,
-      boolean snapshot) {}
+      boolean snapshot,
+      SessionSnapshot session) {
+
+    /** Backward-compatible constructor for callers that only need the event envelope. */
+    public AgentEventReplayResponse(
+        List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+        long lastSequence,
+        boolean snapshot) {
+      this(events, lastSequence, snapshot, null);
+    }
+  }
+
+  /** Minimal durable state needed to reconcile a reconnecting client before applying events. */
+  public record SessionSnapshot(String id, String status, String title, Instant updatedAt) {}
 
   public record RepoContext(
       String cwdName,
