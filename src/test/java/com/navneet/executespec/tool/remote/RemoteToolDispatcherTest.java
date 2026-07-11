@@ -9,6 +9,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -287,6 +289,56 @@ class RemoteToolDispatcherTest {
             eq("shell"),
             eq("shell"),
             any());
+  }
+
+  @Test
+  void restartStatus_doesNotPretendDurableCallCanResumeMissingWorkerFuture() {
+    LocalHandsStateService.PendingCall pending =
+        new LocalHandsStateService.PendingCall(
+            "call-restart",
+            "r1",
+            "t1",
+            "readFile",
+            "read",
+            "{\"callId\":\"call-restart\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now());
+    when(stateService.pending("r1")).thenReturn(List.of(pending));
+
+    RemoteToolDispatcher restarted = new RemoteToolDispatcher(broadcaster, om, stateService, 1000L);
+
+    RemoteToolDispatcher.ReconnectStatus status = restarted.reconnectStatus("r1");
+
+    assertThat(status.state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(status.workerWaitRebound()).isFalse();
+    assertThat(status.pendingCalls())
+        .extracting(LocalHandsStateService.PendingCall::callId)
+        .containsExactly("call-restart");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+  }
+
+  @Test
+  void restartStatus_marksPersistedCallOlderThanLeaseAsStale() {
+    LocalHandsStateService.PendingCall stale =
+        new LocalHandsStateService.PendingCall(
+            "call-stale",
+            "r1",
+            "t1",
+            "shell",
+            "shell",
+            "{\"callId\":\"call-stale\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now().minusSeconds(10));
+    when(stateService.pending("r1")).thenReturn(List.of(stale));
+
+    RemoteToolDispatcher restarted =
+        new RemoteToolDispatcher(broadcaster, om, stateService, 1000L, 1L);
+
+    RemoteToolDispatcher.ReconnectStatus status = restarted.reconnectStatus("r1");
+
+    assertThat(status.state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(status.pendingCalls()).isEmpty();
+    assertThat(status.staleCallIds()).containsExactly("call-stale");
   }
 
   private void assertPermissionKind(String toolName, String expected) throws Exception {

@@ -1,5 +1,6 @@
 package com.navneet.executespec.tool.remote;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -50,6 +51,8 @@ public class RemoteToolDispatcher {
    * worker).
    */
   private final long toolTimeoutMs;
+  /** Persisted calls older than this are not offered as a restart handoff. */
+  private final long restartRecoveryWindowMs;
 
   private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
@@ -58,10 +61,21 @@ public class RemoteToolDispatcher {
       ObjectMapper objectMapper,
       LocalHandsStateService stateService,
       @Value("${executespec.remote-tool.timeout-ms:600000}") long toolTimeoutMs) {
+    this(broadcaster, objectMapper, stateService, toolTimeoutMs, toolTimeoutMs);
+  }
+
+  /** Visible for tests; restart recovery must remain bounded by the original remote lease. */
+  RemoteToolDispatcher(
+      SseBroadcaster broadcaster,
+      ObjectMapper objectMapper,
+      LocalHandsStateService stateService,
+      long toolTimeoutMs,
+      long restartRecoveryWindowMs) {
     this.broadcaster = broadcaster;
     this.objectMapper = objectMapper;
     this.stateService = stateService;
     this.toolTimeoutMs = toolTimeoutMs;
+    this.restartRecoveryWindowMs = restartRecoveryWindowMs;
   }
 
   private static final class Session {
@@ -142,6 +156,42 @@ public class RemoteToolDispatcher {
     }
     return stateService.pending(runId);
   }
+
+  /**
+   * Describes whether a reconnect can actually rebind an in-memory worker wait.
+   *
+   * <p>A fresh JVM has durable evidence of the call but not the blocked provider future. It must
+   * therefore never pretend that a tool result can resume the old worker. Clients use this
+   * additive status endpoint to distinguish a live handoff from a restart that requires a new run
+   * (or an explicit future checkpoint/resume implementation).
+   */
+  public ReconnectStatus reconnectStatus(String runId) {
+    Session session = sessions.get(runId);
+    List<LocalHandsStateService.PendingCall> durable = stateService.pending(runId);
+    Instant cutoff = Instant.now().minusMillis(Math.max(0L, restartRecoveryWindowMs));
+    List<String> stale =
+        durable.stream()
+            .filter(call -> call.updatedAt() != null && call.updatedAt().isBefore(cutoff))
+            .map(LocalHandsStateService.PendingCall::callId)
+            .toList();
+    List<LocalHandsStateService.PendingCall> fresh =
+        durable.stream()
+            .filter(call -> call.updatedAt() == null || !call.updatedAt().isBefore(cutoff))
+            .toList();
+    if (session != null) {
+      return new ReconnectStatus("CONNECTED", true, fresh, stale);
+    }
+    if (!fresh.isEmpty() || !stale.isEmpty()) {
+      return new ReconnectStatus("RESTART_REQUIRES_NEW_RUN", false, fresh, stale);
+    }
+    return new ReconnectStatus("NO_PENDING_CALLS", false, List.of(), List.of());
+  }
+
+  public record ReconnectStatus(
+      String state,
+      boolean workerWaitRebound,
+      List<LocalHandsStateService.PendingCall> pendingCalls,
+      List<String> staleCallIds) {}
 
   /** Reloadable pending calls for clients that reconnect without an active SSE replay cursor. */
   public List<LocalHandsStateService.PendingCall> pendingCalls(String runId) {

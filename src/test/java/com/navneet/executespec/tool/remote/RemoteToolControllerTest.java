@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -62,5 +63,24 @@ class RemoteToolControllerTest {
             new RemoteToolController.ToolResultBody(" ", om.createObjectNode().put("ok", true)));
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void reconnectStatus_exposesRestartBoundaryToClient() {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    when(dispatcher.reconnectStatus("run-1"))
+        .thenReturn(
+            new RemoteToolDispatcher.ReconnectStatus(
+                "RESTART_REQUIRES_NEW_RUN",
+                false,
+                java.util.List.<LocalHandsStateService.PendingCall>of(),
+                java.util.List.of("call-1")));
+
+    var response = controller.reconnectStatus(null, "run-1");
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody().state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(response.getBody().workerWaitRebound()).isFalse();
+    assertThat(response.getBody().staleCallIds()).containsExactly("call-1");
   }
 }
