@@ -100,6 +100,8 @@ public class ModelProviderCapabilityRegistry {
         signal.latencyP95Ms(),
         signal.requiredQualityThreshold(),
         signal.benchmarkQualityScore() != null,
+        !weightedSignals.isEmpty(),
+        signal.providerAvailable(),
         reasons);
   }
 
