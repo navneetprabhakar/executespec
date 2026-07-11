@@ -31,6 +31,7 @@ public class AgentSessionStartupRecovery {
 
   private static final String RUNNING = "RUNNING";
   private static final String CANCELLED = "CANCELLED";
+  private static final long STALE_AFTER_SECONDS = 120;
 
   private final AgentSessionRepository sessionRepository;
   private final AgentEventRecorder eventRecorder;
@@ -46,8 +47,14 @@ public class AgentSessionStartupRecovery {
     List<AgentSession> sessions = sessionRepository.findByStatus(RUNNING);
     if (sessions == null || sessions.isEmpty()) return 0;
     int reconciled = 0;
+    Instant staleBefore = Instant.now().minusSeconds(STALE_AFTER_SECONDS);
     for (AgentSession session : sessions) {
       if (session == null || !RUNNING.equals(session.getStatus())) continue;
+      // A delayed ApplicationReadyEvent must not cancel a session that this JVM (or a peer) is
+      // still actively updating. Older rows may have no heartbeat timestamp; those remain
+      // fail-closed and are treated as stale so they cannot reserve budget forever.
+      Instant updatedAt = session.getUpdatedAt();
+      if (updatedAt != null && updatedAt.isAfter(staleBefore)) continue;
       session.setStatus(CANCELLED);
       session.setUpdatedAt(Instant.now());
       sessionRepository.save(session);

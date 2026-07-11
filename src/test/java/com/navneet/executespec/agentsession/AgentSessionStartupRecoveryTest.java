@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.List;
 
 import com.navneet.executespec.agentsession.entity.AgentSession;
@@ -29,6 +30,7 @@ class AgentSessionStartupRecoveryTest {
             .userId("user-1")
             .title("scout")
             .status("RUNNING")
+            .updatedAt(Instant.now().minusSeconds(300))
             .build();
     when(sessions.findByStatus("RUNNING")).thenReturn(List.of(child));
 
@@ -48,5 +50,29 @@ class AgentSessionStartupRecoveryTest {
   void emptyRunningSetIsAStableNoOp() {
     when(sessions.findByStatus("RUNNING")).thenReturn(List.of());
     assertThat(recovery.reconcileRunningSessions()).isZero();
+  }
+
+  @Test
+  void liveRunningSessionIsNotCancelledByDelayedStartupRecovery() {
+    AgentSession live =
+        AgentSession.builder()
+            .id("live-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("RUNNING")
+            .updatedAt(Instant.now())
+            .build();
+    when(sessions.findByStatus("RUNNING")).thenReturn(List.of(live));
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+    assertThat(live.getStatus()).isEqualTo("RUNNING");
+    verify(sessions, org.mockito.Mockito.never()).save(live);
+    verify(events, org.mockito.Mockito.never())
+        .appendAction(
+            eq("live-1"),
+            org.mockito.ArgumentMatchers.any(),
+            eq("SUBAGENT_RECOVERY"),
+            org.mockito.ArgumentMatchers.any());
   }
 }
