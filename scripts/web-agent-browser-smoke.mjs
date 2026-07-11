@@ -97,6 +97,38 @@ async function login() {
   return {email, token: json.accessToken};
 }
 
+/**
+ * Create an isolated, empty WEB session for this smoke. The local credential used by release
+ * QA is intentionally long-lived and may contain historical fixture turns that reference runs
+ * deleted by a previous attempt. Selecting a fresh session keeps this shell/contract smoke
+ * side-effect free with respect to runs while still exercising the real authenticated API.
+ */
+async function createSmokeSession(auth) {
+  const id = `web-browser-smoke-${crypto.randomUUID()}`;
+  const res = await fetch(`${backendUrl}/api/agent/sessions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id,
+      surface: 'WEB',
+      title: `Browser smoke ${id.slice(-12)}`,
+      defaultExecutionMode: 'PRODUCTION',
+      approvalPolicy: 'CONFIRM_MUTATIONS',
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create isolated browser smoke session: HTTP ${res.status} ${await res.text()}`);
+  }
+  const json = await res.json();
+  if (json.id !== id) {
+    throw new Error(`Browser smoke session id mismatch: expected ${id}, received ${json.id || 'none'}`);
+  }
+  return id;
+}
+
 function startVite(port) {
   const child = spawn(
     'npm',
@@ -121,6 +153,7 @@ async function main() {
   await mkdir(outDir, {recursive: true});
   await waitFor(`${backendUrl}/actuator/health`, 'backend health');
   const auth = await login();
+  const smokeSessionId = await createSmokeSession(auth);
   const port = await findFrontendPort();
   const frontendUrl = `http://localhost:${port}`;
   const vite = startVite(port);
@@ -143,6 +176,27 @@ async function main() {
       executablePath: existsSync(chromePath) ? chromePath : undefined,
     });
     page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+    // The account is deliberately reusable across QA runs. Force the newly-created empty session
+    // to the head of the real API response so stale historical fixture turns cannot hydrate a
+    // deleted run and turn this provider-free shell smoke into an accidental run/SSE test.
+    await page.route('**/api/agent/sessions*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const rows = await response.json().catch(() => null);
+      if (!Array.isArray(rows)) {
+        await route.fulfill({response});
+        return;
+      }
+      const ordered = [...rows].sort((a, b) => {
+        if (a?.id === smokeSessionId) return -1;
+        if (b?.id === smokeSessionId) return 1;
+        return 0;
+      });
+      await route.fulfill({response, body: JSON.stringify(ordered)});
+    });
     page.on('console', (msg) => {
       if (['error', 'warning'].includes(msg.type())) {
         consoleMessages.push(`${msg.type()}: ${msg.text()}`);
@@ -220,6 +274,7 @@ async function main() {
 - Backend: \`${backendUrl}\`
 - Frontend: \`${frontendUrl}\`
 - Account: \`${auth.email}\`
+- Isolated session: \`${smokeSessionId}\`
 - Screenshot: \`${screenshot}\`
 - Summary: ${results.length} pass, 0 fail
 
@@ -247,6 +302,7 @@ ${rows}
 - Backend: \`${backendUrl}\`
 - Frontend: \`${frontendUrl}\`
 - Account: \`${auth.email}\`
+- Isolated session: \`${smokeSessionId}\`
 - Failure screenshot: \`${failureScreenshot}\`
 - Summary: FAILED
 - Console warnings/errors: ${consoleMessages.length ? consoleMessages.map((line) => `\`${line.replace(/`/g, "'")}\``).join(', ') : 'none'}
