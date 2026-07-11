@@ -9,12 +9,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 /** Regression coverage for the rolling-restart crash-recovery ownership claim. */
 class RunLifecycleServiceCrashClaimTest {
@@ -43,5 +46,59 @@ class RunLifecycleServiceCrashClaimTest {
     assertThat(run.getResumeAttempts()).isZero();
     verify(runRepo, never()).save(any(PipelineRun.class));
     verify(runRepo).claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
+  }
+
+  @Test
+  void onlyOneRecoveryInstanceMayAdvanceTheAttemptBeforeResumeWork() throws Exception {
+    Path workspaceRoot = Files.createTempDirectory("executespec-crash-claim-");
+    Files.createDirectories(workspaceRoot.resolve("crash-claim-owner"));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("crash-claim-owner")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(0)
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    com.navneet.executespec.config.AgentProperties agentProperties =
+        mock(com.navneet.executespec.config.AgentProperties.class);
+    when(agentProperties.getWorkspace()).thenReturn(workspaceRoot.toString());
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    // Simulates two JVMs racing on the same row: the first wins the CAS, the second loses it.
+    when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
+        .thenReturn(1, 0);
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo,
+            null,
+            null,
+            null,
+            null,
+            controlPort,
+            agentProperties,
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.PLAN_MISSING);
+    assertThat(run.getResumeAttempts()).isEqualTo(1);
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE);
+    Mockito.verify(controlPort).terminate(run.getRunId(), "FAILED", "plan missing on resume", null);
+    Mockito.verify(runRepo, Mockito.times(2))
+        .claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
   }
 }
