@@ -428,7 +428,7 @@ public class WorkerAgent {
     // v2: PATCH pre-first-edit exploration ceiling (total iterations; see constant javadoc).
     final int explorationNudgeAfter =
         Math.max(PROGRESS_V2_EXPLORATION_NUDGE_AFTER, progressWarnAfter * 3);
-    // auto-verify (harness-resolution Phase 2, flag worker.auto-verify.enabled, default OFF):
+    // auto-verify (harness-resolution Phase 2, flag worker.auto-verify.enabled, default ON):
     // server-run tests after each edit burst; result injected as an observation. Schema-free.
     final boolean autoVerifyOn =
         Boolean.TRUE.equals(req.autoVerify())

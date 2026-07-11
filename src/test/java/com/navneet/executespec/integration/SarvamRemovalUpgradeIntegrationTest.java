@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Production-like V255 to V257 upgrade fixture for removal of active Sarvam routing state. */
+/** Production-like V255 to V259 upgrade fixture for removal of active Sarvam routing state. */
 class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
   @Test
-  void v257ClearsExecutableSarvamStateButPreservesHistoricalEvidence() {
+  void v259ClearsExecutableSarvamStateButPreservesHistoricalEvidence() {
     String schema = "sarvam_upgrade_" + UUID.randomUUID().toString().replace("-", "");
     String baseUrl = POSTGRES.getJdbcUrl();
     String url =
@@ -30,8 +30,9 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
       var result = flyway(dataSource, schema, null).migrate();
 
-      // V256 removes executable Sarvam state; V257 seeds the fail-closed coordinator flag.
-      assertThat(result.migrationsExecuted).isEqualTo(2);
+      // V256 removes executable Sarvam state; V257 seeds the coordinator flag; V258/V259 add
+      // subsequent task-cost and default auto-verification changes.
+      assertThat(result.migrationsExecuted).isEqualTo(4);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
     } finally {
