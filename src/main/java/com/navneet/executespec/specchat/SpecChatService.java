@@ -377,6 +377,75 @@ claim in a tool result — never invent a runId, score, or status.""";
         parentTurnId);
   }
 
+  /**
+   * Runs a bounded model loop over an already-authorized tool set.
+   *
+   * <p>This is intentionally narrow: callers own the capability boundary and must pass only
+   * callbacks that are safe for their execution context. It exists for the local-hands IMPLEMENTER
+   * protocol, where write callbacks are wrapped by the single-writer reservation service before
+   * reaching this method.
+   */
+  public void runTurnBoundedWithTools(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      com.navneet.executespec.router.AgentTier tier,
+      String agentRole,
+      String systemPrompt,
+      ExecutionContext context,
+      List<ToolCallback> tools,
+      int maxRounds,
+      Runnable beforeRound,
+      String parentTurnId) {
+    LlmProvider provider = resolveProvider(providerOverride);
+    ResolvedModel model;
+    try {
+      model = modelResolver.resolve(agentRole, provider, tier);
+    } catch (Exception e) {
+      log.warn(
+          "{} model resolve failed for {}: {} — ANTHROPIC fallback",
+          agentRole,
+          provider,
+          e.getMessage());
+      provider = LlmProvider.ANTHROPIC;
+      model = modelResolver.resolve(agentRole, provider, tier);
+    }
+    if (modelOverride != null && !modelOverride.isBlank()) {
+      model =
+          ResolvedModel.builder()
+              .requestedProvider(provider)
+              .actualProvider(provider)
+              .model(modelOverride)
+              .agentTier(tier)
+              .fallback(false)
+              .build();
+    }
+    if (user != null && user.getUser() != null && user.getUser().getId() != null) {
+      keyContextStore.resolveAndPut(sessionId, user.getUser().getId());
+    }
+    List<Message> messages = new ArrayList<>();
+    messages.add(new SystemMessage(systemPrompt == null ? READ_ONLY_SYSTEM_PROMPT : systemPrompt));
+    messages.addAll(translate(conversation));
+    int rounds =
+        runToolLoop(
+            sink,
+            provider.name().toLowerCase(),
+            model.getModel(),
+            messages,
+            context,
+            tools == null ? List.of() : List.copyOf(tools),
+            sessionId,
+            Math.max(1, Math.min(MAX_TOOL_ROUNDS, maxRounds)),
+            beforeRound == null ? () -> {} : beforeRound,
+            agentRole,
+            parentTurnId);
+    sink.done(rounds, safeSnapshot(sessionId));
+  }
+
   private void runTurnBounded(
       Sink sink,
       AppUserDetails user,
@@ -476,7 +545,9 @@ claim in a tool result — never invent a runId, score, or status.""";
             tools,
             sessionId,
             Math.max(1, Math.min(MAX_TOOL_ROUNDS, maxRounds)),
-            beforeRound == null ? () -> {} : beforeRound);
+            beforeRound == null ? () -> {} : beforeRound,
+            "SpecChatService",
+            parentTurnId);
     sink.done(rounds, safeSnapshot(sessionId));
   }
 
@@ -500,7 +571,9 @@ claim in a tool result — never invent a runId, score, or status.""";
       List<ToolCallback> tools,
       String sessionId,
       int maxRounds,
-      Runnable beforeRound) {
+      Runnable beforeRound,
+      String agentRole,
+      String parentTurnId) {
     List<Message> conversation = new ArrayList<>(seed);
 
     for (int round = 0; round < maxRounds; round++) {
@@ -511,7 +584,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .model(modelName)
               .messages(conversation)
               .context(ctx)
-              .agentRole("SpecChatService")
+              .agentRole(agentRole == null ? "SpecChatService" : agentRole)
               .stepId("spec-chat.round-" + (round + 1))
               .temperature(0.2)
               .maxTokens(1200)
