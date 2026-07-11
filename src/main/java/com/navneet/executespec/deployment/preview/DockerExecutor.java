@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Component;
@@ -199,25 +201,47 @@ public class DockerExecutor {
 
       Process process = pb.start();
 
-      // Read output in bounded fashion
-      String output;
-      try (InputStream is = process.getInputStream()) {
-        byte[] buf = is.readNBytes(MAX_OUTPUT_BYTES);
-        output = new String(buf);
-      }
-
+      // Drain output concurrently. Reading the pipe before waitFor can deadlock when a command
+      // stays silent (or fills the pipe) past the process timeout; Docker availability checks then
+      // hang instead of failing closed. The bounded read also prevents untrusted build output from
+      // growing without limit.
+      CompletableFuture<String> outputFuture =
+          CompletableFuture.supplyAsync(
+              () -> {
+                try (InputStream is = process.getInputStream()) {
+                  return new String(is.readNBytes(MAX_OUTPUT_BYTES));
+                } catch (IOException e) {
+                  return "";
+                }
+              });
       boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       if (!finished) {
         process.destroyForcibly();
-        return new ProcessResult(-1, output, true);
+        try {
+          process.getInputStream().close();
+        } catch (IOException ignored) {
+          // The process has already been force-killed; preserve the timeout result.
+        }
+        return new ProcessResult(-1, output(outputFuture), true);
       }
 
-      return new ProcessResult(process.exitValue(), output, false);
+      return new ProcessResult(process.exitValue(), output(outputFuture), false);
     } catch (IOException | InterruptedException e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
       throw new PreviewException("Process execution failed: " + String.join(" ", command), e);
+    }
+  }
+
+  private String output(CompletableFuture<String> outputFuture) {
+    try {
+      return outputFuture.get(1, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return "";
+    } catch (ExecutionException | java.util.concurrent.TimeoutException e) {
+      return "";
     }
   }
 
