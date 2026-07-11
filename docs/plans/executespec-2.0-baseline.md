@@ -61,7 +61,7 @@ Fresh `npm ci` reported 24 frontend dependency advisories: 1 low, 18 moderate, 4
 
 Milestone 0 remains open until generated manifests can reproduce inventories and benchmark cohorts. Required additions:
 
-1. Extend the machine-readable inventory from prompts/routes/providers/flags/migrations/adapters to exact active tool and chat-path caller manifests.
+1. Extend the machine-readable inventory from prompts/routes/providers/flags/migrations/adapters to exact active tool and chat-path caller manifests. The prompt manifest now also carries `runtimeCoverage` identities for BUILD/PATCH/Terminal provider fragments, project fragments, scaffolds, caller source tokens, roles, and tool profiles; `scripts/validate-prompt-manifest.mjs` fails closed on missing dynamic resources or resolver drift.
 2. Benchmark manifest schema containing repository, model slug, prompt, tool-schema, harness, dataset slice, feature flags and all budgets.
 3. Historical outcome extractor that joins task result, verification, timing, usage and provider/model identity without treating missing evidence as success.
 4. Semantic timing/search/context events for metrics that do not exist today.
