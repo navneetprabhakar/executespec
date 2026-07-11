@@ -92,6 +92,50 @@ class InitialRoutingServiceTest {
         .anyMatch(reason -> reason.contains("no observed quality evidence"));
   }
 
+  @Test
+  void typedAvailabilityAndQualityEvidenceOverrideMisleadingReasonText() {
+    ModelProviderScore unavailableWithStrongText =
+        new ModelProviderScore(
+            "openai",
+            "gpt",
+            "BUG_FIX",
+            99.0,
+            0.01,
+            1,
+            2,
+            70.0,
+            true,
+            true,
+            false,
+            List.of("provider appears available", "persisted validation pass rate 99%"));
+    ModelProviderScore unverifiedWithStrongText =
+        new ModelProviderScore(
+            "anthropic",
+            "sonnet",
+            "BUG_FIX",
+            98.0,
+            1.0,
+            10,
+            20,
+            70.0,
+            true,
+            false,
+            true,
+            List.of("persisted validation pass rate 98%"));
+    when(candidates.buildCandidates(null))
+        .thenReturn(List.of(unavailableWithStrongText, unverifiedWithStrongText));
+
+    InitialRoutingDecision decision = service.decide("deepseek", "current", null);
+
+    assertThat(decision.routeLabel()).isEqualTo("deepseek/current");
+    assertThat(decision.changed()).isFalse();
+    assertThat(decision.rejectedCandidates())
+        .extracting(ModelProviderScore::label)
+        .containsExactly("openai/gpt");
+    assertThat(decision.reasons())
+        .anyMatch(reason -> reason.contains("no observed quality evidence"));
+  }
+
   private static ModelProviderScore score(
       String provider, String model, double quality, double cost, long latency, String... reasons) {
     return new ModelProviderScore(
