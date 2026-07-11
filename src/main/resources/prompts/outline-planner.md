@@ -57,6 +57,13 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
     reasoning, or add prose fields not present in the schema. The complete `tasks` array is
     mandatory; trim wording before risking a truncated tool call.
 
+13. **MEDIUM decomposition floor and final checklist.** When classification is `MEDIUM` and the
+    spec names at least three independent deliverable surfaces or five distinct feature bullets,
+    emit at least 7 tasks (normally 7–10), with one cohesive task per surface/layer and explicit
+    dependencies where needed. Before calling `submitOutline`, verify that every `R*` requirement
+    is cited by at least one task's `meetsRequirements`, every hard constraint is propagated, and
+    the task array is complete. Do not merge independent surfaces merely to reduce task count.
+
 7. **Order matters.** Tasks run top-to-bottom. Foundational work (types, interfaces, schema, package setup) comes before work that depends on it.
 
 8. **Hard constraints are non-negotiable.** If the spec contains rules like "use JDBC not JPA" or "no external dependencies beyond the stdlib", propagate them into every affected task's `hardConstraints` array verbatim.
