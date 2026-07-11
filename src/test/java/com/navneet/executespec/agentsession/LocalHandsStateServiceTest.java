@@ -93,6 +93,26 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void pending_reconstructsFromDurableEventsAfterStateServiceRecreation() {
+    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-1"))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    // A new service instance represents a fresh JVM component with no in-memory dispatcher
+    // state. The append-only agent-action stream remains sufficient to show what the client owes.
+    LocalHandsStateService restartedService =
+        new LocalHandsStateService(sessionRepo, eventRepo, recorder, objectMapper);
+
+    assertThat(restartedService.pending("run-1"))
+        .singleElement()
+        .satisfies(
+            pending -> {
+              assertThat(pending.callId()).isEqualTo("call-1");
+              assertThat(pending.state()).isEqualTo(LocalHandsState.AWAITING_CLIENT);
+              assertThat(pending.frameJson()).contains("call-1");
+            });
+  }
+
+  @Test
   void persistenceFailure_isFailSoftForWorkerPath() {
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenThrow(new IllegalStateException("database unavailable"));
