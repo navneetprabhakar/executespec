@@ -50,6 +50,11 @@ public class AgentSessionStartupRecovery {
     Instant staleBefore = Instant.now().minusSeconds(STALE_AFTER_SECONDS);
     for (AgentSession session : sessions) {
       if (session == null || !RUNNING.equals(session.getStatus())) continue;
+      // Rolling restarts can execute this hook concurrently. Re-read each candidate under a row
+      // lock so a peer's terminal transition wins and cannot be overwritten by this stale snapshot.
+      AgentSession locked = sessionRepository.findByIdForUpdate(session.getId()).orElse(null);
+      if (locked == null || !RUNNING.equals(locked.getStatus())) continue;
+      session = locked;
       // A delayed ApplicationReadyEvent must not cancel a session that this JVM (or a peer) is
       // still actively updating. Older rows may have no heartbeat timestamp; those remain
       // fail-closed and are treated as stale so they cannot reserve budget forever.
