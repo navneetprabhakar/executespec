@@ -1,14 +1,27 @@
 package com.navneet.executespec.agentsession;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.RepoContext;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 
 class AgentIntentServiceTest {
 
@@ -232,6 +245,155 @@ class AgentIntentServiceTest {
     assertThat(decision.proposedAction().type()).isEqualTo("approve_run");
     assertThat(decision.proposedAction().billingImpact()).isEqualTo("run_credit");
     assertThat(decision.proposedAction().arguments()).containsEntry("runId", runId);
+  }
+
+  @Test
+  void quotedFixUsesStructuredClassifierAndDoesNotBecomeACloudRun() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(registry.lightweightModelFor("anthropic")).thenReturn("claude-haiku-4-5-20251001");
+    when(router.callText(
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            anyList(),
+            eq("intent-routing-" + Integer.toHexString("Please handle \"fix\".".hashCode())),
+            eq("AgentIntentService"),
+            eq("orchestrator.intent.classify"),
+            eq(400)))
+        .thenReturn(
+            ok(
+                "{\"route\":\"CLARIFY\",\"confidence\":0.95,\"reasonCode\":\"ambiguous\",\"requiresUserConfirmation\":false,\"negativeEvidence\":[]}"));
+
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "Please handle \"fix\".",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("CLARIFY");
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
+  void structuredReadOnlyDecisionIsAcceptedThroughCanonicalTextSeam() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(registry.lightweightModelFor("anthropic")).thenReturn("claude-haiku-4-5-20251001");
+    when(router.callText(
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            anyList(),
+            anyString(),
+            eq("AgentIntentService"),
+            eq("orchestrator.intent.classify"),
+            eq(400)))
+        .thenReturn(
+            ok(
+                "{\"route\":\"READ_ONLY_CODE_HELP\",\"confidence\":0.9,\"reasonCode\":\"inspect\",\"requiresUserConfirmation\":false,\"negativeEvidence\":[]}"));
+
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "Could you tell me what changed?",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("READ_ONLY_CODE_HELP");
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
+  void malformedStructuredOutputFallsBackWithoutCreatingRun() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(registry.lightweightModelFor("anthropic")).thenReturn("claude-haiku-4-5-20251001");
+    when(router.callText(
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            anyList(),
+            anyString(),
+            eq("AgentIntentService"),
+            eq("orchestrator.intent.classify"),
+            eq(400)))
+        .thenReturn(ok("not-json"));
+
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "What is the weather?",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("CHAT_ONLY");
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
+  void explicitImplementationRemainsDeterministicAndDoesNotCallClassifier() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "implement OAuth login",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("CODE_RUN_REQUIRED");
+    verify(router, never())
+        .callText(
+            anyString(), anyString(), anyList(), anyString(), anyString(), anyString(), eq(400));
+  }
+
+  @Test
+  void unavailableClassifierFallsBackToSafeChat() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(registry.lightweightModelFor("anthropic")).thenReturn(null);
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "Tell me something unrelated",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)));
+
+    assertThat(decision.route()).isEqualTo("CHAT_ONLY");
+    verify(router, never())
+        .callText(
+            anyString(), anyString(), anyList(), anyString(), anyString(), anyString(), eq(400));
+  }
+
+  private static ChatResponse ok(String text) {
+    return new ChatResponse(
+        List.of(new Generation(AssistantMessage.builder().content(text).build())));
   }
 
   @Test
