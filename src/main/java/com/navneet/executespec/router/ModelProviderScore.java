@@ -107,8 +107,7 @@ public record ModelProviderScore(
         .map(reason -> reason == null ? "" : reason.toLowerCase(java.util.Locale.ROOT))
         .anyMatch(
             reason ->
-                reason.contains("persisted ")
-                    && reason.contains("validation pass rate")
+                reason.contains("persisted ") && reason.contains("validation pass rate")
                     || reason.contains("local 24h success score")
                     || (reason.contains("quality ")
                         && reason.contains(" from [")
