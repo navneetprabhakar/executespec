@@ -1,7 +1,15 @@
 import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {Markdown} from '@/signal/components/Markdown';
-import {CommandIcon, PlusIcon, RunsIcon, SearchIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
+import {
+  CommandIcon,
+  ImageIcon,
+  PlusIcon,
+  RunsIcon,
+  SearchIcon,
+  SettingsIcon,
+  StatusDot,
+} from '@/ide/IdeIcons';
 import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
 import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
 import {boundedInlineDiff} from '@/ide/agentDiff';
@@ -746,6 +754,19 @@ function Activity({items}: {items: StreamTimelineItem[]}) {
   );
 }
 
+function RouteDecision({routingState}: {routingState: RoutingState}) {
+  if (!routingState) return null;
+  const runRoute = routingState.runApiAllowed;
+  return (
+    <div className='agent-route-decision' data-agent-region='route-decision' role='status'>
+      <span className='agent-route-decision-label'>Intent route</span>
+      <strong>{routingState.route.replace(/_/g, ' ')}</strong>
+      <span>{Math.round(routingState.confidence * 100)}% confidence</span>
+      <span>{runRoute ? 'Run action available after confirmation' : 'Read-only response'}</span>
+    </div>
+  );
+}
+
 function Typing() {
   return (
     <div className='agent-typing' aria-label='Agent is working'>
@@ -1379,11 +1400,16 @@ function Composer({
       {attachments.length > 0 && (
         <div className='agent-attachments'>
           {attachments.map((a) => (
-            <span
+            <div
               key={a.attachmentId}
               className='agent-attach-chip'
               title={`${a.mimeType} · ${a.extractedChars} chars extracted`}
             >
+              {a.previewUrl ? (
+                <img className='agent-attach-thumb' src={a.previewUrl} alt='' aria-hidden='true' />
+              ) : (
+                <ImageIcon size={14} />
+              )}
               <span className='agent-attach-chip-name'>{a.filename}</span>
               <button
                 onClick={() => onRemoveAttachment(a.attachmentId)}
@@ -1391,14 +1417,14 @@ function Composer({
               >
                 ×
               </button>
-            </span>
+            </div>
           ))}
         </div>
       )}
       <div className='agent-composer-box'>
         <label
           className='agent-attach-btn'
-          title='Attach PDF, Markdown, or text'
+          title='Attach an image, PDF, Markdown, or text'
           tabIndex={uploading || isBusy ? -1 : 0}
           role='button'
           aria-label='Attach a file'
@@ -1412,7 +1438,7 @@ function Composer({
           {uploading ? <span className='agent-attach-spin' /> : <Paperclip />}
           <input
             type='file'
-            accept='.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
+            accept='.png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp,.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
             multiple
             style={{display: 'none'}}
             disabled={uploading || isBusy}
@@ -1454,7 +1480,7 @@ function Composer({
         )}
       </div>
       <div className='agent-composer-hint'>
-        Enter to send · attach PDF, Markdown, or text · web search built in
+        Enter to send · attach image, PDF, Markdown, or text · web search built in
       </div>
     </div>
   );
@@ -1471,6 +1497,7 @@ export function AgentConversation({
   runCard,
   runCost,
   runStreamStatus,
+  routingState,
   hasNewActivity = false,
   input,
   attachments,
@@ -1499,6 +1526,7 @@ export function AgentConversation({
   runCard: api.RunDetail | null;
   runCost: number | null;
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  routingState?: RoutingState;
   hasNewActivity?: boolean;
   input: string;
   attachments: AgentAttachmentLite[];
@@ -1564,6 +1592,7 @@ export function AgentConversation({
               ))}
             </div>
           )}
+          <RouteDecision routingState={routingState ?? null} />
           {empty
             ? !showOperatorInScroll && (
                 <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
