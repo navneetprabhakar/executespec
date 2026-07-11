@@ -126,7 +126,7 @@ turns separately from runs.
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
 | `AgentText.java`                           | Package-local string helper for repeated blank, fallback, trim, and path-leaf handling across agent-session services.                                                                                               |
-| `AgentIntentService.java`                  | Conservative deterministic pre-router. LLM intent routing can replace/augment this later, but must preserve typed routes, policy, typed actions, and confirmations.                                                 |
+| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; malformed/unavailable output fails closed to the non-run fallback.                                                   |
 | `AgentIntentDecisions.java`                | Package-local decision/policy construction and billing-impact mapping helper for deterministic route outputs.                                                                                                       |
 | `AgentGuardIntents.java`                   | Package-local pre-routing guard for empty input, unsafe requests, and explicit no-edit/chat-only instructions.                                                                                                      |
 | `AgentCodeChangeIntents.java`              | Package-local code-change router for local code tasks, missing-project implementation proposals, and confirmation-gated cloud-run proposals.                                                                        |
@@ -159,7 +159,9 @@ turns separately from runs.
 - `AgentIntentServiceTest` pins the route matrix and billing/confirmation safety contract:
   explanation, review, planning, "find the bug", chat-only patch requests, local git actions, and
   destructive requests must not create cloud runs; explicit implementation can only produce a
-  confirmation-required `create_cloud_run` proposal.
+  confirmation-required `create_cloud_run` proposal. Structured classifier tests must also pin
+  ambiguous quoted mutation language, strict JSON success, malformed output, and unavailable
+  provider fallback.
 - `AgentIntentLegacyAdapterTest` pins legacy DTO compatibility for `interpret()` callers:
   cloud-run proposals map to `CREATE_RUN`, lifecycle actions map to gate intents, read-only routes
   map to legacy `CHAT`, and confirmation prompts/responses keep the old nullability contract.
