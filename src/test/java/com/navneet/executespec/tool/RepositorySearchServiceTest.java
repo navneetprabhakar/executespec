@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +91,30 @@ class RepositorySearchServiceTest {
                         "after", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0))
                 .totalMatches())
         .isEqualTo(1);
+  }
+
+  @Test
+  void detectsSameSizeMutationEvenWhenMtimeIsRestored() throws Exception {
+    Path file = root.resolve("same-size.txt");
+    Files.writeString(file, "before\n");
+    FileTime originalMtime = Files.getLastModifiedTime(file);
+    var service = new RepositorySearchService();
+    var beforeRequest =
+        new RepositorySearchService.SearchRequest(
+            "before", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+    var afterRequest =
+        new RepositorySearchService.SearchRequest(
+            "after ", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0);
+
+    var before = service.search(root, beforeRequest);
+    Files.writeString(file, "after \n");
+    // Keep both metadata signals unchanged: freshness must come from content, not size/mtime.
+    Files.setLastModifiedTime(file, originalMtime);
+
+    assertThat(service.search(root, beforeRequest).totalMatches()).isZero();
+    assertThat(service.search(root, afterRequest).totalMatches()).isEqualTo(1);
+    assertThat(service.search(root, afterRequest).inventoryFingerprint())
+        .isNotEqualTo(before.inventoryFingerprint());
   }
 
   @Test
