@@ -137,6 +137,50 @@ class RepositorySearchServiceTest {
         .containsExactly("tracked.txt");
   }
 
+  @Test
+  void symbolModeRanksDeterministicDeclarationsAheadOfReferencesAcrossLanguages() throws Exception {
+    Files.writeString(root.resolve("z-use.ts"), "export const result = Widget;\n");
+    Files.writeString(root.resolve("a-widget.ts"), "export class Widget {}\n");
+    Files.writeString(root.resolve("b-widget.py"), "def Widget(value):\n    return value\n");
+
+    var result =
+        new RepositorySearchService()
+            .search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    "Widget", RepositorySearchService.SearchMode.SYMBOL, true, null, null, 50, 0));
+
+    assertThat(result.hits()).hasSize(3);
+    assertThat(result.hits().get(0).matchType())
+        .isEqualTo(RepositorySearchService.MatchType.SYMBOL_DEFINITION);
+    assertThat(result.hits().get(0).relevanceReason()).contains("symbol definition");
+    assertThat(result.hits().get(1).matchType())
+        .isEqualTo(RepositorySearchService.MatchType.SYMBOL_DEFINITION);
+    assertThat(result.hits().get(2).matchType())
+        .isEqualTo(RepositorySearchService.MatchType.SYMBOL_REFERENCE);
+    assertThat(result.hits().get(0).repositoryFingerprint())
+        .isEqualTo(result.inventoryFingerprint());
+    assertThat(result.repositoryFingerprint()).hasSize(64);
+  }
+
+  @Test
+  void citationValidationRejectsWorkingTreeMutation() throws Exception {
+    Path file = root.resolve("src/Widget.java");
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, "class Widget {}\n");
+    var service = new RepositorySearchService();
+    var result =
+        service.search(
+            root,
+            new RepositorySearchService.SearchRequest(
+                "Widget", RepositorySearchService.SearchMode.SYMBOL, true, null, null, 50, 0));
+    var citation = result.hits().getFirst();
+
+    assertThat(service.isCitationCurrent(root, result, citation)).isTrue();
+    Files.writeString(file, "class WidgetRenamed {}\n");
+    assertThat(service.isCitationCurrent(root, result, citation)).isFalse();
+  }
+
   private void runGit(String... args) throws Exception {
     var command = new java.util.ArrayList<>(List.of("git", "-C", root.toString()));
     command.addAll(List.of(args));

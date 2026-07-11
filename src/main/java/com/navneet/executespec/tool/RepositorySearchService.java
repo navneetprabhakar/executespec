@@ -87,7 +87,12 @@ public class RepositorySearchService {
         if (lines == null) continue;
         for (int i = 0; i < lines.size(); i++) {
           String line = lines.get(i);
-          if (!pattern.matcher(line).find()) continue;
+          SymbolMatch symbolMatch =
+              request.mode() == SearchMode.SYMBOL
+                  ? symbolMatch(request.query(), line, request.caseSensitive())
+                  : null;
+          if (request.mode() == SearchMode.SYMBOL && symbolMatch == null) continue;
+          if (request.mode() != SearchMode.SYMBOL && !pattern.matcher(line).find()) continue;
           Path relative = root.relativize(file);
           hits.add(
               new SearchHit(
@@ -95,14 +100,19 @@ public class RepositorySearchService {
                   i + 1,
                   1,
                   line.substring(0, Math.min(MAX_PREVIEW, line.length())),
-                  "TEXT",
+                  symbolMatch == null ? MatchType.TEXT : symbolMatch.type(),
                   "CURRENT",
-                  estimate(line)));
+                  estimate(line),
+                  symbolMatch == null ? "text match" : symbolMatch.reason(),
+                  fingerprint));
           if (hits.size() >= MAX_HITS) break;
         }
         if (hits.size() >= MAX_HITS) break;
       }
-      hits.sort(Comparator.comparing(SearchHit::path).thenComparingInt(SearchHit::line));
+      hits.sort(
+          Comparator.comparingInt((SearchHit hit) -> hit.matchType().rank())
+              .thenComparing(SearchHit::path)
+              .thenComparingInt(SearchHit::line));
       int from = Math.min(request.offset(), hits.size());
       int to = Math.min(from + request.limit(), hits.size());
       return new SearchResult(
@@ -196,6 +206,11 @@ public class RepositorySearchService {
   private record FileSnapshot(long size, long modified, List<String> lines) {}
 
   private static Pattern compile(SearchRequest request) {
+    if (request.mode() == SearchMode.SYMBOL) {
+      return Pattern.compile(
+          "(?<![A-Za-z0-9_$])" + Pattern.quote(request.query()) + "(?![A-Za-z0-9_$])",
+          request.caseSensitive() ? 0 : Pattern.CASE_INSENSITIVE);
+    }
     return Pattern.compile(
         request.mode() == SearchMode.EXACT ? Pattern.quote(request.query()) : request.query(),
         request.caseSensitive() ? 0 : Pattern.CASE_INSENSITIVE);
@@ -341,7 +356,25 @@ public class RepositorySearchService {
 
   public enum SearchMode {
     EXACT,
-    REGEX
+    REGEX,
+    /** Exact identifier search with deterministic declaration classification and ranking. */
+    SYMBOL
+  }
+
+  public enum MatchType {
+    SYMBOL_DEFINITION(0),
+    SYMBOL_REFERENCE(1),
+    TEXT(2);
+
+    private final int rank;
+
+    MatchType(int rank) {
+      this.rank = rank;
+    }
+
+    int rank() {
+      return rank;
+    }
   }
 
   public record SearchRequest(
@@ -364,9 +397,41 @@ public class RepositorySearchService {
       int line,
       int column,
       String preview,
-      String matchType,
+      MatchType matchType,
       String freshness,
-      int tokenEstimate) {}
+      int tokenEstimate,
+      String relevanceReason,
+      String repositoryFingerprint) {
+    /** Compatibility constructor for callers that used the original string-shaped contract. */
+    public SearchHit(
+        String path,
+        int line,
+        int column,
+        String preview,
+        String matchType,
+        String freshness,
+        int tokenEstimate) {
+      this(
+          path,
+          line,
+          column,
+          preview,
+          parseMatchType(matchType),
+          freshness,
+          tokenEstimate,
+          "text match",
+          "");
+    }
+
+    private static MatchType parseMatchType(String value) {
+      if (value == null) return MatchType.TEXT;
+      try {
+        return MatchType.valueOf(value.toUpperCase(Locale.ROOT));
+      } catch (IllegalArgumentException ignored) {
+        return MatchType.TEXT;
+      }
+    }
+  }
 
   public record SearchResult(
       String repositorySha,
@@ -376,5 +441,68 @@ public class RepositorySearchService {
       int totalMatches,
       boolean hasMore,
       int nextOffset,
-      String engine) {}
+      String engine) {
+    /** Composite fingerprint suitable for citation validation and client cache keys. */
+    public String repositoryFingerprint() {
+      return sha256(repositorySha + ":" + inventoryFingerprint);
+    }
+  }
+
+  /**
+   * Rejects citations from an inventory that changed after the search. This intentionally checks
+   * both the inventory fingerprint and the cited line, so a caller cannot reuse a path:line after a
+   * working-tree edit. It is a bounded validation helper, not a replacement for a full VCS diff.
+   */
+  public boolean isCitationCurrent(Path workspace, SearchResult result, SearchHit citation) {
+    if (workspace == null || result == null || citation == null) return false;
+    try {
+      Path root = workspace.toRealPath();
+      Path file = root.resolve(citation.path()).normalize();
+      if (!file.startsWith(root) || !Files.isRegularFile(file)) return false;
+      List<Path> files = inventory(root, root);
+      if (!result.inventoryFingerprint().equals(fingerprint(files))) return false;
+      List<String> lines = Files.readAllLines(file);
+      if (citation.line() < 1 || citation.line() > lines.size()) return false;
+      String current = lines.get(citation.line() - 1);
+      String expected = citation.preview();
+      if (expected.endsWith("...")) expected = expected.substring(0, expected.length() - 3);
+      return current.startsWith(expected);
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private record SymbolMatch(MatchType type, String reason) {}
+
+  private static SymbolMatch symbolMatch(String symbol, String line, boolean caseSensitive) {
+    Pattern token =
+        Pattern.compile(
+            "(?<![A-Za-z0-9_$])" + Pattern.quote(symbol) + "(?![A-Za-z0-9_$])",
+            caseSensitive ? 0 : Pattern.CASE_INSENSITIVE);
+    if (!token.matcher(line).find()) return null;
+    String escaped = Pattern.quote(symbol);
+    String declaration =
+        "(?:^|\\s)(?:(?:public|private|protected|static|final|abstract|async|export|default|"
+            + "override|virtual|synchronized|sealed|open|internal|readonly|const|let|var)\\s+)*"
+            + "(?:class|interface|enum|record|type|function|def)\\s+"
+            + escaped
+            + "(?:\\b|\\s*\\()";
+    String assignedDeclaration = "(?:^|\\s)(?:const|let|var)\\s+" + escaped + "\\s*=.*";
+    String methodDeclaration = "(?:^|\\s)[A-Za-z_$][\\w$<>\\[\\], ?]*\\s+" + escaped + "\\s*\\(";
+    boolean definition =
+        Pattern.compile(declaration).matcher(line).find()
+            || Pattern.compile(assignedDeclaration).matcher(line).find()
+            || Pattern.compile(methodDeclaration).matcher(line).find()
+            || Pattern.compile("^\\s*(?:async\\s+)?(?:def|class)\\s+" + escaped + "\\b")
+                .matcher(line)
+                .find();
+    if (!definition) return new SymbolMatch(MatchType.SYMBOL_REFERENCE, "exact symbol reference");
+    String language =
+        line.contains("def ")
+            ? "Python"
+            : line.contains("function ") || line.contains("=>")
+                ? "TypeScript/JavaScript"
+                : "Java-family";
+    return new SymbolMatch(MatchType.SYMBOL_DEFINITION, "exact " + language + " symbol definition");
+  }
 }
