@@ -440,6 +440,9 @@ class SubagentExecutionServiceTest {
         .extracting(SubagentProtocol.BatchFailure::requestId)
         .containsExactly("req", "req-2");
     assertThat(batch.failures().get(1).reason()).isEqualTo("cancelled after sibling failure");
-    verify(protocol).cancelChildren(eq("parent"), any(), eq("user"), eq("org"));
+    verify(protocol, org.mockito.Mockito.atLeastOnce())
+        .cancel(eq("child"), any(), eq("user"), eq("org"));
+    verify(protocol, org.mockito.Mockito.atLeastOnce())
+        .cancel(eq("child-2"), any(), eq("user"), eq("org"));
   }
 }

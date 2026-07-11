@@ -307,15 +307,16 @@ public class SubagentExecutionService {
   private void cancelReserved(
       List<Handle> reserved, Throwable cause, AppUserDetails user, String orgId) {
     if (reserved.isEmpty()) return;
-    try {
-      protocolService.cancelChildren(
-          reserved.getFirst().parentSessionId(),
-          "batch stopped: " + rootMessage(cause),
-          user.getUser().getId(),
-          orgId);
-    } catch (RuntimeException ignored) {
-      // The original reservation/model failure is the useful response; protocol cancellation is
-      // best-effort because another worker may have already reached a terminal state.
+    String reason = "batch stopped: " + rootMessage(cause);
+    for (Handle handle : reserved) {
+      try {
+        // Cancel only children reserved by this batch. Cancelling the whole parent scope can
+        // terminate unrelated concurrent children that predate this batch.
+        protocolService.cancel(handle.childSessionId(), reason, user.getUser().getId(), orgId);
+      } catch (RuntimeException ignored) {
+        // The original reservation/model failure is the useful response; protocol cancellation is
+        // best-effort because another worker may have already reached a terminal state.
+      }
     }
   }
 
