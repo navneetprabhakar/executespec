@@ -1542,6 +1542,43 @@ to boot — skip it for those.""";
     }
   }
 
+  private void emitInitialRoutingDecision(
+      String runId,
+      String taskId,
+      String currentProvider,
+      String currentModel,
+      InitialRoutingDecision decision) {
+    if (decision == null
+        || featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_INITIAL_ROUTING)) {
+      return;
+    }
+    List<String> considered =
+        decision.consideredCandidates().stream()
+            .filter(java.util.Objects::nonNull)
+            .map(ModelProviderScore::label)
+            .toList();
+    List<String> rejected =
+        decision.rejectedCandidates().stream()
+            .filter(java.util.Objects::nonNull)
+            .map(ModelProviderScore::label)
+            .toList();
+    broadcaster.emit(
+        runId,
+        RunEvent.initialRoutingDecision(
+            runId,
+            taskId,
+            currentProvider,
+            currentModel,
+            decision.provider(),
+            decision.model(),
+            decision.changed(),
+            decision.observedQualityEvidenceUsed(),
+            considered,
+            rejected,
+            decision.reasons()));
+  }
+
   private TaskOutcome executeOne(
       PlannedTask task,
       Plan plan,
@@ -1586,6 +1623,8 @@ to boot — skip it for those.""";
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
         providerModelOverride == null ? req.model() : providerModelOverride.model();
+    String initialRequestedProvider = requestedProvider;
+    String initialRequestedModel = requestedModel;
     InitialRoutingDecision initialRoute =
         initialRouteFor(
             task,
@@ -1593,6 +1632,12 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             providerModelOverride == null && resumeFrom == null);
+    emitInitialRoutingDecision(
+        req.runContext().runId(),
+        task.id(),
+        initialRequestedProvider,
+        initialRequestedModel,
+        initialRoute);
     requestedProvider = initialRoute.provider();
     requestedModel = initialRoute.model();
     if (initialRoute.changed()) {
