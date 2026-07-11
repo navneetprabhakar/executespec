@@ -331,21 +331,56 @@ public class RunOrchestrator implements RunControlPort {
    */
   /** Full submit variant that stamps local-hands intent atomically with the run row. */
   public PipelineRun submitRunWithLocalExecution(
-      String userRequest, String source, String repoUrl, String repoMode, String githubPat,
-      String githubOwner, boolean skipApproval, boolean autoMerge, String modelName,
-      String aiProvider, String createdByUserId, String orgId, String projectId,
-      String executionMode, List<UUID> selectedRepoIds, String figmaUrl, boolean tddMode,
-      String branchOverride, String prReviewComments, String runMode,
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
       Boolean requireConfirmationBeforeExpensiveContinuation,
-      Boolean requireBenchmarkPriorForAutomaticContinuation, String lowComplexityWorkerStartTier,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier,
       boolean localExecutionRequested) {
     submitLocalExecutionIntent.set(localExecutionRequested);
     try {
-      return submitRun(userRequest, source, repoUrl, repoMode, githubPat, githubOwner,
-          skipApproval, autoMerge, modelName, aiProvider, createdByUserId, orgId, projectId,
-          executionMode, selectedRepoIds, figmaUrl, tddMode, branchOverride, prReviewComments,
-          runMode, requireConfirmationBeforeExpensiveContinuation,
-          requireBenchmarkPriorForAutomaticContinuation, lowComplexityWorkerStartTier);
+      return submitRun(
+          userRequest,
+          source,
+          repoUrl,
+          repoMode,
+          githubPat,
+          githubOwner,
+          skipApproval,
+          autoMerge,
+          modelName,
+          aiProvider,
+          createdByUserId,
+          orgId,
+          projectId,
+          executionMode,
+          selectedRepoIds,
+          figmaUrl,
+          tddMode,
+          branchOverride,
+          prReviewComments,
+          runMode,
+          requireConfirmationBeforeExpensiveContinuation,
+          requireBenchmarkPriorForAutomaticContinuation,
+          lowComplexityWorkerStartTier);
     } finally {
       submitLocalExecutionIntent.remove();
     }
@@ -1276,15 +1311,15 @@ public class RunOrchestrator implements RunControlPort {
       boolean continuationLocalIntent =
           approvedPlanContinuation != null && approvedPlanContinuation.localRun();
       if ((persistedLocalIntent || continuationLocalIntent) && !localHandsEnabled) {
-        log.error("V2 run={} local-hands intent cannot be honoured: feature flag is disabled", runId);
+        log.error(
+            "V2 run={} local-hands intent cannot be honoured: feature flag is disabled", runId);
         terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
         return;
       }
       localRun =
           approvedPlanContinuation != null
               ? approvedPlanContinuation.localRun()
-              : localHandsEnabled
-                  && (runLocalExecutionFlag.consume(runId) || persistedLocalIntent);
+              : localHandsEnabled && (runLocalExecutionFlag.consume(runId) || persistedLocalIntent);
       boolean requireContinuationConfirmation =
           approvedPlanContinuation != null
               ? approvedPlanContinuation.requireContinuationConfirmation()

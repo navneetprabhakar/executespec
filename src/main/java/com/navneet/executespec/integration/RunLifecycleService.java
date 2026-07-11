@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
@@ -40,7 +41,6 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.stereotype.Component;
 
@@ -71,18 +71,49 @@ public class RunLifecycleService {
 
   /** Compatibility constructor retained for focused lifecycle tests and older embedders. */
   public RunLifecycleService(
-      PipelineRunRepository runRepo, AgentTaskRepository taskRepo, SseBroadcaster broadcaster,
-      Metrics metrics, GateStore gateStore, RunControlPort controlPort, AgentProperties agentProps,
-      ObjectMapper objectMapper, PipelineExecutorPool pool, SequentialExecutor executor,
-      ReviewerAgent reviewer, RunCostTracker costTracker, RunTokenAttributor tokenAttributor,
-      RunKeyContextStore keyContextStore, WorkspaceRestoreService workspaceRestoreService,
-      RunPersistenceWriter persistenceWriter, RunContextComposer contextComposer,
-      RunValidationKickoff validationKickoff, ModelResolver modelResolver,
+      PipelineRunRepository runRepo,
+      AgentTaskRepository taskRepo,
+      SseBroadcaster broadcaster,
+      Metrics metrics,
+      GateStore gateStore,
+      RunControlPort controlPort,
+      AgentProperties agentProps,
+      ObjectMapper objectMapper,
+      PipelineExecutorPool pool,
+      SequentialExecutor executor,
+      ReviewerAgent reviewer,
+      RunCostTracker costTracker,
+      RunTokenAttributor tokenAttributor,
+      RunKeyContextStore keyContextStore,
+      WorkspaceRestoreService workspaceRestoreService,
+      RunPersistenceWriter persistenceWriter,
+      RunContextComposer contextComposer,
+      RunValidationKickoff validationKickoff,
+      ModelResolver modelResolver,
       ValidationReportRepository validationReportRepository) {
-    this(runRepo, taskRepo, broadcaster, metrics, gateStore, controlPort, agentProps, objectMapper,
-        pool, executor, reviewer, costTracker, tokenAttributor, keyContextStore,
-        workspaceRestoreService, persistenceWriter, contextComposer, validationKickoff,
-        modelResolver, validationReportRepository, null, null);
+    this(
+        runRepo,
+        taskRepo,
+        broadcaster,
+        metrics,
+        gateStore,
+        controlPort,
+        agentProps,
+        objectMapper,
+        pool,
+        executor,
+        reviewer,
+        costTracker,
+        tokenAttributor,
+        keyContextStore,
+        workspaceRestoreService,
+        persistenceWriter,
+        contextComposer,
+        validationKickoff,
+        modelResolver,
+        validationReportRepository,
+        null,
+        null);
   }
 
   /**
@@ -658,7 +689,8 @@ public class RunLifecycleService {
       // execution. The feature flag is still an operator kill switch.
       boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
       if (row.isLocalExecutionRequested() && !localHandsEnabled) {
-        log.error("resume run={} local-hands intent cannot be honoured: feature flag disabled", runId);
+        log.error(
+            "resume run={} local-hands intent cannot be honoured: feature flag disabled", runId);
         controlPort.terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
         return;
       }
