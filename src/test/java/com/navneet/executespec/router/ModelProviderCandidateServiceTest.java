@@ -189,9 +189,37 @@ class ModelProviderCandidateServiceTest {
             "claude-sonnet-4-6");
 
     assertThat(sonnet.qualityScore()).isEqualTo(80.0);
+    assertThat(sonnet.observedQualityEvidenceAvailable()).isTrue();
     assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
     assertThat(sonnet.reasons())
         .contains("persisted BUG_FIX validation pass rate 80.00% from 10 tasks");
+  }
+
+  @Test
+  void outcomeEvidenceWinsAndUnavailableProviderCannotReenterRanking() {
+    when(taskOutcomeMetricService.qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", 5))
+        .thenReturn(
+            java.util.Optional.of(new TaskOutcomeMetricService.QualityPrior(96.0, 10, "BUG_FIX")));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(70.0)
+                .providerAvailability(Map.of("openai", false))
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore unavailable = find(candidates, "openai", "gpt-5.4-mini");
+    ModelProviderRankingDecision decision = new ModelProviderRankingPolicy().rank(candidates);
+
+    assertThat(sonnet.observedQualityEvidenceAvailable()).isTrue();
+    assertThat(sonnet.qualityScore()).isEqualTo(96.0);
+    assertThat(unavailable.qualityScore()).isZero();
+    assertThat(unavailable.meetsQualityThreshold()).isFalse();
+    assertThat(unavailable.providerAvailable()).isFalse();
+    assertThat(decision.selected()).contains(sonnet);
+    assertThat(decision.rejectedBelowThreshold()).contains(unavailable);
   }
 
   @Test

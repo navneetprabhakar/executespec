@@ -2,7 +2,6 @@ package com.navneet.executespec.router;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import org.springframework.stereotype.Service;
 
@@ -102,22 +101,11 @@ public class InitialRoutingService {
   }
 
   private static boolean isUnavailable(ModelProviderScore candidate) {
-    return candidate.reasons().stream()
-        .map(reason -> reason == null ? "" : reason.toLowerCase(Locale.ROOT))
-        .anyMatch(reason -> reason.contains("provider unavailable"));
+    return !candidate.providerAvailable();
   }
 
   private static boolean hasObservedQualityEvidence(ModelProviderScore candidate) {
-    if (candidate.benchmarkQualityPriorAvailable()) return true;
-    return candidate.reasons().stream()
-        .map(reason -> reason == null ? "" : reason.toLowerCase(Locale.ROOT))
-        .anyMatch(
-            reason ->
-                reason.contains("persisted ") && reason.contains("validation pass rate")
-                    || reason.contains("local 24h success score")
-                    || (reason.contains("quality ")
-                        && reason.contains(" from [")
-                        && !reason.contains("fallback")));
+    return candidate.observedQualityEvidenceAvailable();
   }
 
   private static List<ModelProviderScore> concat(
