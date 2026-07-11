@@ -196,20 +196,24 @@ public class SubagentExecutionService {
         futures.add(executor.submit(() -> execute(request, user, orgId)));
       }
       boolean failed = false;
+      Set<Integer> processed = new LinkedHashSet<>();
       for (int index = 0; index < futures.size(); index++) {
         Future<Result> future = futures.get(index);
         try {
           results.add(future.get());
+          processed.add(index);
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
           failed = true;
           failures.add(failure(requests.get(index), reserved.get(index), "batch interrupted"));
+          processed.add(index);
           cancelReserved(reserved, interrupted, user, orgId);
           break;
         } catch (ExecutionException executionFailure) {
           failed = true;
           failures.add(
               failure(requests.get(index), reserved.get(index), rootMessage(executionFailure)));
+          processed.add(index);
           cancelReserved(reserved, executionFailure, user, orgId);
           break;
         }
@@ -217,14 +221,29 @@ public class SubagentExecutionService {
       if (failed) {
         for (int index = 0; index < futures.size(); index++) {
           Future<Result> future = futures.get(index);
-          if (!future.isDone()) future.cancel(true);
-        }
-        for (int index = results.size() + failures.size(); index < futures.size(); index++) {
-          if (!futures.get(index).isDone()) {
+          if (processed.contains(index)) continue;
+          if (!future.isDone()) {
+            future.cancel(true);
             failures.add(
                 failure(
                     requests.get(index), reserved.get(index), "cancelled after sibling failure"));
+            processed.add(index);
+            continue;
           }
+          try {
+            results.add(future.get());
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            failures.add(failure(requests.get(index), reserved.get(index), "batch interrupted"));
+          } catch (CancellationException cancelled) {
+            failures.add(
+                failure(
+                    requests.get(index), reserved.get(index), "cancelled after sibling failure"));
+          } catch (ExecutionException executionFailure) {
+            failures.add(
+                failure(requests.get(index), reserved.get(index), rootMessage(executionFailure)));
+          }
+          processed.add(index);
         }
       }
     }
