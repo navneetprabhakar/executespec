@@ -184,6 +184,10 @@ Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below 
 
 The application boots without LLM keys (provider auto-configs are excluded; manual beans degrade gracefully), but any pipeline that needs a missing provider will fail. The template foregrounds Razorpay because the dev default gateway is Razorpay; prod default is Stripe (toggle via `BILLING_DEFAULT_GATEWAY=stripe`).
 
+The Spring AI provider settings resolve the variables above (and the optional `OPENROUTER_API_KEY`,
+`DEEPSEEK_API_KEY`, and `FIREWORKS_API_KEY`) at startup; do not edit provider keys into the tracked
+YAML configuration.
+
 **Optional**
 
 | Variable                                                                                   | Default / notes                                                       |

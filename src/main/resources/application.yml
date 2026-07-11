@@ -58,32 +58,32 @@ spring:
         multiplier: 2
         max-interval: 10000
     anthropic:
-      api-key: ""
+      api-key: ${ANTHROPIC_API_KEY:}
       chat:
         options:
           model: claude-haiku-4-5-20251001
           max-tokens: 16384
     openai:
-      api-key: ""
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
           model: gpt-5.4-mini
           max-tokens: 16384
     google:
       genai:
-        api-key: ""
+        api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
             model: gemini-3-flash-preview
     openrouter:
       base-url: https://openrouter.ai/api
-      api-key: ""
+      api-key: ${OPENROUTER_API_KEY:}
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: ""
+      api-key: ${DEEPSEEK_API_KEY:}
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
-      api-key: ""
+      api-key: ${FIREWORKS_API_KEY:}
 
 execution:
   continuation:
