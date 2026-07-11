@@ -1069,6 +1069,37 @@ public class WorkerAgent {
               continue;
             }
           }
+          // Harness-resolution Phase 2: completion intent is an edit-burst boundary too.  When
+          // auto-verify is enabled, do one bounded server-side suite run before accepting the
+          // first completion after edits, even when the model did not give us an intervening
+          // read/shell turn.  This closes the "write -> completeTask" hole without changing the
+          // tool schema.  Fail-open on no runner/remote/zero tests and yield after the shared cap;
+          // VBC remains an independent hard-ish gate when explicitly enabled.
+          if (autoVerifyOn
+              && editsSinceAutoVerify > 0
+              && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
+            autoVerifyRuns++;
+            String autoVerifyFailure = autoVerifyCompletionFailure(req.context());
+            if (autoVerifyFailure != null) {
+              String refused = errEnvelope("VERIFY_FAILED", autoVerifyFailure);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (auto-verify: " + autoVerifyFailure + ")");
+              log.info(
+                  "WorkerAgent completeTask AUTO_VERIFY-GATED run={} task={} iter={}"
+                      + " runsUsed={}/{}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  autoVerifyRuns,
+                  AUTO_VERIFY_MAX_RUNS_PER_TASK);
+              continue;
+            }
+            // A green/unavailable result closes this burst.  Keep the edit marker on RED so a
+            // model cannot immediately call completeTask again without either fixing the tests
+            // or exhausting the bounded auto-verify refusal budget.
+            editsSinceAutoVerify = 0;
+          }
           // #VBC verify-before-complete (RL-2026-06-…, worker.verify-before-complete.enabled,
           // V235).
           // SERVER-RUNS the project's own tests here (vs the soft test/build gates above, which
@@ -2792,6 +2823,44 @@ public class WorkerAgent {
           + " change, say so explicitly) before moving on.";
     } catch (Exception e) {
       log.debug("auto-verify failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * Completion-intent sibling of {@link #autoVerifyObservation}. It deliberately returns only a
+   * refusal detail: green, unavailable, remote, zero-test, and parser-error outcomes all fail open
+   * so enabling the flag cannot turn an otherwise-completable task into a false failure.
+   */
+  private String autoVerifyCompletionFailure(ExecutionContext ctx) {
+    try {
+      Optional<com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult> opt =
+          workspaceTestRunner.runTestsDetailed(ctx.runId(), ctx.workspaceRoot());
+      if (opt.isEmpty()) return null;
+      TestExecutionSummary s = opt.get().summary();
+      if (s.getTotalTests() == 0 || (s.getFailed() == 0 && s.getErrors() == 0)) return null;
+      String tail = opt.get().outputTail();
+      String detailTail =
+          tail == null || tail.isBlank()
+              ? ""
+              : "\nTest output (tail):\n"
+                  + (tail.length() > 1_500 ? tail.substring(tail.length() - 1_500) : tail);
+      return "completeTask refused — auto-verify ran `"
+          + opt.get().command()
+          + "` and found "
+          + s.getFailed()
+          + " failed / "
+          + s.getErrors()
+          + " errored of "
+          + s.getTotalTests()
+          + " tests. Fix the failing tests or the code they exercise, then call completeTask"
+          + " again."
+          + detailTail;
+    } catch (Exception e) {
+      log.debug(
+          "auto-verify completion check failed (fail-open) run={}: {}",
+          ctx.runId(),
+          e.getMessage());
       return null;
     }
   }
