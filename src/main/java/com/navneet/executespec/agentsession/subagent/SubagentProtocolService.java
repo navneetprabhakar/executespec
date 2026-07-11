@@ -256,7 +256,15 @@ public class SubagentProtocolService {
             .updatedAt(now)
             .build();
     sessionRepository.save(child);
-    append(childId, request.parentTurnId(), request.requestId(), EVENT_CHILD_CREATED, metadata);
+    // requestId is the durable action correlation id.  Keeping it on every protocol event lets
+    // the parent session render one coherent child activity card across reconnects, rather than
+    // forcing clients to infer the relationship from payload JSON.
+    append(
+        childId,
+        request.parentTurnId(),
+        request.requestId(),
+        EVENT_CHILD_CREATED,
+        metadata);
     append(
         parent.getId(),
         request.parentTurnId(),
@@ -430,7 +438,14 @@ public class SubagentProtocolService {
     child.setStatus("RUNNING");
     child.setUpdatedAt(Instant.now());
     sessionRepository.save(child);
-    append(childSessionId, metadata.parentTurnId(), null, EVENT_CHILD_STARTED, metadata);
+    String actionId = actionIdForChild(metadata.parentSessionId(), childSessionId);
+    append(childSessionId, metadata.parentTurnId(), actionId, EVENT_CHILD_STARTED, metadata);
+    append(
+        metadata.parentSessionId(),
+        metadata.parentTurnId(),
+        actionId,
+        EVENT_CHILD_STARTED,
+        metadata);
     return handleFromMetadata(child, metadata);
   }
 
@@ -464,9 +479,14 @@ public class SubagentProtocolService {
             budget.turnsUsed(),
             budget.costUsd(),
             completedAt);
-    append(childSessionId, metadata.parentTurnId(), null, EVENT_CHILD_COMPLETED, result);
+    String actionId = actionIdForChild(metadata.parentSessionId(), childSessionId);
+    append(childSessionId, metadata.parentTurnId(), actionId, EVENT_CHILD_COMPLETED, result);
     append(
-        metadata.parentSessionId(), metadata.parentTurnId(), null, EVENT_CHILD_COMPLETED, result);
+        metadata.parentSessionId(),
+        metadata.parentTurnId(),
+        actionId,
+        EVENT_CHILD_COMPLETED,
+        result);
     return result;
   }
 
@@ -484,11 +504,17 @@ public class SubagentProtocolService {
       sessionRepository.save(child);
       Cancellation cancellation =
           new Cancellation(childSessionId, blankToDefault(reason, "cancelled by parent"));
-      append(childSessionId, metadata.parentTurnId(), null, EVENT_CHILD_CANCELLED, cancellation);
+      String actionId = actionIdForChild(metadata.parentSessionId(), childSessionId);
+      append(
+          childSessionId,
+          metadata.parentTurnId(),
+          actionId,
+          EVENT_CHILD_CANCELLED,
+          cancellation);
       append(
           metadata.parentSessionId(),
           metadata.parentTurnId(),
-          null,
+          actionId,
           EVENT_CHILD_CANCELLED,
           cancellation);
     }
@@ -623,6 +649,21 @@ public class SubagentProtocolService {
     List<AgentActionEvent> events =
         eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(sessionId, type);
     return events == null ? List.of() : events;
+  }
+
+  /**
+   * Recover the original model/tool action id from the parent's durable spawn link.  Older rows
+   * may not have an action id (pre-correlation protocol), so the helper deliberately returns null
+   * for those rows and keeps replay backward compatible.
+   */
+  private String actionIdForChild(String parentSessionId, String childSessionId) {
+    for (AgentActionEvent event : safeEvents(parentSessionId, EVENT_CHILD_SPAWNED)) {
+      ParentLink link = read(event.getPayloadJson(), ParentLink.class);
+      if (link != null && childSessionId.equals(link.childSessionId())) {
+        return blankToNull(event.getActionId());
+      }
+    }
+    return null;
   }
 
   private static String formatBudget(double value) {
