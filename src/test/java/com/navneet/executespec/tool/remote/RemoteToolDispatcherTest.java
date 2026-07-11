@@ -341,6 +341,16 @@ class RemoteToolDispatcherTest {
     assertThat(status.staleCallIds()).containsExactly("call-stale");
   }
 
+  @Test
+  void registerAfterWorkerRestart_closesDurableCallsBeforeNewDispatch() {
+    when(stateService.closeForWorkerRestart("r1")).thenReturn(1);
+
+    dispatcher.registerAfterWorkerRestart("r1");
+
+    assertThat(dispatcher.isRemote("r1")).isTrue();
+    verify(stateService).closeForWorkerRestart("r1");
+  }
+
   private void assertPermissionKind(String toolName, String expected) throws Exception {
     setUp();
     dispatcher.register("r1");

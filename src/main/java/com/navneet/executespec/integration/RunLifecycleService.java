@@ -696,7 +696,7 @@ public class RunLifecycleService {
       }
       localRun = row.isLocalExecutionRequested() && localHandsEnabled;
       if (localRun) {
-        remoteToolDispatcher.register(runId);
+        remoteToolDispatcher.registerAfterWorkerRestart(runId);
         log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();

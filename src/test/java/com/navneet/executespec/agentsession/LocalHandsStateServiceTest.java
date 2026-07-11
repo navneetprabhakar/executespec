@@ -113,6 +113,17 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void closeForWorkerRestart_marksOldCallUnreplayable() {
+    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-1"))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    assertThat(service.closeForWorkerRestart("run-1")).isEqualTo(1);
+
+    verify(recorder)
+        .appendAction(eq("session-1"), eq("call-1"), eq("LOCAL_HANDS_WORKER_RESTARTED"), any());
+  }
+
+  @Test
   void persistenceFailure_isFailSoftForWorkerPath() {
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenThrow(new IllegalStateException("database unavailable"));

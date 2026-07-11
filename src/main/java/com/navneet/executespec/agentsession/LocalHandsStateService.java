@@ -130,6 +130,32 @@ public class LocalHandsStateService {
     }
   }
 
+  /** Close durable calls whose worker future belonged to a previous JVM. */
+  public int closeForWorkerRestart(String runId) {
+    if (runId == null || runId.isBlank()) return 0;
+    try {
+      List<AgentSession> sessions =
+          sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
+      if (sessions == null || sessions.isEmpty()) return 0;
+      int closed = 0;
+      for (PendingCall call : pending(runId)) {
+        record(
+            runId,
+            call.callId(),
+            LocalHandsState.WORKER_RESTARTED,
+            call.taskId(),
+            call.toolName(),
+            call.permissionKind(),
+            call.frameJson());
+        closed++;
+      }
+      return closed;
+    } catch (RuntimeException ex) {
+      log.warn("[LocalHands] failed to close restart calls for run {}: {}", runId, ex.getMessage());
+      return 0;
+    }
+  }
+
   private PendingCall from(AgentActionEvent event) {
     try {
       JsonNode payload = objectMapper.readTree(event.getPayloadJson());
