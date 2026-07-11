@@ -18,6 +18,7 @@ import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -57,6 +58,7 @@ public class RemoteToolDispatcher {
 
   private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
+  @Autowired
   public RemoteToolDispatcher(
       SseBroadcaster broadcaster,
       ObjectMapper objectMapper,
