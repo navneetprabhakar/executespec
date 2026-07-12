@@ -1,6 +1,8 @@
-# Screenshot Capture Guide — ExecuteSpec
+# Screenshot Capture Guide — ExecuteSpec 2.0
 
-_For P0-22 (PH gallery) + P0-24 (swap mock tour panels for real assets)._
+_Refreshed 2026-07-12. The canonical product shell is the Console/Agent surface; this guide is for a fresh capture, not a claim that the historical fixture URLs below still exist._
+
+Current screenshots in `current/` and `website/media/hero.webm` are deterministic product-demo evidence. They must be labeled as synthetic demo data and never presented as customer, production, or benchmark evidence.
 
 Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440×900 viewport. Drop the files into `website/press-kit/` with the exact names below — the tour-panel swap job will `<img src="">` them from there.
 
