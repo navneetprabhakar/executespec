@@ -7,6 +7,7 @@ import java.util.Optional;
 import com.navneet.executespec.state.entity.AgentTask;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -28,6 +29,15 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
    * tasks that were never persisted (worker died before the first {@code persistTaskStatus} call).
    */
   Optional<AgentTask> findByRunIdAndTaskId(String runId, String taskId);
+
+  /**
+   * Serializes task persistence with the rolling-restart recovery CAS. A stale worker that already
+   * holds this row lock finishes its write before takeover; a worker arriving after takeover sees
+   * the incremented recovery generation and is fenced before saving.
+   */
+  @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT t FROM AgentTask t WHERE t.taskId = :taskId")
+  Optional<AgentTask> findByIdForUpdate(@Param("taskId") String taskId);
 
   @Modifying(clearAutomatically = true)
   @Query(
