@@ -8,6 +8,8 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.PersonIdent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -87,5 +89,39 @@ class ContextEvidenceBundleWriterTest {
     Files.delete(contextDir.resolve("decisions.md"));
 
     assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
+  }
+
+  @Test
+  void rejectsBundleWhenRepositoryHeadMovesEvenIfContextSourcesAreUnchanged() throws Exception {
+    try (Git git = Git.init().setDirectory(tempDir.toFile()).call()) {
+      git.getRepository().getConfig().setString("user", null, "name", "test");
+      git.getRepository().getConfig().setString("user", null, "email", "test@example.com");
+      Files.createDirectories(tempDir.resolve(".agent-context"));
+      Files.writeString(tempDir.resolve(".agent-context/CODEBASE_CONTEXT.md"), "context");
+      Files.writeString(tempDir.resolve(".agent-context/decisions.md"), "decisions");
+      Files.writeString(tempDir.resolve("tracked.txt"), "one");
+      git.add().addFilepattern(".").call();
+      git.commit()
+          .setMessage("initial")
+          .setAuthor(new PersonIdent("test", "test@example.com"))
+          .call();
+
+      var writer = new ContextEvidenceBundleWriter(new ObjectMapper());
+      writer.write(
+          tempDir,
+          new ContextAgentInput(
+              "context", "diff", List.of(), List.of(), List.of(), "", "", "run-1", "goal"),
+          "run-1");
+      assertThat(writer.readCurrent(tempDir, "run-1")).isPresent();
+
+      Files.writeString(tempDir.resolve("tracked.txt"), "two");
+      git.add().addFilepattern("tracked.txt").call();
+      git.commit()
+          .setMessage("move head")
+          .setAuthor(new PersonIdent("test", "test@example.com"))
+          .call();
+
+      assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
+    }
   }
 }
