@@ -686,7 +686,8 @@ to boot — skip it for those.""";
         //   - run fresh
         TaskOutcome outcome;
         if (resume != null) {
-          ResumeAction action = resolveResumeAction(runId, task.id(), resume);
+          ResumeAction action =
+              resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
           switch (action.kind()) {
             case SKIP_TERMINAL -> {
               log.info(
@@ -927,7 +928,8 @@ to boot — skip it for those.""";
    * {@link com.navneet.executespec.state.entity.AgentTask} status; loads a Redis snapshot iff the
    * task is the resume target.
    */
-  private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
+  private ResumeAction resolveResumeAction(
+      String runId, String taskId, ResumeRequest resume, java.nio.file.Path workspaceRoot) {
     // 2026-05-10 — task-id format normalisation.
     //
     // The `taskId` argument is the LOGICAL plan id ("T12") — comes
@@ -981,13 +983,9 @@ to boot — skip it for those.""";
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
 
-    // Resume target — try to load the snapshot from Redis.
-    com.navneet.executespec.tool.ExecutionContext ctx =
-        new com.navneet.executespec.tool.ExecutionContext(
-            runId,
-            taskId,
-            // workspaceRoot isn't part of the Redis key — any value works for keyFor.
-            java.nio.file.Paths.get("/"));
+    // Resume target — try Redis first, then the workspace-local durable checkpoint. The workspace
+    // root is not part of the Redis key, but it is required for disk fallback after a JVM restart.
+    com.navneet.executespec.tool.ExecutionContext ctx = resumeContext(runId, taskId, workspaceRoot);
     com.navneet.executespec.context.SavedContext snap = contextStore.load(ctx).orElse(null);
     if (snap == null) {
       log.info(
@@ -997,6 +995,18 @@ to boot — skip it for those.""";
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
     return new ResumeAction(ResumeKind.RESUME_FROM_SNAPSHOT, persisted, snap);
+  }
+
+  /** Compatibility seam for package-local recovery tests and older callers. */
+  private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
+    return resolveResumeAction(runId, taskId, resume, java.nio.file.Paths.get("/"));
+  }
+
+  /** Builds the context used by resume resolution, preserving the disk handoff boundary. */
+  static com.navneet.executespec.tool.ExecutionContext resumeContext(
+      String runId, String taskId, java.nio.file.Path workspaceRoot) {
+    return new com.navneet.executespec.tool.ExecutionContext(
+        runId, taskId, workspaceRoot == null ? java.nio.file.Paths.get("/") : workspaceRoot);
   }
 
   private String readPersistedTaskStatus(String runId, String taskId) {

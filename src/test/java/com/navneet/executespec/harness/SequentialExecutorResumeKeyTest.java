@@ -124,6 +124,17 @@ class SequentialExecutorResumeKeyTest {
   }
 
   @Test
+  void resumeContextPreservesWorkspaceForDiskCheckpointFallback() {
+    Path workspace = Path.of("/tmp/executespec-resume-workspace");
+
+    ExecutionContext context = SequentialExecutor.resumeContext(RUN_ID, TASK_ID, workspace);
+
+    assertEquals(RUN_ID, context.runId());
+    assertEquals(TASK_ID, context.taskId());
+    assertEquals(workspace, context.workspaceRoot());
+  }
+
+  @Test
   void continuationHandoffRejectsStaleEvidenceBundleBeforeLoadingSnapshot() throws Exception {
     AgentTaskRepository repo = mock(AgentTaskRepository.class);
     ContextStore contextStore = mock(ContextStore.class);
