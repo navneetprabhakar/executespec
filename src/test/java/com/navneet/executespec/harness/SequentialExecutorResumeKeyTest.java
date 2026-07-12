@@ -159,17 +159,16 @@ class SequentialExecutorResumeKeyTest {
   }
 
   /**
-   * Reflectively invoke {@code resolveResumeAction(runId, taskId, resume)} and return the {@code
-   * ResumeKind} for assertion. Keeps the production method package-private (it is) without widening
-   * to public just for tests.
+   * Reflectively invoke {@code resolveResumeAction(runId, taskId, resume, workspace)} and return
+   * the {@code ResumeKind} for assertion.
    */
   private String resumeKind(
       SequentialExecutor exec, String runId, String taskId, ResumeRequest resume) throws Exception {
     Method m =
         SequentialExecutor.class.getDeclaredMethod(
-            "resolveResumeAction", String.class, String.class, ResumeRequest.class);
+            "resolveResumeAction", String.class, String.class, ResumeRequest.class, Path.class);
     m.setAccessible(true);
-    Object action = m.invoke(exec, runId, taskId, resume);
+    Object action = m.invoke(exec, runId, taskId, resume, Path.of("/tmp/resume-test-workspace"));
     assertNotNull(action, "resolveResumeAction returned null");
     Method kindM = action.getClass().getDeclaredMethod("kind");
     kindM.setAccessible(true);
