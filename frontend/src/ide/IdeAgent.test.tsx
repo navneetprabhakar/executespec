@@ -672,7 +672,9 @@ describe('IdeAgent', () => {
 
     expect(host.textContent).toContain('Submit a coding run to add README launch notes');
     expect(host.querySelectorAll('.agent-msg').length).toBe(2);
-    expect(host.textContent).not.toContain('Recent answer');
+    expect(host.textContent).toContain(
+      'No response arrived for this turn. You can send the message again.',
+    );
   });
 
   it('collapses generated code blocks by default and shows assistant turn usage', async () => {
