@@ -108,6 +108,54 @@ describe('agentState', () => {
     expect(proposed.pendingAction?.action.type).toBe('create_cloud_run');
   });
 
+  it('hydrates semantic POST-SSE replay frames through the live reducer path and dedupes cursors', () => {
+    const events: api.AgentActionEvent[] = [
+      {
+        id: 'route-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'ROUTE_DECISION',
+        payloadJson: JSON.stringify({
+          route: 'CHAT_ONLY',
+          confidence: 0.88,
+          reason_code: 'question',
+          run_api_allowed: false,
+          requires_confirmation: false,
+        }),
+        createdAt: '2026-07-12T00:00:00Z',
+        streamSequence: 10,
+      },
+      {
+        id: 'tool-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'TOOL_CALL',
+        payloadJson: JSON.stringify({tool: 'readFile', args: '{"path":"README.md"}', id: 'call-1'}),
+        createdAt: '2026-07-12T00:00:01Z',
+        streamSequence: 11,
+      },
+      {
+        id: 'done-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'TURN_DONE',
+        payloadJson: JSON.stringify({cost_usd: 0.012}),
+        createdAt: '2026-07-12T00:00:02Z',
+        streamSequence: 12,
+      },
+    ];
+    const hydrated = agentReducer(initialAgentState, {type: 'events:hydrate', events});
+    expect(hydrated.routingState?.route).toBe('CHAT_ONLY');
+    expect(hydrated.streamEvents.map((item) => item.type)).toEqual(['route', 'tool', 'usage']);
+    expect(hydrated.streamEvents.map((item) => item.streamSequence)).toEqual([10, 11, 12]);
+    const appended = agentReducer(hydrated, {type: 'events:hydrate', events, append: true});
+    expect(appended.streamEvents).toHaveLength(3);
+    expect(appended.status).toBe('idle');
+  });
+
   it('derives messages and pending actions from stored turns', () => {
     expect(toMessages([turn])).toEqual([
       {
