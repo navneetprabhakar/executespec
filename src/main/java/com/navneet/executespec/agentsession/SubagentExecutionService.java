@@ -366,8 +366,13 @@ public class SubagentExecutionService {
     // advisory; another coordinator may win the last slot before this point.  In that case spawn
     // fails closed and no misleading "accepted" event is emitted.  The persisted event names the
     // actual child rather than the probe's (normally null) placeholder.
-    protocolService.spawnAndRecordCoordinator(request, user.getUser().getId(), orgId);
-    return execute(request, user, orgId);
+    Handle handle =
+        protocolService.spawnAndRecordCoordinator(request, user.getUser().getId(), orgId);
+    // The coordinator reservation already created and started this exact child. Calling
+    // execute() here would spawn a second child for the same request (and can fail with a 500 when
+    // the parent has no remaining capacity). Execute the reserved handle directly so the
+    // acceptance audit and the model execution refer to one persisted child.
+    return executeReserved(request, handle, user, orgId);
   }
 
   /** Explicit parent cancellation propagation for an in-flight execution owner. */
