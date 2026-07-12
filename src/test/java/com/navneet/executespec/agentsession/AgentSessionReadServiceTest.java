@@ -144,6 +144,37 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void replayPreservesSemanticPostSseFramesForBrowserReconnect() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 4))
+        .thenReturn(
+            List.of(
+                semanticEvent("route", 5L, "ROUTE_DECISION"),
+                semanticEvent("tool-call", 6L, "TOOL_CALL"),
+                semanticEvent("tool-result", 7L, "TOOL_RESULT"),
+                semanticEvent("text", 8L, "TURN_TEXT"),
+                semanticEvent("done", 9L, "TURN_DONE")));
+
+    var replay = service.replayEvents("s1", 4L, user());
+
+    assertThat(replay.events())
+        .extracting(AgentActionEvent::getType)
+        .containsExactly("ROUTE_DECISION", "TOOL_CALL", "TOOL_RESULT", "TURN_TEXT", "TURN_DONE");
+    assertThat(replay.lastSequence()).isEqualTo(9L);
+    assertThat(replay.snapshot()).isFalse();
+  }
+
+  private static AgentActionEvent semanticEvent(String id, long sequence, String type) {
+    return AgentActionEvent.builder()
+        .id(id)
+        .sessionId("s1")
+        .turnId("t1")
+        .streamSequence(sequence)
+        .type(type)
+        .build();
+  }
+
+  @Test
   void replayToleratesLegacyEventWithoutSequenceWithoutAdvancingCursor() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
     when(eventRepo.findBySessionIdOrderByStreamSequenceAsc("s1"))
