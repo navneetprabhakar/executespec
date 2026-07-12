@@ -152,7 +152,7 @@ class WorkerAgentVerifyBeforeCompleteTest {
 
   @Test
   void refuses_red_tests_then_yields_after_bounded_refusals() {
-    // Tests RED every attempt → refuse on iters 1,2,3 (3 refusals == MAX), then YIELD on iter 4.
+    // Tests RED every attempt → one server-owned repair refusal, then YIELD on iter 2.
     Fixture f = newWorker(completeTaskTimes(6), false, Optional.of(summary(5, 3, 2, 0)));
 
     WorkerResult result = f.worker.run(req(true));
@@ -162,9 +162,7 @@ class WorkerAgentVerifyBeforeCompleteTest {
         result.outcome(),
         "VBC must refuse a red suite but eventually YIELD (fail-open). Saw: " + result.outcome());
     assertEquals(
-        4,
-        result.iterations(),
-        "refused on iters 1,2,3 (== VBC_GATE_MAX_REFUSALS), then yields + completes on iter 4.");
+        2, result.iterations(), "one bounded repair refusal, then yields + completes on iter 2.");
   }
 
   @Test
@@ -175,7 +173,24 @@ class WorkerAgentVerifyBeforeCompleteTest {
     WorkerResult result = f.worker.run(req(true));
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
-    assertEquals(4, result.iterations(), "errored tests are red → 3 refusals then yield.");
+    assertEquals(2, result.iterations(), "errored tests are red → one refusal then yield.");
+  }
+
+  @Test
+  void refusal_carries_structured_failure_names_and_output_tail() {
+    WorkspaceTestRunner.DetailedResult detail =
+        new WorkspaceTestRunner.DetailedResult(
+            summary(2, 1, 1, 0),
+            "FAILED tests/test_math.py::test_sum - AssertionError\nE assert 2 == 3",
+            "python3 -m pytest -q",
+            1);
+
+    String evidence = WorkerAgent.verificationFailureEvidence(detail);
+
+    assertEquals(true, evidence.contains("failedTests:"));
+    assertEquals(true, evidence.contains("test_math.py::test_sum"));
+    assertEquals(true, evidence.contains("outputTail:"));
+    assertEquals(true, evidence.contains("E assert 2 == 3"));
   }
 
   @Test
