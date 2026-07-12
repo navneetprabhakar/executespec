@@ -141,18 +141,25 @@ public class ContextStore {
   /** Read a snapshot back. Empty if missing, TTL-expired, or Redis is down. */
   public Optional<SavedContext> load(ExecutionContext ctx) {
     if (ctx == null) return Optional.empty();
+    boolean redisRejected = false;
+    boolean redisFailed = false;
     if (redis != null) {
       try {
         String json = redis.opsForValue().get(keyFor(ctx));
         if (json != null) {
           Optional<SavedContext> snapshot = deserializeForContext(json, ctx);
-          if (snapshot.isPresent()) return snapshot;
+          if (snapshot.isPresent()) {
+            metrics.recordContextLoad("redis");
+            return snapshot;
+          }
+          redisRejected = true;
           log.warn(
               "ContextStore Redis snapshot identity mismatch run={} task={}; ignoring payload",
               ctx.runId(),
               ctx.taskId());
         }
       } catch (Exception e) {
+        redisFailed = true;
         log.warn(
             "ContextStore Redis load FAILED run={} task={}: {}",
             ctx.runId(),
@@ -160,7 +167,19 @@ public class ContextStore {
             e.getMessage());
       }
     }
-    return readDiskCheckpoint(ctx);
+    Optional<SavedContext> diskSnapshot = readDiskCheckpoint(ctx);
+    if (diskSnapshot.isPresent()) {
+      metrics.recordContextLoad("disk");
+      return diskSnapshot;
+    }
+    if (redisRejected) {
+      metrics.recordContextLoad("identity_mismatch");
+    } else if (redisFailed) {
+      metrics.recordContextLoad("redis_error");
+    } else {
+      metrics.recordContextLoad("miss");
+    }
+    return Optional.empty();
   }
 
   /** Remove the snapshot for a task — called when the task completes successfully. */
