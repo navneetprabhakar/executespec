@@ -10,7 +10,9 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -78,6 +80,8 @@ public class ContextEvidenceBundleWriter {
     sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
     String repoHeadSha = resolveRepoHeadSha(projectPath);
     if (repoHeadSha != null) sources.put("repoHeadSha", repoHeadSha);
+    String repoStateSha = resolveRepoStateSha(projectPath);
+    if (repoStateSha != null) sources.put("repoStateSha256", repoStateSha);
 
     ObjectNode evidence = root.putObject("evidence");
     ContextEvidenceAssembler.Selection selected = evidenceAssembler.select(input);
@@ -147,6 +151,11 @@ public class ContextEvidenceBundleWriter {
         String currentHead = resolveRepoHeadSha(projectPath);
         if (currentHead == null || !recordedHead.equals(currentHead)) return Optional.empty();
       }
+      String recordedState = sources.path("repoStateSha256").asText("");
+      if (!recordedState.isBlank()) {
+        String currentState = resolveRepoStateSha(projectPath);
+        if (currentState == null || !recordedState.equals(currentState)) return Optional.empty();
+      }
       return Optional.of(root);
     } catch (Exception e) {
       return Optional.empty();
@@ -200,5 +209,56 @@ public class ContextEvidenceBundleWriter {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  /**
+   * Fingerprints dirty repository state as well as HEAD. A commit SHA alone cannot detect an
+   * in-progress edit, which is precisely the state in which a continuation handoff is most likely
+   * to be stale. The generated evidence sidecar is excluded so reading a bundle does not invalidate
+   * itself; file bytes are included for changed and untracked paths.
+   */
+  static String resolveRepoStateSha(Path projectPath) {
+    if (projectPath == null) return null;
+    try (Git git = Git.open(projectPath.toFile())) {
+      org.eclipse.jgit.api.Status status = git.status().call();
+      Map<String, String> states = new TreeMap<>();
+      addStatus(states, "added", status.getAdded());
+      addStatus(states, "changed", status.getChanged());
+      addStatus(states, "conflicting", status.getConflicting());
+      addStatus(states, "missing", status.getMissing());
+      addStatus(states, "modified", status.getModified());
+      addStatus(states, "removed", status.getRemoved());
+      addStatus(states, "untracked", status.getUntracked());
+      addStatus(states, "untrackedFolder", status.getUntrackedFolders());
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      for (Map.Entry<String, String> entry : states.entrySet()) {
+        String relative = entry.getKey();
+        if (relative.equals(".agent-context/" + FILE_NAME)
+            || relative.startsWith(".agent-context/" + FILE_NAME + ".tmp-")) {
+          continue;
+        }
+        digest.update((entry.getValue() + "\0" + relative + "\0").getBytes(StandardCharsets.UTF_8));
+        Path file = projectPath.resolve(relative);
+        if (Files.isRegularFile(file)) digest.update(Files.readAllBytes(file));
+      }
+      return hex(digest.digest());
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static void addStatus(
+      Map<String, String> states, String label, java.util.Set<String> paths) {
+    if (paths == null) return;
+    for (String path : paths) {
+      if (path == null || path.isBlank()) continue;
+      states.merge(path.replace('\\', '/'), label, (first, ignored) -> first + "+" + label);
+    }
+  }
+
+  private static String hex(byte[] bytes) {
+    StringBuilder result = new StringBuilder(bytes.length * 2);
+    for (byte b : bytes) result.append(String.format("%02x", b));
+    return result.toString();
   }
 }
