@@ -16,12 +16,15 @@ import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class AgentSessionStartupRecoveryTest {
 
   private final AgentSessionRepository sessions = mock(AgentSessionRepository.class);
   private final AgentEventRecorder events = mock(AgentEventRecorder.class);
+  private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
   private final AgentSessionStartupRecovery recovery =
-      new AgentSessionStartupRecovery(sessions, events);
+      new AgentSessionStartupRecovery(sessions, events, metrics);
 
   @Test
   void staleRunningChildrenAreCancelledAndLeaveDurableRecoveryEvidence() {
@@ -191,5 +194,34 @@ class AgentSessionStartupRecoveryTest {
         .containsEntry("staleTimestampPresent", false)
         .containsEntry("previousStatus", "RUNNING")
         .containsKey("recoveryBatchId");
+  }
+
+  @Test
+  void recoveryPublishesOutcomeCountersAndSweepDuration() {
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of());
+    when(sessions.findByStatusAndClientSurface("READY", "SUBAGENT")).thenReturn(List.of());
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+
+    assertThat(metrics.get("executespec.agent_session.startup_recovery.sweeps").counter().count())
+        .isEqualTo(1);
+    assertThat(
+            metrics
+                .get("executespec.agent_session.startup_recovery.outcomes")
+                .tag("outcome", "empty")
+                .tag("previous_status", "RUNNING")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(
+            metrics
+                .get("executespec.agent_session.startup_recovery.outcomes")
+                .tag("outcome", "empty")
+                .tag("previous_status", "READY")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(metrics.get("executespec.agent_session.startup_recovery.duration").timer().count())
+        .isEqualTo(1);
   }
 }

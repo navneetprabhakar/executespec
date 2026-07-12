@@ -13,7 +13,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -26,7 +28,6 @@ import lombok.extern.slf4j.Slf4j;
  * bounded child after reconnect, and the durable recovery event explains why the old child ended.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class AgentSessionStartupRecovery {
 
@@ -38,6 +39,16 @@ public class AgentSessionStartupRecovery {
 
   private final AgentSessionRepository sessionRepository;
   private final AgentEventRecorder eventRecorder;
+  private final MeterRegistry meterRegistry;
+
+  public AgentSessionStartupRecovery(
+      AgentSessionRepository sessionRepository,
+      AgentEventRecorder eventRecorder,
+      MeterRegistry meterRegistry) {
+    this.sessionRepository = sessionRepository;
+    this.eventRecorder = eventRecorder;
+    this.meterRegistry = meterRegistry;
+  }
 
   @EventListener(ApplicationReadyEvent.class)
   @Transactional
@@ -47,31 +58,58 @@ public class AgentSessionStartupRecovery {
 
   /** Visible for deterministic unit/integration tests and operator recovery checks. */
   int reconcileRunningSessions() {
+    Timer.Sample sample = Timer.start(meterRegistry);
     // One boot pass can reconcile both lifecycle states. Keep a shared correlation id so operators
     // can distinguish one startup sweep from a later JVM sweep when reading the durable events.
     String recoveryBatchId = UUID.randomUUID().toString();
-    return reconcileStatus(RUNNING, recoveryBatchId) + reconcileStatus(READY, recoveryBatchId);
+    int reconciled =
+        reconcileStatus(RUNNING, recoveryBatchId) + reconcileStatus(READY, recoveryBatchId);
+    Counter.builder("executespec.agent_session.startup_recovery.sweeps")
+        .description("Startup subagent-session recovery sweeps")
+        .register(meterRegistry)
+        .increment();
+    Counter.builder("executespec.agent_session.startup_recovery.cancelled")
+        .description("Subagent sessions cancelled by startup recovery")
+        .register(meterRegistry)
+        .increment(reconciled);
+    sample.stop(
+        Timer.builder("executespec.agent_session.startup_recovery.duration")
+            .description("Duration of a startup subagent-session recovery sweep")
+            .register(meterRegistry));
+    return reconciled;
   }
 
   private int reconcileStatus(String status, String recoveryBatchId) {
     // The agent_session table also stores parent/web conversations.  Only the SUBAGENT surface
     // has READY/RUNNING lifecycle rows that this boot-time reconciler is authorised to cancel.
     List<AgentSession> sessions = sessionRepository.findByStatusAndClientSurface(status, SUBAGENT);
-    if (sessions == null || sessions.isEmpty()) return 0;
+    if (sessions == null || sessions.isEmpty()) {
+      increment("empty", status);
+      return 0;
+    }
     int reconciled = 0;
     Instant staleBefore = Instant.now().minusSeconds(STALE_AFTER_SECONDS);
     for (AgentSession session : sessions) {
-      if (session == null || !status.equals(session.getStatus())) continue;
+      if (session == null || !status.equals(session.getStatus())) {
+        increment("snapshot_status_changed", status);
+        continue;
+      }
       // Rolling restarts can execute this hook concurrently. Re-read each candidate under a row
       // lock so a peer's terminal transition wins and cannot be overwritten by this stale snapshot.
       AgentSession locked = sessionRepository.findByIdForUpdate(session.getId()).orElse(null);
-      if (locked == null || !status.equals(locked.getStatus())) continue;
+      if (locked == null || !status.equals(locked.getStatus())) {
+        increment("row_lock_status_changed", status);
+        continue;
+      }
       session = locked;
       // A delayed ApplicationReadyEvent must not cancel a session that this JVM (or a peer) is
       // still actively updating. Older rows may have no heartbeat timestamp; those remain
       // fail-closed and are treated as stale so they cannot reserve budget forever.
       Instant updatedAt = session.getUpdatedAt();
-      if (updatedAt != null && updatedAt.isAfter(staleBefore)) continue;
+      if (updatedAt != null && updatedAt.isAfter(staleBefore)) {
+        increment("fresh_skipped", status);
+        continue;
+      }
       session.setStatus(CANCELLED);
       session.setUpdatedAt(Instant.now());
       sessionRepository.save(session);
@@ -85,6 +123,7 @@ public class AgentSessionStartupRecovery {
       payload.put("reconciledAt", session.getUpdatedAt().toString());
       eventRecorder.appendAction(
           session.getId(), "startup-recovery:" + session.getId(), "SUBAGENT_RECOVERY", payload);
+      increment("cancelled", status);
       reconciled++;
     }
     log.warn(
@@ -92,5 +131,14 @@ public class AgentSessionStartupRecovery {
         reconciled,
         status);
     return reconciled;
+  }
+
+  private void increment(String outcome, String previousStatus) {
+    Counter.builder("executespec.agent_session.startup_recovery.outcomes")
+        .description("Outcomes observed while reconciling stale subagent sessions")
+        .tag("outcome", outcome)
+        .tag("previous_status", previousStatus)
+        .register(meterRegistry)
+        .increment();
   }
 }
