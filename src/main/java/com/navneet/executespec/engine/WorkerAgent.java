@@ -250,14 +250,13 @@ public class WorkerAgent {
   public static final int DELIVERABLE_GATE_MAX_REFUSALS = 2;
 
   /**
-   * VBC verify-before-complete gate — how many times the server-run test gate may refuse {@code
+   * VBC verify-before-complete gate — how many server-owned repair passes may refuse {@code
    * completeTask} (tests red) before it YIELDS and lets the run complete anyway. Bounded +
-   * fail-open (mirrors {@link #DELIVERABLE_GATE_MAX_REFUSALS}): the gate can nudge the worker to
-   * fix failing tests for a few rounds but can NEVER permanently block a legitimately-complete run.
-   * 3 (vs the deliverable gate's 2) gives an extra round because fixing a real test failure usually
-   * needs one read + one edit + one re-verify.
+   * fail-open: exactly one refusal gives the model one repair turn with structured failure
+   * evidence; a second completion attempt cannot trigger another server-side test run. This keeps
+   * the repair continuation from consuming unbounded iterations, tokens, or test-suite time.
    */
-  public static final int VBC_GATE_MAX_REFUSALS = 3;
+  public static final int VBC_GATE_MAX_REFUSALS = 1;
 
   /**
    * Terminal visible-test gate — how many times {@code completeTask} may be refused when a remote
@@ -2775,14 +2774,9 @@ public class WorkerAgent {
       TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0) return null; // nothing ran → fail-open
       if (s.getFailed() == 0 && s.getErrors() == 0) return null; // green
-      // Harness-resolution task 8: the refusal is a REPAIR message, not a bare gate — carry the
-      // failing output so the worker can fix against the actual failures instead of re-guessing.
-      String tail = opt.get().outputTail();
-      String detailTail =
-          tail == null || tail.isBlank()
-              ? ""
-              : "\n\nTest output (tail):\n"
-                  + (tail.length() > 1_500 ? tail.substring(tail.length() - 1_500) : tail);
+      // Harness-resolution task 8: the refusal is a REPAIR message, not a bare gate — carry
+      // structured failing-test evidence so the worker can fix against the actual failures
+      // instead of re-guessing. No tool schema change is needed.
       return s.getFailed()
           + " failed / "
           + s.getErrors()
@@ -2791,7 +2785,7 @@ public class WorkerAgent {
           + " tests (command: "
           + opt.get().command()
           + ")"
-          + detailTail;
+          + verificationFailureEvidence(opt.get());
     } catch (Exception e) {
       log.debug("VBC gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
       return null; // fail-open
@@ -2911,7 +2905,41 @@ public class WorkerAgent {
         + "). The platform ran your test suite and it is RED. Fix the failing test(s) — or the code"
         + " they exercise — then call completeTask again. A run that completes with failing tests"
         + " ships a broken deliverable. If a failure is genuinely pre-existing and unrelated to"
-        + " your change, note that in completionNotes; the gate yields after a few attempts.";
+        + " your change, note that in completionNotes; the gate yields after this one repair pass.";
+  }
+
+  /**
+   * Render bounded, structured evidence for a server-owned verification repair pass. The runner
+   * already caps {@code outputTail} at 3,000 chars; this method keeps the model-visible payload
+   * smaller and extracts the conventional failure-name lines emitted by pytest/JUnit/Jest.
+   */
+  public static String verificationFailureEvidence(
+      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult result) {
+    String output = result.outputTail() == null ? "" : result.outputTail();
+    List<String> names =
+        output
+            .lines()
+            .map(String::trim)
+            .filter(line -> !line.isBlank())
+            .filter(WorkerAgent::looksLikeFailureLine)
+            .distinct()
+            .limit(12)
+            .toList();
+    String tail = output.length() > 1_200 ? output.substring(output.length() - 1_200) : output;
+    StringBuilder evidence = new StringBuilder("\n\nFailure evidence (server-collected):\n");
+    evidence.append("failedTests: ").append(names.isEmpty() ? "[]" : names).append('\n');
+    evidence.append("outputTail:\n");
+    evidence.append(tail.isBlank() ? "<empty>" : tail);
+    return evidence.toString();
+  }
+
+  private static boolean looksLikeFailureLine(String line) {
+    String lower = line.toLowerCase(java.util.Locale.ROOT);
+    return lower.contains("failed")
+        || lower.contains("failure")
+        || lower.contains("error")
+        || lower.startsWith("e ")
+        || lower.startsWith("at ");
   }
 
   static String terminalVisibleTestsMessage() {

@@ -122,10 +122,12 @@ import lombok.Builder;
  *     com.navneet.executespec.smoketest.WorkspaceTestRunner} DIRECTLY (not the flag-gated {@code
  *     runWorkspaceTests} tool), so VBC is independent of {@code worker.build-tdd.enabled} (V217)
  *     and carries no model-visible schema change (sidesteps the RL-2026-05-061 schema-stall class).
- *     Real test failures refuse completion (bounded to {@link WorkerAgent#VBC_GATE_MAX_REFUSALS},
- *     then YIELD); no resolvable runner / a remote run / any error ⇒ fail-open (never false-FAILs a
- *     complete run). Set by {@link com.navneet.executespec.harness.SequentialExecutor} (BUILD) and
- *     {@link CodeGenEngineImpl} (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
+ *     Real test failures refuse completion for one server-owned repair pass (bounded to {@link
+ *     WorkerAgent#VBC_GATE_MAX_REFUSALS}, then YIELD); the refusal carries bounded structured
+ *     failing-test/output evidence without changing the tool schema. No resolvable runner / a
+ *     remote run / any error ⇒ fail-open (never false-FAILs a complete run). Set by {@link
+ *     com.navneet.executespec.harness.SequentialExecutor} (BUILD) and {@link CodeGenEngineImpl}
+ *     (PATCH) from the flag. Null/false ⇒ inert (byte-identical).
  * @param progressV2 harness-resolution Phase 1 (flag {@code worker.progress-v2.enabled}, V255,
  *     default OFF). Replaces the write-only progress definition with evidence-based progress: (a)
  *     any tool call with a NOVEL (name, normalized-args) signature resets the stagnation counter —
