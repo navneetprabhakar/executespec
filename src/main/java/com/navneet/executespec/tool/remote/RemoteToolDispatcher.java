@@ -231,7 +231,10 @@ public class RemoteToolDispatcher {
 
   /** Reloadable pending calls for clients that reconnect without an active SSE replay cursor. */
   public List<LocalHandsStateService.PendingCall> pendingCalls(String runId) {
-    return stateService.pending(runId);
+    // The endpoint is a reload/reconnect surface, not an unbounded audit export. Apply the same
+    // lease window as reconnectStatus so a client cannot replay an expired call after a long
+    // disconnect or JVM restart.
+    return freshPending(stateService.pending(runId));
   }
 
   public boolean isRemote(String runId) {
