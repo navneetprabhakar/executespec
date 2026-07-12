@@ -17,7 +17,7 @@ class InitialRoutingServiceTest {
   @Test
   void observedTaskOutcomeQualityWinsBeforeCostAndLatency() {
     ModelProviderScore cheapFastButWeak =
-        score(
+        observedScore(
             "deepseek",
             "cheap",
             82.0,
@@ -25,7 +25,7 @@ class InitialRoutingServiceTest {
             100,
             "persisted BUG_FIX validation pass rate 82.00% from 10 tasks");
     ModelProviderScore knownStrong =
-        score(
+        observedScore(
             "anthropic",
             "sonnet",
             94.0,
@@ -140,5 +140,22 @@ class InitialRoutingServiceTest {
       String provider, String model, double quality, double cost, long latency, String... reasons) {
     return new ModelProviderScore(
         provider, model, "BUG_FIX", quality, cost, latency, latency, 70.0, false, List.of(reasons));
+  }
+
+  private static ModelProviderScore observedScore(
+      String provider, String model, double quality, double cost, long latency, String... reasons) {
+    return new ModelProviderScore(
+        provider,
+        model,
+        "BUG_FIX",
+        quality,
+        cost,
+        latency,
+        latency,
+        70.0,
+        false,
+        true,
+        true,
+        List.of(reasons));
   }
 }

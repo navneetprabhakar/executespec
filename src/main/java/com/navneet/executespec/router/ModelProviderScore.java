@@ -54,7 +54,7 @@ public record ModelProviderScore(
         latencyP95Ms,
         requiredQualityThreshold,
         false,
-        observedQualityEvidence(reasons, false),
+        false,
         providerAvailability(reasons),
         reasons);
   }
@@ -62,9 +62,9 @@ public record ModelProviderScore(
   /**
    * Compatibility constructor for callers that already provide benchmark-prior state.
    *
-   * <p>The explicit evidence bit is intentionally derived once at the score boundary instead of
-   * making routing policy parse human-readable reason strings. New producers should use the
-   * canonical constructor (or the capability registry) so the bit remains auditable.
+   * <p>Compatibility callers do not have enough structured information to assert observed quality
+   * evidence. They must migrate to the canonical constructor; human-readable reasons are never
+   * interpreted as quality proof.
    */
   public ModelProviderScore(
       String provider,
@@ -87,7 +87,7 @@ public record ModelProviderScore(
         latencyP95Ms,
         requiredQualityThreshold,
         benchmarkQualityPriorAvailable,
-        observedQualityEvidence(reasons, benchmarkQualityPriorAvailable),
+        false,
         providerAvailability(reasons),
         reasons);
   }
@@ -98,20 +98,6 @@ public record ModelProviderScore(
 
   public String label() {
     return provider + "/" + model;
-  }
-
-  private static boolean observedQualityEvidence(
-      List<String> reasons, boolean benchmarkQualityPriorAvailable) {
-    if (benchmarkQualityPriorAvailable || reasons == null) return benchmarkQualityPriorAvailable;
-    return reasons.stream()
-        .map(reason -> reason == null ? "" : reason.toLowerCase(java.util.Locale.ROOT))
-        .anyMatch(
-            reason ->
-                reason.contains("persisted ") && reason.contains("validation pass rate")
-                    || reason.contains("local 24h success score")
-                    || (reason.contains("quality ")
-                        && reason.contains(" from [")
-                        && !reason.contains("fallback")));
   }
 
   private static boolean providerAvailability(List<String> reasons) {
