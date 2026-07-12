@@ -123,6 +123,19 @@ class AgentSessionReadService {
         }
       }
     }
+    Long nextSequence =
+        hasMore
+                && events.stream()
+                    .map(AgentActionEvent::getStreamSequence)
+                    .filter(java.util.Objects::nonNull)
+                    .max(Long::compareTo)
+                    .isPresent()
+            ? events.stream()
+                .map(AgentActionEvent::getStreamSequence)
+                .filter(java.util.Objects::nonNull)
+                .max(Long::compareTo)
+                .orElse(null)
+            : null;
     return new AgentEventReplayResponse(
         events,
         last,
@@ -133,7 +146,8 @@ class AgentSessionReadService {
             : null,
         legacyEventsOmitted,
         truncated,
-        hasMore);
+        hasMore,
+        nextSequence);
   }
 
   List<AgentTurnResponse> listTurns(
