@@ -626,8 +626,8 @@
     {
       "id": "outline-planner",
       "path": "src/main/resources/prompts/outline-planner.md",
-      "sha256": "1a02e73f413cffd47e35a87d831ab8231a6978659226a151fd53d0a454ebd694",
-      "bytes": 13781,
+      "sha256": "2e571df566251a4283869c12ea79d5a6c1801aeedd2fc3af0f99d26f44385f00",
+      "bytes": 15118,
       "active": true,
       "fragments": [
         "security-rules:planner"
