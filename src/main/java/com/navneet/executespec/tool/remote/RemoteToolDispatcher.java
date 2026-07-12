@@ -310,7 +310,12 @@ public class RemoteToolDispatcher {
         log.debug("[RemoteTool] duplicate result ignored for callId={} (run {})", callId, runId);
       }
     } else {
-      log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
+      // A client can retry after the worker JVM restarted and the in-memory future disappeared.
+      // Preserve that result durably instead of treating it as an unrelated/invalid call.  This
+      // does not claim to resume the old worker; it only closes the durable handoff exactly once.
+      if (!stateService.acceptRestartedResult(runId, callId, resultEnvelopeJson)) {
+        log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
+      }
     }
   }
 
@@ -341,7 +346,18 @@ public class RemoteToolDispatcher {
       if (call.future().isDone()) {
         return false;
       }
-      record(call, state);
+      if (state == LocalHandsState.COMPLETED) {
+        stateService.recordCompleted(
+            call.runId(),
+            call.callId(),
+            call.taskId(),
+            call.toolName(),
+            call.permissionKind(),
+            call.frameJson(),
+            resultEnvelope);
+      } else {
+        record(call, state);
+      }
       return call.future().complete(resultEnvelope);
     }
   }

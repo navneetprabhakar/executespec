@@ -114,14 +114,14 @@ class RemoteToolDispatcherTest {
             eq("read"),
             any());
     verify(stateService)
-        .record(
+        .recordCompleted(
             eq("r1"),
             eq(frame.get("callId").asText()),
-            eq(LocalHandsState.COMPLETED),
             eq("t1"),
             eq("readFile"),
             eq("read"),
-            any());
+            any(),
+            eq("{\"ok\":true,\"content\":\"hello\"}"));
   }
 
   @Test
@@ -159,14 +159,14 @@ class RemoteToolDispatcherTest {
       assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
           .isEqualTo("first");
       verify(stateService, org.mockito.Mockito.times(1))
-          .record(
+          .recordCompleted(
               eq("r1"),
               eq(callId[0]),
-              eq(LocalHandsState.COMPLETED),
               eq("t1"),
               eq("readFile"),
               eq("read"),
-              any());
+              any(),
+              eq("{\"ok\":true,\"content\":\"first\"}"));
     } finally {
       executor.shutdownNow();
     }

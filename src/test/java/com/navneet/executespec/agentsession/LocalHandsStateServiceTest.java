@@ -124,6 +124,23 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void acceptRestartedResult_persistsLateResultAgainstOriginalCall() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.WORKER_RESTARTED, 1)));
+
+    assertThat(
+            service.acceptRestartedResult("run-1", "call-1", "{\"ok\":true,\"content\":\"late\"}"))
+        .isTrue();
+
+    ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+    verify(recorder)
+        .appendAction(
+            eq("session-1"), eq("call-1"), eq("LOCAL_HANDS_COMPLETED"), payload.capture());
+    assertThat(objectMapper.valueToTree(payload.getValue()).path("result").path("content").asText())
+        .isEqualTo("late");
+  }
+
+  @Test
   void persistenceFailure_isFailSoftForWorkerPath() {
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenThrow(new IllegalStateException("database unavailable"));

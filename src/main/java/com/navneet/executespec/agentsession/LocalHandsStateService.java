@@ -85,6 +85,101 @@ public class LocalHandsStateService {
     }
   }
 
+  /**
+   * Persist the result envelope with the terminal transition. Keeping the envelope in the
+   * append-only stream makes a retried client result idempotent across JVMs; the old implementation
+   * only stored the state, so a restart lost the authoritative response body.
+   */
+  public void recordCompleted(
+      String runId,
+      String callId,
+      String taskId,
+      String toolName,
+      String permissionKind,
+      String frameJson,
+      String resultEnvelope) {
+    recordInternal(
+        runId,
+        callId,
+        LocalHandsState.COMPLETED,
+        taskId,
+        toolName,
+        permissionKind,
+        frameJson,
+        resultEnvelope);
+  }
+
+  /**
+   * Accept a result that arrived after a JVM restart. There is no worker future to unblock, but
+   * recording the terminal response prevents a client retry from being treated as an unknown call
+   * and preserves the exact result for a later audit/recovery surface.
+   */
+  public boolean acceptRestartedResult(String runId, String callId, String resultEnvelope) {
+    if (runId == null || runId.isBlank() || callId == null || callId.isBlank()) return false;
+    try {
+      List<AgentSession> sessions =
+          sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
+      if (sessions == null || sessions.isEmpty()) return false;
+      PendingCall restarted = latestCall(sessions, callId, LocalHandsState.WORKER_RESTARTED);
+      if (restarted == null) return false;
+      recordCompleted(
+          runId,
+          callId,
+          restarted.taskId(),
+          restarted.toolName(),
+          restarted.permissionKind(),
+          restarted.frameJson(),
+          resultEnvelope);
+      return true;
+    } catch (RuntimeException ex) {
+      log.warn(
+          "[LocalHands] failed to persist restarted result for run {} call {}: {}",
+          runId,
+          callId,
+          ex.getMessage());
+      return false;
+    }
+  }
+
+  private void recordInternal(
+      String runId,
+      String callId,
+      LocalHandsState state,
+      String taskId,
+      String toolName,
+      String permissionKind,
+      String frameJson,
+      String resultEnvelope) {
+    if (runId == null || runId.isBlank() || callId == null || callId.isBlank() || state == null) {
+      return;
+    }
+    try {
+      List<AgentSession> sessions =
+          sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
+      if (sessions == null || sessions.isEmpty()) return;
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("state", state.name());
+      payload.put("runId", runId);
+      payload.put("callId", callId);
+      put(payload, "taskId", taskId);
+      put(payload, "toolName", toolName);
+      put(payload, "permissionKind", permissionKind);
+      put(payload, "frame", parseJson(frameJson));
+      put(payload, "result", parseJson(resultEnvelope));
+      payload.put("recordedAt", Instant.now().toString());
+      for (AgentSession session : sessions) {
+        eventRecorder.appendAction(session.getId(), callId, EVENT_PREFIX + state.name(), payload);
+      }
+    } catch (RuntimeException ex) {
+      log.warn(
+          "[LocalHands] failed to persist {} for run {} call {}: {}",
+          state,
+          runId,
+          callId,
+          ex.getMessage());
+    }
+  }
+
   /** Reloadable calls for which the latest durable state still expects a client result. */
   public List<PendingCall> pending(String runId) {
     if (runId == null || runId.isBlank()) {
@@ -164,6 +259,26 @@ public class LocalHandsStateService {
       log.warn("[LocalHands] failed to close restart calls for run {}: {}", runId, ex.getMessage());
       return 0;
     }
+  }
+
+  private PendingCall latestCall(
+      List<AgentSession> sessions, String callId, LocalHandsState expectedState) {
+    PendingCall latest = null;
+    for (AgentSession session : sessions) {
+      List<AgentActionEvent> events =
+          eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(session.getId(), REPLAYABLE_TYPES);
+      for (AgentActionEvent event : events) {
+        if (!callId.equals(event.getActionId())) continue;
+        PendingCall call = from(event);
+        if (call == null || call.state() != expectedState) continue;
+        if (latest == null
+            || latest.updatedAt() == null
+            || (call.updatedAt() != null && call.updatedAt().isAfter(latest.updatedAt()))) {
+          latest = call;
+        }
+      }
+    }
+    return latest;
   }
 
   private PendingCall from(AgentActionEvent event) {
