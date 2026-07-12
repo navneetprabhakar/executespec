@@ -140,6 +140,8 @@ class WorkerAgentAutoVerifyTest {
     assertThat(result.outcome()).isEqualTo(WorkerResult.Outcome.COMPLETED);
     assertThat(result.iterations()).isEqualTo(4);
     assertThat(result.toolCallLog()).anyMatch(line -> line.contains("AUTO_VERIFY"));
+    assertThat(result.toolCallLog())
+        .anyMatch(line -> line.contains("failedTests: [FAILED test_contract"));
     verify(f.runner, org.mockito.Mockito.times(2)).runTestsDetailed(anyString(), any());
   }
 

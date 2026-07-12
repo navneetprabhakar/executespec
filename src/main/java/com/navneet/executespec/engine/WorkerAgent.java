@@ -2815,12 +2815,6 @@ public class WorkerAgent {
             + s.getTotalTests()
             + " passed (exit 0). Tests are green — continue.";
       }
-      String tail = opt.get().outputTail();
-      String detail =
-          tail == null || tail.isBlank()
-              ? ""
-              : "\nFailing output (tail):\n"
-                  + (tail.length() > 1_200 ? tail.substring(tail.length() - 1_200) : tail);
       return "AUTO-VERIFY — the platform ran `"
           + opt.get().command()
           + "` after your last "
@@ -2832,7 +2826,7 @@ public class WorkerAgent {
           + " errored of "
           + s.getTotalTests()
           + "."
-          + detail
+          + verificationFailureEvidence(opt.get())
           + "\nFix these failures (or, if one is genuinely pre-existing and unrelated to your"
           + " change, say so explicitly) before moving on.";
     } catch (Exception e) {
@@ -2853,12 +2847,6 @@ public class WorkerAgent {
       if (opt.isEmpty()) return null;
       TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0 || (s.getFailed() == 0 && s.getErrors() == 0)) return null;
-      String tail = opt.get().outputTail();
-      String detailTail =
-          tail == null || tail.isBlank()
-              ? ""
-              : "\nTest output (tail):\n"
-                  + (tail.length() > 1_500 ? tail.substring(tail.length() - 1_500) : tail);
       return "completeTask refused — auto-verify ran `"
           + opt.get().command()
           + "` and found "
@@ -2869,7 +2857,7 @@ public class WorkerAgent {
           + s.getTotalTests()
           + " tests. Fix the failing tests or the code they exercise, then call completeTask"
           + " again."
-          + detailTail;
+          + verificationFailureEvidence(opt.get());
     } catch (Exception e) {
       log.debug(
           "auto-verify completion check failed (fail-open) run={}: {}",
