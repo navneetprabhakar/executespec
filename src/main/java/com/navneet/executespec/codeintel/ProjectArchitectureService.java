@@ -95,6 +95,16 @@ public class ProjectArchitectureService {
   }
 
   /**
+   * Generate architecture using an explicit run provider when supplied.  Run-scoped provider/model
+   * pins must also cover this pre-planner refresh; otherwise a pinned run can silently spend on the
+   * project's default provider before the worker starts.
+   */
+  public ProjectArchitectureDoc generate(
+      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
+    return generateInternal(projectId, branchOverride, patOverride, providerOverride);
+  }
+
+  /**
    * Regenerate codemaps for every linked repo using the supplied branch (falls back to each repo's
    * default when {@code branchOverride} is null or blank) and the supplied PAT (falls back to the
    * system PAT when {@code patOverride} is null).
@@ -129,6 +139,14 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride) {
+    return generateInternal(projectId, branchOverride, patOverride, null);
+  }
+
+  private ProjectArchitectureDoc generateInternal(
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
@@ -137,10 +155,12 @@ public class ProjectArchitectureService {
     }
 
     LlmProvider provider =
-        projectRepository
-            .findById(projectId)
-            .map(Project::getAiProvider)
-            .orElse(LlmProvider.OPENAI);
+        providerOverride != null
+            ? providerOverride
+            : projectRepository
+                .findById(projectId)
+                .map(Project::getAiProvider)
+                .orElse(LlmProvider.OPENAI);
 
     boolean hasOverride = branchOverride != null && !branchOverride.isBlank();
     List<ProjectCodeMap> codeMaps = new ArrayList<>();
