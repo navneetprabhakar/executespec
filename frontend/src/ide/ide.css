@@ -933,7 +933,9 @@
   color: var(--ide-accent);
   font-size: 11px;
 }
-.ide-work-state-error { color: var(--ide-red); }
+.ide-work-state-error {
+  color: var(--ide-red);
+}
 .ide-work-state-dot {
   width: 6px;
   height: 6px;
@@ -2137,7 +2139,9 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
   }
-  .ide-work-state { display: inline-flex; }
+  .ide-work-state {
+    display: inline-flex;
+  }
   .ide-work-provider {
     grid-column: 1;
     grid-row: 3;
