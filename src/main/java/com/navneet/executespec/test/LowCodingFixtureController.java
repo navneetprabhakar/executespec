@@ -10,11 +10,13 @@ import com.navneet.executespec.benchmark.LowCodingFixtureHarness.Evidence;
 import com.navneet.executespec.engine.WorkerAgent;
 
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -40,7 +42,12 @@ public class LowCodingFixtureController {
       @RequestParam String runId,
       @RequestParam String reservationId)
       throws IOException {
-    dispatchAuthorization.authorizeReservedTest(reservationId, provider, model, runId);
+    try {
+      dispatchAuthorization.authorizeReservedTest(reservationId, provider, model, runId);
+    } catch (IllegalStateException denied) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "provider reservation denied", denied);
+    }
     Path workspace = Files.createTempDirectory("executespec-low-coding-");
     try {
       return LowCodingFixtureHarness.run(worker, provider, model, runId, reservationId, workspace);
