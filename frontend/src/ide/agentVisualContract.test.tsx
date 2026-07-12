@@ -257,7 +257,7 @@ describe('protected transcript visual contract', () => {
     );
 
     expect(rendered.querySelector('[data-agent-region="route-decision"]')?.textContent).toContain(
-      'CODE RUN REQUIRED',
+      'Ready to run',
     );
     expect(rendered.querySelector('[data-agent-region="route-decision"]')?.textContent).toContain(
       '92% confidence',

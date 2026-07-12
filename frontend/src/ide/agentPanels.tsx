@@ -120,7 +120,7 @@ function totalTokens(usage?: AgentUsageSummary | null): number {
 }
 
 function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
-  if (!usage || totalTokens(usage) <= 0) return 'No token usage yet';
+  if (!usage || totalTokens(usage) <= 0) return 'Usage appears after the first response';
   const parts = [
     `${tokenCount(totalTokens(usage))} tokens`,
     `${tokenCount(usage.inputTokens)} in`,
@@ -598,7 +598,13 @@ function MessageBubble({
         )}
       </div>
       <div className='agent-msg-body'>
-        <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
+        {message.role === 'assistant' && !message.content.trim() ? (
+          <div className='agent-msg-empty' role='status'>
+            No response arrived for this turn. You can send the message again.
+          </div>
+        ) : (
+          <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
+        )}
       </div>
       {message.role === 'assistant' && (
         <ArtifactRail artifacts={extractAgentArtifacts(message.content)} dispatch={dispatch} />
@@ -759,10 +765,17 @@ function RouteDecision({routingState}: {routingState: RoutingState}) {
   const runRoute = routingState.runApiAllowed;
   return (
     <div className='agent-route-decision' data-agent-region='route-decision' role='status'>
-      <span className='agent-route-decision-label'>Intent route</span>
-      <strong>{routingState.route.replace(/_/g, ' ')}</strong>
-      <span>{Math.round(routingState.confidence * 100)}% confidence</span>
-      <span>{runRoute ? 'Run action available after confirmation' : 'Read-only response'}</span>
+      <span className='agent-route-decision-label'>Next step</span>
+      <strong>{runRoute ? 'Ready to run' : 'Answer from context'}</strong>
+      <details className='agent-route-details'>
+        <summary>Why this response?</summary>
+        <span>
+          {Math.round(routingState.confidence * 100)}% confidence ·{' '}
+          {runRoute
+            ? 'a run can be started after confirmation'
+            : 'no files or commands will be changed'}
+        </span>
+      </details>
     </div>
   );
 }
