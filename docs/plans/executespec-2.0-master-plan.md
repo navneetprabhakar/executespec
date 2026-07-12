@@ -12,7 +12,7 @@ Canonical scope: the goal prompt attached to the active Codex task. This documen
 - Agent Protocol: v2, shared by Web, CLI, and VS Code.
 - TypeScript remains the CLI implementation language for 1.0. A Rust rewrite is not authorized without a measured hotspot that cannot be fixed within the current architecture.
 - No permanent fork. Work happens on isolated integration branches and linked worktrees.
-- No push, pull request, merge, deployment, package publication, benchmark publication, or production mutation without a later explicit instruction. Forge owns all ExecuteSpec PR merges.
+- Branch pushes are allowed when explicitly requested for this goal. Pull requests, merges, deployment, package publication, benchmark publication, and production mutation still require a later explicit instruction. Forge owns all ExecuteSpec PR merges.
 - Main-program live LLM spend is capped at $10 per authorized provider and $60 total. Sarvam is forbidden from the main program and must be absent from the released product.
 
 ## Current truth

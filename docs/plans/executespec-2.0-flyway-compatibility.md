@@ -2,7 +2,7 @@
 
 ## Decision
 
-Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V258; any future schema cleanup may start at V259 or later.
+Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V262; any future schema cleanup may start at V263 or later.
 
 The default runtime does not suppress missing applied migrations. A package with an incomplete
 `classpath:db/migration` chain must fail Flyway validation rather than silently starting against an
@@ -14,14 +14,14 @@ The user-requested consolidation option is supported only for clean installs:
 1. Generate and review a complete schema-only baseline from a known migration head.
 2. Add a Flyway baseline migration (`B<baseline>__executespec_2_schema.sql`) containing the generated schema and required seed data in a separately configured clean-install location/profile; do not place it in the ordinary upgrade path by default.
 3. Keep all post-baseline migrations (`V<baseline+1>__...`) as normal forward migrations.
-4. Prove a clean install using the baseline and an upgrade from a database that has applied V257, then validate the V257→V258 forward step. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
+4. Prove a clean install using the baseline and an upgrade from a database that has applied V255, then validate the V255→V262 forward step. Both must reach the same Hibernate `ddl-auto: validate` shape and application smoke checks.
 5. Never delete, rename, edit, or checksum-repair an already-applied V-file as part of this work. Historical migrations remain available for old database histories and auditability.
 
 No baseline migration is created until the schema has stopped moving for the release cut; generating one earlier would create a second source of truth while V2 work is still changing entities.
 
-## V256/V257/V258 upgrade contract
+## V256–V262 upgrade contract
 
-V256 is a forward data migration only. It removes Sarvam from reusable provider/model state in `app_user`, `project`, `pipeline_run`, `execution_run`, `agent_session`, `agent_task`, and `org`. V257 seeds the coordinator-subagent feature flag with a fail-closed default. V258 adds the observed task-cost column with a zero backfill. These migrations deliberately do not rewrite immutable provider strings in usage, benchmark, or event history. All are idempotent and preserve existing rows.
+V256 is a forward data migration only. It removes Sarvam from reusable provider/model state in `app_user`, `project`, `pipeline_run`, `execution_run`, `agent_session`, `agent_task`, and `org`. V257 seeds the coordinator-subagent feature flag with a fail-closed default. V258 adds the observed task-cost column with a zero backfill. V259 graduates the worker auto-verification flag, V260 seeds initial routing, V261 persists local-execution intent, and V262 adds a database-assigned cursor for agent-event replay. These migrations deliberately do not rewrite immutable provider strings in usage, benchmark, or event history. All are idempotent and preserve existing rows.
 
 The `model_overrides_json` cleanup treats this legacy TEXT column defensively: valid JSON objects are filtered, while malformed values are retained with a migration notice so one bad row cannot block deployment or silently discard customer data. A later quarantine/repair migration may clean those rows explicitly.
 
@@ -39,7 +39,7 @@ The `model_overrides_json` cleanup treats this legacy TEXT column defensively: v
 
 | Path | Status |
 |---|---|
-| V1–V258 | Existing history; do not rewrite or rename |
-| V256/V257/V258 cleanup + coordinator seed + observed spend | Forward migrations; source/classpath inventory expects all three |
+| V1–V262 | Existing history; do not rewrite or rename |
+| V256–V262 cleanup, flags, execution intent, and replay cursor | Forward migrations; source/classpath inventory expects all seven |
 | Squashed clean-install baseline | Not yet generated; deferred until schema freeze; separate clean-install profile only, never a replacement for V1–V257 |
-| Upgrade integration test | Testcontainers/Flyway suite proves V255→V258 and historical data preservation |
+| Upgrade integration test | Testcontainers/Flyway suite proves V255→V262, idempotent rerun, and historical data preservation |
