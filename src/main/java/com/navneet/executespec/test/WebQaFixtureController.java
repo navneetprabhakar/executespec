@@ -183,15 +183,29 @@ public class WebQaFixtureController {
       run.setCurrentGate(null);
       run.setCompletedAt(null);
       run.setStatusReason("CLEAN_COMPLETION");
+      advanceTasks(runId, false);
     } else {
       run.setStatus("COMPLETE");
       run.setCompletedAt(Instant.now());
       run.setStatusReason("CLEAN_COMPLETION");
+      advanceTasks(runId, true);
     }
     runRepository.save(run);
     sseBroadcaster.emit(runId, RunEvent.runStatus(runId, run.getStatus()));
     sseBroadcaster.emit(runId, RunEvent.log(runId, null, "fixture advanced to " + requested));
     return new AdvanceResponse(runId, requested, run.getStatus(), run.getStatusReason());
+  }
+
+  private void advanceTasks(String runId, boolean complete) {
+    List<AgentTask> tasks = taskRepository.findByRunId(runId);
+    if (tasks == null) return;
+    Instant now = Instant.now();
+    for (AgentTask task : tasks) {
+      task.setStatus(complete ? "COMPLETE" : "WORKING");
+      if (!complete) task.setStartedAt(now);
+      if (complete) task.setCompletedAt(now);
+      taskRepository.save(task);
+    }
   }
 
   @DeleteMapping
