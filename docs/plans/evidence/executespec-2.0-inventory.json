@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "949e7f7cd5c47808ee8bddc0771d23029ae9c498",
+      "sha": "3056a6101c8cf84da551c8970ada467f86f36003",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2677,
-      "worktreeFingerprint": "f88fa161a3ee30ad6232f48717a8b9f2f739ca702da33caada99a12e5294852d"
+      "worktreeFingerprint": "2bbb717c9e562458879372c7574dc1515c11a8c06d926610406ae4ae2038a992"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -17,7 +17,7 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "2f910bbfbd63169063eecc2fc1dc9beab37edd05",
+      "sha": "34356ada71ab2b89524e9dd40e75d159422156b3",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 774,
       "worktreeFingerprint": "a35f619e1b33523e137afe7a5bdab083e92ffdfa4dfb1f167f21c73dff9b150a"
@@ -26,7 +26,7 @@
   "backend": {
     "mainJava": {
       "files": 1255,
-      "lines": 199057
+      "lines": 199127
     },
     "testJavaFiles": 416,
     "controllers": 110,
