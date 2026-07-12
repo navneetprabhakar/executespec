@@ -11,15 +11,15 @@ Renders `/images/og-hero.png` (1200×630) — the social-share preview card that
 ## Rebuild
 
 ```bash
-# 1. Copy the latest product screenshot to use as the right-side visual
-cp ../ss-05b-validation-polished.png screenshot.png
+# 1. The template uses the canonical current Console capture
+#    (`../current/05-run-result.png`) directly; no stale screenshot copy is required.
 
-# 2. Render via Playwright (re-uses /tmp/es-capture/node_modules)
+# 2. Render via Playwright (or the repository's headless-Chrome capture helper)
 CHROMIUM_PATH="$HOME/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" \
 NODE_PATH=/tmp/es-capture/node_modules \
 node render.js
 
-# 3. Quantize to 256 colors to shrink 241 KB → 92 KB (lossless-looking for flat UI)
+# 3. Quantize to 256 colors if a smaller social asset is needed
 python3 -c "from PIL import Image; img = Image.open('og-hero.png').convert('RGB'); img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG).save('og-hero.png', format='PNG', optimize=True)"
 
 # 4. Ship
