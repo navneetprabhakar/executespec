@@ -513,6 +513,25 @@ class SubagentProtocolServiceTest {
         .containsExactly("request-action", "request-action");
   }
 
+  @Test
+  void completionCannotBypassExplicitStart() throws Exception {
+    AgentSession child = parent("child", "READY");
+    var metadata =
+        new SubagentProtocolService.ChildMetadata("parent", "turn", Role.SCOUT, "scan", 1, 3, 0.5);
+    when(sessions.findById("child")).thenReturn(Optional.of(child));
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "child", SubagentProtocolService.EVENT_CHILD_CREATED))
+        .thenReturn(List.of(event("child", SubagentProtocolService.EVENT_CHILD_CREATED, metadata)));
+
+    assertThatThrownBy(
+            () ->
+                service.complete(
+                    "child", new Completion("scan complete", List.of()), "user", "org"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("must be started");
+    verify(sessions, org.mockito.Mockito.never()).save(child);
+  }
+
   private AgentActionEvent event(String sessionId, String type, Object payload) throws Exception {
     return event(sessionId, type, null, payload);
   }
