@@ -1143,6 +1143,37 @@ export default function IdeRunResult() {
                   {busy === 'pause' ? 'Pausing…' : '⏸ Pause'}
                 </button>
               )}
+              {files.length > 0 &&
+                ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(
+                  String(run?.status || '').toUpperCase(),
+                ) && (
+                  <button
+                    className='ide-btn ghost'
+                    style={{color: 'var(--ide-red)'}}
+                    disabled={busy === 'revert-workspace'}
+                    onClick={() =>
+                      setConfirm({
+                        title: 'Revert workspace to run start',
+                        body: 'This resets the cloned workspace to the exact commit captured when this run started. It does not change the remote repository or open a PR. Continue?',
+                        confirmLabel: 'Revert workspace',
+                        danger: true,
+                        onConfirm: () =>
+                          action(
+                            'revert-workspace',
+                            () => api.syncRunToOriginal(runId),
+                            (result) => {
+                              const response = result as {status?: string; reposSynced?: number};
+                              return response.status === 'failed'
+                                ? 'Workspace revert failed.'
+                                : `Workspace reverted (${response.reposSynced ?? 0} repos).`;
+                            },
+                          ),
+                      })
+                    }
+                  >
+                    {busy === 'revert-workspace' ? 'Reverting…' : '↶ Revert workspace'}
+                  </button>
+                )}
               <button
                 className='ide-btn ghost'
                 disabled={busy === 'preview'}
