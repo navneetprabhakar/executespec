@@ -462,6 +462,14 @@ to boot — skip it for those.""";
   private final ConcurrentMap<String, ContinuationConfirmationScope>
       continuationConfirmationScopeByRun = new ConcurrentHashMap<>();
 
+  /**
+   * Recovery generation observed when a worker starts a task. A rolling-restart takeover increments
+   * {@code agent_task.recovery_attempt}; retaining the generation here lets a stale worker refuse
+   * to write terminal state after another JVM has claimed the task.
+   */
+  private final ConcurrentMap<String, Integer> taskRecoveryAttemptByTask =
+      new ConcurrentHashMap<>();
+
   private record ContinuationConfirmationScope(
       boolean confirmed, RunContinuationDecision action, String provider, String model) {
     static ContinuationConfirmationScope from(ExecutionRequest req) {
@@ -1654,6 +1662,7 @@ to boot — skip it for those.""";
       ProviderModelOverride providerModelOverride,
       List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
+    rememberRecoveryAttempt(req.runContext().runId(), task.id());
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
     String requestedProvider =
@@ -4291,6 +4300,18 @@ to boot — skip it for those.""";
         return;
       }
       var t = existing.get();
+      Integer expectedRecoveryAttempt = taskRecoveryAttemptByTask.get(key);
+      if (expectedRecoveryAttempt != null
+          && !recoveryAttemptMatches(expectedRecoveryAttempt, t.getRecoveryAttempt())) {
+        log.warn(
+            "persistTaskStatus: fenced stale worker id={} expectedRecoveryAttempt={}"
+                + " actualRecoveryAttempt={} status={}",
+            key,
+            expectedRecoveryAttempt,
+            t.getRecoveryAttempt(),
+            status);
+        return;
+      }
       t.setStatus(status);
       // Keep task-level liveness durable for crash recovery.  Run-level heartbeats are refreshed
       // by the orchestrator scheduler, but a long provider turn or scheduler pause can make that
@@ -4363,6 +4384,27 @@ to boot — skip it for those.""";
           failureReason != null ? " (reason: " + failureReason + ")" : "");
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);
+    }
+  }
+
+  /** Visible for focused recovery tests; null in the legacy schema is generation zero. */
+  static boolean recoveryAttemptMatches(int expected, Integer actual) {
+    return expected == (actual == null ? 0 : actual);
+  }
+
+  private void rememberRecoveryAttempt(String runId, String taskIdShort) {
+    if (taskRepo == null || runId == null || taskIdShort == null) return;
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    try {
+      taskRepo
+          .findById(key)
+          .ifPresent(
+              task ->
+                  taskRecoveryAttemptByTask.put(
+                      key, task.getRecoveryAttempt() == null ? 0 : task.getRecoveryAttempt()));
+    } catch (RuntimeException ex) {
+      // Recovery fencing is additive; a missing row or unavailable read must not stop a worker.
+      log.debug("rememberRecoveryAttempt: unable to read {}: {}", key, ex.getMessage());
     }
   }
 
