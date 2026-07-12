@@ -8,11 +8,13 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class AgentSessionStartupRecoveryTest {
 
@@ -157,5 +159,37 @@ class AgentSessionStartupRecoveryTest {
     assertThat(ordinary.getStatus()).isEqualTo("RUNNING");
     verify(sessions, org.mockito.Mockito.never()).findByIdForUpdate("web-running");
     verify(sessions, org.mockito.Mockito.never()).save(ordinary);
+  }
+
+  @Test
+  void recoveryEventExplainsMissingHeartbeatAndCorrelatesTheStartupSweep() {
+    AgentSession child =
+        AgentSession.builder()
+            .id("legacy-child")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("RUNNING")
+            // Legacy rows may not have a heartbeat; the fail-closed cancellation must be auditable.
+            .updatedAt(null)
+            .build();
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of(child));
+    when(sessions.findByIdForUpdate("legacy-child")).thenReturn(java.util.Optional.of(child));
+
+    assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
+
+    ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+    verify(events)
+        .appendAction(
+            eq("legacy-child"),
+            eq("startup-recovery:legacy-child"),
+            eq("SUBAGENT_RECOVERY"),
+            payload.capture());
+    assertThat(payload.getValue())
+        .containsEntry("clientSurface", "SUBAGENT")
+        .containsEntry("staleAfterSeconds", 120L)
+        .containsEntry("staleTimestampPresent", false)
+        .containsEntry("previousStatus", "RUNNING")
+        .containsKey("recoveryBatchId");
   }
 }
