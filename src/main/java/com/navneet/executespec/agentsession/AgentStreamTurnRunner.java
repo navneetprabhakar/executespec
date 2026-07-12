@@ -55,6 +55,7 @@ public class AgentStreamTurnRunner {
       AgentSessionService.StreamTurnContext ctx,
       AppUserDetails user,
       StreamTurnRequest request) {
+    AccumulatingSink sink = null;
     try {
       send(
           emitter,
@@ -115,7 +116,7 @@ public class AgentStreamTurnRunner {
         return;
       }
 
-      AccumulatingSink sink = new AccumulatingSink(emitter, sessionService, ctx, eventRecorder);
+      sink = new AccumulatingSink(emitter, sessionService, ctx, eventRecorder);
       List<Map<String, Object>> conversation =
           AgentStreamTurnSupport.withAttachmentBlock(
               AgentStreamTurnSupport.conversationOrCurrentMessage(request),
@@ -153,7 +154,7 @@ public class AgentStreamTurnRunner {
       emitter.complete();
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
-        sessionService.disconnectStreamTurn(ctx);
+        sessionService.disconnectStreamTurn(ctx, sink == null ? null : sink.partialSummary());
         emitter.complete();
         return;
       }
@@ -401,6 +402,11 @@ public class AgentStreamTurnRunner {
       if (eventRecorder != null) {
         eventRecorder.append(ctx.sessionId(), ctx.turnId(), type, payload);
       }
+    }
+
+    private String partialSummary() {
+      if (text.isEmpty()) return null;
+      return text.toString();
     }
   }
 }

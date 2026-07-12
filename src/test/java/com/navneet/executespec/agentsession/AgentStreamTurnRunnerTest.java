@@ -144,6 +144,72 @@ class AgentStreamTurnRunnerTest {
   }
 
   @Test
+  void clientDisconnectPersistsPartialAssistantTextForReplay() throws Exception {
+    AgentSessionService sessionService = mock(AgentSessionService.class);
+    SpecChatService specChatService = mock(SpecChatService.class);
+    FeatureFlagService featureFlags = mock(FeatureFlagService.class);
+    AgentAttachmentService attachmentService = mock(AgentAttachmentService.class);
+    SseEmitter emitter = mock(SseEmitter.class);
+    AgentStreamTurnRunner runner =
+        new AgentStreamTurnRunner(sessionService, specChatService, featureFlags, attachmentService);
+    StreamTurnContext ctx =
+        new StreamTurnContext(
+            "session-1",
+            "turn-1",
+            1,
+            null,
+            null,
+            "org-1",
+            "user-1",
+            "anthropic",
+            null,
+            new OrchestratorDecision(
+                "ANSWER",
+                0.9,
+                "chat",
+                false,
+                "",
+                null,
+                new OrchestratorPolicy(true, false, "allowed"),
+                "trace-1"));
+
+    when(featureFlags.isEnabled("spec.chat.enabled")).thenReturn(true);
+    when(attachmentService.injectionBlock(anyString(), any())).thenReturn("");
+    var sends = new java.util.concurrent.atomic.AtomicInteger();
+    doAnswer(
+            invocation -> {
+              if (sends.incrementAndGet() == 3) throw new java.io.IOException("broken pipe");
+              return null;
+            })
+        .when(emitter)
+        .send(any(SseEmitter.SseEventBuilder.class));
+    doAnswer(
+            invocation -> {
+              SpecChatService.Sink sink = invocation.getArgument(0);
+              sink.token("partial response");
+              return null;
+            })
+        .when(specChatService)
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
+
+    runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
+
+    verify(sessionService).disconnectStreamTurn(ctx, "partial response");
+    verify(emitter).complete();
+  }
+
+  @Test
   void providerCredentialFailureUsesRecoveryMessageInsteadOfRawProviderJson() throws Exception {
     AgentSessionService sessionService = mock(AgentSessionService.class);
     SpecChatService specChatService = mock(SpecChatService.class);

@@ -90,6 +90,11 @@ class AgentStreamTurnLifecycle {
   }
 
   void disconnect(AgentSessionService.StreamTurnContext ctx) {
+    disconnect(ctx, null);
+  }
+
+  void disconnect(AgentSessionService.StreamTurnContext ctx, String partialSummary) {
+    String boundedPartial = boundPartialSummary(partialSummary);
     turnRepo
         .findById(ctx.turnId())
         .ifPresent(
@@ -97,14 +102,22 @@ class AgentStreamTurnLifecycle {
               if ("STREAMING".equals(turn.getStatus())) {
                 turn.setStatus("CANCELLED");
                 turn.setAssistantSummary(
-                    AgentText.firstNonBlank("Stream disconnected.", turn.getAssistantSummary()));
+                    AgentText.firstNonBlank(
+                        boundedPartial == null ? "Stream disconnected." : boundedPartial,
+                        turn.getAssistantSummary()));
                 turnRepo.save(turn);
               }
             });
-    eventRecorder.append(
-        ctx.sessionId(),
-        ctx.turnId(),
-        "STREAM_DISCONNECTED",
-        Map.of("message", "client disconnected"));
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("message", "client disconnected");
+    payload.put("partial", boundedPartial != null);
+    if (boundedPartial != null) payload.put("partialSummary", boundedPartial);
+    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_DISCONNECTED", payload);
+  }
+
+  private static String boundPartialSummary(String value) {
+    if (value == null || value.isBlank()) return null;
+    int maxChars = 16_000;
+    return value.length() <= maxChars ? value : value.substring(0, maxChars);
   }
 }
