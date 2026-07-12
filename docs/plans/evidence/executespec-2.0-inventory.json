@@ -3,7 +3,7 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "3056a6101c8cf84da551c8970ada467f86f36003",
+      "sha": "da086ab726daabae955767ffe7081e82c6f0d0ed",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2677,
       "worktreeFingerprint": "2bbb717c9e562458879372c7574dc1515c11a8c06d926610406ae4ae2038a992"
@@ -17,10 +17,10 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "34356ada71ab2b89524e9dd40e75d159422156b3",
+      "sha": "6c96acaa29b02ebaa47d26925f8d9a371958558b",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 774,
-      "worktreeFingerprint": "a35f619e1b33523e137afe7a5bdab083e92ffdfa4dfb1f167f21c73dff9b150a"
+      "worktreeFingerprint": "9467c0bcbe8fe14c9dc7c4b992dc973773d7c07cbe800f9bd32d91a92bc2f2fd"
     }
   },
   "backend": {
