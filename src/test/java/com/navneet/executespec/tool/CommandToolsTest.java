@@ -147,6 +147,28 @@ class CommandToolsTest {
   }
 
   @Test
+  void buildProject_marks_unknown_stack_noOp_as_unavailable_evidence() {
+    BuildCommandResolver resolver = mock(BuildCommandResolver.class);
+    MavenDependencyValidator validator = mock(MavenDependencyValidator.class);
+    when(validator.validate(root))
+        .thenReturn(new MavenDependencyValidator.ValidationResult(true, List.of(), 0));
+    when(resolver.resolve(eq(root), eq((String) null)))
+        .thenReturn(
+            BuildCommand.builder()
+                .command("true")
+                .timeoutSeconds(5)
+                .sourceDescription("fallback:no-op")
+                .build());
+    BuildProjectTool tool = new BuildProjectTool(resolver, validator, null, null);
+
+    ToolResult result = tool.execute(JSON.createObjectNode(), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("source=fallback:no-op", "smokeSignal=UNAVAILABLE", "noOp=true", "exit=0");
+  }
+
+  @Test
   void buildAlias_maps_command_to_plannerCommand_before_delegating() {
     BuildCommandResolver resolver = mock(BuildCommandResolver.class);
     MavenDependencyValidator validator = mock(MavenDependencyValidator.class);

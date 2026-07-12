@@ -172,6 +172,7 @@ public class BuildProjectTool implements Tool {
       }
       String output = new String(proc.getInputStream().readAllBytes());
       int exit = proc.exitValue();
+      boolean noOp = "fallback:no-op".equals(bc.sourceDescription());
       // Output budget (#6): persist a full build log to disk + give the worker a preview + readFile
       // path, so a long compiler/maven failure isn't lost to a 4 KB truncation.
       String summary =
@@ -179,6 +180,10 @@ public class BuildProjectTool implements Tool {
               + bc.command()
               + "\nsource="
               + bc.sourceDescription()
+              + "\nsmokeSignal="
+              + (noOp ? "UNAVAILABLE" : "EXECUTED")
+              + "\nnoOp="
+              + noOp
               + "\nexit="
               + exit
               + "\noutput:\n"
