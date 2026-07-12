@@ -32,5 +32,7 @@ public interface AgentSessionRepository extends JpaRepository<AgentSession, Stri
   List<AgentSession> findByUserIdAndStatusOrderByUpdatedAtDesc(
       String userId, String status, Pageable pageable);
 
+  List<AgentSession> findByUserIdAndIdStartingWith(String userId, String idPrefix);
+
   List<AgentSession> findByRunIdAndStatusOrderByUpdatedAtDesc(String runId, String status);
 }

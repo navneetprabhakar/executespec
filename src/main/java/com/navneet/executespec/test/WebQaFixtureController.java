@@ -164,7 +164,13 @@ public class WebQaFixtureController {
       deleteWorkspace(run.getWorkspacePath());
       runRepository.delete(run);
     }
-    return Map.of("deletedRuns", runs.size());
+    List<AgentSession> sessions = sessionRepository.findByUserIdAndIdStartingWith(userId, PREFIX);
+    for (AgentSession session : sessions) {
+      eventRepository.deleteBySessionId(session.getId());
+      turnRepository.deleteBySessionId(session.getId());
+      sessionRepository.delete(session);
+    }
+    return Map.of("deletedRuns", runs.size(), "deletedAgentSessions", sessions.size());
   }
 
   private PipelineRun createRun(
