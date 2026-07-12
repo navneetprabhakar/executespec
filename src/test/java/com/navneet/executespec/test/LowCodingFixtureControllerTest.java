@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -19,6 +20,7 @@ class LowCodingFixtureControllerTest {
   @Test
   void endpointRequiresExactScopeAndReturnsDeterministicEvidence() throws Exception {
     WorkerAgent worker = mock(WorkerAgent.class);
+    ProviderDispatchAuthorization authorization = mock(ProviderDispatchAuthorization.class);
     when(worker.run(any(WorkerTaskRequest.class)))
         .thenAnswer(
             invocation -> {
@@ -36,17 +38,36 @@ class LowCodingFixtureControllerTest {
                   .build();
             });
 
-    LowCodingFixtureController controller = new LowCodingFixtureController(worker);
+    LowCodingFixtureController controller = new LowCodingFixtureController(worker, authorization);
     var evidence = controller.run("deepseek", "deepseek-v4-flash-native", "low-1", "res-1");
 
     assertThat(evidence.tier()).isEqualTo("LOW");
     assertThat(evidence.evaluatorPassed()).isTrue();
     assertThat(evidence.provider()).isEqualTo("deepseek");
+    org.mockito.Mockito.verify(authorization)
+        .authorizeReservedTest("res-1", "deepseek", "deepseek-v4-flash-native", "low-1");
     Method method =
         LowCodingFixtureController.class.getDeclaredMethod(
             "run", String.class, String.class, String.class, String.class);
     assertThat(LowCodingFixtureController.class.getAnnotation(PreAuthorize.class).value())
         .isEqualTo("hasRole('SUPER_ADMIN')");
     assertThat(method).isNotNull();
+  }
+
+  @Test
+  void invalidReservationStopsBeforeWorkerDispatch() throws Exception {
+    WorkerAgent worker = mock(WorkerAgent.class);
+    ProviderDispatchAuthorization authorization = mock(ProviderDispatchAuthorization.class);
+    org.mockito.Mockito.doThrow(new IllegalStateException("reservation denied"))
+        .when(authorization)
+        .authorizeReservedTest("bad", "deepseek", "deepseek-v4-flash-native", "low-2");
+
+    LowCodingFixtureController controller = new LowCodingFixtureController(worker, authorization);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> controller.run("deepseek", "deepseek-v4-flash-native", "low-2", "bad"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("reservation denied");
+    org.mockito.Mockito.verifyNoInteractions(worker);
   }
 }
