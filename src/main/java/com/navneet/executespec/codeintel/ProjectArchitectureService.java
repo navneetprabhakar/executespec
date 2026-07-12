@@ -95,7 +95,7 @@ public class ProjectArchitectureService {
   }
 
   /**
-   * Generate architecture using an explicit run provider when supplied.  Run-scoped provider/model
+   * Generate architecture using an explicit run provider when supplied. Run-scoped provider/model
    * pins must also cover this pre-planner refresh; otherwise a pinned run can silently spend on the
    * project's default provider before the worker starts.
    */
@@ -143,10 +143,7 @@ public class ProjectArchitectureService {
   }
 
   private ProjectArchitectureDoc generateInternal(
-      String projectId,
-      String branchOverride,
-      String patOverride,
-      LlmProvider providerOverride) {
+      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
