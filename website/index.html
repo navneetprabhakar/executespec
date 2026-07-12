@@ -833,6 +833,23 @@
             max-width: 74ch;
         }
         .demo-caption strong { color: var(--ink); font-weight: 600; }
+        .demo-transcript {
+            max-width: 74ch;
+            margin: 12px auto 0;
+            color: var(--text-dim);
+            font-size: 13px;
+            line-height: 1.55;
+        }
+        .demo-transcript summary {
+            cursor: pointer;
+            width: fit-content;
+            margin: 0 auto;
+            color: var(--ink);
+            font-weight: 600;
+        }
+        .demo-transcript ol { margin: 12px 0 0 1.25rem; padding: 0; }
+        .demo-transcript li { padding: 2px 0; }
+        .demo-transcript-note { margin: 10px 0 0; color: var(--text-mute); font-size: 12px; }
         .token-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
@@ -1332,9 +1349,23 @@
 <section class='section' id='demo' style='padding-top:8px'>
     <div class='wrap'>
         <div class='demo-shell'>
-            <video src='/media/hero.webm' autoplay loop muted playsinline preload='metadata' poster='/media/hero-poster.png' aria-label='Illustrative ExecuteSpec agent control-plane walkthrough using synthetic demo data' style='display:block;width:100%;height:auto'></video>
+            <video src='/media/hero.webm' autoplay loop muted playsinline preload='metadata' poster='/media/hero-poster.png' aria-label='Illustrative ExecuteSpec agent control-plane walkthrough using synthetic demo data' style='display:block;width:100%;height:auto'>
+                <track kind='captions' src='/media/hero.vtt' srclang='en' label='English' default>
+            </video>
         </div>
         <p class='demo-caption'>Illustrative product walkthrough using synthetic demo data — describe it, approve the plan, watch the agents work, then review the evidence, pull request, and <strong>token ledger</strong>.</p>
+        <details class='demo-transcript'>
+            <summary>Read the walkthrough transcript</summary>
+            <ol>
+                <li><strong>Start:</strong> A durable agent control plane keeps the request, actions, and evidence together.</li>
+                <li><strong>Compose:</strong> Write the change and inspect the provider route and estimated usage before execution.</li>
+                <li><strong>Plan gate:</strong> Review the task list, token estimate, and cap before approving any coding work.</li>
+                <li><strong>Live:</strong> Follow tool actions, validation, token usage, and spend while the agents work.</li>
+                <li><strong>Result:</strong> Inspect the final score, build and test signals, reviewer result, and provider ledger.</li>
+                <li><strong>Pull request:</strong> The generated PR carries its validation evidence for human review.</li>
+            </ol>
+            <p class='demo-transcript-note'>This is a synthetic product walkthrough, not a customer run, production measurement, or benchmark result.</p>
+        </details>
     </div>
 </section>
 

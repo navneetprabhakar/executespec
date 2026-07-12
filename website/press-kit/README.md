@@ -75,10 +75,11 @@ website/press-kit/
 ├── ss-05b-validation-polished.png           (historical pre-v3 capture; do not use)
 ├── ss-extra-score-trend.png                 (historical pre-v3 capture; do not use)
 ├── ../media/hero.webm                       (current illustrative walkthrough; synthetic demo data)
+├── ../media/hero.vtt                        (caption track for the walkthrough)
 └── CAPTURE_GUIDE.md                         (SOP for shooting the next round)
 ```
 
-The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like.
+The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like. The landing-page walkthrough includes a caption track and an expandable transcript so the synthetic sequence is accessible without sound.
 
 Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. The website walkthrough was regenerated on 2026-07-12 from the current agent-control-plane story. Treat all screenshots and video as product-demo assets, not real customer data, production metrics, or benchmark evidence.
 
