@@ -68,4 +68,13 @@ class RunJournalStoreTest {
 
     assertThat(RunJournalStore.load(workspace)).isEmpty();
   }
+
+  @Test
+  void runIdentityRejectsCopiedJournalButAllowsMatchingReload() throws Exception {
+    Path workspace = Files.createTempDirectory("journal-identity-");
+    RunJournalStore.save(workspace, List.of("task-1 -> COMPLETE"), "run-a");
+
+    assertThat(RunJournalStore.load(workspace, "run-a")).containsExactly("task-1 -> COMPLETE");
+    assertThat(RunJournalStore.load(workspace, "run-b")).isEmpty();
+  }
 }

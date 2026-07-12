@@ -18,7 +18,8 @@
  *   save. Redis remains the fast path; the workspace checkpoint is the bounded restart fallback
  *   when Redis is unavailable or the key has expired. It restores conversation state only when
  *   the workspace is available; it cannot resurrect an in-memory provider call or prove a
- *   cross-JVM worker handoff.
+ *   cross-JVM worker handoff. The run journal envelope now records the run identity and reload
+ *   rejects a copied journal whose identity does not match the active run.
  *
  * Run journal:
  *   {@code <workspace>/.agent-context/run-journal.json}, a bounded atomic, versioned envelope of
