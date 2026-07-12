@@ -75,6 +75,11 @@ public class AgentSessionService {
     return sessionReadService.listEvents(sessionId, user);
   }
 
+  public List<AgentActionEvent> listEvents(String sessionId, int limit, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.listEvents(sessionId, limit, user);
+  }
+
   public AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
     requireOrg(user);
     return sessionReadService.replayEvents(sessionId, after, user);

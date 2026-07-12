@@ -292,8 +292,10 @@ public class AgentSessionController {
 
   @GetMapping("/sessions/{sessionId}/events")
   public List<AgentActionEvent> sessionEvents(
-      @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
-    return sessionService.listEvents(sessionId, user);
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(defaultValue = "500") int limit) {
+    return sessionService.listEvents(sessionId, limit, user);
   }
 
   /** Cursor-based event replay used after a stream interruption or tab resume. */
