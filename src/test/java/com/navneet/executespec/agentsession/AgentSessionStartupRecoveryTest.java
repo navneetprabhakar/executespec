@@ -59,8 +59,7 @@ class AgentSessionStartupRecoveryTest {
             .updatedAt(Instant.now().minusSeconds(300))
             .build();
     when(sessions.findByStatus("READY")).thenReturn(List.of(child));
-    when(sessions.findByIdForUpdate("ready-child-1"))
-        .thenReturn(java.util.Optional.of(child));
+    when(sessions.findByIdForUpdate("ready-child-1")).thenReturn(java.util.Optional.of(child));
 
     assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
     assertThat(child.getStatus()).isEqualTo("CANCELLED");

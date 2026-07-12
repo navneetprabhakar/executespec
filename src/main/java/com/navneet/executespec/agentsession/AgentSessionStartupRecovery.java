@@ -78,7 +78,8 @@ public class AgentSessionStartupRecovery {
     }
     log.warn(
         "Agent-session startup recovery cancelled {} stale {} child session(s)",
-        reconciled, status);
+        reconciled,
+        status);
     return reconciled;
   }
 }
