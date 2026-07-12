@@ -189,6 +189,7 @@ export interface AgentGateDecisionCard {
 export interface AgentActionEvent {
   id: string;
   sessionId: string;
+  turnId?: string | null;
   actionId: string | null;
   type: string;
   payloadJson: string | null;

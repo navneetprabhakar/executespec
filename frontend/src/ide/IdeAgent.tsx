@@ -70,46 +70,6 @@ function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
   );
 }
 
-function persistedEventTimeline(events: api.AgentActionEvent[] | null | undefined) {
-  const semanticTypes = new Set([
-    'SUBAGENT',
-    'HANDOFF',
-    'PROVIDER_SWITCH',
-    'MODEL_SWITCH',
-    'CONTINUATION',
-    'RUN_TASK_WAVE_PLAN',
-    'RUN_GOAL_DECISION',
-    'RUN_CONTINUATION_DECISION',
-    'RUN_CONTINUATION_ACTION',
-    'RUN_CONTINUATION_ACTION_SKIPPED',
-    'RUN_VALIDATION_EVIDENCE',
-  ]);
-  const isSemanticType = (type: string) =>
-    semanticTypes.has(type) ||
-    ['SUBAGENT_', 'HANDOFF_', 'PROVIDER_', 'MODEL_', 'CONTINUATION_'].some((prefix) =>
-      type.startsWith(prefix),
-    );
-  return (events ?? [])
-    .filter((event) => isSemanticType(event.type.toUpperCase()))
-    .map((event) => {
-      let detail = event.payloadJson ?? undefined;
-      if (detail) {
-        try {
-          const payload = JSON.parse(detail) as Record<string, unknown>;
-          detail = String(payload.summary ?? payload.reason ?? payload.status ?? detail);
-        } catch {
-          // Preserve opaque historical payloads as bounded detail rather than dropping activity.
-        }
-      }
-      return {
-        id: `persisted:${event.id}`,
-        type: 'system' as const,
-        title: event.type.split('_').join(' '),
-        detail,
-      };
-    });
-}
-
 export default function IdeAgent() {
   const navigate = useNavigate();
   const {projectId, runId} = useParams();
@@ -227,11 +187,11 @@ export default function IdeAgent() {
       if (typeof api.replayAgentEvents === 'function') {
         const replay = await api.replayAgentEvents(sessionId);
         eventCursorRef.current = replay.lastSequence || 0;
-        dispatch({type: 'events:set', events: persistedEventTimeline(replay.events)});
+        dispatch({type: 'events:hydrate', events: replay.events});
       } else if (typeof api.listAgentEvents === 'function') {
         // Compatibility with older servers and reduced test clients.
         const events = (await api.listAgentEvents(sessionId)) ?? [];
-        dispatch({type: 'events:set', events: persistedEventTimeline(events)});
+        dispatch({type: 'events:hydrate', events});
       }
     } catch {
       // Historical event replay is additive; a missing event endpoint must not hide turns.
@@ -468,7 +428,9 @@ export default function IdeAgent() {
             dispatch({
               type: 'stream:event',
               item: {
-                id: `tool:${tool.id || tool.tool}:${Date.now()}`,
+                // The backend replay uses the same tool-call id so a proxy retry cannot
+                // duplicate a frame that was already rendered live.
+                id: `tool:${tool.id || tool.tool}`,
                 type: 'tool',
                 title: tool.tool,
                 detail: tool.args,
@@ -478,7 +440,7 @@ export default function IdeAgent() {
             dispatch({
               type: 'stream:event',
               item: {
-                id: `result:${result.id}:${Date.now()}`,
+                id: `result:${result.id}`,
                 type: 'result',
                 title: 'Tool result',
                 detail: result.result,
@@ -515,7 +477,7 @@ export default function IdeAgent() {
             const replay = await api.replayAgentEvents(activeSessionId, eventCursorRef.current);
             eventCursorRef.current = replay.lastSequence || eventCursorRef.current;
             if (replay.events.length > 0) {
-              dispatch({type: 'events:append', events: persistedEventTimeline(replay.events)});
+              dispatch({type: 'events:hydrate', events: replay.events, append: true});
             }
           }
           await refreshAfterMutation(activeSessionId);

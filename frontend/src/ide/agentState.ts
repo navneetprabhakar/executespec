@@ -30,6 +30,7 @@ export type AgentUsageSummary = {
 
 export type StreamTimelineItem = {
   id: string;
+  streamSequence?: number;
   type: 'route' | 'tool' | 'result' | 'run' | 'usage' | 'system';
   title: string;
   detail?: string;
@@ -94,6 +95,7 @@ export type AgentAction =
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
   | {type: 'events:set'; events: StreamTimelineItem[]}
   | {type: 'events:append'; events: StreamTimelineItem[]}
+  | {type: 'events:hydrate'; events: api.AgentActionEvent[]; append?: boolean}
   | {type: 'gates:set'; gates: api.AgentGateDecisionCard[]}
   | {type: 'managed-ai:set'; balance: api.ManagedAiBalance | null}
   | {type: 'input:set'; input: string}
@@ -173,6 +175,8 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       const appended = action.events.filter((event) => !seen.has(event.id));
       return {...state, streamEvents: [...state.streamEvents, ...appended]};
     }
+    case 'events:hydrate':
+      return hydratePersistedEvents(state, action.events, action.append === true);
     case 'gates:set':
       return {...state, gates: action.gates};
     case 'managed-ai:set':
@@ -289,6 +293,191 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
     default:
       return state;
   }
+}
+
+/**
+ * Replays the semantic events emitted by the POST-SSE agent stream through the same state shape
+ * as live events. This is intentionally reducer-owned: a browser reconnect must restore routing,
+ * proposals, tools, and terminal usage rather than only append opaque activity rows.
+ */
+function hydratePersistedEvents(
+  state: AgentState,
+  events: api.AgentActionEvent[],
+  append: boolean,
+): AgentState {
+  let next = state;
+  if (!append) next = {...state, streamEvents: []};
+  const seenIds = new Set(next.streamEvents.map((item) => item.id));
+  const seenSequences = new Set(
+    next.streamEvents
+      .map((item) => item.streamSequence)
+      .filter((sequence): sequence is number => sequence != null),
+  );
+  for (const event of events ?? []) {
+    const payload = parsePersistedPayload(event.payloadJson);
+    const streamSequence = event.streamSequence ?? undefined;
+    if (streamSequence != null && seenSequences.has(streamSequence)) continue;
+    const type = event.type.toUpperCase();
+    const turnId = event.turnId ?? String(payload.turn_id ?? payload.turnId ?? '');
+    const id = persistedTimelineId(type, event, payload);
+    if (seenIds.has(id)) continue;
+    if (streamSequence != null) seenSequences.add(streamSequence);
+    seenIds.add(id);
+    if (type === 'ROUTE_DECISION') {
+      next = agentReducer(next, {
+        type: 'stream:route',
+        route: {
+          session_id: event.sessionId,
+          turn_id: turnId,
+          route: String(payload.route ?? ''),
+          confidence: numberValue(payload.confidence),
+          reason_code: String(payload.reason_code ?? payload.reasonCode ?? ''),
+          run_api_allowed: Boolean(payload.run_api_allowed ?? payload.runApiAllowed),
+          requires_confirmation: Boolean(
+            payload.requires_confirmation ?? payload.requiresConfirmation,
+          ),
+        },
+      });
+      next = replaceLastTimelineId(next, id, streamSequence);
+    } else if (type === 'PROPOSAL' && payload.action && typeof payload.action === 'object') {
+      next = agentReducer(next, {
+        type: 'stream:proposal',
+        proposal: {
+          session_id: event.sessionId,
+          turn_id: turnId,
+          route: String(payload.route ?? ''),
+          action: payload.action as api.AgentTypedAction,
+        },
+      });
+      next = replaceLastTimelineId(next, id, streamSequence);
+    } else if (type === 'TOOL_CALL') {
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'tool',
+        title: String(payload.tool ?? 'Tool call'),
+        detail: String(payload.args ?? ''),
+      });
+    } else if (type === 'TOOL_RESULT') {
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'result',
+        title: 'Tool result',
+        detail: String(payload.result ?? ''),
+      });
+    } else if (type === 'TURN_TEXT') {
+      next = {...next, streamText: next.streamText + String(payload.text ?? '')};
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'system',
+        title: 'Assistant text recovered',
+        detail: String(payload.text ?? ''),
+      });
+    } else if (type === 'TURN_DONE') {
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'usage',
+        title: 'Usage',
+        detail: `$${numberValue(payload.cost_usd ?? payload.costUsd).toFixed(4)}`,
+      });
+      next = {
+        ...next,
+        status: next.pendingAction ? 'confirmationRequired' : 'idle',
+        pendingUser: '',
+        streamText: '',
+      };
+    } else if (
+      type === 'STREAM_STARTED' ||
+      type === 'STREAM_COMPLETED' ||
+      type === 'STREAM_FAILED'
+    ) {
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'system',
+        title: type.split('_').join(' '),
+        detail: payload.summary ? String(payload.summary) : undefined,
+      });
+    } else if (isPersistedActivityType(type)) {
+      next = appendTimeline(next, {
+        id,
+        streamSequence,
+        type: 'system',
+        title: type.split('_').join(' '),
+        detail: String(
+          payload.summary ?? payload.reason ?? payload.status ?? event.payloadJson ?? '',
+        ),
+      });
+    }
+  }
+  return next;
+}
+
+function isPersistedActivityType(type: string): boolean {
+  return (
+    ['SUBAGENT', 'HANDOFF', 'PROVIDER_SWITCH', 'MODEL_SWITCH', 'CONTINUATION'].includes(type) ||
+    [
+      'SUBAGENT_',
+      'HANDOFF_',
+      'PROVIDER_',
+      'MODEL_',
+      'CONTINUATION_',
+      'RUN_TASK_WAVE_PLAN',
+      'RUN_GOAL_DECISION',
+      'RUN_CONTINUATION_DECISION',
+      'RUN_CONTINUATION_ACTION',
+      'RUN_CONTINUATION_ACTION_SKIPPED',
+      'RUN_VALIDATION_EVIDENCE',
+    ].some((prefix) => type.startsWith(prefix))
+  );
+}
+
+function parsePersistedPayload(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function numberValue(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function persistedTimelineId(
+  type: string,
+  event: api.AgentActionEvent,
+  payload: Record<string, unknown>,
+): string {
+  const turnId = event.turnId ?? String(payload.turn_id ?? payload.turnId ?? '');
+  const itemId = String(payload.id ?? event.id);
+  if (type === 'ROUTE_DECISION') return `route:${turnId}`;
+  if (type === 'PROPOSAL') return `proposal:${turnId}`;
+  if (type === 'TOOL_CALL') return `tool:${itemId}`;
+  if (type === 'TOOL_RESULT') return `result:${itemId}`;
+  if (type === 'TURN_TEXT') return `text:${turnId}`;
+  if (type === 'TURN_DONE') return `usage:${turnId}`;
+  return `persisted:${event.streamSequence ?? event.id}`;
+}
+
+function appendTimeline(state: AgentState, item: StreamTimelineItem): AgentState {
+  if (state.streamEvents.some((existing) => existing.id === item.id)) return state;
+  return {...state, streamEvents: [...state.streamEvents, item]};
+}
+
+function replaceLastTimelineId(state: AgentState, id: string, streamSequence?: number): AgentState {
+  if (state.streamEvents.length === 0) return state;
+  const last = state.streamEvents[state.streamEvents.length - 1];
+  return {
+    ...state,
+    streamEvents: [...state.streamEvents.slice(0, -1), {...last, id, streamSequence}],
+  };
 }
 
 export function sessionTitle(s: api.AgentSessionResponse): string {
