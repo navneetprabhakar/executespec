@@ -128,8 +128,8 @@
       ]
     },
     "migrations": {
-      "count": 262,
-      "head": "V262"
+      "count": 263,
+      "head": "V263"
     },
     "providers": [
       "anthropic",

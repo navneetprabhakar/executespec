@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Production-like V255 to V262 upgrade fixture for removal of active Sarvam routing state. */
+/** Production-like V255 to V263 upgrade fixture for removal of active Sarvam routing state. */
 class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
   @Test
@@ -30,9 +30,9 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
       var result = flyway(dataSource, schema, null).migrate();
 
-      // V256 removes executable Sarvam state; V257-V262 add subsequent routing/task-cost,
+      // V256 removes executable Sarvam state; V257-V263 add subsequent routing/task-cost,
       // default auto-verification, and durable local-hands intent changes.
-      assertThat(result.migrationsExecuted).isEqualTo(7);
+      assertThat(result.migrationsExecuted).isEqualTo(8);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
 
@@ -68,7 +68,9 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
         VALUES
           ('org-upgrade', 'Upgrade Org', 'example.com', 'user-upgrade',
            'anthropic,sarvam,openai',
-           '{"sarvam:PLANNING":"sarvam-105b","anthropic:PLANNING":"claude-sonnet-4-6"}')
+           '{"sarvam:PLANNING":"sarvam-105b","anthropic:PLANNING":"claude-sonnet-4-6"}'),
+          ('org-malformed', 'Malformed Overrides', 'malformed.example.com', 'user-upgrade',
+           'anthropic,sarvam', '{sarvam:PLANNING:sarvam-105b}')
         """);
     jdbc.update(
         """
@@ -207,6 +209,8 @@ VALUES
     assertThat(text(jdbc, "SELECT model_overrides_json FROM org WHERE id='org-upgrade'"))
         .contains("anthropic:PLANNING")
         .doesNotContainIgnoringCase("sarvam");
+    assertThat(text(jdbc, "SELECT model_overrides_json FROM org WHERE id='org-malformed'"))
+        .isNull();
   }
 
   private static void assertHistoricalEvidenceWasPreserved(JdbcTemplate jdbc) {
