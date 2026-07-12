@@ -1,5 +1,5 @@
 -- =====================================================================
--- V226: Seed router.failover.enabled = false (DEFAULT OFF).
+-- V226: Historical seed for router.failover.enabled.
 --
 -- RL-2026-05-062 — closes audit M #68 (the long-standing LlmRouter gap:
 -- a single transient 5xx that survived the same-provider bounded retry
