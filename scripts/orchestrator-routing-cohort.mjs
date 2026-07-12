@@ -29,6 +29,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const EPSILON = 1e-6;
 const MAX_REPORT_ERRORS = 200;
@@ -173,7 +174,7 @@ export function validateCohort(input) {
   return report;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const inputPath = process.argv[2];
   const outputPath = process.argv[3];
   if (!inputPath) {
