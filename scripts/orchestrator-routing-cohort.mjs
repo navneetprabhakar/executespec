@@ -135,7 +135,13 @@ function validateRecord(record, budgets, running, groups, errors) {
     running[provider] = spend.cumulativeUsd;
     const budget = budgets[provider];
     if (budget === undefined) addError(errors, record, `provider budget missing for ${provider}`);
-    else if (spend.cumulativeUsd > budget + EPSILON) addError(errors, record, `provider spend exceeds configured budget for ${provider}`);
+    else {
+      if (spend.cumulativeUsd > budget + EPSILON) addError(errors, record, `provider spend exceeds configured budget for ${provider}`);
+      const expectedRemaining = Math.max(0, budget - spend.cumulativeUsd);
+      if (Math.abs(spend.remainingBudgetUsd - expectedRemaining) > 0.01) {
+        addError(errors, record, `remaining provider budget does not reconcile (expected ${expectedRemaining.toFixed(6)})`);
+      }
+    }
   }
 }
 
@@ -150,6 +156,10 @@ export function validateCohort(input) {
     errors.push({ message: "records must be a non-empty array" });
   }
   const budgets = input.providerBudgetsUsd ?? {};
+  for (const [provider, budget] of Object.entries(budgets)) {
+    const issue = finiteNonNegative(budget, `providerBudgetsUsd.${provider}`);
+    if (issue) errors.push({ message: issue });
+  }
   const running = {};
   const groups = {};
   if (Array.isArray(input.records)) {
