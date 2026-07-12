@@ -303,8 +303,12 @@ public class RemoteToolDispatcher {
     }
     PendingRemoteCall call = s.pending.get(callId);
     if (call != null) {
-      record(call, LocalHandsState.COMPLETED);
-      call.future().complete(resultEnvelopeJson);
+      if (!finish(call, LocalHandsState.COMPLETED, resultEnvelopeJson)) {
+        // Clients are allowed to retry a result when the 204 response was lost.  The
+        // first result is authoritative; do not append another terminal event or let a
+        // racing duplicate change the durable replay state.
+        log.debug("[RemoteTool] duplicate result ignored for callId={} (run {})", callId, runId);
+      }
     } else {
       log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
     }
@@ -316,11 +320,30 @@ public class RemoteToolDispatcher {
     if (session == null) return false;
     PendingRemoteCall call = session.pending.get(callId);
     if (call == null) return false;
-    record(call, LocalHandsState.CLIENT_PROTOCOL_ERROR);
-    return call.future()
-        .complete(
-            errorEnvelope(
-                "CLIENT_PROTOCOL_ERROR", "client returned a malformed tool-result envelope"));
+    return finish(
+        call,
+        LocalHandsState.CLIENT_PROTOCOL_ERROR,
+        errorEnvelope("CLIENT_PROTOCOL_ERROR", "client returned a malformed tool-result envelope"));
+  }
+
+  /**
+   * Accept exactly one terminal result for a pending call.
+   *
+   * <p>The client may retry a result after losing the HTTP response. {@link
+   * CompletableFuture#complete(Object)} is first-writer-wins, but recording the lifecycle event
+   * before that call used to let two racing retries append competing {@code COMPLETED} events. The
+   * synchronized transition keeps the durable evidence and the in-memory waiter aligned. This is
+   * deliberately process-local; a JVM restart still cannot resume the old worker future (the
+   * documented restart boundary).
+   */
+  private boolean finish(PendingRemoteCall call, LocalHandsState state, String resultEnvelope) {
+    synchronized (call) {
+      if (call.future().isDone()) {
+        return false;
+      }
+      record(call, state);
+      return call.future().complete(resultEnvelope);
+    }
   }
 
   private String await(PendingRemoteCall call)

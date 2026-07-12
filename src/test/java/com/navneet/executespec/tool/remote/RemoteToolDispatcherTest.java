@@ -132,6 +132,47 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
+  void duplicateResults_areFirstWriterWins_andPersistOneTerminalTransition() throws Exception {
+    dispatcher.register("r1");
+    CountDownLatch emitted = new CountDownLatch(1);
+    String[] callId = new String[1];
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              callId[0] = om.readTree(event.payload()).path("callId").asText();
+              emitted.countDown();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(emitted.await(2, TimeUnit.SECONDS)).isTrue();
+
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"first\"}");
+      // A retried HTTP response must not append a second terminal event or replace the result.
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"duplicate\"}");
+
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("first");
+      verify(stateService, org.mockito.Mockito.times(1))
+          .record(
+              eq("r1"),
+              eq(callId[0]),
+              eq(LocalHandsState.COMPLETED),
+              eq("t1"),
+              eq("readFile"),
+              eq("read"),
+              any());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void permissionKind_defaultsUnknownToolsToShellForFailClosedClients() throws Exception {
     dispatcher.register("r1");
     doAnswer(
