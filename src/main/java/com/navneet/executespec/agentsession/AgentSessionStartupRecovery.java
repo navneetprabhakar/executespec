@@ -3,6 +3,7 @@ package com.navneet.executespec.agentsession;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.UUID;
 
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
@@ -46,10 +47,13 @@ public class AgentSessionStartupRecovery {
 
   /** Visible for deterministic unit/integration tests and operator recovery checks. */
   int reconcileRunningSessions() {
-    return reconcileStatus(RUNNING) + reconcileStatus(READY);
+    // One boot pass can reconcile both lifecycle states. Keep a shared correlation id so operators
+    // can distinguish one startup sweep from a later JVM sweep when reading the durable events.
+    String recoveryBatchId = UUID.randomUUID().toString();
+    return reconcileStatus(RUNNING, recoveryBatchId) + reconcileStatus(READY, recoveryBatchId);
   }
 
-  private int reconcileStatus(String status) {
+  private int reconcileStatus(String status, String recoveryBatchId) {
     // The agent_session table also stores parent/web conversations.  Only the SUBAGENT surface
     // has READY/RUNNING lifecycle rows that this boot-time reconciler is authorised to cancel.
     List<AgentSession> sessions = sessionRepository.findByStatusAndClientSurface(status, SUBAGENT);
@@ -74,6 +78,10 @@ public class AgentSessionStartupRecovery {
       var payload = new LinkedHashMap<String, Object>();
       payload.put("reason", "SERVER_RESTART");
       payload.put("previousStatus", status);
+      payload.put("clientSurface", SUBAGENT);
+      payload.put("staleAfterSeconds", STALE_AFTER_SECONDS);
+      payload.put("staleTimestampPresent", updatedAt != null);
+      payload.put("recoveryBatchId", recoveryBatchId);
       payload.put("reconciledAt", session.getUpdatedAt().toString());
       eventRecorder.appendAction(
           session.getId(), "startup-recovery:" + session.getId(), "SUBAGENT_RECOVERY", payload);
