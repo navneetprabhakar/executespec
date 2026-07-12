@@ -368,11 +368,12 @@ public class SubagentExecutionService {
     // actual child rather than the probe's (normally null) placeholder.
     Handle handle =
         protocolService.spawnAndRecordCoordinator(request, user.getUser().getId(), orgId);
-    // The coordinator reservation already created and started this exact child. Calling
-    // execute() here would spawn a second child for the same request (and can fail with a 500 when
-    // the parent has no remaining capacity). Execute the reserved handle directly so the
-    // acceptance audit and the model execution refer to one persisted child.
-    return executeReserved(request, handle, user, orgId);
+    // The coordinator reservation already created this exact child. Calling execute() here would
+    // spawn a second child for the same request (and can fail with a 500 when the parent has no
+    // remaining capacity). Start and execute the reserved handle directly so the acceptance audit
+    // and the model execution refer to one persisted child.
+    Handle started = protocolService.start(handle.childSessionId(), user.getUser().getId(), orgId);
+    return executeReserved(request, started, user, orgId);
   }
 
   /** Explicit parent cancellation propagation for an in-flight execution owner. */

@@ -184,6 +184,7 @@ class SubagentExecutionServiceTest {
 
     assertThat(result.summary()).contains("Verified");
     verify(protocol).spawnAndRecordCoordinator(request, "user", "org");
+    verify(protocol).start("child", "user", "org");
     org.mockito.Mockito.verify(protocol, org.mockito.Mockito.never()).spawn(request, "user", "org");
   }
 
