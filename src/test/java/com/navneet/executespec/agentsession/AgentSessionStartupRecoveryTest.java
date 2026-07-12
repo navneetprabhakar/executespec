@@ -48,6 +48,33 @@ class AgentSessionStartupRecoveryTest {
   }
 
   @Test
+  void staleReadyChildrenAreCancelledSoAnUnstartedChildCannotReserveBudgetForever() {
+    AgentSession child =
+        AgentSession.builder()
+            .id("ready-child-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("READY")
+            .updatedAt(Instant.now().minusSeconds(300))
+            .build();
+    when(sessions.findByStatus("READY")).thenReturn(List.of(child));
+    when(sessions.findByIdForUpdate("ready-child-1"))
+        .thenReturn(java.util.Optional.of(child));
+
+    assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
+    assertThat(child.getStatus()).isEqualTo("CANCELLED");
+    verify(sessions).save(child);
+    verify(events)
+        .appendAction(
+            eq("ready-child-1"),
+            eq("startup-recovery:ready-child-1"),
+            eq("SUBAGENT_RECOVERY"),
+            org.mockito.ArgumentMatchers.argThat(
+                payload -> payload.toString().contains("previousStatus=READY")));
+  }
+
+  @Test
   void emptyRunningSetIsAStableNoOp() {
     when(sessions.findByStatus("RUNNING")).thenReturn(List.of());
     assertThat(recovery.reconcileRunningSessions()).isZero();
