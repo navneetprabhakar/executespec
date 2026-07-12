@@ -31,6 +31,7 @@ public class AgentSessionStartupRecovery {
 
   private static final String RUNNING = "RUNNING";
   private static final String READY = "READY";
+  private static final String SUBAGENT = "SUBAGENT";
   private static final String CANCELLED = "CANCELLED";
   private static final long STALE_AFTER_SECONDS = 120;
 
@@ -49,7 +50,9 @@ public class AgentSessionStartupRecovery {
   }
 
   private int reconcileStatus(String status) {
-    List<AgentSession> sessions = sessionRepository.findByStatus(status);
+    // The agent_session table also stores parent/web conversations.  Only the SUBAGENT surface
+    // has READY/RUNNING lifecycle rows that this boot-time reconciler is authorised to cancel.
+    List<AgentSession> sessions = sessionRepository.findByStatusAndClientSurface(status, SUBAGENT);
     if (sessions == null || sessions.isEmpty()) return 0;
     int reconciled = 0;
     Instant staleBefore = Instant.now().minusSeconds(STALE_AFTER_SECONDS);

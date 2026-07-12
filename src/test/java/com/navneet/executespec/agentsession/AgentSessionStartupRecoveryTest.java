@@ -32,7 +32,7 @@ class AgentSessionStartupRecoveryTest {
             .status("RUNNING")
             .updatedAt(Instant.now().minusSeconds(300))
             .build();
-    when(sessions.findByStatus("RUNNING")).thenReturn(List.of(child));
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of(child));
     when(sessions.findByIdForUpdate("child-1")).thenReturn(java.util.Optional.of(child));
 
     assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
@@ -58,7 +58,7 @@ class AgentSessionStartupRecoveryTest {
             .status("READY")
             .updatedAt(Instant.now().minusSeconds(300))
             .build();
-    when(sessions.findByStatus("READY")).thenReturn(List.of(child));
+    when(sessions.findByStatusAndClientSurface("READY", "SUBAGENT")).thenReturn(List.of(child));
     when(sessions.findByIdForUpdate("ready-child-1")).thenReturn(java.util.Optional.of(child));
 
     assertThat(recovery.reconcileRunningSessions()).isEqualTo(1);
@@ -75,7 +75,7 @@ class AgentSessionStartupRecoveryTest {
 
   @Test
   void emptyRunningSetIsAStableNoOp() {
-    when(sessions.findByStatus("RUNNING")).thenReturn(List.of());
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of());
     assertThat(recovery.reconcileRunningSessions()).isZero();
   }
 
@@ -90,7 +90,7 @@ class AgentSessionStartupRecoveryTest {
             .status("RUNNING")
             .updatedAt(Instant.now())
             .build();
-    when(sessions.findByStatus("RUNNING")).thenReturn(List.of(live));
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of(live));
     when(sessions.findByIdForUpdate("live-1")).thenReturn(java.util.Optional.of(live));
 
     assertThat(recovery.reconcileRunningSessions()).isZero();
@@ -124,7 +124,8 @@ class AgentSessionStartupRecoveryTest {
             .status("COMPLETED")
             .updatedAt(Instant.now())
             .build();
-    when(sessions.findByStatus("RUNNING")).thenReturn(List.of(staleSnapshot));
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT"))
+        .thenReturn(List.of(staleSnapshot));
     when(sessions.findByIdForUpdate("peer-1")).thenReturn(java.util.Optional.of(peerState));
 
     assertThat(recovery.reconcileRunningSessions()).isZero();
@@ -135,5 +136,26 @@ class AgentSessionStartupRecoveryTest {
             org.mockito.ArgumentMatchers.any(),
             eq("SUBAGENT_RECOVERY"),
             org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void startupRecoveryNeverCancelsAStaleNonSubagentSession() {
+    AgentSession ordinary =
+        AgentSession.builder()
+            .id("web-running")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("web conversation")
+            .clientSurface("WEB")
+            .status("RUNNING")
+            .updatedAt(Instant.now().minusSeconds(300))
+            .build();
+    // Repository query is surface-scoped; a non-child row must never enter the recovery loop.
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of());
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+    assertThat(ordinary.getStatus()).isEqualTo("RUNNING");
+    verify(sessions, org.mockito.Mockito.never()).findByIdForUpdate("web-running");
+    verify(sessions, org.mockito.Mockito.never()).save(ordinary);
   }
 }

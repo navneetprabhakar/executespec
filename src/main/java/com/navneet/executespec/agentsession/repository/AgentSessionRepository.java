@@ -22,6 +22,13 @@ public interface AgentSessionRepository extends JpaRepository<AgentSession, Stri
 
   List<AgentSession> findByStatus(String status);
 
+  /**
+   * Returns only durable child-agent sessions for startup reconciliation. Parent/web sessions share
+   * the same table and may legitimately use a RUNNING/READY status in future; recovery must never
+   * cancel those rows merely because their status happens to match a child state.
+   */
+  List<AgentSession> findByStatusAndClientSurface(String status, String clientSurface);
+
   List<AgentSession> findByUserIdAndStatusOrderByUpdatedAtDesc(
       String userId, String status, Pageable pageable);
 
