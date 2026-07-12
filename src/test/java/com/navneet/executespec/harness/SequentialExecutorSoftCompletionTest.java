@@ -154,6 +154,13 @@ class SequentialExecutorSoftCompletionTest {
               return Optional.of(rowsByKey.computeIfAbsent(key, k -> new AgentTask()));
             });
     lenient()
+        .when(taskRepo.findByIdForUpdate(anyString()))
+        .thenAnswer(
+            inv -> {
+              String key = inv.getArgument(0);
+              return Optional.of(rowsByKey.computeIfAbsent(key, k -> new AgentTask()));
+            });
+    lenient()
         .when(taskRepo.saveAndFlush(any()))
         .thenAnswer(
             inv -> {
