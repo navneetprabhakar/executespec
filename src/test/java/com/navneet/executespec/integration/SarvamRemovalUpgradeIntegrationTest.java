@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Production-like V255 to V264 upgrade fixture for routing cleanup and local-hands fencing. */
+/** Production-like V255 to V265 upgrade fixture for routing cleanup and local-hands fencing. */
 class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
   @Test
-  void v264ClearsExecutableSarvamStatePreservesHistoryAndDeduplicatesLocalHands() {
+  void v265ClearsExecutableSarvamStatePreservesHistoryAndDeduplicatesLocalHands() {
     String schema = "sarvam_upgrade_" + UUID.randomUUID().toString().replace("-", "");
     String baseUrl = POSTGRES.getJdbcUrl();
     String url =
@@ -30,9 +30,9 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
       var result = flyway(dataSource, schema, null).migrate();
 
-      // V256 removes executable Sarvam state; V257-V264 add subsequent routing/task-cost,
-      // default auto-verification, durable local-hands intent, replay cursor, and result fencing.
-      assertThat(result.migrationsExecuted).isEqualTo(9);
+      // V256 removes executable Sarvam state; V257-V265 add subsequent routing/task-cost,
+      // default auto-verification, durable local-hands intent, replay cursor, and handoff fencing.
+      assertThat(result.migrationsExecuted).isEqualTo(10);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
       assertLocalHandsResultsWereDeduplicated(jdbc);
@@ -176,7 +176,11 @@ VALUES
           ('local-completed-first', 'session-active', 'LOCAL_HANDS_COMPLETED',
            '{"result":"first"}', 'local-action-1'),
           ('local-completed-duplicate', 'session-active', 'LOCAL_HANDS_COMPLETED',
-           '{"result":"duplicate"}', 'local-action-1')
+           '{"result":"duplicate"}', 'local-action-1'),
+          ('local-restarted-first', 'session-active', 'LOCAL_HANDS_WORKER_RESTARTED',
+           '{"state":"WORKER_RESTARTED"}', 'local-action-2'),
+          ('local-restarted-duplicate', 'session-active', 'LOCAL_HANDS_WORKER_RESTARTED',
+           '{"state":"WORKER_RESTARTED"}', 'local-action-2')
         """);
   }
 
@@ -276,6 +280,20 @@ VALUES
                 "SELECT COUNT(*) FROM pg_indexes"
                     + " WHERE schemaname=current_schema()"
                     + " AND indexname='uq_agent_action_event_local_hands_completed'",
+                Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM agent_action_event"
+                    + " WHERE session_id='session-active' AND action_id='local-action-2'"
+                    + " AND type='LOCAL_HANDS_WORKER_RESTARTED'",
+                Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes"
+                    + " WHERE schemaname=current_schema()"
+                    + " AND indexname='uq_agent_action_event_local_hands_worker_restarted'",
                 Integer.class))
         .isEqualTo(1);
   }
