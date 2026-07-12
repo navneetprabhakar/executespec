@@ -29,7 +29,7 @@ Audit findings that change execution order:
 
 1. The approval gate blocks a fixed orchestration pool for up to 24 hours. Non-blocking persisted suspension is P0.
 2. Production routing does not feed its outcomes into the model-performance tracker; the deprecated router records API-call success instead of task quality. Outcome storage precedes adaptive routing.
-3. The model-visible `spawn_subagent` tool does not spawn a model. It must be deleted and replaced by persisted child runs.
+3. The original model-visible `spawn_subagent` stub did not spawn a model and is superseded. The current `spawn_subagent`/`spawn_subagents` callbacks delegate through persisted `SubagentExecutionService` child sessions with eligibility, bounded budgets, and audit events; retain this compatibility surface until an explicit API migration.
 4. Repository search is fast in places but returns flat strings, lacks stable fingerprints and has two inconsistent local implementations.
 5. Web carries roughly 40 protected route concepts. CLI carries four interaction implementations and about 21K lines of renderer-adjacent code. Both require semantic state consolidation before visual redesign.
 6. The docs repository has broken canonical navigation, duplicate reason-log IDs, stale release facts, and legacy TUI documentation presented as current truth.
