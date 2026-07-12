@@ -383,6 +383,25 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
+  void pendingCalls_filtersExpiredLeaseAfterLongReconnect() {
+    LocalHandsStateService.PendingCall stale =
+        new LocalHandsStateService.PendingCall(
+            "call-stale",
+            "r1",
+            "t1",
+            "readFile",
+            "read",
+            "{\"callId\":\"call-stale\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now().minusSeconds(10));
+    when(stateService.pending("r1")).thenReturn(List.of(stale));
+
+    RemoteToolDispatcher restarted = new RemoteToolDispatcher(broadcaster, om, stateService, 1000L);
+
+    assertThat(restarted.pendingCalls("r1")).isEmpty();
+  }
+
+  @Test
   void registerAfterWorkerRestart_closesDurableCallsBeforeNewDispatch() {
     when(stateService.closeForWorkerRestart("r1")).thenReturn(1);
 
