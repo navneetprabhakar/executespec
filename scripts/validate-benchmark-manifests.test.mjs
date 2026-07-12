@@ -77,6 +77,36 @@ test("benchmark validation rejects a missing resolution rate", () => {
   );
 });
 
+test("benchmark validation rejects an unknown status", () => {
+  const manifest = {
+    schemaVersion: 1,
+    status: "NOT_A_BENCHMARK_STATUS",
+    suite: "suite",
+    repository: { sha: null },
+    model: { provider: "deepseek", matrixId: "m", providerSlug: null },
+    prompt: { sha256: null },
+    toolSchema: { sha256: null },
+    harness: { sha256: null },
+    dataset: { name: "d", slice: "s", sha256: null },
+    featureFlags: {},
+    budgets: Object.fromEntries(
+      [
+        "passes",
+        "tasks",
+        "concurrency",
+        "contextTokens",
+        "maxOutputTokens",
+        "iterationLimit",
+        "wallClockLimitSeconds",
+        "costLimitUsd",
+      ].map((key) => [key, 1]),
+    ),
+    results: { resolved: 0, total: 0, resolutionRate: 0 },
+  };
+
+  assert.ok(validateManifest(manifest).some((error) => error.includes("status must be one of")));
+});
+
 test("benchmark validation rejects malformed reproducibility identities", () => {
   const manifest = {
     schemaVersion: 1,
