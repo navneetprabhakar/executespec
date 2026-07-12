@@ -144,7 +144,14 @@ public class ContextStore {
     if (redis != null) {
       try {
         String json = redis.opsForValue().get(keyFor(ctx));
-        if (json != null) return Optional.of(deserialize(json));
+        if (json != null) {
+          Optional<SavedContext> snapshot = deserializeForContext(json, ctx);
+          if (snapshot.isPresent()) return snapshot;
+          log.warn(
+              "ContextStore Redis snapshot identity mismatch run={} task={}; ignoring payload",
+              ctx.runId(),
+              ctx.taskId());
+        }
       } catch (Exception e) {
         log.warn(
             "ContextStore Redis load FAILED run={} task={}: {}",
@@ -298,10 +305,50 @@ public class ContextStore {
     try {
       Path path = diskCheckpointPath(ctx);
       if (!Files.isRegularFile(path)) return Optional.empty();
-      return Optional.of(deserialize(Files.readString(path, StandardCharsets.UTF_8)));
+      Optional<SavedContext> snapshot =
+          deserializeForContext(Files.readString(path, StandardCharsets.UTF_8), ctx);
+      if (snapshot.isEmpty()) {
+        log.warn(
+            "ContextStore disk snapshot identity mismatch run={} task={}; ignoring checkpoint",
+            ctx.runId(),
+            ctx.taskId());
+      }
+      return snapshot;
     } catch (Exception e) {
       log.warn(
           "ContextStore disk load FAILED run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * Parse a persisted snapshot only when its embedded identity matches the key/path being read.
+   *
+   * <p>This is a deliberately fail-closed boundary for restart and provider-handoff recovery: a
+   * copied workspace, stale Redis key, or task-id collision must never feed another run's
+   * conversation into the current worker. The IDs are present in every snapshot written by this
+   * store; an absent/blank identity is therefore treated as invalid rather than as a legacy
+   * wildcard.
+   */
+  private Optional<SavedContext> deserializeForContext(String json, ExecutionContext ctx) {
+    if (json == null || ctx == null) return Optional.empty();
+    try {
+      SavedContext snapshot = deserialize(json);
+      if (!java.util.Objects.equals(ctx.runId(), snapshot.runId())
+          || !java.util.Objects.equals(ctx.taskId(), snapshot.taskId())
+          || snapshot.runId() == null
+          || snapshot.runId().isBlank()
+          || snapshot.taskId() == null
+          || snapshot.taskId().isBlank()) {
+        return Optional.empty();
+      }
+      return Optional.of(snapshot);
+    } catch (Exception e) {
+      log.warn(
+          "ContextStore snapshot parse FAILED run={} task={}: {}",
           ctx.runId(),
           ctx.taskId(),
           e.getMessage());
