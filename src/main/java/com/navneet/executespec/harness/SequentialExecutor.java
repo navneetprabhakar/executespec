@@ -4292,6 +4292,11 @@ to boot — skip it for those.""";
       }
       var t = existing.get();
       t.setStatus(status);
+      // Keep task-level liveness durable for crash recovery.  Run-level heartbeats are refreshed
+      // by the orchestrator scheduler, but a long provider turn or scheduler pause can make that
+      // signal stale while this worker is still progressing.  Every persisted task transition is
+      // an independent progress marker used by RunLifecycleService before takeover.
+      t.setLastActivityAt(java.time.Instant.now());
       // Timestamp live — the Timeline tab needs real per-task start/end to render
       // staggered bars, and the end-of-run applyExecutionResultToTasks only writes
       // completedAt + durationMs. Stamp startedAt when a task first moves to WORKING,

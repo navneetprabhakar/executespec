@@ -50,6 +50,25 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
       @Param("now") Instant now);
 
   /**
+   * Atomically marks a stale in-flight task as owned by a recovery attempt. The task remains
+   * WORKING so the resume executor can reuse its persisted snapshot, while {@code recoveryAttempt}
+   * and {@code lastActivityAt} provide durable evidence that takeover happened. A fresh task (or a
+   * task already made terminal by another worker) cannot be claimed.
+   */
+  @Modifying(clearAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.status = 'WORKING', "
+          + "t.recoveryAttempt = COALESCE(t.recoveryAttempt, 0) + 1, "
+          + "t.lastActivityAt = :now "
+          + "WHERE t.taskId = :taskId AND t.status IN ('WORKING', 'LOCKED') "
+          + "AND (t.lastActivityAt IS NULL OR t.lastActivityAt < :staleBefore)")
+  int claimStaleForRecovery(
+      @Param("taskId") String taskId,
+      @Param("now") Instant now,
+      @Param("staleBefore") Instant staleBefore);
+
+  /**
    * N2 (audit 2026-05-29) — model-comparison feed filtered in the DB, replacing {@code
    * StateStore.computeModelComparison}'s {@code findAll().stream().filter(...)} which loaded the
    * whole agent_task table into heap. Split into all / since-windowed variants (the caller branches
