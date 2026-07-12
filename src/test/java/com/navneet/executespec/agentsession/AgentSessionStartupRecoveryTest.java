@@ -44,12 +44,13 @@ class AgentSessionStartupRecoveryTest {
     assertThat(child.getStatus()).isEqualTo("CANCELLED");
     assertThat(child.getUpdatedAt()).isNotNull();
     verify(sessions).save(child);
+    ArgumentCaptor<String> actionId = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
     verify(events)
         .appendAction(
-            eq("child-1"),
-            eq("startup-recovery:child-1"),
-            eq("SUBAGENT_RECOVERY"),
-            org.mockito.ArgumentMatchers.any());
+            eq("child-1"), actionId.capture(), eq("SUBAGENT_RECOVERY"), payload.capture());
+    assertThat(actionId.getValue()).startsWith("startup-recovery:");
+    assertThat(actionId.getValue()).contains(payload.getValue().get("recoveryBatchId").toString());
   }
 
   @Test
@@ -72,7 +73,8 @@ class AgentSessionStartupRecoveryTest {
     verify(events)
         .appendAction(
             eq("ready-child-1"),
-            eq("startup-recovery:ready-child-1"),
+            org.mockito.ArgumentMatchers.argThat(
+                actionId -> actionId.startsWith("startup-recovery:")),
             eq("SUBAGENT_RECOVERY"),
             org.mockito.ArgumentMatchers.argThat(
                 payload -> payload.toString().contains("previousStatus=READY")));
@@ -185,7 +187,8 @@ class AgentSessionStartupRecoveryTest {
     verify(events)
         .appendAction(
             eq("legacy-child"),
-            eq("startup-recovery:legacy-child"),
+            org.mockito.ArgumentMatchers.argThat(
+                actionId -> actionId.startsWith("startup-recovery:")),
             eq("SUBAGENT_RECOVERY"),
             payload.capture());
     assertThat(payload.getValue())
