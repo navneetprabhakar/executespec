@@ -223,13 +223,10 @@ class AgentSessionReadServiceTest {
   @Test
   void listsBoundedTurnsBeforeCursorWithStoredTraceHydration() throws Exception {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(turnRepo.findBySessionIdOrderBySequenceAsc("s1"))
-        .thenReturn(
-            List.of(
-                turn("t1", 1, "first"),
-                turn("t2", 2, "second"),
-                turn("t3", 3, "third"),
-                turn("t4", 4, "fourth")));
+    when(turnRepo.findById("t4")).thenReturn(Optional.of(turn("t4", 4, "fourth")));
+    when(turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+            eq("s1"), eq(4), any(Pageable.class)))
+        .thenReturn(List.of(turn("t3", 3, "third"), turn("t2", 2, "second")));
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("t2"))
         .thenReturn(List.of(orchestratorDecisionEvent("t2", "PLAN_ONLY")));
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("t3"))

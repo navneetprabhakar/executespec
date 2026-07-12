@@ -1,6 +1,5 @@
 package com.navneet.executespec.agentsession;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,22 +119,23 @@ class AgentSessionReadService {
       String sessionId, String beforeTurnId, int limit, AppUserDetails user) {
     requireSession(sessionId, user);
     int capped = Math.max(1, Math.min(100, limit));
-    List<AgentTurn> turns = new ArrayList<>(turnRepo.findBySessionIdOrderBySequenceAsc(sessionId));
+    List<AgentTurn> turns;
     if (beforeTurnId != null && !beforeTurnId.isBlank()) {
       Integer beforeSequence =
-          turns.stream()
-              .filter(t -> beforeTurnId.equals(t.getId()))
+          turnRepo
+              .findById(beforeTurnId)
+              .filter(turn -> sessionId.equals(turn.getSessionId()))
               .map(AgentTurn::getSequence)
-              .findFirst()
               .orElse(null);
-      if (beforeSequence != null) {
-        turns = turns.stream().filter(t -> t.getSequence() < beforeSequence).toList();
-      }
+      turns =
+          beforeSequence == null
+              ? turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped))
+              : turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+                  sessionId, beforeSequence, PageRequest.of(0, capped));
+    } else {
+      turns = turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped));
     }
-    if (turns.size() > capped) {
-      turns = turns.subList(turns.size() - capped, turns.size());
-    }
-    return turns.stream().map(turnReadModel::toResponse).toList();
+    return turns.reversed().stream().map(turnReadModel::toResponse).toList();
   }
 
   AgentSession requireSession(String sessionId, AppUserDetails user) {
