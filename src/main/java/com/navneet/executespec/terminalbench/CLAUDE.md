@@ -133,12 +133,12 @@ export ES_MAX_ITERS=120
 Current internal TB 2.1 benchmark is a **one-pass, non-submission** matrix: DeepSeek V4 Pro native,
 DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, and GLM 5.2 via OpenRouter. Use
 `infra/benchmark/scripts/run-tb-internal-once-matrix.sh`; it enforces `K=1`, `BRIDGE=on`, and
-`SUBMIT_TB=off`. Gemini, GPT, and Sarvam are intentionally out of scope for this internal pass.
+`SUBMIT_TB=off`. Gemini and GPT are intentionally out of scope for this internal pass.
 
 ## Iteration policy
 
 - Test Terminal-Bench 2.1 internal comparisons with the locked five-model matrix only. Do not add
-  Gemini, GPT, Sarvam, or frontier routes without a fresh explicit benchmark scope.
+  Gemini, GPT, or frontier routes without a fresh explicit benchmark scope.
 - Use small comparable slices first (`es-tb-base20.yaml` before wider sets). Keep job names unique or
   archive the prior `/tmp/es-tb-jobs/<job_name>` directory before rerunning.
 - After every run, inspect failures task-by-task and classify them as prompt, tool protocol,
