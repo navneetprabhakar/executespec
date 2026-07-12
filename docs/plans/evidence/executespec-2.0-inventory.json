@@ -3,10 +3,10 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "cbe8adfb9b6586d98f950aeae40ff5759d94d0dc",
+      "sha": "5b1d62ed9c77dbd539948a6995d3592614084ca0",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2677,
-      "worktreeFingerprint": "67cd145adeed620e8fc84a233f7bfc0e0a3417c0fb3acd71646ea47dbef54cc5"
+      "worktreeFingerprint": "2185e0cec9d18bba6ec0662856f97da1779aa7d00c6a6a1bd225ab685550f6ab"
     },
     "cli": {
       "name": "executespec-cli-1.0",
@@ -17,10 +17,10 @@
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "03592f090ad21b33865f9b62dc6283221901d8d7",
+      "sha": "0d0c5ecf0e05c6b2568dd73ac962c93d4204b4bd",
       "branch": "codex/executespec-2.0-docs",
       "trackedFiles": 768,
-      "worktreeFingerprint": "a4b570369c9cdca90f1cf4774d16e17b8ae90ef3d19e7c70de537019016d4805"
+      "worktreeFingerprint": "05697e59544a737928c6310d0fe08710f4a9bab3bcb8619aa9381d605090e722"
     }
   },
   "backend": {
@@ -361,8 +361,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 767,
-    "markdownFiles": 198,
+    "trackedFiles": 643,
+    "markdownFiles": 196,
     "outputFiles": 418
   }
 }
