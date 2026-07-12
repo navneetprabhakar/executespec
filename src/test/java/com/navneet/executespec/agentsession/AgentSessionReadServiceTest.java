@@ -211,6 +211,20 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void initialSnapshotReportsTruncationWhenHistoryExceedsPage() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc(eq("s1"), any(Pageable.class)))
+        .thenReturn(List.of(AgentActionEvent.builder().id("first").build()));
+    when(eventRepo.countBySessionId("s1")).thenReturn(501L);
+
+    var replay = service.replayEvents("s1", null, user());
+
+    assertThat(replay.snapshot()).isTrue();
+    assertThat(replay.truncated()).isTrue();
+    assertThat(replay.hasMore()).isTrue();
+  }
+
+  @Test
   void replayRejectsStaleRowsAndNeverRegressesCursor() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
     when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))

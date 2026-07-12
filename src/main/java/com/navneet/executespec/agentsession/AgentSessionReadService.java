@@ -101,6 +101,10 @@ class AgentSessionReadService {
         !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
     boolean truncated = false;
     boolean hasMore = false;
+    if (snapshot) {
+      truncated = eventRepo.countBySessionId(sessionId) > LEGACY_SNAPSHOT_PAGE_SIZE;
+      hasMore = truncated;
+    }
     if (legacyEventsOmitted) {
       // A cursor cannot establish a complete ordering across pre-V262 rows. Return an explicit
       // full snapshot instead of letting a client treat an incomplete delta as authoritative.
