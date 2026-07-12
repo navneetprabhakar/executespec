@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { validateManifest } from "./validate-benchmark-manifests.mjs";
+import { validateManifest, validateRepairAttempts } from "./validate-benchmark-manifests.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifests = path.join(root, "infra", "benchmark", "manifests");
@@ -107,4 +107,69 @@ test("benchmark validation rejects malformed reproducibility identities", () => 
   assert.ok(errors.some((error) => error.includes("repository.sha must be null or a lowercase SHA-256")));
   assert.ok(errors.some((error) => error.includes("prompt.sha256 must be null or a lowercase SHA-256")));
   assert.ok(errors.some((error) => error.includes("model.providerSlug must be a lowercase provider slug or null")));
+});
+
+test("repair evidence requires assertion, patch, outcomes, no-op, spend, timing, and route", () => {
+  const valid = {
+    assertion: "failing assertion: expected 2, received 1",
+    patchHash: "a".repeat(64),
+    testOutcome: "PASS",
+    buildOutcome: "PASS",
+    reviewerOutcome: "PASS",
+    noOpClassification: "PATCH_APPLIED",
+    costUsd: 0.012,
+    latencyMs: 1842,
+    provider: "deepseek",
+    model: "deepseek-v4-pro-native",
+  };
+  assert.deepEqual(validateRepairAttempts([valid], "repair.json"), []);
+});
+
+test("repair evidence fails closed on missing or fabricated fields", () => {
+  const errors = validateRepairAttempts(
+    [
+      {
+        assertion: "",
+        patchHash: null,
+        testOutcome: "",
+        buildOutcome: "PASS",
+        reviewerOutcome: "MAYBE",
+        noOpClassification: "UNKNOWN",
+        costUsd: -1,
+        latencyMs: 0,
+        provider: "DeepSeek",
+        model: "",
+      },
+    ],
+    "repair.json",
+  );
+  for (const expected of [
+    "assertion",
+    "patchHash",
+    "testOutcome",
+    "reviewerOutcome",
+    "noOpClassification",
+    "costUsd",
+    "latencyMs",
+    "provider",
+    "model",
+  ]) {
+    assert.ok(errors.some((error) => error.includes(expected)), `missing error for ${expected}`);
+  }
+});
+
+test("repairEvidenceRequired rejects an absent attempt ledger", () => {
+  const manifest = {
+    schemaVersion: 1,
+    status: "EXPLORATORY",
+    suite: "repair",
+    repairEvidenceRequired: true,
+    model: {provider: "deepseek", matrixId: "m", providerSlug: null},
+    budgets: Object.fromEntries([
+      "passes", "tasks", "concurrency", "contextTokens", "maxOutputTokens", "iterationLimit",
+      "wallClockLimitSeconds", "costLimitUsd",
+    ].map((key) => [key, 1])),
+    results: {resolved: 0, total: 0, resolutionRate: 0},
+  };
+  assert.ok(validateManifest(manifest).some((error) => error.includes("repairAttempts is required")));
 });

@@ -9,6 +9,8 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestDir = path.resolve(scriptDir, "../infra/benchmark/manifests");
 const SHA256 = /^[a-f0-9]{64}$/;
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9._:/-]*$/;
+const REPAIR_OUTCOME = /^(?:PASS|FAIL|ERROR|NOT_RUN|UNKNOWN)$/;
+const NO_OP_CLASSIFICATION = /^(?:NO_OP|PATCH_APPLIED|PATCH_REJECTED|PATCH_FAILED)$/;
 const REQUIRED_BUDGETS = [
   "passes",
   "tasks",
@@ -78,6 +80,60 @@ export function validateManifest(manifest, file = "<manifest>") {
       if (manifest.budgets?.[field] === null) add(`budgets.${field} cannot be null for REPRODUCIBLE status`);
     }
   }
+  if (manifest.repairEvidenceRequired === true && !Array.isArray(manifest.repairAttempts)) {
+    add("repairAttempts is required when repairEvidenceRequired is true");
+  }
+  if (manifest.repairAttempts !== undefined) {
+    for (const error of validateRepairAttempts(manifest.repairAttempts, file)) errors.push(error);
+  }
+  return errors;
+}
+
+/**
+ * Validate the per-attempt evidence needed to compare repair quality across providers/models.
+ * This is deliberately fail-closed: an attempt with missing provenance or an unmeasured outcome
+ * cannot silently enter a quality cohort. `patchHash` is required even for NO_OP attempts (the
+ * canonical hash of the empty patch is the caller's responsibility).
+ */
+export function validateRepairAttempts(attempts, file = "<manifest>") {
+  const errors = [];
+  const add = (index, message) => errors.push(`${file}: repairAttempts[${index}] ${message}`);
+  if (!Array.isArray(attempts)) {
+    errors.push(`${file}: repairAttempts must be an array`);
+    return errors;
+  }
+  attempts.forEach((attempt, index) => {
+    if (!attempt || typeof attempt !== "object" || Array.isArray(attempt)) {
+      add(index, "must be an object");
+      return;
+    }
+    if (typeof attempt.assertion !== "string" || !attempt.assertion.trim()) {
+      add(index, "assertion must be a non-empty string");
+    }
+    if (typeof attempt.patchHash !== "string" || !SHA256.test(attempt.patchHash)) {
+      add(index, "patchHash must be a lowercase SHA-256");
+    }
+    for (const field of ["testOutcome", "buildOutcome", "reviewerOutcome"]) {
+      if (typeof attempt[field] !== "string" || !REPAIR_OUTCOME.test(attempt[field])) {
+        add(index, `${field} must be one of PASS, FAIL, ERROR, NOT_RUN, UNKNOWN`);
+      }
+    }
+    if (typeof attempt.noOpClassification !== "string" || !NO_OP_CLASSIFICATION.test(attempt.noOpClassification)) {
+      add(index, "noOpClassification must be NO_OP, PATCH_APPLIED, PATCH_REJECTED, or PATCH_FAILED");
+    }
+    if (typeof attempt.costUsd !== "number" || !Number.isFinite(attempt.costUsd) || attempt.costUsd < 0) {
+      add(index, "costUsd must be a finite number >= 0");
+    }
+    if (typeof attempt.latencyMs !== "number" || !Number.isFinite(attempt.latencyMs) || attempt.latencyMs <= 0) {
+      add(index, "latencyMs must be a finite number > 0");
+    }
+    if (typeof attempt.provider !== "string" || !PROVIDER_SLUG.test(attempt.provider)) {
+      add(index, "provider must be a lowercase provider slug");
+    }
+    if (typeof attempt.model !== "string" || !attempt.model.trim()) {
+      add(index, "model must be a non-empty string");
+    }
+  });
   return errors;
 }
 

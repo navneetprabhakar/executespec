@@ -52,6 +52,37 @@
     "featureFlags": { "type": "object" },
     "budgets": { "type": "object" },
     "results": { "type": "object" },
+    "repairEvidenceRequired": { "type": "boolean" },
+    "repairAttempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "assertion",
+          "patchHash",
+          "testOutcome",
+          "buildOutcome",
+          "reviewerOutcome",
+          "noOpClassification",
+          "costUsd",
+          "latencyMs",
+          "provider",
+          "model"
+        ],
+        "properties": {
+          "assertion": { "type": "string", "minLength": 1 },
+          "patchHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "testOutcome": { "enum": ["PASS", "FAIL", "ERROR", "NOT_RUN", "UNKNOWN"] },
+          "buildOutcome": { "enum": ["PASS", "FAIL", "ERROR", "NOT_RUN", "UNKNOWN"] },
+          "reviewerOutcome": { "enum": ["PASS", "FAIL", "ERROR", "NOT_RUN", "UNKNOWN"] },
+          "noOpClassification": { "enum": ["NO_OP", "PATCH_APPLIED", "PATCH_REJECTED", "PATCH_FAILED"] },
+          "costUsd": { "type": "number", "minimum": 0 },
+          "latencyMs": { "type": "number", "exclusiveMinimum": 0 },
+          "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:/-]*$" },
+          "model": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "limitations": { "type": "array", "items": { "type": "string" } }
   },
   "$defs": {
