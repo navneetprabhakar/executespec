@@ -16,6 +16,8 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
 
   long countBySessionId(String sessionId);
 
+  void deleteBySessionId(String sessionId);
+
   /** Legacy chronological view retained for recovery heuristics. */
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
