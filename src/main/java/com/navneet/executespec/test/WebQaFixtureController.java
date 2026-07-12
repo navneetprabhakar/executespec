@@ -37,12 +37,16 @@ import com.navneet.executespec.testgen.repository.TestResultRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -135,6 +139,59 @@ public class WebQaFixtureController {
     turn.setLinkedRunId(gate.getRunId());
     turnRepository.save(turn);
     return new FixtureResponse(success.getRunId(), failed.getRunId(), gate.getRunId(), sessionId);
+  }
+
+  /**
+   * Advance only a fixture-owned plan-gate row for provider-free screen captures. EXECUTING maps to
+   * the V2 pipeline's persisted WORKING state; no worker, provider, quota, PR, or background job is
+   * started. The endpoint is intentionally local/dev + SUPER_ADMIN only with a strict prefix and
+   * transition order so it cannot mutate customer runs.
+   */
+  @PostMapping("/{runId}/advance")
+  public AdvanceResponse advance(
+      @PathVariable String runId,
+      @RequestBody AdvanceRequest request,
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          AppUserDetails principal) {
+    if (runId == null || !runId.startsWith(PREFIX)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "fixture run not found");
+    }
+    String requested = request == null || request.status() == null ? "" : request.status().trim();
+    if (!List.of("EXECUTING", "COMPLETE").contains(requested)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "status must be EXECUTING or COMPLETE");
+    }
+    PipelineRun run =
+        runRepository
+            .findById(runId)
+            .filter(candidate -> runId.equals(candidate.getRunId()))
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "fixture run not found"));
+    if (!java.util.Objects.equals(run.getCreatedByUserId(), principal.getUser().getId())) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "fixture run not found");
+    }
+    String current = run.getStatus();
+    if ("EXECUTING".equals(requested) && !"AWAITING_APPROVAL".equals(current)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "fixture run is not awaiting approval");
+    }
+    if ("COMPLETE".equals(requested) && !"WORKING".equals(current)) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "fixture run is not executing");
+    }
+    if ("EXECUTING".equals(requested)) {
+      run.setStatus("WORKING");
+      run.setCurrentGate(null);
+      run.setCompletedAt(null);
+      run.setStatusReason("CLEAN_COMPLETION");
+    } else {
+      run.setStatus("COMPLETE");
+      run.setCompletedAt(Instant.now());
+      run.setStatusReason("CLEAN_COMPLETION");
+    }
+    runRepository.save(run);
+    sseBroadcaster.emit(runId, RunEvent.runStatus(runId, run.getStatus()));
+    sseBroadcaster.emit(runId, RunEvent.log(runId, null, "fixture advanced to " + requested));
+    return new AdvanceResponse(runId, requested, run.getStatus(), run.getStatusReason());
   }
 
   @DeleteMapping
@@ -307,4 +364,9 @@ public class WebQaFixtureController {
 
   public record FixtureResponse(
       String successRunId, String failedRunId, String gateRunId, String agentSessionId) {}
+
+  public record AdvanceRequest(String status) {}
+
+  public record AdvanceResponse(
+      String runId, String requestedStatus, String persistedStatus, String statusReason) {}
 }

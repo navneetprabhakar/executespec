@@ -1,6 +1,7 @@
 package com.navneet.executespec.test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 import java.util.List;
@@ -31,7 +32,12 @@ class WebQaFixtureControllerTest {
     AgentSession session = AgentSession.builder().id("web-qa-session").build();
     AgentSessionRepository sessions = mock(AgentSessionRepository.class);
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
-    PipelineRun run = PipelineRun.builder().runId("web-qa-run").build();
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("web-qa-run")
+            .createdByUserId("user-1")
+            .status("AWAITING_APPROVAL")
+            .build();
     AgentTaskRepository tasks = mock(AgentTaskRepository.class);
     when(tasks.findByRunId("web-qa-run")).thenReturn(List.of());
     ValidationReportRepository reports = mock(ValidationReportRepository.class);
@@ -73,5 +79,82 @@ class WebQaFixtureControllerTest {
     verify(events).deleteBySessionId("web-qa-session");
     verify(turns).deleteBySessionId("web-qa-session");
     verify(sessions).delete(session);
+  }
+
+  @Test
+  void advanceFixtureTransitionsGateToExecutingThenCompleteWithoutProviderWork() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("web-qa-gate")
+            .createdByUserId("user-1")
+            .status("AWAITING_APPROVAL")
+            .build();
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    when(runs.findById("web-qa-gate")).thenReturn(java.util.Optional.of(run));
+    WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class));
+    AppUserDetails user = user();
+
+    assertThat(
+            controller.advance(
+                "web-qa-gate", new WebQaFixtureController.AdvanceRequest("EXECUTING"), user))
+        .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
+        .isEqualTo("WORKING");
+    assertThat(
+            controller.advance(
+                "web-qa-gate", new WebQaFixtureController.AdvanceRequest("COMPLETE"), user))
+        .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
+        .isEqualTo("COMPLETE");
+    verify(runs, times(2)).save(run);
+  }
+
+  @Test
+  void advanceRejectsNonFixtureAndInvalidTransition() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("web-qa-gate")
+            .createdByUserId("user-1")
+            .status("AWAITING_APPROVAL")
+            .build();
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    when(runs.findById("web-qa-gate")).thenReturn(java.util.Optional.of(run));
+    WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class));
+    AppUserDetails user = user();
+    assertThatThrownBy(
+            () ->
+                controller.advance(
+                    "real-run", new WebQaFixtureController.AdvanceRequest("EXECUTING"), user))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    assertThatThrownBy(
+            () ->
+                controller.advance(
+                    "web-qa-gate", new WebQaFixtureController.AdvanceRequest("COMPLETE"), user))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+  }
+
+  private static AppUserDetails user() {
+    return new AppUserDetails(
+        AppUser.builder()
+            .id("user-1")
+            .email("admin@example.com")
+            .globalRole("SUPER_ADMIN")
+            .orgId("org-1")
+            .status("ACTIVE")
+            .build(),
+        null);
+  }
+
+  private static WebQaFixtureController controller(
+      PipelineRunRepository runs, AgentSessionRepository sessions) {
+    return new WebQaFixtureController(
+        runs,
+        mock(AgentTaskRepository.class),
+        mock(ValidationReportRepository.class),
+        mock(TestPlanRepository.class),
+        mock(TestTaskRepository.class),
+        mock(TestResultRepository.class),
+        sessions,
+        mock(AgentTurnRepository.class),
+        mock(AgentActionEventRepository.class),
+        mock(SseBroadcaster.class));
   }
 }
