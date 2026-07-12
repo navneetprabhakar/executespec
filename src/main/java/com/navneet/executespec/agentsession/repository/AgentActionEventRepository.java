@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AgentActionEventRepository extends JpaRepository<AgentActionEvent, String> {
@@ -12,6 +13,9 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
 
   /** Legacy chronological view retained for recovery heuristics. */
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
+
+  /** Bounded compatibility history page for clients that do not use cursor replay yet. */
+  List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId, Pageable pageable);
 
   /**
    * Loads only the local-hands lifecycle events needed to reconstruct pending tool calls.

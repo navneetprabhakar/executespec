@@ -115,12 +115,15 @@ class AgentSessionReadServiceTest {
   @Test
   void listsEventsAfterSessionOwnershipCheck() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("s1"))
+    when(eventRepo.findBySessionIdOrderByCreatedAtAsc(eq("s1"), any(Pageable.class)))
         .thenReturn(List.of(AgentActionEvent.builder().id("evt-1").sessionId("s1").build()));
 
     var events = service.listEvents("s1", user());
 
     assertThat(events).extracting("id").containsExactly("evt-1");
+    var page = ArgumentCaptor.forClass(Pageable.class);
+    verify(eventRepo).findBySessionIdOrderByCreatedAtAsc(eq("s1"), page.capture());
+    assertThat(page.getValue().getPageSize()).isEqualTo(500);
   }
 
   @Test

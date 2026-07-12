@@ -54,9 +54,14 @@ class AgentSessionReadService {
   }
 
   List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
+    return listEvents(sessionId, 500, user);
+  }
+
+  List<AgentActionEvent> listEvents(String sessionId, int limit, AppUserDetails user) {
     requireSession(sessionId, user);
+    int capped = Math.max(1, Math.min(500, limit));
     // Compatibility route remains chronological; new clients use /events/replay for cursors.
-    return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId);
+    return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId, PageRequest.of(0, capped));
   }
 
   AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
