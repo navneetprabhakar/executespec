@@ -38,6 +38,11 @@ public final class RunJournalStore {
 
   /** Load the bounded journal from a run workspace. */
   public static List<String> load(Path workspace) {
+    return load(workspace, null);
+  }
+
+  /** Load only when the durable envelope belongs to the expected run (fail-closed on mismatch). */
+  public static List<String> load(Path workspace, String expectedRunId) {
     if (workspace == null) return List.of();
     try {
       Path path = path(workspace);
@@ -53,6 +58,11 @@ public final class RunJournalStore {
       if (!root.isObject() || root.path("schemaVersion").asInt(-1) != SCHEMA_VERSION) {
         return List.of();
       }
+      if (expectedRunId != null
+          && !expectedRunId.isBlank()
+          && !expectedRunId.equals(root.path("runId").asText())) {
+        return List.of();
+      }
       JsonNode entries = root.path("entries");
       if (!entries.isArray()) return List.of();
       return sanitize(MAPPER.convertValue(entries, STRING_LIST));
@@ -63,6 +73,11 @@ public final class RunJournalStore {
 
   /** Replace the durable journal with the current bounded in-memory state. */
   public static void save(Path workspace, List<String> entries) {
+    save(workspace, entries, null);
+  }
+
+  /** Persist the bounded journal with the run identity used for restart validation. */
+  public static void save(Path workspace, List<String> entries, String runId) {
     if (workspace == null) return;
     Path target = path(workspace);
     Path temp = target.resolveSibling(target.getFileName() + ".tmp");
@@ -72,6 +87,7 @@ public final class RunJournalStore {
       ObjectNode envelope = MAPPER.createObjectNode();
       envelope.put("schemaVersion", SCHEMA_VERSION);
       envelope.put("updatedAt", Instant.now().toString());
+      if (runId != null && !runId.isBlank()) envelope.put("runId", runId);
       ArrayNode journalEntries = envelope.putArray("entries");
       bounded.forEach(journalEntries::add);
       Files.writeString(

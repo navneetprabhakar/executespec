@@ -649,7 +649,8 @@ to boot — skip it for those.""";
       // provider transcript or treating the journal as authoritative task state.
       java.nio.file.Path journalWorkspace = req.runContext().workspaceRoot();
       List<String> runJournal =
-          new ArrayList<>(com.navneet.executespec.context.RunJournalStore.load(journalWorkspace));
+          new ArrayList<>(
+              com.navneet.executespec.context.RunJournalStore.load(journalWorkspace, runId));
       for (int i = 0; i < taskCount; i++) {
         // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
         // calls {@code future.cancel(true)} which interrupts THIS thread, but
@@ -719,7 +720,7 @@ to boot — skip it for those.""";
         String journalEntry = journalEntry(task, outcome);
         runJournal.removeIf(existing -> existing.startsWith(task.id() + " ("));
         runJournal.add(journalEntry);
-        com.navneet.executespec.context.RunJournalStore.save(journalWorkspace, runJournal);
+        com.navneet.executespec.context.RunJournalStore.save(journalWorkspace, runJournal, runId);
         metrics.recordTaskStatus(outcome.status().name());
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
