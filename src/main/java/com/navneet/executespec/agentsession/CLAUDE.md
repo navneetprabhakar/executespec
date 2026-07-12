@@ -97,7 +97,8 @@ turns separately from runs.
 - Child agents use the bounded `subagent/SubagentProtocolService` seam. A child is a persisted
   `agent_session` with parent/depth/role/turn-budget/cost-budget metadata in append-only
   `agent_action_event` rows. Executors must call `authorizeNextTurn` before every child turn;
-  verifier completion requires cited evidence. Each admitted child turn refreshes the session
+  `start` must explicitly claim a READY child before execution, and completion is accepted only
+  from RUNNING; verifier completion requires cited evidence. Each admitted child turn refreshes the session
   heartbeat in the admission transaction, so a long-running model call is not mistaken for a stale
   child by startup recovery. Spawn also reserves against the complete descendant
   tree (48 turns / $8 requested-cost ceiling rooted at one parent), so nested fan-out cannot

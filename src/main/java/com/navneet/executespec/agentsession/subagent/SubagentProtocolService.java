@@ -471,7 +471,7 @@ public class SubagentProtocolService {
       String childSessionId, Completion completion, String actorUserId, String actorOrgId) {
     AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
     ChildMetadata metadata = metadataOf(childSessionId);
-    requireActiveChild(child);
+    requireRunningChild(child);
     if (completion == null || completion.summary() == null || completion.summary().isBlank()) {
       throw new IllegalArgumentException("completion summary is required");
     }
@@ -723,9 +723,10 @@ public class SubagentProtocolService {
     }
   }
 
-  private static void requireActiveChild(AgentSession child) {
-    if (!List.of("READY", "RUNNING").contains(child.getStatus())) {
-      throw new IllegalStateException("Subagent is already terminal: " + child.getStatus());
+  private static void requireRunningChild(AgentSession child) {
+    if (!"RUNNING".equals(child.getStatus())) {
+      throw new IllegalStateException(
+          "Subagent must be started before completion (status=" + child.getStatus() + ")");
     }
   }
 
