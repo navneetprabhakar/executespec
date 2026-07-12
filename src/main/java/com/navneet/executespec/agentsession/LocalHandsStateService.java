@@ -246,9 +246,7 @@ public class LocalHandsStateService {
             continue;
           }
           PendingCall previous = latest.get(event.getActionId());
-          if (previous == null
-              || previous.updatedAt() == null
-              || (call.updatedAt() != null && call.updatedAt().isAfter(previous.updatedAt()))) {
+          if (isAfter(call, previous)) {
             latest.put(event.getActionId(), call);
           }
         }
@@ -304,9 +302,7 @@ public class LocalHandsStateService {
         if (!callId.equals(event.getActionId())) continue;
         PendingCall call = from(event);
         if (call == null || call.state() != expectedState) continue;
-        if (latest == null
-            || latest.updatedAt() == null
-            || (call.updatedAt() != null && call.updatedAt().isAfter(latest.updatedAt()))) {
+        if (isAfter(call, latest)) {
           latest = call;
         }
       }
@@ -327,7 +323,8 @@ public class LocalHandsStateService {
           text(payload, "permissionKind"),
           frame == null || frame.isNull() ? "{}" : frame.toString(),
           state,
-          event.getCreatedAt());
+          event.getCreatedAt(),
+          event.getStreamSequence());
     } catch (Exception ex) {
       log.debug("[LocalHands] ignoring malformed persisted event {}", event.getId());
       return null;
@@ -364,5 +361,36 @@ public class LocalHandsStateService {
       String permissionKind,
       String frameJson,
       LocalHandsState state,
-      Instant updatedAt) {}
+      Instant updatedAt,
+      Long streamSequence) {
+
+    /** Compatibility constructor for callers that only have timestamp-based evidence. */
+    public PendingCall(
+        String callId,
+        String runId,
+        String taskId,
+        String toolName,
+        String permissionKind,
+        String frameJson,
+        LocalHandsState state,
+        Instant updatedAt) {
+      this(callId, runId, taskId, toolName, permissionKind, frameJson, state, updatedAt, null);
+    }
+  }
+
+  /**
+   * Prefer the database cursor when available. Timestamp-only ordering is not deterministic when
+   * two JVMs append transitions within the same clock tick, which can resurrect a completed tool
+   * call on reconnect. Older rows/tests have no cursor and retain the timestamp fallback.
+   */
+  private static boolean isAfter(PendingCall candidate, PendingCall previous) {
+    if (previous == null) return true;
+    if (candidate.streamSequence() != null && previous.streamSequence() != null) {
+      return candidate.streamSequence() > previous.streamSequence();
+    }
+    if (candidate.streamSequence() != null) return true;
+    if (previous.streamSequence() != null) return false;
+    if (candidate.updatedAt() == null) return false;
+    return previous.updatedAt() == null || candidate.updatedAt().isAfter(previous.updatedAt());
+  }
 }

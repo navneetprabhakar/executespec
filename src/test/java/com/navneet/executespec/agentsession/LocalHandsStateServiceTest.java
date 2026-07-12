@@ -93,6 +93,18 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void pending_prefersDatabaseCursorWhenTransitionsShareClockTimestamp() {
+    Instant sameTimestamp = Instant.parse("2026-07-10T00:00:00Z");
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                event("call-1", LocalHandsState.AWAITING_CLIENT, sameTimestamp, 101L),
+                event("call-1", LocalHandsState.COMPLETED, sameTimestamp, 102L)));
+
+    assertThat(service.pending("run-1")).isEmpty();
+  }
+
+  @Test
   void pending_reconstructsFromDurableEventsAfterStateServiceRecreation() {
     when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
         .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
@@ -198,6 +210,11 @@ class LocalHandsStateServiceTest {
   }
 
   private AgentActionEvent event(String callId, LocalHandsState state, Instant createdAt) {
+    return event(callId, state, createdAt, null);
+  }
+
+  private AgentActionEvent event(
+      String callId, LocalHandsState state, Instant createdAt, Long streamSequence) {
     String payload =
         "{\"state\":\""
             + state.name()
@@ -214,6 +231,7 @@ class LocalHandsStateServiceTest {
         .type("LOCAL_HANDS_" + state.name())
         .payloadJson(payload)
         .createdAt(createdAt)
+        .streamSequence(streamSequence)
         .build();
   }
 }
