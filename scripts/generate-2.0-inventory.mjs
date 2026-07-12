@@ -27,6 +27,9 @@ function sourceFiles(repo) {
     .split("\n")
     .filter(Boolean)
     .filter((file) => !file.endsWith("docs/plans/evidence/executespec-2.0-inventory.json"))
+    // Release-evidence manifests and copied captures are independently hash-sealed. Including
+    // them here creates a cross-repository fingerprint churn every time provenance is rebound.
+    .filter((file) => !file.startsWith("release-evidence/"))
     // This manifest carries the backend commit SHA used to capture the visual evidence.
     // Including it in the docs tree fingerprint would create a commit-hash cycle between
     // the backend inventory and the docs evidence manifest.
