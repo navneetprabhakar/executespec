@@ -200,6 +200,9 @@ turns separately from runs.
 - `V262__agent_event_replay_cursor.sql` adds a durable database-assigned `stream_sequence` cursor
   and replay index. `/events` remains the compatibility list; `/events/replay?after=` returns a
   cursor envelope for stream interruption and visibility-resume backfill.
+- `V265__dedupe_local_hands_restart_events.sql` deduplicates historical
+  `LOCAL_HANDS_WORKER_RESTARTED` transitions and adds a partial first-writer-wins index, so two
+  JVMs observing the same stale worker cannot publish competing restart handoff records.
 
 ## Tests
 
