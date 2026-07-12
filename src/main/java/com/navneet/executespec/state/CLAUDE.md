@@ -67,6 +67,11 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 
 ## Patterns
 - StateStore is the single source of truth — no direct repository access from agents
+- Crash recovery uses two durable liveness fences: `pipeline_run.execution_heartbeat` is claimed
+  atomically at run level, and `agent_task.last_activity_at` is refreshed on each persisted task
+  transition. `RunLifecycleService` refuses takeover when a WORKING/LOCKED task is fresh and
+  atomically increments `recovery_attempt` for stale tasks before queueing a resumed executor;
+  this is bounded stale-task fencing, not proof of full cross-JVM worker replay.
 - Task compaction recorded via `recordCompaction()` (emits SSE event)
 - Token usage tracked per run via atomic `addTokens()` SQL update (no read-modify-write race)
 - Quota enforcement: `TierEnforcementService.assertAndIncrementRunCount(userId, credits)` uses pessimistic lock + single TX (TOCTOU fix). Multi-credit support: increments by N at plan approval (not submission). Refunds via `decrementRunCount(userId, credits)` on FAILURE.

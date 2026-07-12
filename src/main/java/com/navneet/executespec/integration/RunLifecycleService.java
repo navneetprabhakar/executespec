@@ -36,6 +36,7 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -71,6 +72,10 @@ public class RunLifecycleService {
 
   /** A heartbeat newer than this means another JVM still owns the run. */
   private static final java.time.Duration CRASH_RECOVERY_HEARTBEAT_STALE_AFTER =
+      java.time.Duration.ofMinutes(2);
+
+  /** Task-level freshness window used to fence a worker that is still making progress. */
+  private static final java.time.Duration CRASH_RECOVERY_TASK_STALE_AFTER =
       java.time.Duration.ofMinutes(2);
 
   /** Stable, non-secret owner label persisted with a recovery claim for operator diagnostics. */
@@ -548,6 +553,18 @@ public class RunLifecycleService {
       return RunOrchestrator.CrashResumeOutcome.EXHAUSTED;
     }
 
+    // A run heartbeat can be stale while an individual task is still making progress (for
+    // example during a scheduler pause or a long provider turn).  Do not let boot recovery queue a
+    // second executor in that case.  The task timestamp is refreshed at every durable task-status
+    // write and is therefore a useful, independent signal from the run-level lease.
+    Instant taskCutoff = Instant.now().minus(CRASH_RECOVERY_TASK_STALE_AFTER);
+    if (hasFreshActiveTask(runId, taskCutoff)) {
+      log.info(
+          "resumeAfterCrash run={} has a fresh WORKING/LOCKED task; leaving live worker untouched",
+          runId);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+
     // Claim before touching the workspace or submitting to the pool. Startup recovery may run
     // concurrently on two JVMs during a rolling restart; only the caller that advances the
     // durable attempt counter may proceed. A recent heartbeat means the original worker is still
@@ -576,6 +593,17 @@ public class RunLifecycleService {
     run.setResumedAt(claimAt);
     run.setExecutingInstance(RECOVERY_INSTANCE_ID);
     run.setExecutionHeartbeat(claimAt);
+
+    // Fence each stale in-flight task before submitting the resumed pipeline.  This is deliberately
+    // fail-closed: if another worker changed the row between the read above and this CAS, do not
+    // queue a duplicate recovery attempt.  The run claim remains durable and the next scanner can
+    // reconcile it using the normal heartbeat/attempt cap.
+    if (!claimStaleActiveTasks(runId, claimAt, taskCutoff)) {
+      log.info(
+          "resumeAfterCrash run={} task-level recovery claim lost; not queueing duplicate work",
+          runId);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
 
     // Workspace must be on this node. Cross-node resume needs GCS shipping (chunk #3 of the
     // pause/resume design — same constraint as the existing PAUSED resume path).
@@ -681,6 +709,24 @@ public class RunLifecycleService {
             });
     controlPort.putActiveRun(runId, future);
     return RunOrchestrator.CrashResumeOutcome.OK;
+  }
+
+  private boolean hasFreshActiveTask(String runId, Instant staleBefore) {
+    if (taskRepo == null) return false; // compatibility constructors used by focused unit tests
+    return taskRepo.findByRunIdAndStatusIn(runId, List.of("WORKING", "LOCKED")).stream()
+        .anyMatch(
+            task ->
+                task.getLastActivityAt() != null && task.getLastActivityAt().isAfter(staleBefore));
+  }
+
+  private boolean claimStaleActiveTasks(String runId, Instant now, Instant staleBefore) {
+    if (taskRepo == null) return true; // compatibility constructors used by focused unit tests
+    for (AgentTask task : taskRepo.findByRunIdAndStatusIn(runId, List.of("WORKING", "LOCKED"))) {
+      if (taskRepo.claimStaleForRecovery(task.getTaskId(), now, staleBefore) != 1) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static String recoveryInstanceId() {

@@ -11,9 +11,14 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
@@ -21,6 +26,104 @@ import org.mockito.Mockito;
 
 /** Regression coverage for the rolling-restart crash-recovery ownership claim. */
 class RunLifecycleServiceCrashClaimTest {
+
+  @Test
+  void freshTaskActivityFencesRecoveryBeforeRunLevelClaim() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("fresh-task-owner")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(0)
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("fresh-task-owner_T1")
+            .runId(run.getRunId())
+            .status("WORKING")
+            .lastActivityAt(Instant.now())
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(taskRepo.findByRunIdAndStatusIn(run.getRunId(), List.of("WORKING", "LOCKED")))
+        .thenReturn(List.of(task));
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo, taskRepo, null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null, null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE);
+    verify(runRepo, never())
+        .claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
+    verify(taskRepo, never()).claimStaleForRecovery(anyString(), any(), any());
+  }
+
+  @Test
+  void staleTaskIsAtomicallyMarkedForRecoveryBeforePlanValidation() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("stale-task-owner")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(0)
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("stale-task-owner_T1")
+            .runId(run.getRunId())
+            .status("WORKING")
+            .lastActivityAt(Instant.now().minus(Duration.ofMinutes(10)))
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
+        .thenReturn(1);
+    when(taskRepo.findByRunIdAndStatusIn(run.getRunId(), List.of("WORKING", "LOCKED")))
+        .thenReturn(List.of(task));
+    when(taskRepo.claimStaleForRecovery(anyString(), any(), any())).thenReturn(1);
+    com.navneet.executespec.config.AgentProperties agentProperties =
+        mock(com.navneet.executespec.config.AgentProperties.class);
+    try {
+      Path workspace = Files.createTempDirectory("executespec-stale-task-");
+      Files.createDirectories(workspace.resolve(run.getRunId()));
+      when(agentProperties.getWorkspace()).thenReturn(workspace.toString());
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo,
+            taskRepo,
+            null,
+            null,
+            null,
+            controlPort,
+            agentProperties,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.PLAN_MISSING);
+    verify(taskRepo).claimStaleForRecovery(anyString(), any(), any());
+    verify(controlPort).terminate(run.getRunId(), "FAILED", "plan missing on resume", null);
+  }
 
   @Test
   void aLostRecoveryClaimDoesNotTouchWorkspaceOrQueueAnotherPipeline() {
