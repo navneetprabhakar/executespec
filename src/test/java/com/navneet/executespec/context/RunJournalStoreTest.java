@@ -29,6 +29,38 @@ class RunJournalStoreTest {
   }
 
   @Test
+  void writesVersionedEnvelopeWithTimestampAndEntries() throws Exception {
+    RunJournalStore.save(workspace, List.of("task-1 -> COMPLETE"));
+
+    var root =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(Files.readString(RunJournalStore.path(workspace)));
+
+    assertThat(root.path("schemaVersion").asInt()).isEqualTo(RunJournalStore.SCHEMA_VERSION);
+    assertThat(root.path("updatedAt").asText()).isNotBlank();
+    assertThat(root.path("entries")).hasSize(1);
+    assertThat(root.path("entries").get(0).asText()).isEqualTo("task-1 -> COMPLETE");
+  }
+
+  @Test
+  void readsLegacyBareArrayForWorkspaceUpgrade() throws Exception {
+    Path path = RunJournalStore.path(workspace);
+    Files.createDirectories(path.getParent());
+    Files.writeString(path, "[\"legacy task\"]");
+
+    assertThat(RunJournalStore.load(workspace)).containsExactly("legacy task");
+  }
+
+  @Test
+  void rejectsUnknownEnvelopeSchemaInsteadOfTreatingItAsJournal() throws Exception {
+    Path path = RunJournalStore.path(workspace);
+    Files.createDirectories(path.getParent());
+    Files.writeString(path, "{\"schemaVersion\":99,\"entries\":[\"stale\"]}");
+
+    assertThat(RunJournalStore.load(workspace)).isEmpty();
+  }
+
+  @Test
   void malformedJournalFailsClosed() throws Exception {
     Path path = RunJournalStore.path(workspace);
     Files.createDirectories(path.getParent());
