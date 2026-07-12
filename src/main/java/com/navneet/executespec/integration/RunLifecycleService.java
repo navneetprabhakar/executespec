@@ -26,6 +26,7 @@ import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.recovery.RecoveryCheckpointLease;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
@@ -636,6 +637,18 @@ public class RunLifecycleService {
         controlPort.terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
         return RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
       }
+    }
+
+    RecoveryCheckpointLease.AcquireResult checkpointLease =
+        RecoveryCheckpointLease.acquire(
+            workspace, runId, RECOVERY_INSTANCE_ID, run.getPlanJson(), claimAt);
+    if (!checkpointLease.acquired()) {
+      log.warn(
+          "resumeAfterCrash run={} checkpoint lease refused reason={}; not queueing takeover",
+          runId,
+          checkpointLease.reason());
+      emitRecoveryEvidence(runId, "CHECKPOINT_LEASE_" + checkpointLease.reason(), "REFUSED", 0);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
     }
 
     // PLANNING crash → just re-run the planner (cheap) by calling the standard runPipeline.
