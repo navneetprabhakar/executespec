@@ -92,6 +92,19 @@ class AgentSessionReadService {
     boolean snapshot = after == null || after < 0;
     boolean legacyEventsOmitted =
         !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
+    if (legacyEventsOmitted) {
+      // A cursor cannot establish a complete ordering across pre-V262 rows. Return an explicit
+      // full snapshot instead of letting a client treat an incomplete delta as authoritative.
+      events = eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId);
+      snapshot = true;
+      legacyEventsOmitted = false;
+      last = 0;
+      for (AgentActionEvent event : events) {
+        if (event.getStreamSequence() != null) {
+          last = Math.max(last, event.getStreamSequence());
+        }
+      }
+    }
     return new AgentEventReplayResponse(
         events,
         last,
