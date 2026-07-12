@@ -56,6 +56,9 @@ class AgentStreamTurnLifecycleTest {
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("STREAM_COMPLETED");
     assertThat(event.getValue().getPayloadJson()).contains("\"costUsd\":0.012");
+    assertThat(event.getValue().getPayloadJson()).contains("\"provider\":\"DEEPSEEK\"");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"model\":\"deepseek-v4-flash-native\"");
   }
 
   @Test

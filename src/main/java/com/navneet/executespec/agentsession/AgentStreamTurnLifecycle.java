@@ -1,6 +1,7 @@
 package com.navneet.executespec.agentsession;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -60,7 +61,15 @@ class AgentStreamTurnLifecycle {
             .createdAt(Instant.now())
             .build());
 
-    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_COMPLETED", cost);
+    Map<String, Object> completionEvidence = new LinkedHashMap<>();
+    completionEvidence.put("provider", ctx.provider());
+    completionEvidence.put("model", ctx.model());
+    completionEvidence.put("inputTokens", cost == null ? 0 : cost.inputTokens());
+    completionEvidence.put("outputTokens", cost == null ? 0 : cost.outputTokens());
+    completionEvidence.put("reasoningTokens", cost == null ? 0 : cost.reasoningTokens());
+    completionEvidence.put("cacheReadTokens", cost == null ? 0 : cost.cacheReadTokens());
+    completionEvidence.put("costUsd", cost == null ? 0.0 : cost.costUsd());
+    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_COMPLETED", completionEvidence);
   }
 
   void fail(AgentSessionService.StreamTurnContext ctx, String message) {

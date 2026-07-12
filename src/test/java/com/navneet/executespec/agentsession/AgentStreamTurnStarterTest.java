@@ -107,6 +107,8 @@ class AgentStreamTurnStarterTest {
     assertThat(event.getValue().getPayloadJson()).contains("READ_ONLY_CODE_HELP");
     assertThat(event.getValue().getPayloadJson()).contains("runApiAllowed");
     assertThat(event.getValue().getPayloadJson()).contains("false");
+    assertThat(event.getValue().getPayloadJson()).contains("\"provider\":\"DEEPSEEK\"");
+    assertThat(event.getValue().getPayloadJson()).contains("providerSelection");
   }
 
   @Test

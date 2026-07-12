@@ -1,6 +1,7 @@
 package com.navneet.executespec.agentsession;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
@@ -117,10 +118,7 @@ class AgentStreamTurnStarter {
     }
     sessionRepo.save(session);
 
-    eventRecorder.append(
-        sessionId,
-        turn.getId(),
-        "STREAM_STARTED",
+    Map<String, Object> startPayload =
         tracePayloadFactory.build(
             new OrchestratorTurnResponse(
                 turn.getId(),
@@ -138,7 +136,15 @@ class AgentStreamTurnStarter {
             message,
             false,
             null,
-            "deterministic_pre_router"));
+            "deterministic_pre_router");
+    // Persist the resolved route alongside the decision. Replay clients must not infer the
+    // provider/model from the current account preference after a later provider switch.
+    startPayload.put("provider", effectiveProvider);
+    startPayload.put("model", session.getDefaultModel());
+    startPayload.put(
+        "providerSelection",
+        explicitProvider == null ? "session_or_account_default" : "explicit_turn_override");
+    eventRecorder.append(sessionId, turn.getId(), "STREAM_STARTED", startPayload);
 
     return new AgentSessionService.StreamTurnContext(
         sessionId,
