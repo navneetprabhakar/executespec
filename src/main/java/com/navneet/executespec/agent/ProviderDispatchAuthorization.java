@@ -29,4 +29,10 @@ public class ProviderDispatchAuthorization {
       ProviderTestBudgetGuard.authorize(reservationId, provider, model, runId);
     }
   }
+
+  /** Authorize an operator fixture against the supplied exact reservation, regardless of config. */
+  public void authorizeReservedTest(
+      String reservationId, String provider, String model, String runId) {
+    ProviderTestBudgetGuard.authorize(reservationId, provider, model, runId);
+  }
 }

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.benchmark.LowCodingFixtureHarness;
 import com.navneet.executespec.benchmark.LowCodingFixtureHarness.Evidence;
 import com.navneet.executespec.engine.WorkerAgent;
@@ -26,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class LowCodingFixtureController {
 
   private final WorkerAgent worker;
+  private final ProviderDispatchAuthorization dispatchAuthorization;
 
   /**
    * Run one fixed-repository LOW task. The ledger reservation must be created before this call; the
@@ -38,6 +40,7 @@ public class LowCodingFixtureController {
       @RequestParam String runId,
       @RequestParam String reservationId)
       throws IOException {
+    dispatchAuthorization.authorizeReservedTest(reservationId, provider, model, runId);
     Path workspace = Files.createTempDirectory("executespec-low-coding-");
     try {
       return LowCodingFixtureHarness.run(worker, provider, model, runId, reservationId, workspace);
