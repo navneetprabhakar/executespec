@@ -140,6 +140,41 @@ class SubagentChatToolsTest {
   }
 
   @Test
+  void disabledCoordinatorLaneUsesExplicitExecutionOnly() throws Exception {
+    when(provider.getObject()).thenReturn(execution);
+    when(flags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG)).thenReturn(false);
+    when(execution.evaluateDelegation(any(), any(), any()))
+        .thenReturn(
+            new SubagentProtocol.DelegationDecision(
+                "parent", SubagentProtocol.Role.SCOUT, true, "eligible", 1, 0, 4, 0, 0, "child"));
+    when(execution.execute(any(), any(), any()))
+        .thenReturn(
+            new SubagentProtocol.Result(
+                new SubagentProtocol.Handle(
+                    "child",
+                    "parent",
+                    "turn-1",
+                    SubagentProtocol.Role.SCOUT,
+                    "scan",
+                    1,
+                    4,
+                    0.5,
+                    "COMPLETED"),
+                "found src/App.java:10",
+                java.util.List.of(),
+                1,
+                0.01,
+                java.time.Instant.now()));
+
+    ToolCallback tool = new SubagentChatTools(provider, json, flags).bind(user, "parent", "turn-1");
+    JsonNode response = json.readTree(tool.call("{\"role\":\"SCOUT\",\"objective\":\"scan\"}"));
+
+    assertThat(response.path("ok").asBoolean()).isTrue();
+    verify(execution).execute(any(), any(), any());
+    verify(execution, never()).executeCoordinator(any(), any(), any());
+  }
+
+  @Test
   void batchToolExposesStrictSchemaAndReturnsStructuredPartialResults() throws Exception {
     when(provider.getObject()).thenReturn(execution);
     SubagentProtocol.BatchResult batch =
