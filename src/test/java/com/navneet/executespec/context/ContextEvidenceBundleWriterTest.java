@@ -124,4 +124,33 @@ class ContextEvidenceBundleWriterTest {
       assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
     }
   }
+
+  @Test
+  void rejectsBundleWhenWorkingTreeChangesWithoutHeadMoving() throws Exception {
+    try (Git git = Git.init().setDirectory(tempDir.toFile()).call()) {
+      git.getRepository().getConfig().setString("user", null, "name", "test");
+      git.getRepository().getConfig().setString("user", null, "email", "test@example.com");
+      Files.createDirectories(tempDir.resolve(".agent-context"));
+      Files.writeString(tempDir.resolve(".agent-context/CODEBASE_CONTEXT.md"), "context");
+      Files.writeString(tempDir.resolve(".agent-context/decisions.md"), "decisions");
+      Files.writeString(tempDir.resolve("tracked.txt"), "one");
+      git.add().addFilepattern(".").call();
+      git.commit()
+          .setMessage("initial")
+          .setAuthor(new PersonIdent("test", "test@example.com"))
+          .call();
+
+      var writer = new ContextEvidenceBundleWriter(new ObjectMapper());
+      writer.write(
+          tempDir,
+          new ContextAgentInput(
+              "context", "diff", List.of(), List.of(), List.of(), "", "", "run-1", "goal"),
+          "run-1");
+      assertThat(writer.readCurrent(tempDir, "run-1")).isPresent();
+
+      Files.writeString(tempDir.resolve("tracked.txt"), "two");
+      assertThat(ContextEvidenceBundleWriter.resolveRepoHeadSha(tempDir)).isNotNull();
+      assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
+    }
+  }
 }
