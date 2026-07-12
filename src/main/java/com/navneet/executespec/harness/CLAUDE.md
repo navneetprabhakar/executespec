@@ -1,5 +1,10 @@
 # `harness/` — V2 pipeline orchestration
 
+Recovery fencing: `SequentialExecutor` snapshots each task's `recovery_attempt` generation before
+dispatch. If rolling-restart takeover increments that generation, a stale worker's later status
+write is ignored, preventing an old JVM from overwriting the resumed worker's terminal state. This
+is a write fence, not proof that an in-flight provider call itself can be replayed across JVMs.
+
 > Last reviewed: 2026-06-10 (1.0.0-M1).
 >
 > V1 `PipelineHarness` was deleted in deprecation P1-P6 (2026-04-13). The live entry point is `integration/RunOrchestrator`; `harness/` now holds the V2 sequential executor + the workspace + gate primitives that survived from the V1 era.
