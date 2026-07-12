@@ -173,6 +173,7 @@ export function IdeRuns() {
                   key={r.runId}
                   to={runDetailPath(r)}
                   className='ide-work-row'
+                  data-work-status={String(r.status || '').toLowerCase()}
                   style={{
                     borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
                   }}
@@ -185,6 +186,17 @@ export function IdeRuns() {
                       {r.projectName ? ` · ${String(r.projectName).slice(0, 24)}` : ''} ·{' '}
                       {relTime(r.startedAt)}
                     </span>
+                    {isLiveStatus(r.status) && (
+                      <span className='ide-work-state' role='status'>
+                        <span className='ide-work-state-dot' aria-hidden='true' />
+                        Work in progress — open for live updates
+                      </span>
+                    )}
+                    {['FAILED', 'CANCELLED'].includes(String(r.status || '').toUpperCase()) && (
+                      <span className='ide-work-state ide-work-state-error' role='status'>
+                        Needs attention — open to review the failure and retry options
+                      </span>
+                    )}
                   </span>
                   {r.aiProvider && (
                     <span className='ide-work-provider'>{providerLabel(r.aiProvider)}</span>
