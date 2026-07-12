@@ -113,6 +113,17 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void requireSessionRejectsSameUserFromDifferentOrg() {
+    AgentSession otherOrg = session("other-org-session", "u1");
+    otherOrg.setOrgId("org-other");
+    when(sessionRepo.findById("other-org-session")).thenReturn(Optional.of(otherOrg));
+
+    assertThatThrownBy(() -> service.requireSession("other-org-session", user()))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("forbidden");
+  }
+
+  @Test
   void listsEventsAfterSessionOwnershipCheck() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
     when(eventRepo.findBySessionIdOrderByCreatedAtAsc(eq("s1"), any(Pageable.class)))

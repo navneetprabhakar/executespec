@@ -164,6 +164,10 @@ class AgentSessionReadService {
     if (!user.getUser().getId().equals(session.getUserId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
+    String userOrgId = user.getUser().getOrgId();
+    if (userOrgId != null && session.getOrgId() != null && !userOrgId.equals(session.getOrgId())) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
+    }
     return session;
   }
 

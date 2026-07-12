@@ -997,11 +997,6 @@ to boot — skip it for those.""";
     return new ResumeAction(ResumeKind.RESUME_FROM_SNAPSHOT, persisted, snap);
   }
 
-  /** Compatibility seam for package-local recovery tests and older callers. */
-  private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
-    return resolveResumeAction(runId, taskId, resume, java.nio.file.Paths.get("/"));
-  }
-
   /** Builds the context used by resume resolution, preserving the disk handoff boundary. */
   static com.navneet.executespec.tool.ExecutionContext resumeContext(
       String runId, String taskId, java.nio.file.Path workspaceRoot) {
