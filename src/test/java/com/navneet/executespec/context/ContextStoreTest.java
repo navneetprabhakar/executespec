@@ -104,6 +104,40 @@ class ContextStoreTest {
   }
 
   @Test
+  void rejectsRedisSnapshotWhoseEmbeddedIdentityDoesNotMatchRequestedContext() throws Exception {
+    ContextStore store = new ContextStore(new ObjectMapper(), metrics, redis, false);
+    when(redis.opsForValue()).thenReturn(ops);
+    ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+    store.save(context, List.of(new UserMessage("belongs to run-1")), 2);
+    verify(ops).set(eq(ContextStore.keyFor(context)), json.capture(), eq(Duration.ofHours(24)));
+
+    ObjectMapper mapper = new ObjectMapper();
+    com.fasterxml.jackson.databind.node.ObjectNode foreign =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            mapper.readTree(json.getValue()).deepCopy();
+    foreign.put("runId", "another-run");
+    when(ops.get(ContextStore.keyFor(context))).thenReturn(foreign.toString());
+
+    assertThat(store.load(context)).isEmpty();
+  }
+
+  @Test
+  void rejectsDiskSnapshotWhoseEmbeddedTaskIdentityDoesNotMatchPath() throws Exception {
+    ContextStore store = new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
+    store.save(context, List.of(new UserMessage("belongs to task-1")), 2);
+
+    Path checkpoint = ContextStore.diskCheckpointPath(context);
+    ObjectMapper mapper = new ObjectMapper();
+    com.fasterxml.jackson.databind.node.ObjectNode foreign =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            mapper.readTree(Files.readString(checkpoint)).deepCopy();
+    foreign.put("taskId", "another-task");
+    Files.writeString(checkpoint, foreign.toString());
+
+    assertThat(store.load(context)).isEmpty();
+  }
+
+  @Test
   void deleteAllRemovesWorkspaceCheckpointsAtRunEnd() {
     ContextStore store = new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
     store.save(context, List.of(new UserMessage("cleanup me")), 4);
