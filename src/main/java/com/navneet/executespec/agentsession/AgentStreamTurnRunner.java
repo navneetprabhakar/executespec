@@ -26,6 +26,7 @@ public class AgentStreamTurnRunner {
   private final FeatureFlagService featureFlags;
   private final AgentAttachmentService attachmentService;
   private final AgentEventRecorder eventRecorder;
+  private final RunCostTracker costTracker;
 
   /** Compatibility constructor retained for focused tests and older package-local callers. */
   AgentStreamTurnRunner(
@@ -36,18 +37,29 @@ public class AgentStreamTurnRunner {
     this(sessionService, specChatService, featureFlags, attachmentService, null);
   }
 
-  @Autowired
   AgentStreamTurnRunner(
       AgentSessionService sessionService,
       SpecChatService specChatService,
       FeatureFlagService featureFlags,
       AgentAttachmentService attachmentService,
       AgentEventRecorder eventRecorder) {
+    this(sessionService, specChatService, featureFlags, attachmentService, eventRecorder, null);
+  }
+
+  @Autowired
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService,
+      AgentEventRecorder eventRecorder,
+      RunCostTracker costTracker) {
     this.sessionService = sessionService;
     this.specChatService = specChatService;
     this.featureFlags = featureFlags;
     this.attachmentService = attachmentService;
     this.eventRecorder = eventRecorder;
+    this.costTracker = costTracker;
   }
 
   public void run(
@@ -156,7 +168,7 @@ public class AgentStreamTurnRunner {
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
         String partial = sink == null ? partialText(fixtureText) : sink.partialSummary();
-        sessionService.disconnectStreamTurn(ctx, partial);
+        sessionService.disconnectStreamTurn(ctx, partial, latestCost(ctx));
         emitter.complete();
         return;
       }
@@ -177,6 +189,12 @@ public class AgentStreamTurnRunner {
       // re-enters Spring's JSON exception handlers and produces a second broken response.
       emitter.complete();
     }
+  }
+
+  private RunCostTracker.Snapshot latestCost(AgentSessionService.StreamTurnContext ctx) {
+    if (costTracker == null) return null;
+    String scope = ctx.runId() == null || ctx.runId().isBlank() ? ctx.sessionId() : ctx.runId();
+    return costTracker.snapshot(scope);
   }
 
   private void runWebQaFixtureStream(

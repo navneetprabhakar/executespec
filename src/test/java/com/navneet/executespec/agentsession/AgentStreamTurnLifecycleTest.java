@@ -111,6 +111,28 @@ class AgentStreamTurnLifecycleTest {
         .contains("\"partial\":true", "\"partialSummary\":\"partial answer\"");
   }
 
+  @Test
+  void disconnectPersistsLatestUsageWhenProviderFinishedBeforeClientDisconnect() {
+    AgentTurn turn = turn("t5", "STREAMING");
+    when(turnRepo.findById("t5")).thenReturn(Optional.of(turn));
+    var cost = new RunCostTracker.Snapshot(1720, 17, 1664, 0, 0.000017, 1, 0);
+
+    lifecycle().disconnect(ctx("t5"), "4.", cost);
+
+    assertThat(turn.getStatus()).isEqualTo("CANCELLED");
+    assertThat(turn.getAssistantSummary()).isEqualTo("4.");
+    assertThat(turn.getInputTokens()).isEqualTo(1720);
+    assertThat(turn.getOutputTokens()).isEqualTo(17);
+    assertThat(turn.getCostUsd()).isEqualTo(0.000017);
+    var usage = ArgumentCaptor.forClass(AgentUsageLedger.class);
+    verify(usageRepo).save(usage.capture());
+    assertThat(usage.getValue().getCostUsd()).isEqualTo(0.000017);
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"costUsd\":1.7E-5", "\"inputTokens\":1720");
+  }
+
   private AgentStreamTurnLifecycle lifecycle() {
     return new AgentStreamTurnLifecycle(
         turnRepo, new AgentEventRecorder(eventRepo, new ObjectMapper()), usageRepo);
