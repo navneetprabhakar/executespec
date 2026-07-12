@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Production-like V255 to V263 upgrade fixture for removal of active Sarvam routing state. */
+/** Production-like V255 to V264 upgrade fixture for routing cleanup and local-hands fencing. */
 class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
   @Test
-  void v262ClearsExecutableSarvamStateButPreservesHistoricalEvidence() {
+  void v264ClearsExecutableSarvamStatePreservesHistoryAndDeduplicatesLocalHands() {
     String schema = "sarvam_upgrade_" + UUID.randomUUID().toString().replace("-", "");
     String baseUrl = POSTGRES.getJdbcUrl();
     String url =
@@ -30,11 +30,12 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
       var result = flyway(dataSource, schema, null).migrate();
 
-      // V256 removes executable Sarvam state; V257-V263 add subsequent routing/task-cost,
-      // default auto-verification, and durable local-hands intent changes.
-      assertThat(result.migrationsExecuted).isEqualTo(8);
+      // V256 removes executable Sarvam state; V257-V264 add subsequent routing/task-cost,
+      // default auto-verification, durable local-hands intent, replay cursor, and result fencing.
+      assertThat(result.migrationsExecuted).isEqualTo(9);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
+      assertLocalHandsResultsWereDeduplicated(jdbc);
 
       // A deploy retry must be a no-op: Flyway must not replay the forward cleanup or mutate the
       // preserved terminal/audit rows a second time.
@@ -42,6 +43,7 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
       assertThat(rerun.migrationsExecuted).isZero();
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
+      assertLocalHandsResultsWereDeduplicated(jdbc);
     } finally {
       jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
     }
@@ -167,6 +169,15 @@ VALUES
           ('action-history', 'session-active', 'RUN_VALIDATION_EVIDENCE',
            '{"provider":"sarvam","model":"sarvam-105b","historical":true}', 'history-action')
         """);
+    jdbc.update(
+        """
+        INSERT INTO agent_action_event (id, session_id, type, payload_json, action_id)
+        VALUES
+          ('local-completed-first', 'session-active', 'LOCAL_HANDS_COMPLETED',
+           '{"result":"first"}', 'local-action-1'),
+          ('local-completed-duplicate', 'session-active', 'LOCAL_HANDS_COMPLETED',
+           '{"result":"duplicate"}', 'local-action-1')
+        """);
   }
 
   private static void assertActiveDispatchStateWasReset(JdbcTemplate jdbc) {
@@ -244,6 +255,29 @@ VALUES
                 jdbc,
                 "SELECT payload_json::text FROM agent_action_event WHERE id='action-history'"))
         .contains("sarvam-105b");
+  }
+
+  private static void assertLocalHandsResultsWereDeduplicated(JdbcTemplate jdbc) {
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM agent_action_event"
+                    + " WHERE session_id='session-active' AND action_id='local-action-1'"
+                    + " AND type='LOCAL_HANDS_COMPLETED'",
+                Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM agent_action_event"
+                    + " WHERE id IN ('local-completed-first', 'local-completed-duplicate')",
+                Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes"
+                    + " WHERE schemaname=current_schema()"
+                    + " AND indexname='uq_agent_action_event_local_hands_completed'",
+                Integer.class))
+        .isEqualTo(1);
   }
 
   private static String text(JdbcTemplate jdbc, String sql) {
