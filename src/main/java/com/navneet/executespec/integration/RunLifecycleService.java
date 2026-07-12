@@ -585,6 +585,7 @@ public class RunLifecycleService {
               + " untouched",
           runId,
           attempts);
+      emitRecoveryEvidence(runId, "CROSS_INSTANCE_LEASE_LOST", "REFUSED", 0);
       return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
     }
     // Keep the in-memory row coherent for any downstream diagnostics; the database update above
@@ -602,6 +603,7 @@ public class RunLifecycleService {
       log.info(
           "resumeAfterCrash run={} task-level recovery claim lost; not queueing duplicate work",
           runId);
+      emitRecoveryEvidence(runId, "TASK_LEASE_LOST", "REFUSED", 0);
       return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
     }
 
@@ -630,6 +632,7 @@ public class RunLifecycleService {
             "resumeAfterCrash run={} workspace not on this node + no restorable GCS checkpoint —"
                 + " failing cleanly (credits refunded via RunFailed)",
             runId);
+        emitRecoveryEvidence(runId, "WORKSPACE_UNAVAILABLE", "REFUSED", 0);
         controlPort.terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
         return RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
       }
@@ -717,6 +720,24 @@ public class RunLifecycleService {
         .anyMatch(
             task ->
                 task.getLastActivityAt() != null && task.getLastActivityAt().isAfter(staleBefore));
+  }
+
+  /**
+   * Publish a typed, replayable recovery outcome for cross-instance safety decisions. The event is
+   * deliberately additive to the durable lease/CAS: it never grants ownership and is best effort so
+   * an SSE outage cannot change the recovery result.
+   */
+  private void emitRecoveryEvidence(String runId, String classification, String action, int locks) {
+    if (broadcaster == null) return;
+    try {
+      broadcaster.emit(
+          runId, RunEvent.recoveryAttempted(runId, null, classification, action, locks));
+    } catch (RuntimeException eventFailure) {
+      log.debug(
+          "resumeAfterCrash run={} recovery evidence emit failed: {}",
+          runId,
+          eventFailure.getMessage());
+    }
   }
 
   private boolean claimStaleActiveTasks(String runId, Instant now, Instant staleBefore) {
