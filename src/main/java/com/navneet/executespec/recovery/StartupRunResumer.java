@@ -26,25 +26,22 @@ import lombok.extern.slf4j.Slf4j;
  * Boot-time recovery for V2 runs left mid-flight by a previous JVM — crash, SIGTERM, or deploy
  * rollover.
  *
- * <p>Phase 1 behaviour (this class): <em>fail-cleanly</em>. The resumer scans non-terminal V2 runs
- * and marks each FAILED with a clear reason + emits an SSE event so the UI shows it. This turns
- * "stuck in WORKING forever" into "user can see and retry" — already a meaningful availability
- * improvement without needing replay logic.
- *
- * <p>Phase 2 (follow-up PR): actual replay via {@link
- * com.navneet.executespec.context.ContextStore#load} + {@code WorkerAgent.resumeFromSnapshot()} +
- * {@code SequentialExecutor.continueFromTask(...)}. Designed as a drop-in replacement for the
- * fail-path below.
+ * <p>Recovery claims a bounded restart attempt with a database compare-and-set, validates the
+ * heartbeat/workspace state, and resumes from persisted task/context checkpoints when the run is
+ * eligible. Stale or exhausted runs fail cleanly with an explicit reason and an SSE event. The
+ * recovery path does not rebind an in-flight provider future, transfer a workspace across nodes, or
+ * provide cross-JVM hot handoff; those cases are deliberately surfaced as bounded recovery outcomes
+ * rather than being presented as transparent continuation.
  *
  * <p>Run state handling:
  *
  * <ul>
  *   <li>{@code AWAITING_APPROVAL} — untouched. The plan gate is user-facing; the user can approve
  *       whenever, and that path does not require the old orchestrator thread.
- *   <li>{@code PLANNING} — failed. No snapshot yet (worker hadn't started); no useful recovery
- *       other than restart-from-scratch, which we leave to the user.
- *   <li>{@code WORKING} / {@code REVIEWING} — failed with "recovery pending" reason. Snapshots
- *       exist in Redis, but replay wiring is Phase 2.
+ *   <li>{@code PLANNING} — recovered only when the persisted plan/task state is sufficient;
+ *       otherwise failed with an explicit restart-required reason.
+ *   <li>{@code WORKING} / {@code REVIEWING} — resumed from the persisted checkpoint when the
+ *       workspace and heartbeat checks pass; stale, exhausted, or unrecoverable rows fail cleanly.
  * </ul>
  *
  * <p>Scoping: only touches rows where {@code harnessVersion = "v2"}. V1's {@code StartupRunResumer}
