@@ -31,4 +31,7 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
   List<AgentActionEvent> findBySessionIdAndTypeOrderByCreatedAtAsc(String sessionId, String type);
 
   long countBySessionIdAndType(String sessionId, String type);
+
+  /** Legacy rows pre-dating V262 have no durable cursor and cannot be replayed after a cursor. */
+  long countBySessionIdAndStreamSequenceIsNull(String sessionId);
 }

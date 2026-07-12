@@ -49,14 +49,24 @@ public final class AgentSessionDtos {
       List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
       long lastSequence,
       boolean snapshot,
-      SessionSnapshot session) {
+      SessionSnapshot session,
+      boolean legacyEventsOmitted) {
 
     /** Backward-compatible constructor for callers that only need the event envelope. */
     public AgentEventReplayResponse(
         List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
         long lastSequence,
         boolean snapshot) {
-      this(events, lastSequence, snapshot, null);
+      this(events, lastSequence, snapshot, null, false);
+    }
+
+    /** Backward-compatible constructor for callers that include a session snapshot only. */
+    public AgentEventReplayResponse(
+        List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+        long lastSequence,
+        boolean snapshot,
+        SessionSnapshot session) {
+      this(events, lastSequence, snapshot, session, false);
     }
   }
 

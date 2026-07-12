@@ -90,6 +90,8 @@ class AgentSessionReadService {
       }
     }
     boolean snapshot = after == null || after < 0;
+    boolean legacyEventsOmitted =
+        !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
     return new AgentEventReplayResponse(
         events,
         last,
@@ -97,7 +99,8 @@ class AgentSessionReadService {
         snapshot
             ? new SessionSnapshot(
                 session.getId(), session.getStatus(), session.getTitle(), session.getUpdatedAt())
-            : null);
+            : null,
+        legacyEventsOmitted);
   }
 
   List<AgentTurnResponse> listTurns(
