@@ -205,11 +205,13 @@ class AgentSessionReadServiceTest {
                 AgentActionEvent.builder().id("stale").streamSequence(9L).build(),
                 AgentActionEvent.builder().id("fresh").streamSequence(12L).build(),
                 AgentActionEvent.builder().id("legacy").streamSequence(null).build()));
+    when(eventRepo.countBySessionIdAndStreamSequenceIsNull("s1")).thenReturn(1L);
 
     var replay = service.replayEvents("s1", 10L, user());
 
     assertThat(replay.events()).extracting("id").containsExactly("fresh", "legacy");
     assertThat(replay.lastSequence()).isEqualTo(12L);
+    assertThat(replay.legacyEventsOmitted()).isTrue();
   }
 
   @Test
