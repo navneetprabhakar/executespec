@@ -76,4 +76,36 @@ class ContextEvidenceAssemblerTest {
     // applies. Before this guard, each 4,000-char hit consumed about 1,000 tokens and six won.
     assertThat(selected.packageIndexes()).containsExactlyElementsOf(oversized);
   }
+
+  @Test
+  void assignsReloadableProvenanceAndTaskPhasePerContextLane() {
+    var assembler = new ContextEvidenceAssembler(new ContextPlanner());
+    var items =
+        assembler.itemsFor(
+            new ContextAgentInput(
+                "context",
+                "diff",
+                List.of("pkg-a"),
+                List.of("src/A.java"),
+                List.of("worker report"),
+                "review",
+                "decision",
+                "run-1",
+                "goal"));
+
+    assertThat(items)
+        .extracting(ContextPlanner.Item::taskPhase)
+        .containsExactly("ORIENTATION", "WORKING_SET", "TASK_EVIDENCE");
+    assertThat(items)
+        .extracting(ContextPlanner.Item::provenance)
+        .containsExactly(
+            "context-agent:package-index",
+            "context-agent:file-index",
+            "context-agent:worker-report");
+    assertThat(items)
+        .extracting(ContextPlanner.Item::reloadHandle)
+        .containsExactly("package:0", "file:0", "worker:0");
+    assertThat(items.get(1).path()).isEqualTo("src/A.java");
+    assertThat(items.get(1).range()).isEqualTo("full");
+  }
 }

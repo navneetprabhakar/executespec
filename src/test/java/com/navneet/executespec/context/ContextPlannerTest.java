@@ -83,6 +83,41 @@ class ContextPlannerTest {
   }
 
   @Test
+  void preservesLaneProvenanceAndSupportsLegacyItemConstruction() {
+    var legacy =
+        new ContextPlanner.Item(
+            "legacy", ContextPlanner.Kind.JOURNAL, "journal", "sha", null, 10, 5, true);
+    assertThat(legacy.provenance()).isEqualTo("journal");
+    assertThat(legacy.taskPhase()).isEqualTo("JOURNAL");
+    assertThat(legacy.reloadHandle()).isEqualTo("legacy");
+
+    var item =
+        new ContextPlanner.Item(
+            "file:0",
+            ContextPlanner.Kind.WORKING_SET,
+            "context-agent",
+            "sha",
+            "src/A.java",
+            12,
+            70,
+            true,
+            "context-agent:file-index",
+            "1-20",
+            "WORKING_SET",
+            "context-agent:file:0");
+    assertThat(
+            planner.plan(new ContextPlanner.Window(100, 0, 0, 0, 0, 0), List.of(item)).selected())
+        .singleElement()
+        .satisfies(
+            selected -> {
+              assertThat(selected.provenance()).isEqualTo("context-agent:file-index");
+              assertThat(selected.range()).isEqualTo("1-20");
+              assertThat(selected.taskPhase()).isEqualTo("WORKING_SET");
+              assertThat(selected.reloadHandle()).isEqualTo("context-agent:file:0");
+            });
+  }
+
+  @Test
   void unknownModelPreservesCallerFallback() {
     when(models.isKnownModel("future-model")).thenReturn(false);
 

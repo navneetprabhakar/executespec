@@ -314,7 +314,37 @@ public class ContextPlanner {
       String path,
       int tokenEstimate,
       int priority,
-      boolean fresh) {}
+      boolean fresh,
+      String provenance,
+      String range,
+      String taskPhase,
+      String reloadHandle) {
+
+    /** Compatibility constructor for callers that predate lane provenance metadata. */
+    public Item(
+        String id,
+        Kind kind,
+        String source,
+        String repositorySha,
+        String path,
+        int tokenEstimate,
+        int priority,
+        boolean fresh) {
+      this(
+          id,
+          kind,
+          source,
+          repositorySha,
+          path,
+          tokenEstimate,
+          priority,
+          fresh,
+          source,
+          path,
+          kind == null ? null : kind.name(),
+          id);
+    }
+  }
 
   public enum Kind {
     SYSTEM,
