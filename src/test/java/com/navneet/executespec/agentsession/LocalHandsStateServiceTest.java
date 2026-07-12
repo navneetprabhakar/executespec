@@ -141,6 +141,18 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void completedResult_reportsFalse_whenDatabaseFirstWriterWinsElsewhere() {
+    org.mockito.Mockito.doThrow(new IllegalStateException("duplicate terminal event"))
+        .when(recorder)
+        .appendAction(any(), any(), eq("LOCAL_HANDS_COMPLETED"), any());
+
+    assertThat(
+            service.recordCompleted(
+                "run-1", "call-1", "task-1", "readFile", "read", "{}", "{\"ok\":true}"))
+        .isFalse();
+  }
+
+  @Test
   void persistenceFailure_isFailSoftForWorkerPath() {
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenThrow(new IllegalStateException("database unavailable"));
