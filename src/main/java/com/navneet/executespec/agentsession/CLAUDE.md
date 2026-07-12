@@ -57,8 +57,12 @@ turns separately from runs.
   accepts at most four unique requests for the same parent, reserves every child before model
   execution, consumes those exact persisted child handles (no second spawn), then runs the children concurrently on a fixed pool. A sibling failure cancels active
   children through the parent protocol and the response preserves successful results plus explicit
-  request/child failure records. This is real server-side concurrency, not a client-side loop or
-  model-prompt claim; all child turns still pass the normal budget and read-only route checks.
+  request/child failure records. When `agent.subagents.coordinator-auto.enabled` is enabled, the
+  batch path performs a fresh eligibility preflight for every request and reserves through
+  `spawnAndRecordCoordinator`, so every accepted child has the same atomic
+  `SUBAGENT_COORDINATOR_ACCEPTED` audit event as single-child delegation. This is real server-side
+  concurrency, not a client-side loop or model-prompt claim; all child turns still pass the normal
+  budget and read-only route checks. The flag remains default-off.
 - Provider choice is cross-surface account state, not a client-local default. Session creation and
   turns must use `AiProviderPreferenceService`: explicit provider input updates
   `app_user.preferred_ai_provider`; omitted input resolves from that preference.

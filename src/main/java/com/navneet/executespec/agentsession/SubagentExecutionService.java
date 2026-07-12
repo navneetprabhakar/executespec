@@ -188,9 +188,25 @@ public class SubagentExecutionService {
     validateBatch(requests);
     String parentSessionId = requests.getFirst().parentSessionId();
     List<Handle> reserved = new ArrayList<>(requests.size());
+    boolean coordinatorAuto = featureFlagService.isEnabled(COORDINATOR_AUTO_FLAG);
     try {
       for (SpawnRequest request : requests) {
-        Handle handle = protocolService.spawn(request, user.getUser().getId(), orgId);
+        Handle handle;
+        if (coordinatorAuto) {
+          // Keep model-requested fan-out on the same audited coordinator lane as the single-child
+          // tool. Eligibility is a fresh, side-effect-free preflight; the transactional
+          // spawnAndRecordCoordinator call repeats the hard limits and records the actual child
+          // id, so a stale probe cannot create a false acceptance event.
+          DelegationDecision decision = evaluateDelegation(request, user, orgId);
+          if (!decision.eligible()) {
+            throw new IllegalStateException(
+                "coordinator delegation is not eligible: " + decision.reason());
+          }
+          handle =
+              protocolService.spawnAndRecordCoordinator(request, user.getUser().getId(), orgId);
+        } else {
+          handle = protocolService.spawn(request, user.getUser().getId(), orgId);
+        }
         protocolService.start(handle.childSessionId(), user.getUser().getId(), orgId);
         reserved.add(handle);
       }
