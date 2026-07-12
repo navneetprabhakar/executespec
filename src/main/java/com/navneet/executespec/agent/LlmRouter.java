@@ -72,11 +72,12 @@ import lombok.extern.slf4j.Slf4j;
  * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
  * is exhausted, the router walks the primary model's YAML failover chain ({@link
  * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each different provider
- * once (each with its own transient retry). Gated by {@link #FAILOVER_FLAG} (default OFF until
- * validated). BYOK-safe: a run on a customer key only fails over to a provider the customer also
- * keyed (never silently to a platform key); {@code deepseek}/{@code openrouter} are never targets.
- * Provider health and tier-based model resolution happen in the canonical routing seams upstream in
- * {@code ModelResolver}; this router owns the actual provider dispatch and bounded retry.
+ * once (each with its own transient retry). Graduated ON by V266 and gated by {@link
+ * #FAILOVER_FLAG} so operators can disable it during incident response. BYOK-safe: a run on a
+ * customer key only fails over to a provider the customer also keyed (never silently to a platform
+ * key); {@code deepseek}/{@code openrouter} are never targets. Provider health and tier-based model
+ * resolution happen in the canonical routing seams upstream in {@code ModelResolver}; this router
+ * owns the actual provider dispatch and bounded retry.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
@@ -120,10 +121,10 @@ public class LlmRouter {
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
    * exhausted, fail over to the next provider(s) in the model's YAML failover chain. Gated by this
-   * flag (seeded default OFF, V226 — flip ON once validated) so production is byte-identical until
-   * enabled. BYOK-safe: a run already using a customer key for the primary only fails over to a
-   * provider the customer ALSO has a key for (never silently crosses to a platform key), and the
-   * enterprise-BYOK providers (deepseek / openrouter) are never failover targets.
+   * flag (graduated ON by V266; operators may disable it for incident response). BYOK-safe: a run
+   * already using a customer key for the primary only fails over to a provider the customer ALSO
+   * has a key for (never silently crosses to a platform key), and the enterprise-BYOK providers
+   * (deepseek / openrouter) are never failover targets.
    */
   static final String FAILOVER_FLAG = "router.failover.enabled";
 

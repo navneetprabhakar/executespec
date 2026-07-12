@@ -2,7 +2,6 @@ package com.navneet.executespec.router;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 import com.navneet.executespec.auth.service.TierEnforcementService;
 
@@ -22,12 +21,6 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class ModelAccessService {
-
-  // Gemini is temporarily dark for buyer-facing run
-  // selection after the 2026-07-02 provider matrix: it was reachable but returned PARTIAL/37 and
-  // produced only README.md on the bounded smoke task while the other enabled providers passed.
-  // Keep enum/YAML breadcrumbs for operator evals; customer-facing selection paths fail closed.
-  private static final Set<String> DISABLED_PROVIDERS = Set.of("gemini", "google");
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -72,8 +65,7 @@ public class ModelAccessService {
   }
 
   public static boolean isDisabledProvider(String provider) {
-    return provider != null
-        && DISABLED_PROVIDERS.contains(provider.trim().toLowerCase(Locale.ROOT));
+    return false;
   }
 
   public static boolean isDisabledProviderModelSlug(String modelId) {
@@ -81,8 +73,7 @@ public class ModelAccessService {
       return false;
     }
     String normalized = modelId.trim().toLowerCase(Locale.ROOT);
-    return DISABLED_PROVIDERS.stream()
-        .anyMatch(provider -> normalized.equals(provider) || normalized.contains(provider + "-"));
+    return false;
   }
 
   public static void assertProviderEnabled(String provider) {
