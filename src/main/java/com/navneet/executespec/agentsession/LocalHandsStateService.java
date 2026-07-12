@@ -115,13 +115,33 @@ public class LocalHandsStateService {
    * and preserves the exact result for a later audit/recovery surface.
    */
   public boolean acceptRestartedResult(String runId, String callId, String resultEnvelope) {
+    return acceptRestartedResult(runId, callId, resultEnvelope, Long.MAX_VALUE);
+  }
+
+  /**
+   * Accept a late result only while the original remote lease is still valid.
+   *
+   * <p>A result that arrives after a JVM restart has no worker future to unblock. It is useful as
+   * durable handoff evidence only for the same bounded window in which the old remote call could
+   * have remained in flight. Without this check, a client holding an old call id could close an
+   * arbitrarily old restart marker long after the run had moved on. A non-positive window is
+   * treated as no valid recovery window; a null event timestamp is rejected in bounded mode.
+   */
+  public boolean acceptRestartedResult(
+      String runId, String callId, String resultEnvelope, long maxAgeMillis) {
     if (runId == null || runId.isBlank() || callId == null || callId.isBlank()) return false;
+    if (maxAgeMillis <= 0) return false;
     try {
       List<AgentSession> sessions =
           sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
       if (sessions == null || sessions.isEmpty()) return false;
       PendingCall restarted = latestCall(sessions, callId, LocalHandsState.WORKER_RESTARTED);
       if (restarted == null) return false;
+      if (maxAgeMillis != Long.MAX_VALUE) {
+        Instant updatedAt = restarted.updatedAt();
+        Instant cutoff = Instant.now().minusMillis(maxAgeMillis);
+        if (updatedAt == null || updatedAt.isBefore(cutoff)) return false;
+      }
       return recordCompleted(
           runId,
           callId,

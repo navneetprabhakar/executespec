@@ -141,6 +141,21 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void acceptRestartedResult_rejectsMarkerOutsideBoundedRecoveryWindow() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                event("call-1", LocalHandsState.WORKER_RESTARTED, Instant.now().minusSeconds(10))));
+
+    assertThat(
+            service.acceptRestartedResult(
+                "run-1", "call-1", "{\"ok\":true}", /* maxAgeMillis= */ 1_000L))
+        .isFalse();
+    verify(recorder, org.mockito.Mockito.never())
+        .appendAction(any(), any(), eq("LOCAL_HANDS_COMPLETED"), any());
+  }
+
+  @Test
   void completedResult_reportsFalse_whenDatabaseFirstWriterWinsElsewhere() {
     org.mockito.Mockito.doThrow(new IllegalStateException("duplicate terminal event"))
         .when(recorder)
@@ -179,6 +194,26 @@ class LocalHandsStateServiceTest {
         .type("LOCAL_HANDS_" + state.name())
         .payloadJson(payload)
         .createdAt(Instant.parse("2026-07-10T00:00:0" + second + "Z"))
+        .build();
+  }
+
+  private AgentActionEvent event(String callId, LocalHandsState state, Instant createdAt) {
+    String payload =
+        "{\"state\":\""
+            + state.name()
+            + "\",\"runId\":\"run-1\",\"callId\":\""
+            + callId
+            + "\",\"toolName\":\"readFile\",\"permissionKind\":\"read\","
+            + "\"frame\":{\"callId\":\""
+            + callId
+            + "\"}}";
+    return AgentActionEvent.builder()
+        .id("event-" + callId + "-bounded")
+        .sessionId("session-1")
+        .actionId(callId)
+        .type("LOCAL_HANDS_" + state.name())
+        .payloadJson(payload)
+        .createdAt(createdAt)
         .build();
   }
 }

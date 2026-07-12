@@ -313,7 +313,8 @@ public class RemoteToolDispatcher {
       // A client can retry after the worker JVM restarted and the in-memory future disappeared.
       // Preserve that result durably instead of treating it as an unrelated/invalid call.  This
       // does not claim to resume the old worker; it only closes the durable handoff exactly once.
-      if (!stateService.acceptRestartedResult(runId, callId, resultEnvelopeJson)) {
+      if (!stateService.acceptRestartedResult(
+          runId, callId, resultEnvelopeJson, restartRecoveryWindowMs)) {
         log.debug("[RemoteTool] result for unknown callId={} (run {})", callId, runId);
       }
     }
