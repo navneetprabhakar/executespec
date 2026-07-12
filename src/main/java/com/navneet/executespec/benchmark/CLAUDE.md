@@ -49,6 +49,7 @@ classifier/planner/reviewer; product PATCH/autofix and benchmark generation shar
 | File | Purpose |
 |------|---------|
 | `BenchmarkGenerationService.java` | **The active benchmark code-gen API.** `generate()` enforces the shared `swebench.max-concurrent-runs` semaphore before setup/codegen, sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the shared code-gen engine synchronously, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. Workspace under the non-Documents output base by design. |
+| `LowCodingFixtureHarness.java` | Operator/test-only fixed-repo LOW fixture. Creates a tiny deterministic Python addition task, requires a non-blank external ledger reservation id before dispatch, runs the canonical `WorkerAgent` with LOW caps, and emits provider/model/tier/flag/prompt/tool/harness fingerprints plus a deterministic evaluator result. No controller or production route is added. |
 | `BenchmarkController.java` | `@RequestMapping("/api/admin/benchmark")` `@PreAuthorize("hasRole('SUPER_ADMIN')")`. `POST /run` and `POST /generate` both call `BenchmarkGenerationService.generate(...)`; `GET /preview/{id}` resolves image/repo/baseCommit; `GET /instances` returns loaded id count. |
 
 Diff capture hardening (RL-2026-06-030): both benchmark paths drain shell output while the process
