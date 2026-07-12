@@ -21,9 +21,12 @@
  *   cross-JVM worker handoff.
  *
  * Run journal:
- *   {@code <workspace>/.agent-context/run-journal.json}, a bounded atomic list of the latest
- *   task outcome summaries. The executor reloads it on restart and replaces entries by task id;
- *   it is prompt context only, never authoritative task state or proof of hot handoff.
+ *   {@code <workspace>/.agent-context/run-journal.json}, a bounded atomic, versioned envelope of
+ *   the latest task outcome summaries (including an update timestamp). Readers retain compatibility
+ *   with the pre-envelope bare-array format, while unknown schema versions fail closed instead of
+ *   being mistaken for trusted recovery context. The executor reloads it on restart and replaces
+ *   entries by task id; it is prompt context only, never authoritative task state or proof of hot
+ *   handoff.
  *
  * Auxiliary keys (Phase 8):
  *   v2:agent-ctx-index:{runId}    Set of taskIds with persisted context (TTL 86400)

@@ -5,11 +5,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Small workspace-local journal for cross-task execution context.
@@ -23,6 +27,7 @@ public final class RunJournalStore {
 
   static final int MAX_ENTRIES = 20;
   static final int MAX_ENTRY_CHARS = 512;
+  static final int SCHEMA_VERSION = 1;
   static final String JOURNAL_DIRECTORY = ".agent-context";
   static final String JOURNAL_FILE = "run-journal.json";
 
@@ -37,8 +42,20 @@ public final class RunJournalStore {
     try {
       Path path = path(workspace);
       if (!Files.isRegularFile(path)) return List.of();
-      List<String> loaded = MAPPER.readValue(Files.readString(path), STRING_LIST);
-      return sanitize(loaded);
+      JsonNode root = MAPPER.readTree(Files.readString(path));
+      if (root == null) return List.of();
+      // Read the pre-v2 bare-array representation so upgrading a workspace does not erase its
+      // task context. New writes use an envelope, which gives recovery a schema/version boundary
+      // instead of treating any JSON array as a trusted journal.
+      if (root.isArray()) {
+        return sanitize(MAPPER.convertValue(root, STRING_LIST));
+      }
+      if (!root.isObject() || root.path("schemaVersion").asInt(-1) != SCHEMA_VERSION) {
+        return List.of();
+      }
+      JsonNode entries = root.path("entries");
+      if (!entries.isArray()) return List.of();
+      return sanitize(MAPPER.convertValue(entries, STRING_LIST));
     } catch (Exception ignored) {
       return List.of();
     }
@@ -51,9 +68,15 @@ public final class RunJournalStore {
     Path temp = target.resolveSibling(target.getFileName() + ".tmp");
     try {
       Files.createDirectories(target.getParent());
+      List<String> bounded = sanitize(entries);
+      ObjectNode envelope = MAPPER.createObjectNode();
+      envelope.put("schemaVersion", SCHEMA_VERSION);
+      envelope.put("updatedAt", Instant.now().toString());
+      ArrayNode journalEntries = envelope.putArray("entries");
+      bounded.forEach(journalEntries::add);
       Files.writeString(
           temp,
-          MAPPER.writeValueAsString(sanitize(entries)) + "\n",
+          MAPPER.writeValueAsString(envelope) + "\n",
           StandardCharsets.UTF_8,
           StandardOpenOption.CREATE,
           StandardOpenOption.TRUNCATE_EXISTING,
