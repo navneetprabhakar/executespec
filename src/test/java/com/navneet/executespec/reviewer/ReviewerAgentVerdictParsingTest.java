@@ -88,6 +88,22 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   @Test
+  void noOpBuildExitZeroIsNotVerifiedBuildEvidence() {
+    assertEquals(
+        false,
+        ReviewerAgent.isBuildVerifiedEvidence(
+            "command=true\nsource=fallback:no-op\nsmokeSignal=UNAVAILABLE\nnoOp=true\nexit=0"));
+    assertEquals(
+        true,
+        ReviewerAgent.isBuildVerifiedEvidence(
+            "command=npm run build\n"
+                + "source=inferred:npm\n"
+                + "smokeSignal=EXECUTED\n"
+                + "noOp=false\n"
+                + "exit=0"));
+  }
+
+  @Test
   void general_fixed_wiring_clean_build_pass_returns_fixed_issues() throws Exception {
     var g = workerWithSummaryAndWrites("VERDICT: FIXED_ISSUES\nFound 2, fixed both.");
     var w = workerWithSummary("VERDICT: CLEAN\nNothing to wire.");
