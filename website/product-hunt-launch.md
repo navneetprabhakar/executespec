@@ -1,12 +1,12 @@
 # Product Hunt Launch Kit — ExecuteSpec
 
-> **Refreshed 2026-07-12** (ExecuteSpec 2.0 / CLI 1.0 website refresh). All pricing/claims in this kit now match the
+> **Refreshed 2026-07-13** (ExecuteSpec 2.0 / CLI 1.0 website refresh). All pricing/claims in this kit now match the
 > billing DB (Free / Pro $20 / Pro+ $100 hidden / BYOK $50 / Team $50/seat / Enterprise) and the honest-claims policy
 > (`docs/enterprise-one-pager.md`: no SOC 2, no SAML-end-to-end, no benchmark numbers until the
 > rebuilt eval lands). Source of truth for live copy: `website/index.html` + the app's
 > `PublicPricingPage`.
 
-_Prepared: 2026-04-21 · refreshed 2026-07-12_
+_Prepared: 2026-04-21 · refreshed 2026-07-13_
 
 Everything we need to hit "ship it" on Product Hunt. US-first framing since that's where our traffic is coming from.
 
@@ -22,7 +22,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 | **Pricing tag** | — | `Freemium` (Free → $20 Pro → $50 BYOK → $50/seat Team → Enterprise) |
 | **Platforms** | — | `Web` |
 | **Website** | — | `https://executespec.ai` |
-| **Demo video** | — | `website/media/hero.webm` — current illustrative agent-control-plane walkthrough using synthetic demo data; capture authenticated production evidence separately |
+| **Demo video** | — | `website/media/hero.webm` — current-tuple illustrative workflow (provider-free fixture); do not present it as a live customer run, benchmark, or SOTA result |
 
 ## 2 · 260-char description (paste-ready)
 
@@ -97,7 +97,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
 2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
-3. ✅ **Illustrative demo video** — `website/media/hero.webm` was regenerated 2026-07-12 from the current agent-control-plane story. It uses synthetic demo data and must not be presented as a live customer run or benchmark result. A separate authenticated production capture is still required for launch proof.
+3. ✅ **Illustrative demo video** — `website/media/hero.webm` was regenerated 2026-07-13 against the current release tuple and covers the agent, plan gate, working task, verdict, code diff, and terminal outcome scenes. It uses provider-free synthetic fixture data and must not be presented as a live customer run, benchmark, or SOTA result.
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 

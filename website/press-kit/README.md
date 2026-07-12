@@ -1,7 +1,7 @@
 # ExecuteSpec Press Kit
 
 _For Product Hunt launch, advertising, and press contacts._
-_Last refreshed 2026-07-12 (ExecuteSpec 2.0 / CLI 1.0 release track)._
+_Last refreshed 2026-07-13 (ExecuteSpec 2.0 / CLI 1.0 release track)._ 
 
 ## Contact
 
