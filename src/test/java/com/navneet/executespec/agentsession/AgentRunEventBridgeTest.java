@@ -161,6 +161,37 @@ class AgentRunEventBridgeTest {
   }
 
   @Test
+  void bridgesInitialRoutingDecisionForReloadableOutcomeEvidence() {
+    AgentSession session = session("s1", "run-1");
+    when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(session));
+    when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    bridge.onRunEvent(
+        RunEvent.initialRoutingDecision(
+            "run-1",
+            "T1",
+            "openai",
+            "gpt-5.4",
+            "anthropic",
+            "claude-sonnet-5",
+            true,
+            true,
+            List.of("anthropic/claude-sonnet-5"),
+            List.of("gemini/gemini-3.5-flash"),
+            List.of("observed quality evidence authorized initial route selection")));
+
+    ArgumentCaptor<AgentActionEvent> event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getType()).isEqualTo("RUN_INITIAL_ROUTING_DECISION");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"runEventType\":\"INITIAL_ROUTING_DECISION\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"selectedProvider\":\"anthropic\"");
+    verify(sessionRepo).save(session);
+  }
+
+  @Test
   void ignoresUnmappedRunEventsAndEventsWithoutRunId() {
     bridge.onRunEvent(RunEvent.log("run-1", "T1", "plain log"));
     bridge.onRunEvent(RunEvent.goalDecision("", "T1", "Goal DONE", Map.of()));
