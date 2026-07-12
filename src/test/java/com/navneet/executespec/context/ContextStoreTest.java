@@ -56,6 +56,8 @@ class ContextStoreTest {
     assertThat(store.deleteAll("run-1")).isZero();
 
     verify(metrics).recordContextSave(eq("disk"), anyInt());
+    verify(metrics).recordContextLoad("disk");
+    verify(metrics).recordContextLoad("miss");
   }
 
   @Test
@@ -85,6 +87,7 @@ class ContextStoreTest {
     assertThat(saved.history().get(0).getText()).isEqualTo("system prompt");
     assertThat(saved.history().get(1)).isInstanceOf(UserMessage.class);
     assertThat(saved.history().get(1).getText()).isEqualTo("user prompt");
+    verify(metrics).recordContextLoad("redis");
   }
 
   @Test
@@ -101,6 +104,7 @@ class ContextStoreTest {
     assertThat(saved.history()).singleElement().isInstanceOf(UserMessage.class);
     assertThat(saved.history().get(0).getText()).isEqualTo("survive restart");
     assertThat(Files.isRegularFile(ContextStore.diskCheckpointPath(context))).isTrue();
+    verify(metrics).recordContextLoad("disk");
   }
 
   @Test
@@ -119,6 +123,17 @@ class ContextStoreTest {
     when(ops.get(ContextStore.keyFor(context))).thenReturn(foreign.toString());
 
     assertThat(store.load(context)).isEmpty();
+    verify(metrics).recordContextLoad("identity_mismatch");
+  }
+
+  @Test
+  void recordsRedisErrorWhenNoDiskCheckpointCanBeRecovered() {
+    ContextStore store = new ContextStore(new ObjectMapper(), metrics, redis, false);
+    when(redis.opsForValue()).thenThrow(new IllegalStateException("redis unavailable"));
+
+    assertThat(store.load(context)).isEmpty();
+
+    verify(metrics).recordContextLoad("redis_error");
   }
 
   @Test
