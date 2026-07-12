@@ -195,6 +195,11 @@ public class AgentSessionService {
     streamTurnLifecycle.disconnect(ctx);
   }
 
+  @Transactional
+  public void disconnectStreamTurn(StreamTurnContext ctx, String partialSummary) {
+    streamTurnLifecycle.disconnect(ctx, partialSummary);
+  }
+
   public IntentDecision interpret(InterpretIntentRequest request) {
     return intentService.interpret(request);
   }

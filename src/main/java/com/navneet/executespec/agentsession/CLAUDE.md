@@ -166,8 +166,8 @@ turns separately from runs.
 | `AgentTurnReadModel.java`                  | Hydrates reloadable turn DTOs and idempotent orchestrator replay responses from stored trace events.                                                                                                                |
 | `AgentTurnRecorder.java`                   | Creates initial `AgentTurn` rows with consistent sequence, transcript fields, proposed-action JSON, and status.                                                                                                     |
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
-| `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior.                                                                                                |
-| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. |
+| `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior. Disconnects retain a capped partial assistant summary in the turn row and `STREAM_DISCONNECTED` event when one exists. |
+| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. Client disconnects pass the accumulated bounded text to the lifecycle so replay retains partial progress. |
 | `AgentStreamTurnSupport.java`              | Package-local stream support policy: read-only tool allowlist (incl. `web_search`/`web_fetch`), conversation fallback, server-side attachment-block injection, and client-disconnect detection.                     |
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
@@ -311,8 +311,8 @@ turns separately from runs.
   session title updates, initial `STREAMING` turn persistence, trace events, and returned
   `StreamTurnContext`.
 - `AgentStreamTurnLifecycleTest` pins completion/failure/disconnect persistence, including usage
-  ledger rows, terminal stream events, and the rule that disconnect does not overwrite completed
-  turns.
+  ledger rows, terminal stream events, partial-summary retention, and the rule that disconnect does
+  not overwrite completed turns.
 - `AgentStreamTurnSupportTest` pins stream support policy: read-only tool allowlist,
   conversation fallback behavior, and client-disconnect detection.
 - `SubagentChatToolsTest` pins eligibility fail-closed behavior, default legacy execution, strict

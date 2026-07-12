@@ -95,6 +95,22 @@ class AgentStreamTurnLifecycleTest {
     assertThat(event.getValue().getType()).isEqualTo("STREAM_DISCONNECTED");
   }
 
+  @Test
+  void disconnectRetainsCappedPartialSummaryForReplay() {
+    AgentTurn turn = turn("t4", "STREAMING");
+    when(turnRepo.findById("t4")).thenReturn(Optional.of(turn));
+
+    String partial = "partial answer";
+    lifecycle().disconnect(ctx("t4"), partial);
+
+    assertThat(turn.getStatus()).isEqualTo("CANCELLED");
+    assertThat(turn.getAssistantSummary()).isEqualTo(partial);
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"partial\":true", "\"partialSummary\":\"partial answer\"");
+  }
+
   private AgentStreamTurnLifecycle lifecycle() {
     return new AgentStreamTurnLifecycle(
         turnRepo, new AgentEventRecorder(eventRepo, new ObjectMapper()), usageRepo);
