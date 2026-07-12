@@ -1,9 +1,12 @@
 # `harness/` — V2 pipeline orchestration
 
 Recovery fencing: `SequentialExecutor` snapshots each task's `recovery_attempt` generation before
-dispatch. Task status persistence uses a pessimistic row lock while takeover uses its atomic
-generation CAS, so a stale worker cannot overwrite the resumed worker's terminal state. This is a
-durable write fence, not proof that an in-flight provider call itself can be replayed across JVMs.
+dispatch. Task status, goal/continuation evidence, and action-history persistence use a pessimistic
+row lock while takeover uses its atomic generation CAS, so a stale worker cannot overwrite the
+resumed worker's terminal state. `RunPersistenceWriter` takes the same lock and skips late
+aggregate updates once a task is terminal; it only repairs a non-terminal row when the worker died
+before its first status flush. This is a durable write fence, not proof that an in-flight provider
+call itself can be replayed across JVMs.
 
 > Last reviewed: 2026-06-10 (1.0.0-M1).
 >

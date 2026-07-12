@@ -1377,10 +1377,11 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing =
-          taskRecoveryAttemptByTask.containsKey(key)
-              ? taskRepo.findByIdForUpdate(key)
-              : taskRepo.findById(key);
+      // Action-history writes are part of the task's recovery-owned state.  Always take the row
+      // lock, even when this executor did not capture a local generation (for example a resumed
+      // process handling a synthetic continuation outcome).  A stale JVM must not race a recovery
+      // writer while appending a decision that could overwrite the newer JSON document.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.debug("appendContinuationActionHistory: row not found id={}", key);
         return;
@@ -3380,7 +3381,10 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      // Goal/continuation evidence is another ancillary task write.  Serialize it with recovery
+      // takeover just like terminal status and action history; otherwise a stale executor can
+      // overwrite the resumed worker's latest decision after the generation CAS succeeds.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.debug("persistGoalDecision: row not found id={}", key);
         return;
@@ -4299,7 +4303,10 @@ to boot — skip it for those.""";
       String failureDiagnosticJson) {
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      // A terminal status is an ownership boundary: a late result from an older JVM must not
+      // replace the recovery worker's durable evidence.  The row lock makes the generation check
+      // and save atomic with takeover.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.warn("persistTaskStatus: row not found id={} (status={} skipped)", key, status);
         return;
@@ -4314,6 +4321,14 @@ to boot — skip it for those.""";
             key,
             expectedRecoveryAttempt,
             t.getRecoveryAttempt(),
+            status);
+        return;
+      }
+      if (isTerminalTaskStatus(t.getStatus()) && !status.equals(t.getStatus())) {
+        log.warn(
+            "persistTaskStatus: fenced terminal overwrite id={} currentStatus={} incomingStatus={}",
+            key,
+            t.getStatus(),
             status);
         return;
       }
@@ -4395,6 +4410,14 @@ to boot — skip it for those.""";
   /** Visible for focused recovery tests; null in the legacy schema is generation zero. */
   static boolean recoveryAttemptMatches(int expected, Integer actual) {
     return expected == (actual == null ? 0 : actual);
+  }
+
+  private static boolean isTerminalTaskStatus(String status) {
+    return "COMPLETE".equals(status)
+        || "PARTIAL".equals(status)
+        || "FAILED".equals(status)
+        || "BLOCKED".equals(status)
+        || "CANCELLED".equals(status);
   }
 
   private void rememberRecoveryAttempt(String runId, String taskIdShort) {
