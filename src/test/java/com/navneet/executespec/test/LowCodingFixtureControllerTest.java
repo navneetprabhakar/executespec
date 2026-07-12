@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.lang.reflect.Method;
 
@@ -14,6 +16,8 @@ import com.navneet.executespec.engine.WorkerTaskRequest;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class LowCodingFixtureControllerTest {
 
@@ -66,8 +70,30 @@ class LowCodingFixtureControllerTest {
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> controller.run("deepseek", "deepseek-v4-flash-native", "low-2", "bad"))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("reservation denied");
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("provider reservation denied");
+    org.mockito.Mockito.verifyNoInteractions(worker);
+  }
+
+  @Test
+  void invalidReservationReturnsStructuredBadRequest() throws Exception {
+    WorkerAgent worker = mock(WorkerAgent.class);
+    ProviderDispatchAuthorization authorization = mock(ProviderDispatchAuthorization.class);
+    org.mockito.Mockito.doThrow(new IllegalStateException("reservation denied"))
+        .when(authorization)
+        .authorizeReservedTest("bad", "deepseek", "deepseek-v4-flash-native", "low-3");
+
+    MockMvc mvc =
+        MockMvcBuilders.standaloneSetup(new LowCodingFixtureController(worker, authorization))
+            .build();
+
+    mvc.perform(
+            get("/api/v2/test/low-coding")
+                .param("provider", "deepseek")
+                .param("model", "deepseek-v4-flash-native")
+                .param("runId", "low-3")
+                .param("reservationId", "bad"))
+        .andExpect(status().isBadRequest());
     org.mockito.Mockito.verifyNoInteractions(worker);
   }
 }
