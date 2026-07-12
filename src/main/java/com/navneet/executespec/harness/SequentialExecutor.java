@@ -1377,7 +1377,10 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      var existing =
+          taskRecoveryAttemptByTask.containsKey(key)
+              ? taskRepo.findByIdForUpdate(key)
+              : taskRepo.findById(key);
       if (existing.isEmpty()) {
         log.debug("appendContinuationActionHistory: row not found id={}", key);
         return;
