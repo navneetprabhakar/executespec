@@ -56,6 +56,7 @@ public class AgentStreamTurnRunner {
       AppUserDetails user,
       StreamTurnRequest request) {
     AccumulatingSink sink = null;
+    StringBuilder fixtureText = new StringBuilder();
     try {
       send(
           emitter,
@@ -88,7 +89,7 @@ public class AgentStreamTurnRunner {
       // Provider-free scripted stream used only by the local/dev Web release fixture. The
       // session id is minted by WebQaFixtureController and never comes from a customer request.
       if (ctx.sessionId().startsWith("web-qa-")) {
-        runWebQaFixtureStream(emitter, ctx);
+        runWebQaFixtureStream(emitter, ctx, fixtureText);
         return;
       }
 
@@ -154,7 +155,8 @@ public class AgentStreamTurnRunner {
       emitter.complete();
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
-        sessionService.disconnectStreamTurn(ctx, sink == null ? null : sink.partialSummary());
+        String partial = sink == null ? partialText(fixtureText) : sink.partialSummary();
+        sessionService.disconnectStreamTurn(ctx, partial);
         emitter.complete();
         return;
       }
@@ -178,9 +180,10 @@ public class AgentStreamTurnRunner {
   }
 
   private void runWebQaFixtureStream(
-      SseEmitter emitter, AgentSessionService.StreamTurnContext ctx) {
+      SseEmitter emitter, AgentSessionService.StreamTurnContext ctx, StringBuilder partialText) {
     try {
       Thread.sleep(120);
+      appendPartial(partialText, "Fixture stream started. ");
       send(emitter, "token", Map.of("delta", "Fixture stream started. "));
       Thread.sleep(120);
       send(
@@ -193,6 +196,7 @@ public class AgentStreamTurnRunner {
           "tool_result",
           Map.of("id", "web-qa-read", "result", "{\"ok\":true,\"path\":\"src/app.ts\"}"));
       Thread.sleep(120);
+      appendPartial(partialText, "Verification evidence is ready for review.");
       send(emitter, "token", Map.of("delta", "Verification evidence is ready for review."));
       sessionService.completeStreamTurn(
           ctx,
@@ -214,9 +218,17 @@ public class AgentStreamTurnRunner {
       emitter.complete();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      sessionService.disconnectStreamTurn(ctx);
+      sessionService.disconnectStreamTurn(ctx, partialText(partialText));
       emitter.complete();
     }
+  }
+
+  private static void appendPartial(StringBuilder target, String value) {
+    if (target != null && value != null) target.append(value);
+  }
+
+  private static String partialText(StringBuilder value) {
+    return value == null || value.isEmpty() ? null : value.toString();
   }
 
   private void finishDecisionOnlyTurn(

@@ -210,6 +210,52 @@ class AgentStreamTurnRunnerTest {
   }
 
   @Test
+  void providerFreeQaFixtureAlsoRetainsPartialTextOnDisconnect() throws Exception {
+    AgentSessionService sessionService = mock(AgentSessionService.class);
+    SseEmitter emitter = mock(SseEmitter.class);
+    AgentStreamTurnRunner runner =
+        new AgentStreamTurnRunner(
+            sessionService,
+            mock(SpecChatService.class),
+            mock(FeatureFlagService.class),
+            mock(AgentAttachmentService.class));
+    StreamTurnContext ctx =
+        new StreamTurnContext(
+            "web-qa-fixture",
+            "turn-qa",
+            1,
+            null,
+            null,
+            "org-1",
+            "user-1",
+            "anthropic",
+            null,
+            new OrchestratorDecision(
+                "CHAT_ONLY",
+                0.9,
+                "fixture",
+                false,
+                "",
+                null,
+                new OrchestratorPolicy(false, false, "fixture"),
+                "trace-qa"));
+
+    var sends = new java.util.concurrent.atomic.AtomicInteger();
+    doAnswer(
+            invocation -> {
+              if (sends.incrementAndGet() == 3) throw new java.io.IOException("broken pipe");
+              return null;
+            })
+        .when(emitter)
+        .send(any(SseEmitter.SseEventBuilder.class));
+
+    runner.run(emitter, ctx, null, new StreamTurnRequest("fixture", null, null, null, null, null));
+
+    verify(sessionService).disconnectStreamTurn(ctx, "Fixture stream started. ");
+    verify(emitter).complete();
+  }
+
+  @Test
   void providerCredentialFailureUsesRecoveryMessageInsteadOfRawProviderJson() throws Exception {
     AgentSessionService sessionService = mock(AgentSessionService.class);
     SpecChatService specChatService = mock(SpecChatService.class);
