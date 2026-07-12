@@ -343,6 +343,44 @@ class SubagentExecutionServiceTest {
   }
 
   @Test
+  void coordinatorFlagMovesBatchThroughFreshEligibilityAndAuditedReservation() {
+    SpawnRequest second =
+        new SpawnRequest("req-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 4, 0.5);
+    Handle secondHandle =
+        new Handle(
+            "child-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 1, 4, 0.5, "RUNNING");
+    when(flags.isEnabled(SubagentExecutionService.COORDINATOR_AUTO_FLAG)).thenReturn(true);
+    when(protocol.evaluateDelegation(any(), eq("user"), eq("org")))
+        .thenReturn(
+            new SubagentProtocol.DelegationDecision(
+                "parent", Role.SCOUT, true, "eligible", 1, 0, 4, 0, 0, null));
+    when(protocol.spawnAndRecordCoordinator(request, "user", "org")).thenReturn(running);
+    when(protocol.spawnAndRecordCoordinator(second, "user", "org")).thenReturn(secondHandle);
+    when(protocol.start("child", "user", "org")).thenReturn(running);
+    when(protocol.start("child-2", "user", "org")).thenReturn(secondHandle);
+
+    SubagentExecutionService spy = org.mockito.Mockito.spy(service);
+    org.mockito.Mockito.doReturn(
+            new Result(running, "first", java.util.List.of(), 1, 0.01, Instant.now()))
+        .when(spy)
+        .executeReserved(eq(request), eq(running), eq(user), eq("org"));
+    org.mockito.Mockito.doReturn(
+            new Result(secondHandle, "second", java.util.List.of(), 1, 0.01, Instant.now()))
+        .when(spy)
+        .executeReserved(eq(second), eq(secondHandle), eq(user), eq("org"));
+
+    var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
+
+    assertThat(batch.failures()).isEmpty();
+    assertThat(batch.results()).extracting(Result::summary).containsExactly("first", "second");
+    verify(protocol).evaluateDelegation(request, "user", "org");
+    verify(protocol).evaluateDelegation(second, "user", "org");
+    verify(protocol).spawnAndRecordCoordinator(request, "user", "org");
+    verify(protocol).spawnAndRecordCoordinator(second, "user", "org");
+    verify(protocol, org.mockito.Mockito.never()).spawn(any(), eq("user"), eq("org"));
+  }
+
+  @Test
   void batchRejectsForeignParentTurnBeforeReservingAnyChild() {
     SpawnRequest foreign =
         new SpawnRequest("req-foreign", "parent", "foreign-turn", Role.SCOUT, "scan", 2, 0.1);
