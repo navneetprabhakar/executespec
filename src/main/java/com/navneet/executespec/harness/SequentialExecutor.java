@@ -1568,6 +1568,8 @@ to boot — skip it for those.""";
           currentModel,
           com.navneet.executespec.router.ModelProviderCandidateRequest.builder()
               .taskCategory(category)
+              .taskComplexity(
+                  task == null || task.complexity() == null ? "UNKNOWN" : task.complexity().name())
               .requiredQualityThreshold(requiredGoalQualityThreshold(category))
               .providerAvailability(providerAvailability(req.runContext().runId()))
               .providerPreferenceOrder(providerPreferenceOrder(currentProvider))

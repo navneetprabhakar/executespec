@@ -119,6 +119,12 @@ public class TaskOutcomeMetricService {
   /** Returns a deterministic validation-pass prior for the same task category. */
   public Optional<QualityPrior> qualityPrior(
       String provider, String model, String taskCategory, int minSamples) {
+    return qualityPrior(provider, model, taskCategory, null, minSamples);
+  }
+
+  /** Returns a validation prior scoped to category and (when supplied) task complexity. */
+  public Optional<QualityPrior> qualityPrior(
+      String provider, String model, String taskCategory, String taskComplexity, int minSamples) {
     if (provider == null || model == null || minSamples < 1) return Optional.empty();
     try {
       List<ModelTaskMetric> candidates =
@@ -126,14 +132,22 @@ public class TaskOutcomeMetricService {
               .findTop200ByProviderIgnoreCaseAndModelNameIgnoreCaseAndTierIgnoreCaseOrderByCreatedAtDesc(
                   provider, model, normalize(taskCategory));
       String category = normalize(taskCategory);
+      String complexity = normalize(taskComplexity);
       List<ModelTaskMetric> matching =
           candidates == null
               ? List.of()
-              : candidates.stream().filter(metric -> metric != null).toList();
+              : candidates.stream()
+                  .filter(metric -> metric != null)
+                  .filter(
+                      metric ->
+                          "UNKNOWN".equals(complexity)
+                              || complexity.equals(normalize(metric.getComplexity())))
+                  .toList();
       if (matching.size() < minSamples) return Optional.empty();
       long passed = matching.stream().filter(ModelTaskMetric::isValidationPassed).count();
       return Optional.of(
-          new QualityPrior((passed * 100.0) / matching.size(), matching.size(), category));
+          new QualityPrior(
+              (passed * 100.0) / matching.size(), matching.size(), category, complexity));
     } catch (RuntimeException e) {
       log.warn(
           "Unable to read task outcome prior provider={} model={}: {}",
@@ -148,7 +162,12 @@ public class TaskOutcomeMetricService {
     return value == null ? "UNKNOWN" : value.trim().toUpperCase(Locale.ROOT);
   }
 
-  public record QualityPrior(double validationPassRate, int sampleSize, String taskCategory) {}
+  public record QualityPrior(
+      double validationPassRate, int sampleSize, String taskCategory, String taskComplexity) {
+    public QualityPrior(double validationPassRate, int sampleSize, String taskCategory) {
+      this(validationPassRate, sampleSize, taskCategory, "UNKNOWN");
+    }
+  }
 
   private static boolean isSuccessful(TaskOutcome.Status status) {
     return status == TaskOutcome.Status.SUCCESS || status == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
