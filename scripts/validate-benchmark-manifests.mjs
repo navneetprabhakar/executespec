@@ -9,6 +9,13 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestDir = path.resolve(scriptDir, "../infra/benchmark/manifests");
 const SHA256 = /^[a-f0-9]{64}$/;
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9._:/-]*$/;
+const VALID_STATUS = new Set([
+  "REPRODUCIBLE",
+  "EXPLORATORY",
+  "EXPLORATORY_RETROSPECTIVE",
+  "SUPERSEDED",
+  "INVALID",
+]);
 const REPAIR_OUTCOME = /^(?:PASS|FAIL|ERROR|NOT_RUN|UNKNOWN)$/;
 const NO_OP_CLASSIFICATION = /^(?:NO_OP|PATCH_APPLIED|PATCH_REJECTED|PATCH_FAILED)$/;
 const REQUIRED_BUDGETS = [
@@ -26,6 +33,9 @@ export function validateManifest(manifest, file = "<manifest>") {
   const errors = [];
   const add = (message) => errors.push(`${file}: ${message}`);
   if (manifest.schemaVersion !== 1) add("schemaVersion must be 1");
+  if (!VALID_STATUS.has(manifest.status)) {
+    add(`status must be one of ${[...VALID_STATUS].join(", ")}`);
+  }
   if (!manifest.suite) add("suite is required");
   if (!manifest.model?.provider || !manifest.model?.matrixId) add("provider and matrixId are required");
   if (manifest.model?.providerSlug !== null && manifest.model?.providerSlug !== undefined
