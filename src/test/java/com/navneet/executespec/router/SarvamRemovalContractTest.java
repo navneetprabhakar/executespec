@@ -61,6 +61,19 @@ class SarvamRemovalContractTest {
         .contains("update org");
   }
 
+  @Test
+  void malformedSarvamOverridesFailClosedInForwardCleanup() throws Exception {
+    String migration =
+        Files.readString(
+                Path.of(
+                    "src/main/resources/db/migration/"
+                        + "V263__fail_closed_malformed_sarvam_overrides.sql"))
+            .toLowerCase(Locale.ROOT);
+    assertThat(migration)
+        .contains("do $$", "model_overrides_json = null", "exception when others")
+        .doesNotContain("delete from", "drop table", "truncate table");
+  }
+
   private static boolean isProductionText(Path file) {
     String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
     return name.endsWith(".java")
