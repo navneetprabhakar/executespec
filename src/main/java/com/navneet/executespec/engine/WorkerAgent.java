@@ -1315,10 +1315,7 @@ public class WorkerAgent {
         // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
         // avoid false-positive on output text that happens to contain "exit=0" without the
         // newline framing (e.g. compiler messages quoting source).
-        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name())
-            && envelope != null
-            && envelope.startsWith("{\"ok\":true")
-            && envelope.contains("\\nexit=0\\n")) {
+        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
           lastBuildPassIter = iter;
         }
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
@@ -2584,6 +2581,21 @@ public class WorkerAgent {
     if (head.startsWith("{\"ok\":false")) return true;
     java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
     return m.find() && !"0".equals(m.group(1));
+  }
+
+  /**
+   * Returns true only when a build envelope reports exit zero without the resolver's explicit no-op
+   * marker. A no-op fallback provides no compilation or repair evidence even though the shell
+   * command exits successfully. Legacy envelopes without the marker remain accepted.
+   */
+  static boolean isSuccessfulBuildEnvelope(String envelope) {
+    if (envelope == null
+        || !envelope.startsWith("{\"ok\":true")
+        || !envelope.contains("\\nexit=0\\n")) {
+      return false;
+    }
+    return !envelope.contains("\\nsmokeSignal=UNAVAILABLE\\n")
+        && !envelope.contains("\\nnoOp=true\\n");
   }
 
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
