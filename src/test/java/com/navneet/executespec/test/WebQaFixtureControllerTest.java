@@ -15,6 +15,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -91,7 +92,10 @@ class WebQaFixtureControllerTest {
             .build();
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     when(runs.findById("web-qa-gate")).thenReturn(java.util.Optional.of(run));
-    WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class));
+    AgentTask task = AgentTask.builder().taskId("task-1").runId("web-qa-gate").build();
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    when(tasks.findByRunId("web-qa-gate")).thenReturn(List.of(task));
+    WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class), tasks);
     AppUserDetails user = user();
 
     assertThat(
@@ -99,12 +103,15 @@ class WebQaFixtureControllerTest {
                 "web-qa-gate", new WebQaFixtureController.AdvanceRequest("EXECUTING"), user))
         .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
         .isEqualTo("WORKING");
+    assertThat(task.getStatus()).isEqualTo("WORKING");
     assertThat(
             controller.advance(
                 "web-qa-gate", new WebQaFixtureController.AdvanceRequest("COMPLETE"), user))
         .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
         .isEqualTo("COMPLETE");
+    assertThat(task.getStatus()).isEqualTo("COMPLETE");
     verify(runs, times(2)).save(run);
+    verify(tasks, times(2)).save(task);
   }
 
   @Test
@@ -145,9 +152,14 @@ class WebQaFixtureControllerTest {
 
   private static WebQaFixtureController controller(
       PipelineRunRepository runs, AgentSessionRepository sessions) {
+    return controller(runs, sessions, mock(AgentTaskRepository.class));
+  }
+
+  private static WebQaFixtureController controller(
+      PipelineRunRepository runs, AgentSessionRepository sessions, AgentTaskRepository tasks) {
     return new WebQaFixtureController(
         runs,
-        mock(AgentTaskRepository.class),
+        tasks,
         mock(ValidationReportRepository.class),
         mock(TestPlanRepository.class),
         mock(TestTaskRepository.class),
