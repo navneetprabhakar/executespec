@@ -174,6 +174,29 @@ class SpecChatServiceTest {
   }
 
   @Test
+  void runScopedTurnUsesRunIdForCostAndProviderAuthorizationScope() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("answer"));
+    SpecChatService svc = newService(router, List.of());
+
+    svc.runTurn(
+        new RecordingSink(),
+        mock(AppUserDetails.class),
+        "session-1",
+        null,
+        "run-1",
+        "org-1",
+        List.of(Map.of("role", "user", "content", "hi")),
+        "deepseek",
+        "deepseek-v4-flash-native",
+        Set.of());
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(request.capture());
+    assertThat(request.getValue().context().runId()).isEqualTo("run-1");
+  }
+
+  @Test
   void promptAdvertisesOnlyCallbacksBoundForCurrentTurn() {
     LlmRouter router = mock(LlmRouter.class);
     when(router.call(any())).thenReturn(textResponse("answer"));

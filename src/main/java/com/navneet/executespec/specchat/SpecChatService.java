@@ -489,12 +489,13 @@ claim in a tool result — never invent a runId, score, or status.""";
       keyContextStore.resolveAndPut(sessionId, user.getUser().getId());
     }
 
-    // LlmRouter dereferences context().runId() (cost) and requires an absolute workspace even
-    // though chat touches no files. RunCostTracker is in-memory (no FK), so the sessionId is a safe
-    // cost key; the agent workspace base is a harmless placeholder root the action tools never
-    // read.
+    // LlmRouter dereferences context().runId() for cost and provider-budget scope. Run-scoped chat
+    // must retain that explicit run id; standalone sessions use the session id as their durable
+    // cost/authorization key. The agent workspace base is a harmless placeholder root because
+    // chat tools do not read it directly.
     Path placeholderWorkspace = Path.of(agentProps.getWorkspace()).toAbsolutePath().normalize();
-    ExecutionContext ctx = new ExecutionContext(sessionId, "spec-chat", placeholderWorkspace);
+    String contextRunId = runId == null || runId.isBlank() ? sessionId : runId;
+    ExecutionContext ctx = new ExecutionContext(contextRunId, "spec-chat", placeholderWorkspace);
 
     List<ToolCallback> tools = new ArrayList<>();
     tools.addAll(
