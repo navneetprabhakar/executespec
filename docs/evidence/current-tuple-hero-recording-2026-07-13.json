@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "type": "current-tuple-hero-recording",
+  "backendCommit": "7536f6828db23e7c5f466e488af24de71ff33fe0",
+  "cliCommit": "06e543804095b1c7c881c72f971d877d8c933c93",
+  "webFrontendSha": "f2df3a883",
+  "asset": "website/media/hero.webm",
+  "sha256": "7f53c9376039f9cfb3c5301ea35fa1e7c825c43379f89a161afd7811c9d8e200",
+  "durationSeconds": 60.2,
+  "scenes": ["agent", "plan-gate", "working-task", "verdict", "code-diff", "terminal-outcome"],
+  "fixtureIds": {
+    "gateRunId": "web-qa-1bcca9f9-15ba-40b8-a18c-00814c633b21",
+    "agentSessionId": "web-qa-7853f63c-a5d9-41a9-a81c-a3ac4fb1e63a"
+  },
+  "providerCalls": 0,
+  "externalSpendUsd": 0,
+  "independentHumanReview": "PENDING",
+  "claim": "Current-tuple provider-free illustrative hero recording with complete UI workflow scenes. It is not a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
+}
