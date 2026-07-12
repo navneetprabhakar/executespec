@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -135,20 +136,45 @@ class RunLifecycleServiceCrashClaimTest {
             .resumeAttempts(0)
             .build();
     PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    com.navneet.executespec.sse.SseBroadcaster broadcaster =
+        mock(com.navneet.executespec.sse.SseBroadcaster.class);
     when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
     when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
         .thenReturn(0);
 
     RunLifecycleService service =
         new RunLifecycleService(
-            runRepo, null, null, null, null, null, null, null, null, null, null, null, null, null,
-            null, null, null, null, null, null);
+            runRepo,
+            null,
+            broadcaster,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
 
     assertThat(service.resumeAfterCrash(run.getRunId()))
         .isEqualTo(RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE);
     assertThat(run.getResumeAttempts()).isZero();
     verify(runRepo, never()).save(any(PipelineRun.class));
     verify(runRepo).claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
+    org.mockito.ArgumentCaptor<RunEvent> event =
+        org.mockito.ArgumentCaptor.forClass(RunEvent.class);
+    verify(broadcaster).emit(anyString(), event.capture());
+    assertThat(event.getValue().type()).isEqualTo("RECOVERY_ATTEMPTED");
+    assertThat(event.getValue().payload()).isEqualTo("CROSS_INSTANCE_LEASE_LOST|REFUSED|locks=0");
   }
 
   @Test
