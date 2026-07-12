@@ -118,6 +118,69 @@ class ContextPlannerTest {
   }
 
   @Test
+  void omitsEvidenceFromAnOldRepositoryRevisionButKeepsItAuditable() {
+    var stale =
+        new ContextPlanner.Item(
+            "old-file",
+            ContextPlanner.Kind.WORKING_SET,
+            "search",
+            "old-sha",
+            "src/A.java",
+            20,
+            100,
+            true,
+            "search:index",
+            "1-10",
+            "WORKING_SET",
+            "reload:old-file");
+    var current =
+        new ContextPlanner.Item(
+            "current-file",
+            ContextPlanner.Kind.WORKING_SET,
+            "search",
+            "new-sha",
+            "src/A.java",
+            20,
+            10,
+            true,
+            "search:index",
+            "1-10",
+            "WORKING_SET",
+            "reload:current-file");
+
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(50, 0, 0, 0, 0, 0), List.of(stale, current), "new-sha");
+
+    assertThat(plan.selected()).extracting(ContextPlanner.Item::id).containsExactly("current-file");
+    assertThat(plan.omitted()).extracting(ContextPlanner.Item::id).containsExactly("old-file");
+  }
+
+  @Test
+  void explicitLanePriorityProtectsTaskEvidenceOverLowerValueExternalArtifacts() {
+    var artifact =
+        new ContextPlanner.Item(
+            "log",
+            ContextPlanner.Kind.EXTERNAL_ARTIFACT,
+            "logs",
+            "sha",
+            "build.log",
+            40,
+            100,
+            true);
+    var evidence =
+        new ContextPlanner.Item(
+            "failure", ContextPlanner.Kind.TASK_EVIDENCE, "test", "sha", "src/A.java", 40, 1, true);
+
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(40, 0, 0, 0, 0, 0), List.of(artifact, evidence), "sha");
+
+    assertThat(plan.selected()).extracting(ContextPlanner.Item::id).containsExactly("failure");
+    assertThat(plan.omitted()).extracting(ContextPlanner.Item::id).containsExactly("log");
+  }
+
+  @Test
   void unknownModelPreservesCallerFallback() {
     when(models.isKnownModel("future-model")).thenReturn(false);
 

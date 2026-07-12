@@ -57,19 +57,29 @@ public class ContextPlanner {
   }
 
   public Plan plan(Window window, List<Item> items) {
+    return plan(window, items, null);
+  }
+
+  /**
+   * Plans evidence against the current repository revision. Items carrying a different SHA are
+   * retained in {@link Plan#omitted()} for auditability but can never enter the selected context. A
+   * null/blank current SHA preserves the compatibility behavior for non-repository contexts.
+   */
+  public Plan plan(Window window, List<Item> items, String currentRepositorySha) {
     if (window == null) throw new IllegalArgumentException("window is required");
     List<Item> candidates =
         items == null
             ? List.of()
             : items.stream()
                 .filter(item -> item != null && item.tokenEstimate() > 0)
-                // Preserve priority as the primary signal, but make ties stable. Callers assemble
-                // evidence from Redis/search results whose iteration order is not guaranteed; a
-                // non-deterministic tie break would change which context survives a tight budget
-                // and make model evaluations/retries irreproducible.
+                // Keep lane priority explicit before item priority, then make ties stable. Callers
+                // assemble evidence from Redis/search results whose iteration order is not
+                // guaranteed; a non-deterministic tie break would change which context survives a
+                // tight budget and make model evaluations/retries irreproducible.
                 .sorted(
-                    Comparator.comparingInt(Item::priority)
+                    Comparator.comparingInt((Item item) -> lanePriority(item.kind()))
                         .reversed()
+                        .thenComparing(Comparator.comparingInt(Item::priority).reversed())
                         .thenComparing(item -> item.fresh() ? 0 : 1)
                         .thenComparing(item -> item.kind() == null ? "" : item.kind().name())
                         .thenComparing(item -> item.id() == null ? "" : item.id()))
@@ -85,7 +95,9 @@ public class ContextPlanner {
     var selected = new java.util.ArrayList<Item>();
     var omitted = new java.util.ArrayList<Item>();
     for (Item item : candidates) {
-      if (item.tokenEstimate() <= remaining) {
+      if (isStale(item, currentRepositorySha)) {
+        omitted.add(item);
+      } else if (item.tokenEstimate() <= remaining) {
         selected.add(item);
         remaining -= item.tokenEstimate();
       } else omitted.add(item);
@@ -96,6 +108,28 @@ public class ContextPlanner {
         omitted,
         remaining,
         omitted.stream().mapToLong(Item::tokenEstimate).sum());
+  }
+
+  private static boolean isStale(Item item, String currentRepositorySha) {
+    return currentRepositorySha != null
+        && !currentRepositorySha.isBlank()
+        && item.repositorySha() != null
+        && !item.repositorySha().isBlank()
+        && !currentRepositorySha.equals(item.repositorySha());
+  }
+
+  private static int lanePriority(Kind kind) {
+    if (kind == null) return 0;
+    return switch (kind) {
+      case SYSTEM -> 1_000;
+      case GOAL -> 990;
+      case PLAN -> 980;
+      case TASK_EVIDENCE -> 900;
+      case WORKING_SET -> 800;
+      case PROJECT_BASELINE -> 700;
+      case JOURNAL -> 600;
+      case EXTERNAL_ARTIFACT -> 100;
+    };
   }
 
   /**
