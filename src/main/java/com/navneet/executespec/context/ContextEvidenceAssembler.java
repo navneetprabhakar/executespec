@@ -26,10 +26,7 @@ public class ContextEvidenceAssembler {
 
   public Selection select(ContextAgentInput input) {
     if (input == null) return new Selection(List.of(), List.of(), List.of());
-    List<ContextPlanner.Item> items = new ArrayList<>();
-    add(items, "package", input.newPackagesDetected(), ContextPlanner.Kind.PROJECT_BASELINE, 80);
-    add(items, "file", input.newFilesDetected(), ContextPlanner.Kind.WORKING_SET, 70);
-    add(items, "worker", input.workerReportSummaries(), ContextPlanner.Kind.TASK_EVIDENCE, 90);
+    List<ContextPlanner.Item> items = itemsFor(input);
     ContextPlanner.Plan plan =
         planner.plan(
             new ContextPlanner.Window(DEFAULT_OPTIONAL_TOKEN_BUDGET, 0, 0, 0, 0, 0), items);
@@ -39,12 +36,45 @@ public class ContextEvidenceAssembler {
     return new Selection(packages, files, workers);
   }
 
+  /** Package-visible lane inventory used by deterministic contract tests and diagnostics. */
+  List<ContextPlanner.Item> itemsFor(ContextAgentInput input) {
+    if (input == null) return List.of();
+    List<ContextPlanner.Item> items = new ArrayList<>();
+    add(
+        items,
+        "package",
+        input.newPackagesDetected(),
+        ContextPlanner.Kind.PROJECT_BASELINE,
+        80,
+        "ORIENTATION",
+        "context-agent:package-index");
+    add(
+        items,
+        "file",
+        input.newFilesDetected(),
+        ContextPlanner.Kind.WORKING_SET,
+        70,
+        "WORKING_SET",
+        "context-agent:file-index");
+    add(
+        items,
+        "worker",
+        input.workerReportSummaries(),
+        ContextPlanner.Kind.TASK_EVIDENCE,
+        90,
+        "TASK_EVIDENCE",
+        "context-agent:worker-report");
+    return List.copyOf(items);
+  }
+
   private static void add(
       List<ContextPlanner.Item> out,
       String prefix,
       List<String> values,
       ContextPlanner.Kind kind,
-      int priority) {
+      int priority,
+      String taskPhase,
+      String provenance) {
     if (values == null) return;
     // The bundle writer deduplicates values as a final serialization guard. Do it before
     // planning as well: spending budget on repeated search hits makes the planner look
@@ -65,10 +95,14 @@ public class ContextEvidenceAssembler {
               kind,
               "context-agent",
               null,
-              null,
+              kind == ContextPlanner.Kind.WORKING_SET ? bounded : null,
               Math.max(1, (bounded.length() + 3) / 4),
               priority,
-              true));
+              true,
+              provenance,
+              kind == ContextPlanner.Kind.WORKING_SET ? "full" : null,
+              taskPhase,
+              prefix + ":" + i));
     }
   }
 
