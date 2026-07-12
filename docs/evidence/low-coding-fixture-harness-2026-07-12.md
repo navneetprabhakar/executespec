@@ -1,6 +1,6 @@
 # Fixed-repo LOW coding harness
 
-The backend now contains an operator/test-only `LowCodingFixtureHarness` with no HTTP route and no automatic provider dispatch.
+The backend now contains an operator/test-only `LowCodingFixtureHarness` and a local/dev/benchmark-only `GET /api/v2/test/low-coding` endpoint. There is no production route or automatic provider dispatch; the endpoint is `SUPER_ADMIN`-gated and requires an exact reservation id.
 
 - Source: `src/main/java/com/navneet/executespec/benchmark/LowCodingFixtureHarness.java`
 - Test: `src/test/java/com/navneet/executespec/benchmark/LowCodingFixtureHarnessTest.java`
