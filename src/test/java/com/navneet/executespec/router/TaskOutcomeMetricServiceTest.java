@@ -92,12 +92,38 @@ class TaskOutcomeMetricServiceTest {
     assertThat(prior.orElseThrow().validationPassRate()).isEqualTo(200.0 / 3.0);
   }
 
+  @Test
+  void scopesValidationPriorToComplexityWhenRequested() {
+    ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
+    when(repository
+            .findTop200ByProviderIgnoreCaseAndModelNameIgnoreCaseAndTierIgnoreCaseOrderByCreatedAtDesc(
+                "anthropic", "claude-sonnet-4-6", "BUG_FIX"))
+        .thenReturn(
+            List.of(
+                metric("BUG_FIX", "LOW", true),
+                metric("BUG_FIX", "HIGH", false),
+                metric("BUG_FIX", "LOW", true)));
+
+    var prior =
+        new TaskOutcomeMetricService(repository)
+            .qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", "LOW", 2);
+
+    assertThat(prior).isPresent();
+    assertThat(prior.orElseThrow().sampleSize()).isEqualTo(2);
+    assertThat(prior.orElseThrow().validationPassRate()).isEqualTo(100.0);
+    assertThat(prior.orElseThrow().taskComplexity()).isEqualTo("LOW");
+  }
+
   private static ModelTaskMetric metric(String category, boolean passed) {
+    return metric(category, "MEDIUM", passed);
+  }
+
+  private static ModelTaskMetric metric(String category, String complexity, boolean passed) {
     return ModelTaskMetric.builder()
         .provider("anthropic")
         .modelName("claude-sonnet-4-6")
         .tier(category)
-        .complexity("MEDIUM")
+        .complexity(complexity)
         .attempt(1)
         .validationPassed(passed)
         .build();

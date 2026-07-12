@@ -189,12 +189,7 @@ public class ModelProviderCandidateService {
     double localScore = performanceTracker.getScore(provider, canonicalModel);
     long localLatency = performanceTracker.getAvgLatencyMs(provider, canonicalModel);
     TaskOutcomeMetricService.QualityPrior outcomePrior =
-        taskOutcomeMetricService == null
-            ? null
-            : taskOutcomeMetricService
-                .qualityPrior(
-                    provider, canonicalModel, request.taskCategory(), outcomeMinSampleTasks())
-                .orElse(null);
+        taskOutcomeMetricService == null ? null : qualityPrior(provider, canonicalModel, request);
     Boolean providerAvailable = providerAvailable(request, provider, canonicalModel, external);
     double recentFailurePenalty =
         external.stream().mapToDouble(ModelProviderCapabilitySignal::recentFailurePenalty).sum();
@@ -292,6 +287,23 @@ public class ModelProviderCandidateService {
     if (outcomePrior == null) return externalValidation;
     if (externalValidation == null) return outcomePrior.validationPassRate();
     return (externalValidation + outcomePrior.validationPassRate()) / 2.0;
+  }
+
+  private TaskOutcomeMetricService.QualityPrior qualityPrior(
+      String provider, String model, ModelProviderCandidateRequest request) {
+    if (request.taskComplexity() == null || "UNKNOWN".equalsIgnoreCase(request.taskComplexity())) {
+      return taskOutcomeMetricService
+          .qualityPrior(provider, model, request.taskCategory(), outcomeMinSampleTasks())
+          .orElse(null);
+    }
+    return taskOutcomeMetricService
+        .qualityPrior(
+            provider,
+            model,
+            request.taskCategory(),
+            request.taskComplexity(),
+            outcomeMinSampleTasks())
+        .orElse(null);
   }
 
   private List<ModelProviderCapabilitySignal> benchmarkSignals(

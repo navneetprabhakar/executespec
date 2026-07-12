@@ -15,6 +15,7 @@ import lombok.Builder;
 @Builder
 public record ModelProviderCandidateRequest(
     String taskCategory,
+    String taskComplexity,
     double requiredQualityThreshold,
     List<String> providerAllowList,
     List<String> modelAllowList,
@@ -24,6 +25,8 @@ public record ModelProviderCandidateRequest(
 
   public ModelProviderCandidateRequest {
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
+    taskComplexity =
+        taskComplexity == null || taskComplexity.isBlank() ? "UNKNOWN" : taskComplexity;
     requiredQualityThreshold = Math.max(0.0, Math.min(100.0, requiredQualityThreshold));
     providerAllowList = providerAllowList == null ? List.of() : List.copyOf(providerAllowList);
     modelAllowList = modelAllowList == null ? List.of() : List.copyOf(modelAllowList);
