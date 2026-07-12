@@ -117,6 +117,10 @@ turns separately from runs.
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
   session contains the complete action stream.
+- `V264__dedupe_local_hands_completed_events.sql` adds a partial unique index over
+  `(session_id, action_id)` for `LOCAL_HANDS_COMPLETED` rows (deduping historical duplicates first),
+  so retried result envelopes are first-writer-wins across JVMs. `LocalHandsStateService` reports
+  whether the terminal insert was accepted; a duplicate is an expected idempotent retry.
 - `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
   means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
   evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the

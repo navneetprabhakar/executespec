@@ -90,7 +90,7 @@ public class LocalHandsStateService {
    * append-only stream makes a retried client result idempotent across JVMs; the old implementation
    * only stored the state, so a restart lost the authoritative response body.
    */
-  public void recordCompleted(
+  public boolean recordCompleted(
       String runId,
       String callId,
       String taskId,
@@ -98,7 +98,7 @@ public class LocalHandsStateService {
       String permissionKind,
       String frameJson,
       String resultEnvelope) {
-    recordInternal(
+    return recordInternal(
         runId,
         callId,
         LocalHandsState.COMPLETED,
@@ -122,7 +122,7 @@ public class LocalHandsStateService {
       if (sessions == null || sessions.isEmpty()) return false;
       PendingCall restarted = latestCall(sessions, callId, LocalHandsState.WORKER_RESTARTED);
       if (restarted == null) return false;
-      recordCompleted(
+      return recordCompleted(
           runId,
           callId,
           restarted.taskId(),
@@ -130,7 +130,6 @@ public class LocalHandsStateService {
           restarted.permissionKind(),
           restarted.frameJson(),
           resultEnvelope);
-      return true;
     } catch (RuntimeException ex) {
       log.warn(
           "[LocalHands] failed to persist restarted result for run {} call {}: {}",
@@ -141,7 +140,7 @@ public class LocalHandsStateService {
     }
   }
 
-  private void recordInternal(
+  private boolean recordInternal(
       String runId,
       String callId,
       LocalHandsState state,
@@ -151,12 +150,12 @@ public class LocalHandsStateService {
       String frameJson,
       String resultEnvelope) {
     if (runId == null || runId.isBlank() || callId == null || callId.isBlank() || state == null) {
-      return;
+      return false;
     }
     try {
       List<AgentSession> sessions =
           sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
-      if (sessions == null || sessions.isEmpty()) return;
+      if (sessions == null || sessions.isEmpty()) return false;
       Map<String, Object> payload = new LinkedHashMap<>();
       payload.put("state", state.name());
       payload.put("runId", runId);
@@ -167,9 +166,22 @@ public class LocalHandsStateService {
       put(payload, "frame", parseJson(frameJson));
       put(payload, "result", parseJson(resultEnvelope));
       payload.put("recordedAt", Instant.now().toString());
+      boolean persisted = false;
       for (AgentSession session : sessions) {
-        eventRecorder.appendAction(session.getId(), callId, EVENT_PREFIX + state.name(), payload);
+        try {
+          eventRecorder.appendAction(session.getId(), callId, EVENT_PREFIX + state.name(), payload);
+          persisted = true;
+        } catch (RuntimeException ex) {
+          // V264 makes COMPLETED first-writer-wins across JVMs. A duplicate terminal insert is an
+          // expected retry outcome, not a worker-path failure.
+          log.debug(
+              "[LocalHands] terminal state already recorded for run {} call {} session {}",
+              runId,
+              callId,
+              session.getId());
+        }
       }
+      return persisted;
     } catch (RuntimeException ex) {
       log.warn(
           "[LocalHands] failed to persist {} for run {} call {}: {}",
@@ -177,6 +189,7 @@ public class LocalHandsStateService {
           runId,
           callId,
           ex.getMessage());
+      return false;
     }
   }
 
