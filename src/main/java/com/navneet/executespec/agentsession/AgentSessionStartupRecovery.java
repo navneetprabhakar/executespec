@@ -122,7 +122,10 @@ public class AgentSessionStartupRecovery {
       payload.put("recoveryBatchId", recoveryBatchId);
       payload.put("reconciledAt", session.getUpdatedAt().toString());
       eventRecorder.appendAction(
-          session.getId(), "startup-recovery:" + session.getId(), "SUBAGENT_RECOVERY", payload);
+          session.getId(),
+          "startup-recovery:" + recoveryBatchId + ":" + session.getId(),
+          "SUBAGENT_RECOVERY",
+          payload);
       increment("cancelled", status);
       reconciled++;
     }
