@@ -119,6 +119,14 @@ function totalTokens(usage?: AgentUsageSummary | null): number {
   return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
 }
 
+function hasRenderableAssistantContent(content: string): boolean {
+  const normalized = content.trim();
+  if (!normalized) return false;
+  // Provider disconnects can persist a partial Markdown marker (for example `1.`). Rendering it
+  // through react-markdown produces an empty list that looks like a blank assistant response.
+  return !/^(?:[-*+]\s*|\d+[.)]\s*)$/.test(normalized);
+}
+
 function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
   if (!usage || totalTokens(usage) <= 0) return 'Usage appears after the first response';
   const parts = [
@@ -598,7 +606,7 @@ function MessageBubble({
         )}
       </div>
       <div className='agent-msg-body'>
-        {message.role === 'assistant' && !message.content.trim() ? (
+        {message.role === 'assistant' && !hasRenderableAssistantContent(message.content) ? (
           <div className='agent-msg-empty' role='status'>
             No response arrived for this turn. You can send the message again.
           </div>

@@ -677,6 +677,50 @@ describe('IdeAgent', () => {
     );
   });
 
+  it('replaces a marker-only Markdown fragment with an explicit response state', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          streamText=''
+          visibleAction={null}
+          gates={[]}
+          runCost={null}
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+          messages={[{id: 'turn:assistant', role: 'assistant', content: '1.'}]}
+          isBusy={false}
+          streamEvents={[]}
+          runCard={null}
+          routingState={null}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain(
+      'No response arrived for this turn. You can send the message again.',
+    );
+    expect(host.querySelector('.signal-md-list')).toBeNull();
+  });
+
   it('collapses generated code blocks by default and shows assistant turn usage', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
