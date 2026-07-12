@@ -393,8 +393,16 @@ public class SubagentProtocolService {
     return released;
   }
 
-  /** Fail-closed budget/cancellation check that an executor calls before each child turn. */
-  @Transactional(readOnly = true)
+  /**
+   * Fail-closed budget/cancellation check that an executor calls before each child turn.
+   *
+   * <p>The check also advances the child heartbeat when the turn is admitted. A child model call
+   * can legitimately run for longer than the startup-recovery stale window; without this write, a
+   * rolling restart could mistake a still-active child for an abandoned one and cancel it. The
+   * timestamp is advisory only (the status/budget checks remain the authority) and is persisted in
+   * the same transaction as the admission decision.
+   */
+  @Transactional
   public BudgetState authorizeNextTurn(
       String childSessionId, String actorUserId, String actorOrgId) {
     AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
@@ -411,6 +419,10 @@ public class SubagentProtocolService {
       reason = "turn budget exhausted";
     } else if (cost >= metadata.maxCostUsd()) {
       reason = "cost budget exhausted";
+    }
+    if (reason == null) {
+      child.setUpdatedAt(Instant.now());
+      sessionRepository.save(child);
     }
     return new BudgetState(
         childSessionId,
