@@ -630,6 +630,9 @@ public class RepositorySearchService {
    */
   public boolean isCitationCurrent(Path workspace, SearchResult result, SearchHit citation) {
     if (workspace == null || result == null || citation == null) return false;
+    if (citation.repositoryFingerprint() == null
+        || citation.repositoryFingerprint().isBlank()
+        || !result.inventoryFingerprint().equals(citation.repositoryFingerprint())) return false;
     try {
       Path root = workspace.toRealPath();
       Path file = root.resolve(citation.path()).normalize();
