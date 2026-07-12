@@ -13,6 +13,16 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
   /** Legacy chronological view retained for recovery heuristics. */
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
+  /**
+   * Loads only the local-hands lifecycle events needed to reconstruct pending tool calls.
+   *
+   * <p>Recovery may run after a long-lived session has accumulated thousands of unrelated
+   * transcript/action events. Keeping this query type-scoped prevents reconnect recovery from
+   * materialising the entire session history just to find a handful of pending tool calls.
+   */
+  List<AgentActionEvent> findBySessionIdAndTypeInOrderByCreatedAtAsc(
+      String sessionId, List<String> types);
+
   List<AgentActionEvent> findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
       String sessionId, long after);
 

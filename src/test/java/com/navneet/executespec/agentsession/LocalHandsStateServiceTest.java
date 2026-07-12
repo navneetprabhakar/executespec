@@ -61,7 +61,7 @@ class LocalHandsStateServiceTest {
 
   @Test
   void pending_reconstructsOnlyCallsWhoseLatestStateNeedsClient() {
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-1"))
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
         .thenReturn(
             List.of(
                 event("call-1", LocalHandsState.AWAITING_CLIENT, 1),
@@ -80,9 +80,9 @@ class LocalHandsStateServiceTest {
     AgentSession newer = AgentSession.builder().id("session-newer").build();
     when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
         .thenReturn(List.of(newer, older));
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-newer"))
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-newer"), any()))
         .thenReturn(List.of(event("call-1", LocalHandsState.CLIENT_RECONNECTED, 2)));
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-older"))
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-older"), any()))
         .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
 
     assertThat(service.pending("run-1"))
@@ -94,7 +94,7 @@ class LocalHandsStateServiceTest {
 
   @Test
   void pending_reconstructsFromDurableEventsAfterStateServiceRecreation() {
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-1"))
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
         .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
 
     // A new service instance represents a fresh JVM component with no in-memory dispatcher
@@ -114,7 +114,7 @@ class LocalHandsStateServiceTest {
 
   @Test
   void closeForWorkerRestart_marksOldCallUnreplayable() {
-    when(eventRepo.findBySessionIdOrderByCreatedAtAsc("session-1"))
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
         .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
 
     assertThat(service.closeForWorkerRestart("run-1")).isEqualTo(1);
