@@ -197,7 +197,13 @@ public class AgentSessionService {
 
   @Transactional
   public void disconnectStreamTurn(StreamTurnContext ctx, String partialSummary) {
-    streamTurnLifecycle.disconnect(ctx, partialSummary);
+    disconnectStreamTurn(ctx, partialSummary, null);
+  }
+
+  @Transactional
+  public void disconnectStreamTurn(
+      StreamTurnContext ctx, String partialSummary, RunCostTracker.Snapshot cost) {
+    streamTurnLifecycle.disconnect(ctx, partialSummary, cost);
   }
 
   public IntentDecision interpret(InterpretIntentRequest request) {

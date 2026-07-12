@@ -205,7 +205,7 @@ class AgentStreamTurnRunnerTest {
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 
-    verify(sessionService).disconnectStreamTurn(ctx, "partial response");
+    verify(sessionService).disconnectStreamTurn(ctx, "partial response", null);
     verify(emitter).complete();
   }
 
@@ -251,7 +251,7 @@ class AgentStreamTurnRunnerTest {
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("fixture", null, null, null, null, null));
 
-    verify(sessionService).disconnectStreamTurn(ctx, "Fixture stream started. ");
+    verify(sessionService).disconnectStreamTurn(ctx, "Fixture stream started. ", null);
     verify(emitter).complete();
   }
 

@@ -94,6 +94,13 @@ class AgentStreamTurnLifecycle {
   }
 
   void disconnect(AgentSessionService.StreamTurnContext ctx, String partialSummary) {
+    disconnect(ctx, partialSummary, null);
+  }
+
+  void disconnect(
+      AgentSessionService.StreamTurnContext ctx,
+      String partialSummary,
+      RunCostTracker.Snapshot cost) {
     String boundedPartial = boundPartialSummary(partialSummary);
     turnRepo
         .findById(ctx.turnId())
@@ -105,13 +112,47 @@ class AgentStreamTurnLifecycle {
                     AgentText.firstNonBlank(
                         boundedPartial == null ? "Stream disconnected." : boundedPartial,
                         turn.getAssistantSummary()));
+                if (cost != null) {
+                  turn.setInputTokens(cost.inputTokens());
+                  turn.setOutputTokens(cost.outputTokens());
+                  turn.setReasoningTokens(cost.reasoningTokens());
+                  turn.setCostUsd(cost.costUsd());
+                }
                 turnRepo.save(turn);
+                if (cost != null
+                    && (cost.inputTokens() > 0 || cost.outputTokens() > 0 || cost.costUsd() > 0)) {
+                  usageRepo.save(
+                      AgentUsageLedger.builder()
+                          .id(UUID.randomUUID().toString())
+                          .orgId(ctx.orgId())
+                          .userId(ctx.userId())
+                          .sourceType("AGENT_TURN")
+                          .sourceId(ctx.turnId())
+                          .provider(ctx.provider())
+                          .model(ctx.model())
+                          .inputTokens(cost.inputTokens())
+                          .outputTokens(cost.outputTokens())
+                          .reasoningTokens(cost.reasoningTokens())
+                          .cacheReadTokens(cost.cacheReadTokens())
+                          .costUsd(cost.costUsd())
+                          .billableUnits(0)
+                          .billingPolicy("INCLUDED")
+                          .createdAt(Instant.now())
+                          .build());
+                }
               }
             });
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("message", "client disconnected");
     payload.put("partial", boundedPartial != null);
     if (boundedPartial != null) payload.put("partialSummary", boundedPartial);
+    if (cost != null) {
+      payload.put("inputTokens", cost.inputTokens());
+      payload.put("outputTokens", cost.outputTokens());
+      payload.put("reasoningTokens", cost.reasoningTokens());
+      payload.put("cacheReadTokens", cost.cacheReadTokens());
+      payload.put("costUsd", cost.costUsd());
+    }
     eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_DISCONNECTED", payload);
   }
 
