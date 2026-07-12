@@ -3,34 +3,34 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "d83938975c1e097198591e9585fcb1e239d955a6",
+      "sha": "5191f58d3e218638b8a5a02af064d367e4643551",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2631,
-      "worktreeFingerprint": "292f291d6db206870668826f1db695230d05c4e21c02732940d2b459a4e4195c"
+      "trackedFiles": 2677,
+      "worktreeFingerprint": "9d0d92aa57ca46ff9265421a55a874115fd93f74360069f80c3fad77d20a3551"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "b0173f32aba3851d8e43ded27f42918888a33d34",
+      "sha": "46481333f0ecc7fd7988cd14609726fcaf59cf8a",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 305,
-      "worktreeFingerprint": "6038b2fc5288fe5c828f254f5b10875fb39521e155851e8d8fcb18007d1b6c29"
+      "trackedFiles": 294,
+      "worktreeFingerprint": "137faa630c33b33b25c37344141f66a2cccec2c3c020a3e73957a4bde35a12bb"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "ad0e9b995b49b2fd6ad9611bc20e874b313e0ca4",
+      "sha": "11aec557f4701da1807b2eb0dc77ef2c11c03be3",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 727,
-      "worktreeFingerprint": "b06032a9e1adc658c59b7eb53c882939f33a2da23ad4365414064af2c780e323"
+      "trackedFiles": 766,
+      "worktreeFingerprint": "a68b34ace0fe7d9a9ad1def88dda0b03d94a52b329575993a72a58a9910020e8"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1249,
-      "lines": 196029
+      "files": 1255,
+      "lines": 199051
     },
-    "testJavaFiles": 393,
-    "controllers": 109,
-    "mappingAnnotations": 604,
+    "testJavaFiles": 416,
+    "controllers": 110,
+    "mappingAnnotations": 613,
     "prompts": {
       "count": 88,
       "markdown": 53,
@@ -128,8 +128,8 @@
       ]
     },
     "migrations": {
-      "count": 258,
-      "head": "V258"
+      "count": 262,
+      "head": "V262"
     },
     "providers": [
       "anthropic",
@@ -182,6 +182,7 @@
     "featureFlagLiterals": [
       "activity.retention.days",
       "agent.subagents.coordinator-auto.enabled",
+      "agent.subagents.implementer.enabled",
       "assessment.llm.enabled",
       "billing.lifecycle.sunsetting.enabled",
       "build.test-exec-gate.enabled",
@@ -193,6 +194,7 @@
       "contracts.breaking-change.enabled",
       "enterprise.inject.enabled",
       "execution.goal-decision.enforcement.enabled",
+      "execution.initial-routing.enabled",
       "execution.run-journal.enabled",
       "execution.view.enabled",
       "gemini.explicit-cache.enabled",
@@ -236,9 +238,9 @@
       "worker.verify-boot.enabled"
     ],
     "web": {
-      "sourceFiles": 149,
-      "lines": 42967,
-      "testFiles": 35,
+      "sourceFiles": 152,
+      "lines": 43659,
+      "testFiles": 37,
       "routePaths": [
         "*",
         "/",
@@ -347,9 +349,9 @@
     ]
   },
   "cli": {
-    "sourceFiles": 127,
-    "lines": 52027,
-    "testFiles": 114,
+    "sourceFiles": 114,
+    "lines": 44162,
+    "testFiles": 111,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
       "cli/src/app-tui",
@@ -359,8 +361,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 726,
-    "markdownFiles": 191,
+    "trackedFiles": 765,
+    "markdownFiles": 198,
     "outputFiles": 418
   }
 }
