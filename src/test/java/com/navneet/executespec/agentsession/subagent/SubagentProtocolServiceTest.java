@@ -490,6 +490,16 @@ class SubagentProtocolServiceTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires evidence");
 
+    assertThatThrownBy(
+            () ->
+                service.complete(
+                    "child",
+                    new Completion("green", List.of(new Evidence("", "observed"))),
+                    "user",
+                    "org"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("requires citation and summary");
+
     var result =
         service.complete(
             "child",

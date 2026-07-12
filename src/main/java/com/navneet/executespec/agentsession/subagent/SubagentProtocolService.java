@@ -479,6 +479,19 @@ public class SubagentProtocolService {
       throw new IllegalArgumentException(
           metadata.role().name().toLowerCase(Locale.ROOT) + " completion requires evidence");
     }
+    if (metadata.resolvedContract().requiresEvidence()
+        && completion.evidence().stream()
+            .anyMatch(
+                evidence ->
+                    evidence == null
+                        || evidence.citation() == null
+                        || evidence.citation().isBlank()
+                        || evidence.summary() == null
+                        || evidence.summary().isBlank())) {
+      throw new IllegalArgumentException(
+          metadata.role().name().toLowerCase(Locale.ROOT)
+              + " completion evidence requires citation and summary");
+    }
     BudgetState budget = authorizeNextTurn(childSessionId, actorUserId, actorOrgId);
     if (budget.turnsUsed() > budget.maxTurns() || budget.costUsd() > budget.maxCostUsd()) {
       throw new IllegalStateException("Subagent completed after exceeding its budget");
