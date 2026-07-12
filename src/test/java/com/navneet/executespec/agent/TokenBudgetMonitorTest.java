@@ -59,13 +59,14 @@ class TokenBudgetMonitorTest {
   }
 
   @Test
-  void highComplexity_getsMoreHeadroom() {
-    // At 0.78 usage: MEDIUM → COMPACT (0.78 >= 0.75), HIGH → WARN (0.78 < 0.80)
+  void complexityDoesNotInflateCompactionThresholds() {
+    // Explicit ContextPlanner reserves, rather than hidden percentage inflation, own complexity
+    // headroom. At 0.78 usage both paths therefore reach the same compact threshold.
     int tokens = (int) (0.78 * 200_000);
     BudgetStatus mediumStatus = monitor.check("claude-haiku-4-5", "MEDIUM", tokens);
     BudgetStatus highStatus = monitor.check("claude-haiku-4-5", "HIGH", tokens);
     assertThat(mediumStatus.status()).isEqualTo(Status.COMPACT);
-    assertThat(highStatus.status()).isEqualTo(Status.WARN);
+    assertThat(highStatus.status()).isEqualTo(Status.COMPACT);
   }
 
   @Test
