@@ -25,7 +25,7 @@ This is an execution register. `COMPATIBILITY_ONLY` entries need an owner, remov
 | Flat search strings and two JS walkers | Typed git/rg/symbol/test index with fingerprint/freshness/citations | Recall/latency and stale-index tests |
 | Raw/full worker history and client-owned canonical chat JSON | Server ContextPlanner, journal, compaction, headroom and local cache | Long-session recovery tests |
 | API-call-success performance tracker and fragmented routing | Task-outcome store plus one auditable RoutingService | Replay/degradation/provider-cap tests |
-| Fake `spawn_subagent` | Persisted child run protocol and bounded orchestration | Scout/verifier integration tests |
+| Historical fake `spawn_subagent` stub | Persisted child run protocol and bounded orchestration | Historical stub is superseded; current model-visible tools delegate through `SubagentExecutionService` and remain until a separately approved API migration |
 
 The coordinator-triggered path is now an explicit, bounded control-plane seam rather than a model
 claim: the feature flag remains fail-closed, eligibility is advisory, and reservation plus the
@@ -43,7 +43,7 @@ being retained under compatibility aliases.
 |---|---|
 | Sarvam enum, config, router dispatch, catalog/picker/style/docs/tests and stale persisted selections | Milestone 1; forward migration and provider-contract suite |
 | Literal NUL bytes in `WorkerAgent.java` and `GeminiNativeToolClient.java` | DONE; escaped delimiters preserve behavior and repository source-text gate prevents recurrence |
-| Backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | Backend aliases/stub deleted in M2 cleanup; CLI fake aliases already deleted. Persisted child protocol remains the replacement before any delegation UX ships. |
+| Historical backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | Superseded. Current backend `spawn_subagent`/`spawn_subagents` callbacks call persisted `SubagentExecutionService` with eligibility, bounded reservations, child sessions, and audit events. Retain the current contract; delete only after an explicit replacement/API migration. |
 | Deprecated `PatchAgent` wrapper | DONE — deleted after `CodeGenEngine`/PATCH characterization; `prompts/patch-agent.md` remains because `CodeGenEngineImpl` owns and actively assembles it |
 | `FallbackLlmRouter` compatibility router | DONE — deleted after all production text callers moved to `LlmRouter.callText`; canonical routing, retry, failover and usage accounting now have one transport |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
