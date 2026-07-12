@@ -1526,7 +1526,14 @@ public class RunOrchestrator implements RunControlPort {
                     runId,
                     projectId,
                     staleness.staleCount());
-                projectArchitectureService.generate(projectId, null, runUserPat);
+                // Preserve the run's explicit provider pin during pre-planner architecture refresh.
+                // Without this, a stale project can spend on its project-default provider before
+                // the pinned worker route is reached.
+                projectArchitectureService.generate(
+                    projectId,
+                    null,
+                    runUserPat,
+                    LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
                 stalenessService.invalidate(projectId);
               }
             } catch (Exception e) {
