@@ -11,24 +11,18 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.web.server.ResponseStatusException;
 
 class RunContextComposerProviderTest {
 
   @Test
-  void normalizeProviderRejectsExplicitDisabledProvider() {
+  void normalizeProviderAllowsExplicitGeminiProvider() {
     RunContextComposer composer = composer(null);
 
-    ResponseStatusException ex =
-        assertThrows(
-            ResponseStatusException.class,
-            () -> composer.normalizeProvider("gemini", null, "run-1"));
-
-    assertEquals(400, ex.getStatusCode().value());
+    assertEquals("gemini", composer.normalizeProvider("gemini", null, "run-1"));
   }
 
   @Test
-  void normalizeProviderRejectsDisabledProjectDefault() {
+  void normalizeProviderAllowsGeminiProjectDefault() {
     ProjectRepository projectRepo = mock(ProjectRepository.class);
     Project project =
         Project.builder()
@@ -41,11 +35,7 @@ class RunContextComposerProviderTest {
     when(projectRepo.findById("p1")).thenReturn(Optional.of(project));
     RunContextComposer composer = composer(projectRepo);
 
-    ResponseStatusException ex =
-        assertThrows(
-            ResponseStatusException.class, () -> composer.normalizeProvider(null, "p1", "run-1"));
-
-    assertEquals(400, ex.getStatusCode().value());
+    assertEquals("gemini", composer.normalizeProvider(null, "p1", "run-1"));
   }
 
   @Test
