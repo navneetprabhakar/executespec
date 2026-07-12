@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.eclipse.jgit.api.Git;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -75,6 +76,8 @@ public class ContextEvidenceBundleWriter {
     sources.put(
         "contextDocumentSha256", sha256(readSource(contextDir.resolve("CODEBASE_CONTEXT.md"))));
     sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
+    String repoHeadSha = resolveRepoHeadSha(projectPath);
+    if (repoHeadSha != null) sources.put("repoHeadSha", repoHeadSha);
 
     ObjectNode evidence = root.putObject("evidence");
     ContextEvidenceAssembler.Selection selected = evidenceAssembler.select(input);
@@ -139,6 +142,11 @@ public class ContextEvidenceBundleWriter {
           || !decisionsHash.equals(sources.path("decisionsSha256").asText())) {
         return Optional.empty();
       }
+      String recordedHead = sources.path("repoHeadSha").asText("");
+      if (!recordedHead.isBlank()) {
+        String currentHead = resolveRepoHeadSha(projectPath);
+        if (currentHead == null || !recordedHead.equals(currentHead)) return Optional.empty();
+      }
       return Optional.of(root);
     } catch (Exception e) {
       return Optional.empty();
@@ -179,6 +187,18 @@ public class ContextEvidenceBundleWriter {
       return hex.toString();
     } catch (java.security.NoSuchAlgorithmException e) {
       throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+  }
+
+  /**
+   * Returns the workspace HEAD when it is a git checkout; older/non-git workspaces remain valid.
+   */
+  static String resolveRepoHeadSha(Path projectPath) {
+    if (projectPath == null) return null;
+    try (Git git = Git.open(projectPath.toFile())) {
+      return git.getRepository().resolve("HEAD").name();
+    } catch (Exception e) {
+      return null;
     }
   }
 }
