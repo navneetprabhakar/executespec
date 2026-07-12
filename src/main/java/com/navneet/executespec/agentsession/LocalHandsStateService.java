@@ -30,6 +30,15 @@ import lombok.extern.slf4j.Slf4j;
 public class LocalHandsStateService {
 
   private static final String EVENT_PREFIX = "LOCAL_HANDS_";
+  private static final List<String> REPLAYABLE_TYPES =
+      List.of(
+          EVENT_PREFIX + LocalHandsState.AWAITING_CLIENT.name(),
+          EVENT_PREFIX + LocalHandsState.CLIENT_RECONNECTED.name(),
+          EVENT_PREFIX + LocalHandsState.CLIENT_PROTOCOL_ERROR.name(),
+          EVENT_PREFIX + LocalHandsState.CLIENT_TIMEOUT.name(),
+          EVENT_PREFIX + LocalHandsState.CLIENT_CANCELLED.name(),
+          EVENT_PREFIX + LocalHandsState.WORKER_RESTARTED.name(),
+          EVENT_PREFIX + LocalHandsState.COMPLETED.name());
 
   private final AgentSessionRepository sessionRepo;
   private final AgentActionEventRepository eventRepo;
@@ -96,7 +105,8 @@ public class LocalHandsStateService {
       Map<String, PendingCall> latest = new LinkedHashMap<>();
       for (AgentSession session : sessions) {
         List<AgentActionEvent> events =
-            eventRepo.findBySessionIdOrderByCreatedAtAsc(session.getId());
+            eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(
+                session.getId(), REPLAYABLE_TYPES);
         for (AgentActionEvent event : events) {
           if (event.getActionId() == null
               || event.getType() == null
