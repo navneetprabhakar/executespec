@@ -252,7 +252,9 @@ public class WebQaFixtureController {
       String userId, String orgId, String status, String reason, String title, boolean success)
       throws IOException {
     String runId = PREFIX + UUID.randomUUID();
-    Path workspace = Path.of("workspace", "web-qa", runId).toAbsolutePath();
+    // Keep the fixture workspace on the same canonical <agent.workspace>/<runId> layout used by
+    // WorkspaceFileService; otherwise the authenticated Code tab cannot show the fixture diff.
+    Path workspace = Path.of("workspace", runId).toAbsolutePath();
     Files.createDirectories(workspace.resolve("src"));
     Files.writeString(
         workspace.resolve("README.md"), "# Release QA fixture\n", StandardCharsets.UTF_8);
