@@ -32,6 +32,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 class AgentSessionReadService {
 
+  private static final int LEGACY_SNAPSHOT_PAGE_SIZE = 500;
+
   private final AgentSessionRepository sessionRepo;
   private final AgentTurnRepository turnRepo;
   private final AgentActionEventRepository eventRepo;
@@ -68,7 +70,8 @@ class AgentSessionReadService {
     AgentSession session = requireSession(sessionId, user);
     List<AgentActionEvent> events =
         after == null || after < 0
-            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId)
+            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+                sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE))
             : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
                 sessionId, after);
     long last = after == null || after < 0 ? 0 : after;
@@ -96,12 +99,19 @@ class AgentSessionReadService {
     boolean snapshot = after == null || after < 0;
     boolean legacyEventsOmitted =
         !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
+    boolean truncated = false;
+    boolean hasMore = false;
     if (legacyEventsOmitted) {
       // A cursor cannot establish a complete ordering across pre-V262 rows. Return an explicit
       // full snapshot instead of letting a client treat an incomplete delta as authoritative.
-      events = eventRepo.findBySessionIdOrderByStreamSequenceAsc(sessionId);
+      long totalEvents = eventRepo.countBySessionId(sessionId);
+      events =
+          eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+              sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE));
       snapshot = true;
       legacyEventsOmitted = false;
+      truncated = totalEvents > LEGACY_SNAPSHOT_PAGE_SIZE;
+      hasMore = truncated;
       last = 0;
       for (AgentActionEvent event : events) {
         if (event.getStreamSequence() != null) {
@@ -117,7 +127,9 @@ class AgentSessionReadService {
             ? new SessionSnapshot(
                 session.getId(), session.getStatus(), session.getTitle(), session.getUpdatedAt())
             : null,
-        legacyEventsOmitted);
+        legacyEventsOmitted,
+        truncated,
+        hasMore);
   }
 
   List<AgentTurnResponse> listTurns(

@@ -180,7 +180,7 @@ class AgentSessionReadServiceTest {
   @Test
   void replayToleratesLegacyEventWithoutSequenceWithoutAdvancingCursor() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc("s1"))
+    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc(eq("s1"), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder()
@@ -209,11 +209,12 @@ class AgentSessionReadServiceTest {
                 AgentActionEvent.builder().id("fresh").streamSequence(12L).build(),
                 AgentActionEvent.builder().id("legacy").streamSequence(null).build()));
     when(eventRepo.countBySessionIdAndStreamSequenceIsNull("s1")).thenReturn(1L);
-    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc("s1"))
+    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc(eq("s1"), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder().id("legacy").streamSequence(null).build(),
                 AgentActionEvent.builder().id("fresh").streamSequence(12L).build()));
+    when(eventRepo.countBySessionId("s1")).thenReturn(2L);
 
     var replay = service.replayEvents("s1", 10L, user());
 
@@ -221,6 +222,26 @@ class AgentSessionReadServiceTest {
     assertThat(replay.lastSequence()).isEqualTo(12L);
     assertThat(replay.snapshot()).isTrue();
     assertThat(replay.legacyEventsOmitted()).isFalse();
+  }
+
+  @Test
+  void legacyReplayMarksTruncatedSnapshotWhenHistoryExceedsSafePage() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+        .thenReturn(List.of());
+    when(eventRepo.countBySessionIdAndStreamSequenceIsNull("s1")).thenReturn(1L);
+    when(eventRepo.countBySessionId("s1")).thenReturn(501L);
+    when(eventRepo.findBySessionIdOrderByStreamSequenceAsc(eq("s1"), any(Pageable.class)))
+        .thenReturn(List.of(AgentActionEvent.builder().id("legacy").build()));
+
+    var replay = service.replayEvents("s1", 10L, user());
+
+    assertThat(replay.snapshot()).isTrue();
+    assertThat(replay.truncated()).isTrue();
+    assertThat(replay.hasMore()).isTrue();
+    var page = ArgumentCaptor.forClass(Pageable.class);
+    verify(eventRepo).findBySessionIdOrderByStreamSequenceAsc(eq("s1"), page.capture());
+    assertThat(page.getValue().getPageSize()).isEqualTo(500);
   }
 
   @Test

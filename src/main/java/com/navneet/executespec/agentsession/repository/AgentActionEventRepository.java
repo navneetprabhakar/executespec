@@ -11,6 +11,11 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
 
   List<AgentActionEvent> findBySessionIdOrderByStreamSequenceAsc(String sessionId);
 
+  List<AgentActionEvent> findBySessionIdOrderByStreamSequenceAsc(
+      String sessionId, Pageable pageable);
+
+  long countBySessionId(String sessionId);
+
   /** Legacy chronological view retained for recovery heuristics. */
   List<AgentActionEvent> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
