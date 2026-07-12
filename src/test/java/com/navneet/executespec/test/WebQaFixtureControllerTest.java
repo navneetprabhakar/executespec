@@ -14,6 +14,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
@@ -30,8 +31,15 @@ class WebQaFixtureControllerTest {
     AgentSession session = AgentSession.builder().id("web-qa-session").build();
     AgentSessionRepository sessions = mock(AgentSessionRepository.class);
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    PipelineRun run = PipelineRun.builder().runId("web-qa-run").build();
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    when(tasks.findByRunId("web-qa-run")).thenReturn(List.of());
+    ValidationReportRepository reports = mock(ValidationReportRepository.class);
+    TestPlanRepository plans = mock(TestPlanRepository.class);
+    when(reports.findByRunId("web-qa-run")).thenReturn(java.util.Optional.empty());
+    when(plans.findByRunId("web-qa-run")).thenReturn(java.util.Optional.empty());
     when(runs.findByCreatedByUserIdOrderByStartedAtDesc(eq("user-1"), any()))
-        .thenReturn(new PageImpl<>(List.of()));
+        .thenReturn(new PageImpl<>(List.of(run)));
     when(sessions.findByUserIdAndIdStartingWith("user-1", "web-qa-")).thenReturn(List.of(session));
     AgentActionEventRepository events = mock(AgentActionEventRepository.class);
     AgentTurnRepository turns = mock(AgentTurnRepository.class);
@@ -47,9 +55,9 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
-            mock(AgentTaskRepository.class),
-            mock(ValidationReportRepository.class),
-            mock(TestPlanRepository.class),
+            tasks,
+            reports,
+            plans,
             mock(TestTaskRepository.class),
             mock(TestResultRepository.class),
             sessions,
@@ -60,6 +68,8 @@ class WebQaFixtureControllerTest {
     Map<String, Object> result = controller.cleanup(new AppUserDetails(user, null));
 
     assertThat(result).containsEntry("deletedAgentSessions", 1);
+    assertThat(result).containsEntry("deletedRuns", 1);
+    verify(runs).delete(run);
     verify(events).deleteBySessionId("web-qa-session");
     verify(turns).deleteBySessionId("web-qa-session");
     verify(sessions).delete(session);

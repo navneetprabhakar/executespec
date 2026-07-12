@@ -38,6 +38,7 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -137,6 +138,9 @@ public class WebQaFixtureController {
   }
 
   @DeleteMapping
+  // Keep run/workspace and agent-session graph deletion atomic. Without a transaction, a stale
+  // fixture row can fail midway through cleanup and leave ACTIVE web-qa sessions behind.
+  @Transactional
   public Map<String, Object> cleanup(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           AppUserDetails principal)
