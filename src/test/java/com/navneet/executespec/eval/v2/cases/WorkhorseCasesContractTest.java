@@ -44,7 +44,8 @@ class WorkhorseCasesContractTest {
 
     WorkhorseEvalCase create = WorkhorseCases.all().get(1);
     Path createWorkspace = Files.createDirectory(tempDir.resolve("malformed-create"));
-    Files.writeString(createWorkspace.resolve("stringutils.py"), "def reverse(s): return s[::-1]\n");
+    Files.writeString(
+        createWorkspace.resolve("stringutils.py"), "def reverse(s): return s[::-1]\n");
     Files.writeString(createWorkspace.resolve("test_stringutils.py"), "reverse('abc') == 'cba'\n");
     assertThat(create.validate(createWorkspace, null).correctness()).isEqualTo(55);
   }

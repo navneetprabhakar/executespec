@@ -196,10 +196,15 @@ public final class PlanningCases {
           Set<String> declaredRequirementIds = declaredRequirementIds(args, notes);
           for (int i = 0; i < tasks.size(); i++) {
             JsonNode t = tasks.get(i);
-            if (t == null || !t.isObject() || !nonBlankText(t, "id") || !nonBlankText(t, "title")) {
+            boolean validTaskIdentity =
+                t != null
+                    && t.isObject()
+                    && nonBlankText(t, "id")
+                    && nonBlankText(t, "title");
+            if (!validTaskIdentity) {
               allHaveIdTitle = false;
             }
-            if (hasValidRequirementLinks(t, declaredRequirementIds)) {
+            if (validTaskIdentity && hasValidRequirementLinks(t, declaredRequirementIds)) {
               tasksWithMeetsReq++;
             }
           }
