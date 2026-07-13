@@ -642,6 +642,13 @@ export default function IdeAgent() {
           >
             ×
           </button>
+          <button
+            className='agent-error-retry'
+            onClick={() => void load()}
+            disabled={state.status === 'loadingSession'}
+          >
+            {state.status === 'loadingSession' ? 'Retrying…' : 'Retry'}
+          </button>
         </div>
       )}
 
