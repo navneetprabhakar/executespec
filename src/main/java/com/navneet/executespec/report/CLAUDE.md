@@ -6,7 +6,7 @@ signals, derives the internal verified/rubric summaries, and reconstructs the re
 
 ## Evidence contract
 
-- V268 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
+- V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
   preview verifier supplied a `BootVerification`. Concrete-test rescoring rehydrates that signal;
   it must never pass `null` merely because the original `ReportInput` is gone.
 - Ledger entries label provenance (`DETERMINISTIC`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `HYBRID`, or
@@ -19,5 +19,5 @@ signals, derives the internal verified/rubric summaries, and reconstructs the re
 
 ## Migration
 
-- `V268__persist_validation_boot_evidence.sql` adds nullable provenance columns. Historical rows remain
+- `V270__persist_validation_boot_evidence.sql` adds nullable provenance columns. Historical rows remain
   valid and compile-only reports retain their prior scoring behavior.
