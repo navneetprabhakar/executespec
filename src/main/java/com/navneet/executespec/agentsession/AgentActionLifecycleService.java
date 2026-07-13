@@ -17,6 +17,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDec
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -103,27 +104,50 @@ class AgentActionLifecycleService {
             : request.status().toUpperCase(Locale.ROOT);
     String summary = request == null ? "" : AgentText.firstNonBlank(request.summary(), "");
     String runId = request == null ? "" : AgentText.firstNonBlank(request.runId(), "");
-    eventRecorder.appendAction(
-        session.getId(),
-        actionId,
-        "ACTION_RESULT",
-        Map.of(
-            "actionId", actionId,
-            "status", status,
-            "summary", summary == null ? "" : summary,
-            "runId", runId == null ? "" : runId,
-            "touchedFiles",
-                request == null || request.touchedFiles() == null
-                    ? List.of()
-                    : request.touchedFiles(),
-            "verification",
-                request == null || request.verification() == null
-                    ? Map.of()
-                    : request.verification()));
+    try {
+      eventRecorder.appendAction(
+          session.getId(),
+          actionId,
+          "ACTION_RESULT",
+          Map.of(
+              "actionId", actionId,
+              "status", status,
+              "summary", summary == null ? "" : summary,
+              "runId", runId == null ? "" : runId,
+              "touchedFiles",
+                  request == null || request.touchedFiles() == null
+                      ? List.of()
+                      : request.touchedFiles(),
+              "verification",
+                  request == null || request.verification() == null
+                      ? Map.of()
+                      : request.verification()));
+    } catch (DataIntegrityViolationException race) {
+      // Another JVM can win the partial unique index between our read and insert. Resolve the
+      // expected retry to that committed first result instead of leaking a 500 to the reconnecting
+      // client. If the row is unavailable, preserve the original database failure.
+      var winner = eventRecorder.findFirstActionResult(session.getId(), actionId);
+      if (winner.isPresent()) {
+        return duplicateResult(session, actionId, winner.get());
+      }
+      throw race;
+    }
     session.setUpdatedAt(now);
     sessionRepo.save(session);
     return new ActionRecordResponse(
         actionId, session.getId(), status, request == null ? null : request.summary(), now);
+  }
+
+  private ActionRecordResponse duplicateResult(
+      AgentSession session,
+      String actionId,
+      com.navneet.executespec.agentsession.entity.AgentActionEvent event) {
+    return new ActionRecordResponse(
+        actionId,
+        session.getId(),
+        eventRecorder.actionResultStatus(event),
+        eventRecorder.actionResultSummary(event),
+        event.getCreatedAt());
   }
 
   record PlannedAction(
