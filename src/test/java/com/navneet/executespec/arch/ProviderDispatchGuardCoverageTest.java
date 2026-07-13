@@ -11,13 +11,8 @@ import org.junit.jupiter.api.Test;
 class ProviderDispatchGuardCoverageTest {
 
   @Test
-  void everyKnownDirectProviderSpendingPathHasAuthorizationBoundary() throws Exception {
-    for (String file :
-        List.of(
-            "test/NativeToolsTestController.java",
-            "batch/AnthropicBatchClient.java",
-            "batch/OpenAiBatchClient.java",
-            "batch/GeminiBatchClient.java")) {
+  void everyRemainingDirectProviderSpendingPathHasAuthorizationBoundary() throws Exception {
+    for (String file : List.of("test/NativeToolsTestController.java")) {
       String source =
           Files.readString(Path.of("src/main/java/com/navneet/executespec").resolve(file));
       assertThat(source)
@@ -27,6 +22,16 @@ class ProviderDispatchGuardCoverageTest {
     }
 
     assertThat(source("agent/LlmRouter.java")).contains("ProviderTestBudgetGuard.authorize(");
+  }
+
+  @Test
+  void retiredBatchProviderPackageHasNoProductionJavaBeans() throws Exception {
+    Path batchPackage = Path.of("src/main/java/com/navneet/executespec/batch");
+    try (var files = Files.list(batchPackage)) {
+      assertThat(files.filter(path -> path.toString().endsWith(".java")).toList())
+          .as("retired batch implementation must not be a Spring/runtime surface")
+          .isEmpty();
+    }
   }
 
   @Test

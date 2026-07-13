@@ -886,13 +886,6 @@ agent:
     estimation-buffer: 1.10
     budget-margin: 1.5
     max-credits-free: 1
-    batch:
-      enabled: true
-      poll-interval-seconds: 30
-      max-wait-hours: 4
-      discount: 0.50
-      max-output-token-multiplier: 1.5
-      google-inline-task-limit: 10
   github:
     default-owner: ""
   shell:

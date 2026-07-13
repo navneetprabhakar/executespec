@@ -506,7 +506,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 - **`feature/swebench-adapter`** (PR #88, NOT merged — **superseded** by `feature/swebench-harness` above) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Its 67%/60% matrix numbers were measured **oracle-mode** (gold test injected into the prompt) and are **discarded** — the harness branch re-measures blind. The 4 autofix surfaces it introduced are live and unaffected.
 - **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/reason-log/2026-05.md` and per-package `CLAUDE.md` files.
 - Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md).
-- V2 batch execution — scoped in [`docs/reason-log/2026-05.md`](docs/reason-log/2026-05.md); not started.
+- V2 batch execution — retired in ExecuteSpec 2.0; BATCH approvals return HTTP 410 while historical V61/V117 data remains read-compatible.
 
 ### Known tech debt
 
