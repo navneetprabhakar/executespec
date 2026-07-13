@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -202,13 +203,13 @@ export function IdeRuns() {
                     <span className='ide-work-provider'>{providerLabel(r.aiProvider)}</span>
                   )}
                   <span className='ide-work-score'>
-                    <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
-                      {score != null
-                        ? `${Math.round(score)}%`
-                        : isLiveStatus(r.status)
-                          ? 'live'
-                          : '—'}
-                    </span>
+                    {score != null ? (
+                      <ScoreBadge score={score} compact />
+                    ) : (
+                      <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
+                        {isLiveStatus(r.status) ? 'live' : '—'}
+                      </span>
+                    )}
                     {isSuperAdmin && cost != null && (
                       <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
                     )}

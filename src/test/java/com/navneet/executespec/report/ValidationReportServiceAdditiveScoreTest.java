@@ -143,13 +143,11 @@ class ValidationReportServiceAdditiveScoreTest {
   }
 
   @Test
-  void testsTotal_zero_with_no_coverage_signal_drops_test_slot() {
-    // testsTotal=0 AND testCoverageLevel=null → drop test slot entirely.
-    // Denominator becomes 30 + 25 + 20 + 5 = 80. Numerator: 30*100 + 25*100 + 20*100 + 5*100 =
-    // 8000.
-    // 8000 / 80 = 100.
+  void testsTotal_zero_with_no_coverage_signal_is_capped_as_unmeasured() {
+    // testsTotal=0 AND testCoverageLevel=null is not proof of quality. Keep the
+    // partial additive score but cap the headline so an unmeasured run cannot read 100.
     int score = svcAdditiveOn().computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4);
-    assertEquals(100, score, "Unmeasured tests must not penalize.");
+    assertEquals(90, score, "Unmeasured tests must not produce a perfect headline.");
   }
 
   @Test

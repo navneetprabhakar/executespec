@@ -824,7 +824,8 @@ function SandboxRunCard({
   const variant = !terminal ? '' : failed ? ' failed' : cancelled ? ' cancelled' : ' done';
   const pillKind = !terminal ? 'live' : failed ? 'bad' : cancelled ? 'muted' : 'ok';
   const activePhase = sandboxPhaseKey(run.status);
-  const score = run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100`;
+  const score =
+    run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100 · internal`;
   const provider = run.aiProvider || run.workerModel || 'default route';
   const streamLabel =
     streamStatus === 'RECONNECTING'
