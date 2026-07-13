@@ -98,12 +98,15 @@ public class AvailableProviderResolver {
     }
     available.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
-    // Fallback: if nothing available, include all system providers
+    // Do not bypass an explicit key-source or provider policy. In particular, falling back to
+    // system keys here would let an OWN_KEYS run (or a run whose enabledProviders excludes every
+    // configured system key) silently spend on a platform provider. Callers can surface the empty
+    // set as an unavailable-provider outcome; the submit pre-flight already gives OWN_KEYS users a
+    // direct configuration error before a run starts.
     if (available.isEmpty()) {
       log.warn(
-          "No providers available for run {} after policy filtering — falling back to system keys",
-          runId);
-      return resolveSystemProviders();
+          "No providers available for run {} after key-source/provider policy filtering", runId);
+      return Set.of();
     }
 
     log.debug("Available providers for run {}: {} (mode={})", runId, available, keySourceMode);
