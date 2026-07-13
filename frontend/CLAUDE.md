@@ -29,7 +29,7 @@ frontend/
 ├── .eslintrc.cjs · .prettierrc.json · .pa11yci.json · A11Y.md
 ├── public/                          # manifest.webmanifest · sw.js (PWA) · trust-pack.pdf
 └── src/
-    ├── main.tsx                     # app entry + pre-paint theme/chrome + PostHog init
+    ├── main.tsx                     # app entry + theme/chrome reconciliation + PostHog init
     ├── App.tsx                      # routes — ConsoleShell for every protected route
     ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
     ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
@@ -207,7 +207,8 @@ The reusable surface lives in `signal/components/` and is enumerated in the **"S
 
 ### Theme
 
-- `useUiStore.ts` — theme slice with `setTheme(t)` / `toggleTheme()`, pre-paint `<html data-theme>` apply + localStorage persistence.
+- `public/theme-bootstrap.js` — CSP-compatible pre-paint theme bootstrap; `useUiStore.ts` reconciles the
+  same `<html data-theme>` state through `setTheme(t)` / `toggleTheme()` and localStorage persistence.
 
 ## SSE event handling
 

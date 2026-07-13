@@ -17,7 +17,7 @@ const login = await fetch(`${backend}/api/auth/login`, {
   method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email, password}),
 });
 if (!login.ok) throw new Error(`login failed: ${login.status}`);
-const {accessToken} = await login.json();
+const {accessToken, refreshToken} = await login.json();
 const fixture = await fetch(`${backend}/api/v2/test/web-fixture`, {method: 'POST', headers: {Authorization: `Bearer ${accessToken}`}});
 if (!fixture.ok) throw new Error(`fixture failed: ${fixture.status} ${await fixture.text()}`);
 const ids = await fixture.json();
@@ -28,9 +28,25 @@ try {
   for (const viewport of [{name: 'desktop', width: 1440, height: 900}, {name: 'mobile', width: 390, height: 844}]) {
     const page = await browser.newPage({viewport: {width: viewport.width, height: viewport.height}});
     const errors = [];
+    const httpFailures = [];
     page.on('pageerror', (e) => errors.push(`pageerror:${e.message}`));
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) errors.push(`${m.type()}:${m.text()}`); });
-    await page.addInitScript((token) => localStorage.setItem('access_token', token), accessToken);
+    page.on('response', (response) => {
+      if (response.status() >= 400) httpFailures.push(`${response.status()} ${response.url()}`);
+    });
+    // Packaged Spring-served builds enforce CSP and reject Playwright's injected init script.
+    // Seed the same localStorage contract through the browser runtime after the origin loads;
+    // this keeps the capture representative of the shipped CSP instead of disabling it.
+    // Use a static same-origin asset so the SPA cannot boot once without credentials and emit a
+    // misleading refresh 401 before the token is seeded.
+    await page.goto(`${frontend}/favicon.svg`, {waitUntil: 'domcontentloaded'});
+    await page.evaluate(
+      ({accessToken: token, refreshToken: refresh}) => {
+        localStorage.setItem('access_token', token);
+        if (refresh) localStorage.setItem('refresh_token', refresh);
+      },
+      {accessToken, refreshToken},
+    );
     for (const [surface, url, marker] of [
       ['agent', '/agent', 'Fixture action is ready for approval'],
       ['run-success', `/result/${ids.successRunId}`, 'Release QA success'],
@@ -49,7 +65,7 @@ try {
       const file = path.join(outDir, `${surface}-${viewport.name}.png`);
       await page.screenshot({path: file, fullPage: true});
       const body = await page.locator('body').innerText();
-      results.push({surface, viewport: viewport.name, file, marker, errors: [...errors], bodyExcerpt: body.slice(0, 800)});
+      results.push({surface, viewport: viewport.name, file, marker, errors: [...errors], httpFailures: [...httpFailures], bodyExcerpt: body.slice(0, 800)});
     }
     await page.close();
   }
