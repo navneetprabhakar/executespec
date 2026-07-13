@@ -4015,104 +4015,18 @@ to boot — skip it for those.""";
       String runModel,
       boolean projectRun,
       String lowComplexityWorkerStartTierOverride) {
-    AgentTier tier;
-    int maxIter;
-    int maxTokens;
-    int stagnationWarnAfter;
-    int stagnationForceAfter;
-    int wallClockSeconds;
-    switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
-        // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
-        // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
-        // (7 files + npm install + typecheck) hit 30 iters and finished
-        // PARTIAL even though all files were written. Bigger scaffold-heavy
-        // specs consistently need >30 iters because every readFile /
-        // writeFile is one tool call. 50 covers a clean 7-file scaffold
-        // with 2-3 self-review re-reads; 75 covers HIGH tasks (e.g. T3
-        // "implement 4 screens + service" on the same run) with headroom.
-        // (Previous bump 12/22/35 → 20/30/45 was for multi-repo Launches;
-        //  this second bump is for codegen-dense greenfield scaffolds.)
-        //
-        // 2026-05-08 — stagnation thresholds are now complexity-aware too. Static
-        // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 was calibrated
-        // for typical write-then-verify-then-stop patterns; for HIGH-complexity
-        // ProgramBench-style reverse-engineering the worker legitimately needs
-        // ~15-20 read iters before its first write, and was force-terminating
-        // at iter 12 before any source was written. Reviewer then "fixed" the
-        // empty workspace with no-op compile.sh — passing build smoke without
-        // actually compiling source. Verified on cmatrix anthropic run 9b37b099
-        // (2026-05-08) with empty workspace + 100/100 programbench score (which
-        // counted the cleanroom's original binary).
-      case LOW -> {
-        // Default remains WORKHORSE after the cheap-tier eval regression, but operators can opt
-        // LOW tasks into LIGHTWEIGHT starts and rely on continuation policy to step up.
-        tier = lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride);
-        // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
-        // quality ceiling. The dollar cap and stagnation guard remain the real runaway
-        // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
-        maxIter = 60;
-        maxTokens = 4096;
-        stagnationWarnAfter = 10;
-        stagnationForceAfter = 16;
-        wallClockSeconds = 30 * 60;
-      }
-      case HIGH -> {
-        tier = AgentTier.PLANNING;
-        // 2026-05-08 — HIGH iter cap 75 → 120 (matches PATCH mode's calibration). Pairs
-        // with WorkerAgent's Lever A force-edit watchdog (fires at 70% with zero writes)
-        // + Lever B best-guess salvage (fires on iter-limit with zero writes). Real cost
-        // ceiling is the per-run cost cap, not the iter cap. Extends headroom for genuine
-        // long-tail HIGH tasks (multi-file Spring Boot apps with deep wiring) that
-        // currently hit iter-limit at iter 75 mid-edit.
-        //
-        // RL-2026-06: 120 -> 180. Non-frontier models need more iterations for the same
-        // tool-using loop. Stagnation remains <25% of the cap, so read-only loops still stop.
-        maxIter = 180;
-        maxTokens = 16384;
-        stagnationWarnAfter = 24;
-        stagnationForceAfter = 40;
-        // RL-2026-05-004: 45→75 min. Gemini is genuinely slow per turn; a real HIGH
-        // task was being wall-clock-killed mid-work → PARTIAL. $ cap still backstops.
-        wallClockSeconds = 75 * 60;
-      }
-      default -> {
-        tier = AgentTier.WORKHORSE;
-        // 2026-05-10 — MEDIUM iter cap 50 → 75. Dev run a59f9798/T12 ("write unit tests for
-        // 3 mobile media.service methods") wrote 92 files at 0.92 writes/iter and hit the
-        // project-run 100-iter cap (50 × 2) mid-test-suite. The worker was making genuine
-        // progress; iter cap killed it.
-        //
-        // RL-2026-06: 75 -> 120. This is the common "real feature slice" band and the most
-        // important budget to uncap for DeepSeek-class models.
-        maxIter = 120;
-        maxTokens = 8192;
-        stagnationWarnAfter = 16;
-        stagnationForceAfter = 28;
-        wallClockSeconds = 45 * 60; // RL-2026-05-004: 25→45 min (PARTIAL reduction)
-      }
-    }
-    // Project runs (Launches on an existing cloned codebase) need more
-    // iterations: the worker has to readFile / searchFiles the real repo
-    // before it can write, so 2× the fresh-scratch cap is the default.
-    //
-    // 2026-05-10 — wall-clock cap also doubles for project runs (same rationale: more files
-    // to read before the first write). Stagnation thresholds DO NOT double — they're
-    // measuring "consecutive non-write iterations" which is a behavioural signal, not a
-    // budget; the underlying LLM doesn't need 2× more reads to recognise "I'm stuck."
-    //
-    // 2026-05-10 — LOW + MEDIUM project stagnation force bumps: 12 → 18 (LOW) and 20 → 24
-    // (MEDIUM) ONLY for project runs. Dev run a59f9798/T9 force-terminated at 12 reads on
-    // a LOW project task that needed to readFile a real codebase before writing the audit
-    // fix; the static 12 is calibrated for fresh-scratch where the workspace is empty.
-    if (projectRun) {
-      maxIter *= 2;
-      wallClockSeconds *= 2;
-      // Bump only the project-run force threshold; warn stays the same so the model still
-      // gets the "PROGRESS CHECK" nudge at the same point.
-      if (complexity == PlannedTask.Complexity.LOW) stagnationForceAfter = 24;
-      else if (complexity == null || complexity == PlannedTask.Complexity.MEDIUM)
-        stagnationForceAfter = 36;
-    }
+    WorkerTierBudgetPolicy.Budget budget =
+        WorkerTierBudgetPolicy.forTask(
+            complexity,
+            projectRun,
+            lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride));
+    AgentTier tier = budget.tier();
+    int maxIter = budget.maxIterations();
+    int maxTokens = budget.maxTokens();
+    int stagnationWarnAfter = budget.stagnationWarnAfter();
+    int stagnationForceAfter = budget.stagnationForceAfter();
+    int wallClockSeconds = budget.wallClockSeconds();
+    // Project-run multipliers and complexity defaults are owned by the pure budget policy.
     // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
     // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
     // every tool call, no prompt cache); observed 1.45M input tokens on HIGH library spec vs
