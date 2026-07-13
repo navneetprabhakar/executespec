@@ -11,6 +11,37 @@ import {
   req,
 } from './core';
 
+/**
+ * Customer-facing billing plan returned by GET /api/billing/plans.
+ *
+ * Keep this contract beside the rest of the billing transport functions so the
+ * frontend has one billing API module.  The previous standalone billing-api.ts
+ * file duplicated this boundary and made it easy for callers to mix transports.
+ */
+export interface BillingPlan {
+  id: string;
+  name: string;
+  tier: string;
+  keyMode: string;
+  period: string;
+  baseAmountInr: number;
+  baseAmountUsd: number;
+  perSeatInr: number;
+  perSeatUsd: number;
+  includedSeats: number;
+  runLimit: number;
+  annualDiscountPct: number;
+  founderPricing: boolean;
+  active: boolean;
+  limits: Record<string, number>;
+}
+
+/** Fetch active customer-facing plans, optionally filtered by key mode. */
+export const fetchPlans = (keyMode?: string) => {
+  const params = keyMode ? `?keyMode=${encodeURIComponent(keyMode)}` : '';
+  return req<BillingPlan[]>(`/billing/plans${params}`);
+};
+
 export const getPricing = () => req<PricingRow[]>('/pricing');
 
 export const updatePricing = (provider: string, model: string, body: Partial<PricingRow>) =>
