@@ -67,6 +67,7 @@ being retained under compatibility aliases.
 | Agent shell errors without recovery action | DONE — the Web agent error card now offers an explicit retry path, with loading-state feedback, instead of forcing a page reload |
 | Silent Web sandbox-session creation failures | DONE — New sandbox actions now route rejected session creation through the visible agent error surface |
 | Console decisions outage shown as a healthy empty queue | DONE — decisions now render a retryable alert and suppress the empty state until data reload succeeds |
+| Silent Web artifact clipboard/preview failures | DONE — copy and preview actions now expose actionable alerts when browser permissions or popup policy reject them |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
