@@ -49,6 +49,9 @@ being retained under compatibility aliases.
 | PATCH/conversation prompt fallback stubs | DONE — required prompt resources now fail closed instead of silently substituting generic prompts; provider overlays use `PromptAssembler` |
 | Inert V2 batch scaffold and dead batch-cost configuration | RETIRED — new BATCH approvals return explicit HTTP 410; provider clients, scheduler, coordinator/resume beans, router, and batch-only config are removed. V61/V117 historical columns/flag and runtime read fields remain for compatibility. |
 | No-op agent-session summary-email route | RETIRED — compatibility route remains for source compatibility but returns HTTP 410; current CLI/VS Code sessions do not call it and usage remains available through agent-session turn/event APIs |
+| CLI duplicate slash alias normalization | PARTIAL — shared typed resolver now feeds REPL and native OpenTUI; headless dispatch and the remaining route shell still need migration |
+| Dead Console CSS selectors `.con-side-mini` / `.con-nav-badge` | DONE — removed after zero non-CSS source references; unrelated legacy Signal/IDE CSS remains pending visual-contract review |
+| Stale Web accessibility guard for model overrides | DONE — guard now checks the actual `ModelPicker` `ariaLabel` prop contract; rendered accessibility remains covered by the component tests |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
