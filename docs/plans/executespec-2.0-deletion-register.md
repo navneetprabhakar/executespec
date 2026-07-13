@@ -61,6 +61,7 @@ being retained under compatibility aliases.
 | Raw GDPR export request in `IdeMore` | DONE — migrated to typed `downloadUserDataExport` while preserving blob-download behavior; DSAR/erasure and multipart paths remain contract-specific |
 | Billing DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved cohesive pricing/usage/payment types to `billing.ts`; type re-exports preserve the stable `core` import surface |
 | Post-review quality policy embedded in `RunOrchestrator` | DONE — extracted pure reviewer/validation quality decisions into `PostReviewQualityPolicy`; characterization tests pin the boundary |
+| Notification DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved `NotificationItem` and `NotificationPrefRow` to `notifications.ts`; the API barrel preserves consumer compatibility |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
