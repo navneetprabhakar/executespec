@@ -17,3 +17,6 @@ Inspect the final score, build and test signals, reviewer result, and provider l
 
 00:00:47.000 --> 00:00:54.000
 The generated pull request carries its validation evidence for human review.
+
+00:00:54.000 --> 00:01:00.200
+Review the evidence attached to the pull request and decide whether to merge.

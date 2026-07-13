@@ -79,9 +79,9 @@ website/press-kit/
 └── CAPTURE_GUIDE.md                         (SOP for shooting the next round)
 ```
 
-The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like. The landing-page walkthrough includes a caption track and an expandable transcript so the synthetic sequence is accessible without sound.
+The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like. The landing-page walkthrough includes a caption track and an expandable transcript so the synthetic sequence is accessible without sound. `hero-poster.png` is sampled from the current `hero.webm` at a stable 1.5-second frame; regenerate and re-seal both when the recording changes.
 
-Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. The website walkthrough was regenerated on 2026-07-13 from the current agent-control-plane story. Treat all screenshots and video as product-demo assets, not real customer data, production metrics, or benchmark evidence. The hero recording is provider-free illustrative fixture data; its source tuple must be re-sealed whenever the website asset is regenerated.
+Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. The website walkthrough was regenerated on 2026-07-13 from the current agent-control-plane story. Treat all screenshots and video as product-demo assets, not real customer data, production metrics, or benchmark evidence. The hero recording is provider-free illustrative fixture data; its exact source tuple and independent human review are not currently sealed, and must be re-sealed whenever the website asset is regenerated.
 
 ## Brand guidelines (current — to be unified in the color-codes pass)
 

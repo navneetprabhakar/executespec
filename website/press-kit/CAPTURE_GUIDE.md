@@ -4,6 +4,8 @@ _Refreshed 2026-07-13. The canonical product shell is the Console/Agent surface;
 
 Current screenshots in `current/` and `website/media/hero.webm` are deterministic product-demo evidence. The 2026-07-13 video covers the current tuple's provider-free fixture workflow; it must be labeled synthetic demo data and never presented as customer, production, or benchmark evidence.
 
+> **Archive warning:** The six shot recipes below are retained from the earlier Console capture round. Their localhost routes, project/run IDs, seeded content, and stage labels are historical references, not current release evidence. Do not present those URLs or IDs as a live product path. For a current release packet, begin from the authenticated Console/Agent entry point, record the exact backend/frontend tuple, and use a new fixture or real-run capture with provenance and human review. The current hero is provider-free illustrative data.
+
 Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440×900 viewport. Drop the files into `website/press-kit/` with the exact names below — the tour-panel swap job will `<img src="">` them from there.
 
 ## Pre-flight
@@ -19,7 +21,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-01-dashboard.png` — Workspace dashboard
 
-**URL**: `http://localhost:5173/dashboard`
+**URL (historical)**: `http://localhost:5173/dashboard` — verify the current Console route before capturing; this URL is not a release-evidence locator.
 
 **What to show**: "Ship velocity, at a glance." headline, metric tiles (Total Runs / Active / Total Tokens / Complete), Token Usage Over Time card with Runs-by-Status donut, Model Comparison bar chart, Recent Activity sidebar.
 
@@ -29,9 +31,9 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-02-run-detail.png` — Run detail with verified score + pipeline
 
-**URL**: `http://localhost:5173/` → click the first completed run in the list (should be `c5dab59a` "Build Expo Habit Tracker" or similar)
+**URL (historical)**: `http://localhost:5173/` → the example run `c5dab59a` ("Build Expo Habit Tracker") is retired fixture data; use a newly seeded run and record its ID.
 
-**What to show**: Right pane — Run title, "X/100 verified · Est. Y" chip, pipeline stages row (Planning ✓ → Approval ✓ → Tasks ✓ → Compilation ✓ → Review ✓ → Merge ✓ → Preview), collapsed Validation Report summary row (`Build ✓ · Reviewer … · Verified X · Est. Y`), and the tab strip (OVERVIEW / PLAN / TASKS / TIMELINE / LIVE LOG / CODE / PREVIEW).
+**What to show**: Right pane — Run title, "X/100 verified · Est. Y" chip, execution/evidence stages (Planning ✓ → Approval ✓ → Tasks ✓ → Build ✓ → Review ✓ → Evidence), collapsed Validation Report summary row (`Build ✓ · Reviewer … · Verified X · Est. Y`), and the tab strip (OVERVIEW / PLAN / TASKS / TIMELINE / LIVE LOG / CODE / PREVIEW). There is no automatic merge stage; the team reviews and merges the resulting PR.
 
 **Capture region**: right pane only. Exclude the run-list on the left to keep focus on the detail view.
 
@@ -39,7 +41,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-03-project-overview.png` — Project overview with generated docs
 
-**URL**: `http://localhost:5173/projects/0151dd82-e09c-43a2-842a-0b72185cd4b3/dashboard` (Hostel Management — 4 completed runs, avg score 68)
+**URL (historical)**: `http://localhost:5173/projects/0151dd82-e09c-43a2-842a-0b72185cd4b3/dashboard` (Hostel Management — retired fixture project; do not treat its runs or score as current)
 
 **What to show**: Header "Hostel Management · ACTIVE · ANTHROPIC · Launch", metric tiles (Active/Completed/Failed/Avg Score/Tokens/Cost), Overview tab content on the right: Project settings → Project summary paragraph → **Generated Docs** block with Explanation v2 + Setup v1 rows each showing View / .md / Regenerate buttons.
 
@@ -49,7 +51,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-04-architecture-viewer.png` — Architecture doc with version selector
 
-**URL**: Same project (`0151dd82...`) → click **Knowledge** tab → then **Architecture** sub-tab
+**URL (historical)**: Same retired project (`0151dd82...`) → click **Knowledge** tab → then **Architecture** sub-tab
 
 **What to show**: Sub-tabs (Architecture / Docs / Memory), the version selector `v7 · 18/04/2026`, Diff vs v6 button, Regenerate button, then the actual architecture markdown content — Overview section + Repository Layer with HOSTEL-BE-V3 (Backend) and HOSTEL-FE-V3 (Frontend) subsections rendered as readable prose.
 
@@ -59,7 +61,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-05-validation-report.png` — Verified score + 6 dimensions
 
-**URL**: `http://localhost:5173/` → click the same `c5dab59a` run → in the right pane, click the collapsed **"> Validation Report"** header to expand it
+**URL (historical)**: `http://localhost:5173/` → use a newly seeded run instead of retired fixture `c5dab59a`; in the right pane, click the collapsed **"> Validation Report"** header to expand it
 
 **What to show**: Expanded Validation Report with three metric tiles (LLM ESTIMATE · BUG RISKS · REVIEW), the **Quality Dimensions** panel with horizontal bars for Code quality / Test coverage / Architecture / Security / Performance (+ Design if present), Validation Summary paragraph, and the Issues Detected list with CRITICAL/MINOR severity chips + file names.
 
@@ -69,7 +71,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-06-mobile-qr-preview.png` — RN + Expo preview with QR
 
-**URL**: `http://localhost:5173/` → click `c5dab59a` (mobile run) → click **Preview** tab
+**URL (historical)**: `http://localhost:5173/` → use a newly seeded mobile run instead of retired fixture `c5dab59a` → click **Preview** tab
 
 **Prerequisite**: The preview must be **started** (currently shows "Preview not started · 0 of 5 previews used"). Click the "Start preview" button if present, wait ~30-60s for the Expo bundler + QR to render. Alternatively, use a different RN run that already has an active preview session.
 
@@ -81,7 +83,7 @@ Recommended workflow: macOS `Cmd+Shift+4` region capture into HiDPI PNGs at 1440
 
 ### `ss-extra-score-trend.png` — 30-day score trend chart
 
-**URL**: Same Hostel Management project dashboard, scroll down past Generated Docs
+**URL (historical)**: Same retired Hostel Management project dashboard, scroll down past Generated Docs
 
 **What to show**: "Score trend" card with the recharts line chart — 4 lines (overall · quality · security · architecture) plotted over 15/04 → 17/04 with values 0-100.
 
