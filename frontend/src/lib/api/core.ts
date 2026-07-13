@@ -1,6 +1,9 @@
 // Typed API contract definitions. Runtime transport is re-exported here to preserve the stable
 // `@/lib/api/core` import surface for existing API modules.
 export * from './transport';
+// Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
+// `@/lib/api/core` consumers keep compiling while the god-file shrinks.
+export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
 
 export interface RunSummary {
   runId: string;
@@ -356,23 +359,6 @@ export interface MetricsResponse {
   queuedRuns: number;
   totalInputTokens: number;
   totalOutputTokens: number;
-}
-
-export interface PricingRow {
-  provider: string;
-  model: string;
-  inputCostPer1m: number;
-  cachedInputCostPer1m: number;
-  outputCostPer1m: number;
-  notes: string | null;
-  /**
-   * 2026-05-06 — chain-tier from YAML model-matrix (ARCHITECT / CAPABLE / UTILITY). Null for
-   * legacy DB rows that pre-date the field. Replaces the hardcoded MODEL_ROLES map.
-   */
-  chainTier: string | null;
-  /** Display label from YAML model-matrix display-label. Null fallback to model id. */
-  displayLabel: string | null;
-  updatedAt: string | null;
 }
 
 // v2.5.13 — TaskFeasibility + FeasibilityReport interfaces retired along with
@@ -1190,18 +1176,6 @@ export interface PrCommentInboxDto {
   createdAt: string;
 }
 
-export interface UsageMetrics {
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  partialRuns: number;
-  runsByDay: {date: string; count: number; successRate: number}[];
-  runsByProject: Record<string, number>;
-  avgTimeToCompleteSeconds: number;
-  totalCost: number;
-  costByModel: Record<string, number>;
-}
-
 export interface MemberUsage {
   userId: string;
   firstName: string;
@@ -1210,47 +1184,6 @@ export interface MemberUsage {
   runCount: number;
   successRate: number;
   lastRunDate: string | null;
-}
-
-export interface BillingOverviewData {
-  billingEntityType: string;
-  billingEntityName: string;
-  currentPlan: string;
-  subscriptionStatus: string;
-  nextBillingDate: string | null;
-  periodUsage: number;
-  remainingRuns: number;
-  runLimit: number;
-  gateway: string | null;
-  topupCredits: number;
-  recentInvoices: {
-    invoiceNumber: string;
-    amount: number;
-    currency: string;
-    status: string;
-    issuedAt: string;
-  }[];
-}
-
-// Payment Audit (Admin)
-
-export interface PaymentAuditEntry {
-  id: string;
-  entityType: string;
-  entityId: string;
-  eventType: string;
-  oldTier: string | null;
-  newTier: string | null;
-  performedBy: string | null;
-  notes: string | null;
-  gatewayProvider: string | null;
-  gatewayEventId: string | null;
-  gatewayPaymentId: string | null;
-  currency: string | null;
-  amountMinor: number | null;
-  userId: string | null;
-  orgId: string | null;
-  createdAt: string;
 }
 
 export interface WebhookEventEntry {

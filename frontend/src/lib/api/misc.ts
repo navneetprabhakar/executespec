@@ -20,13 +20,13 @@ import {
   SsoProvider,
   TestGraphData,
   TimelineData,
-  UsageMetrics,
   BASE,
   authHeader,
   parseErrorMessage,
   req,
   reqText,
 } from './core';
+import type {UsageMetrics} from './billing';
 
 export const getMetrics = (days = 0) =>
   req<MetricsResponse>(`/metrics${days > 0 ? `?days=${days}` : ''}`);
