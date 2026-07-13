@@ -68,6 +68,14 @@ export const getAnalyticsBilling = (entityType: string, entityId: string) =>
     `/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`,
   );
 
+export type BillingPaymentHistoryResponse = PaymentAuditEntry[] | PagedResponse<PaymentAuditEntry>;
+
+/** Read org-scoped payment history for the billing dashboard. */
+export const getPaymentHistory = (orgId: string, page = 0, size = 50) => {
+  const params = new URLSearchParams({orgId, page: String(page), size: String(size)});
+  return req<BillingPaymentHistoryResponse>(`/billing/payment-history?${params}`);
+};
+
 export type ManagedAiBalance = {
   userId: string;
   orgId: string | null;
