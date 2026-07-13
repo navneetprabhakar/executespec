@@ -57,6 +57,7 @@ being retained under compatibility aliases.
 | Duplicate standalone billing API client | DONE — moved `BillingPlan`/`fetchPlans` into canonical `frontend/src/lib/api/billing.ts` and deleted the unused `billing-api.ts` module; no imports remain |
 | Duplicate admin execution-reconcile fetches | DONE — both settings surfaces now use the typed `adminReconcileExecutions` domain helper and shared transport/auth behavior |
 | Raw billing payment-history fetch in `IdeBilling` | DONE — migrated to typed `getPaymentHistory` in the canonical billing API module, preserving best-effort empty-state behavior |
+| Raw project-settings PATCH in `IdeProjectSettings` | DONE — migrated to typed `updateProjectSettings` with shared auth/refresh transport and full payload coverage |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
