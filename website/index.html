@@ -140,7 +140,7 @@
         "name": "How is ExecuteSpec different from inline AI coding tools (Cursor, Copilot, Continue)?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and only opens a PR when those gates pass (or labels it Needs review / Failed when they don't). The output is a real merge-able PR, not a diff suggestion."
+          "text": "Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and opens a PR with the resulting Ready / Needs review / Failed status. The output is a reviewable PR with evidence, not a diff suggestion."
         }
       }, {
         "@type": "Question",
@@ -154,7 +154,7 @@
         "name": "How does ExecuteSpec compare as an alternative to Lovable, Bolt.new, emergent.sh, Cursor, or Windsurf?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Lovable, Bolt.new, v0, and emergent.sh are excellent for rapid zero-to-one prototyping in their own sandboxes. Cursor, Windsurf, and Claude Code are great inline copilots in your IDE. ExecuteSpec is neither — it's the merge-validated alternative: takes a feature request, runs autonomous code generation, runs the CI/CD validation chain (Syntax, Type, Lint, Test, reviewer), and opens a real PR on your repo with a verdict attached. Built for the merge step, not the typing step."
+          "text": "Lovable, Bolt.new, v0, and emergent.sh are excellent for rapid zero-to-one prototyping in their own sandboxes. Cursor, Windsurf, and Claude Code are great inline copilots in your IDE. ExecuteSpec is neither — it's the reviewable-delivery alternative: takes a feature request, runs autonomous code generation, runs the CI/CD validation chain (Syntax, Type, Lint, Test, reviewer), and opens a real PR on your repo with a verdict attached. Built for the merge step, not the typing step."
         }
       }, {
         "@type": "Question",
@@ -182,7 +182,7 @@
         "name": "How does ExecuteSpec compare to Windsurf?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a task plan, validates the work against build + test gates, and opens a PR with a deterministic verdict. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a merged PR with a deterministic verdict."
+          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a task plan, validates the work against build + test gates, and opens a PR with a deterministic verdict. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a reviewable PR with a deterministic verdict."
         }
       }, {
         "@type": "Question",
@@ -242,7 +242,7 @@
         {
           "@type": "HowToStep",
           "name": "Agentic code review and merge",
-          "text": "After all tasks pass validation, ReviewerAgentV2 inspects the merged codebase for critical issues and auto-fixes them. The integration branch is fast-forwarded into main only on full success."
+          "text": "After task execution, the reviewer inspects the workspace for critical issues and may auto-fix them. ExecuteSpec then records build, test, reviewer, and code-delivery evidence on the PR; your team decides whether and when to merge it."
         }
       ]
     }
@@ -1637,7 +1637,7 @@
         <div class='section-eyebrow coral'>Honest comparison</div>
         <h2>How we differ from inline AI coding tools.</h2>
         <p class='lede'>
-            Cursor, Copilot, Continue — they suggest code at the cursor. <strong>You</strong> validate it. ExecuteSpec runs the validation itself and only opens a PR when it passes.
+            Cursor, Copilot, Continue — they suggest code at the cursor. <strong>You</strong> validate it. ExecuteSpec runs the validation itself and opens a PR with the resulting evidence and verdict.
         </p>
 
         <div class='compare-grid'>
@@ -1702,7 +1702,7 @@
             <details class='faq-item'>
                 <summary>How is this different from Cursor / Copilot / Continue?</summary>
                 <div class='answer'>
-                    Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and only opens a PR when those gates pass (or labels it Needs review / Failed when they don't). The output is a real merge-able PR, not a diff suggestion.
+                    Inline AI coding tools (Cursor, GitHub Copilot, Continue) suggest code at the cursor and leave validation to you. ExecuteSpec runs the validation itself — syntax, type, lint, build, tests, reviewer pass — and opens a PR with the resulting Ready / Needs review / Failed status. The output is a reviewable PR with evidence, not a diff suggestion.
                 </div>
             </details>
             <details class='faq-item'>
@@ -1752,7 +1752,7 @@
                 </picture>
                 ExecuteSpec
             </div>
-            <p>AI that ships pull requests your team actually merges. Built in India, used worldwide. ExecuteSpec 2.0 / CLI 1.0 release track.</p>
+            <p>AI that ships pull requests your team can review and merge. Built in India for teams worldwide. ExecuteSpec 2.0 / CLI 1.0 release track.</p>
         </div>
         <div>
             <h5>Product</h5>
