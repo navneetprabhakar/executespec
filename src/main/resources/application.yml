@@ -134,6 +134,10 @@ terminal-bench:
   # below that outer cap while leaving enough room for long productive terminal tasks.
   worker-wall-clock-seconds: 1260
 
+test-generation:
+  # HTTP test generation is post-run work. It must not hold terminal completion open forever.
+  timeout-seconds: ${EXECUTESPEC_TEST_GENERATION_TIMEOUT_SECONDS:600}
+
 managed-ai:
   enabled: true
   credit-pack-usd: 1.25
