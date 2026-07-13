@@ -1,3 +1,4 @@
+import {SpecTemplate, req} from './core';
 import {
   LibraryFacets,
   MigrationApplyResponse,
@@ -6,10 +7,8 @@ import {
   MigrationListItem,
   ReadymadeDetail,
   ReadymadeListItem,
-  SpecTemplate,
   VariantResolutionResult,
-  req,
-} from './core';
+} from './discoveryTypes';
 
 export const listSpecTemplates = (projectId: string) =>
   req<SpecTemplate[]>(`/projects/${projectId}/templates`);
