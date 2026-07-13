@@ -84,10 +84,12 @@ class ValidationReportServiceRubricScoreTest {
   }
 
   @Test
-  void null_endpoint_coverage_gives_full_15_points() {
-    // Non-HTTP spec (CLI / library) → coverage signal n/a → 15 pts
+  void null_endpoint_coverage_gets_neutral_midpoint_points() {
+    // Missing evidence is unknown, not proof that the endpoint dimension is irrelevant. The
+    // rubric must not award the former full 15-point N/A credit to a public/shared score.
     int score = svc.computeRubricScore(true, 50, 50, "CLEAN", 0, null);
-    assertEquals(100, score);
+    // build=25 + tests=20 + reviewer=20 + endpoints=8 + damper=10 + quality=10 = 93
+    assertEquals(93, score);
   }
 
   @Test
