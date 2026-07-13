@@ -2,6 +2,7 @@ package com.navneet.executespec.router;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import com.navneet.executespec.auth.service.TierEnforcementService;
 
@@ -21,6 +22,14 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class ModelAccessService {
+
+  /**
+   * Explicit customer-facing provider deny-list. It is intentionally empty in 2.0: retired
+   * providers are removed from {@link LlmProvider} and the model matrix, while keeping this seam
+   * lets a future emergency quarantine fail closed without scattering provider checks through
+   * controllers and routing services.
+   */
+  private static final Set<String> DISABLED_PROVIDERS = Set.of();
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -65,7 +74,8 @@ public class ModelAccessService {
   }
 
   public static boolean isDisabledProvider(String provider) {
-    return false;
+    return provider != null
+        && DISABLED_PROVIDERS.contains(provider.trim().toLowerCase(Locale.ROOT));
   }
 
   public static boolean isDisabledProviderModelSlug(String modelId) {
@@ -73,7 +83,8 @@ public class ModelAccessService {
       return false;
     }
     String normalized = modelId.trim().toLowerCase(Locale.ROOT);
-    return false;
+    return DISABLED_PROVIDERS.stream()
+        .anyMatch(provider -> normalized.equals(provider) || normalized.startsWith(provider + "-"));
   }
 
   public static void assertProviderEnabled(String provider) {
