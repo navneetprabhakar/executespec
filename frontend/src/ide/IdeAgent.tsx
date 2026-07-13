@@ -684,6 +684,7 @@ export default function IdeAgent() {
         runCard={runCard}
         runCost={runCost}
         runStreamStatus={liveRun.status}
+        runUnavailable={liveRun.unavailable}
         routingState={state.routingState}
         hasNewActivity={hasNewActivity}
         input={state.input}

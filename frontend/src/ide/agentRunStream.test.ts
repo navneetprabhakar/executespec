@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {parseAgentRunEvent, terminalStatusFromEvent} from './agentRunStream';
+import {parseAgentRunEvent, terminalStatusFromEvent, unavailableReason} from './agentRunStream';
 
 describe('agent run event stream', () => {
   it('parses typed JSON events and rejects malformed frames', () => {
@@ -25,5 +25,12 @@ describe('agent run event stream', () => {
     expect(terminalStatusFromEvent({type: 'RUN_DETAIL', data: {status: 'CANCELLED'}})).toBe(
       'CANCELLED',
     );
+  });
+
+  it('classifies missing runs as terminal instead of retryable stream failures', () => {
+    expect(unavailableReason({status: 404})).toBe('RUN_NOT_FOUND');
+    expect(unavailableReason({status: 401})).toBe('AUTH_REQUIRED');
+    expect(unavailableReason({status: 503})).toBeNull();
+    expect(unavailableReason(new Error('network down'))).toBeNull();
   });
 });
