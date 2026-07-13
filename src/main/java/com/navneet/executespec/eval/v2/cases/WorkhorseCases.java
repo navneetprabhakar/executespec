@@ -59,7 +59,7 @@ public final class WorkhorseCases {
         String content = readOrEmpty(dir.resolve("calc.py"));
         int score = 0;
         java.util.List<String> notes = new java.util.ArrayList<>();
-        if (content.contains("def add(a, b)")) {
+        if (hasNonBlankFile(dir.resolve("calc.py")) && content.contains("def add(a, b)")) {
           score += 30;
         } else {
           notes.add("add() was clobbered");
@@ -74,10 +74,10 @@ public final class WorkhorseCases {
         } else {
           notes.add("subtract body wrong");
         }
-        if (result.outcome() == WorkerResult.Outcome.COMPLETED) {
+        if (completed(result)) {
           score += 10;
         } else {
-          notes.add("outcome=" + result.outcome());
+          notes.add("outcome=" + outcome(result));
         }
         return new ValidationVerdict(
             score, notes.isEmpty() ? "clean add-function" : String.join("; ", notes));
@@ -111,7 +111,7 @@ public final class WorkhorseCases {
         String test = readOrEmpty(dir.resolve("test_stringutils.py"));
         int score = 0;
         java.util.List<String> notes = new java.util.ArrayList<>();
-        if (mod.contains("def reverse(")) {
+        if (hasNonBlankFile(dir.resolve("stringutils.py")) && mod.contains("def reverse(")) {
           score += 30;
         } else {
           notes.add("reverse() missing");
@@ -123,21 +123,24 @@ public final class WorkhorseCases {
         } else {
           notes.add("reverse impl not recognized");
         }
-        if (!test.isEmpty() && test.contains("reverse(")) {
+        if (hasNonBlankFile(dir.resolve("test_stringutils.py"))
+            && test.contains("def test_")
+            && test.contains("reverse(")) {
           score += 25;
         } else {
           notes.add("test missing/empty");
         }
-        if (test.replaceAll("\\s", "").contains("'cba'")
-            || test.replaceAll("\\s", "").contains("\"cba\"")) {
+        if (test.replaceAll("\\s", "").contains("assert")
+            && (test.replaceAll("\\s", "").contains("'cba'")
+                || test.replaceAll("\\s", "").contains("\"cba\""))) {
           score += 10;
         } else {
           notes.add("test assertion missing");
         }
-        if (result.outcome() == WorkerResult.Outcome.COMPLETED) {
+        if (completed(result)) {
           score += 10;
         } else {
-          notes.add("outcome=" + result.outcome());
+          notes.add("outcome=" + outcome(result));
         }
         return new ValidationVerdict(
             score, notes.isEmpty() ? "clean multi-file create" : String.join("; ", notes));
@@ -184,7 +187,7 @@ public final class WorkhorseCases {
         // content is whitespace-stripped, so the signature check must be stripped too
         // ("def is_even(n)" with spaces can never match stripped content — that was a
         // validator bug that under-scored every correct fix by 20 pts).
-        if (content.contains("defis_even(n)")) {
+        if (hasNonBlankFile(dir.resolve("numbers.py")) && content.contains("defis_even(n)")) {
           score += 20;
         } else {
           notes.add("signature changed");
@@ -200,10 +203,10 @@ public final class WorkhorseCases {
         } else {
           notes.add("unrecognized impl");
         }
-        if (result.outcome() == WorkerResult.Outcome.COMPLETED) {
+        if (completed(result)) {
           score += 20;
         } else {
-          notes.add("outcome=" + result.outcome());
+          notes.add("outcome=" + outcome(result));
         }
         return new ValidationVerdict(
             Math.min(100, score), notes.isEmpty() ? "bug fixed cleanly" : String.join("; ", notes));
@@ -217,5 +220,21 @@ public final class WorkhorseCases {
     } catch (Exception e) {
       return "";
     }
+  }
+
+  private static boolean hasNonBlankFile(Path path) {
+    try {
+      return Files.isRegularFile(path) && !Files.readString(path, StandardCharsets.UTF_8).isBlank();
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private static boolean completed(WorkerResult result) {
+    return result != null && result.outcome() == WorkerResult.Outcome.COMPLETED;
+  }
+
+  private static String outcome(WorkerResult result) {
+    return result == null ? "null" : String.valueOf(result.outcome());
   }
 }
