@@ -377,11 +377,23 @@ public class WebQaFixtureController {
   private void deleteWorkspace(String value) throws IOException {
     if (value == null) return;
     Path path = Path.of(value).toAbsolutePath();
-    if (!path.toString().contains("/workspace/web-qa/")) return;
+    if (!isFixtureWorkspace(path)) return;
     if (Files.exists(path))
       try (var stream = Files.walk(path)) {
         stream.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
       }
+  }
+
+  // Fixture workspaces are siblings named web-qa-<uuid>, not children of a web-qa directory.
+  // Keep cleanup confined to the canonical workspace root and the fixture prefix.
+  boolean isFixtureWorkspace(Path path) {
+    Path root = Path.of("workspace").toAbsolutePath().normalize();
+    Path normalized = path.toAbsolutePath().normalize();
+    Path name = normalized.getFileName();
+    return name != null
+        && name.toString().startsWith(PREFIX)
+        && normalized.getParent() != null
+        && normalized.getParent().equals(root);
   }
 
   public record FixtureResponse(
