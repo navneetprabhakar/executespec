@@ -136,21 +136,9 @@ public class ModelResolver {
             .tag("agent", agentName)
             .register(meterRegistry)
             .increment();
-        return ResolvedModel.builder()
-            .requestedProvider(userProvider)
-            .actualProvider(adaptiveProvider)
-            .model(adaptiveModel)
-            .agentTier(tier)
-            .fallback(true)
-            .build();
+        return resolved(userProvider, adaptiveProvider, adaptiveModel, tier, true);
       }
-      return ResolvedModel.builder()
-          .requestedProvider(userProvider)
-          .actualProvider(userProvider)
-          .model(primaryModel)
-          .agentTier(tier)
-          .fallback(false)
-          .build();
+      return resolved(userProvider, userProvider, primaryModel, tier, false);
     }
 
     // Failover: try providers in configured order
@@ -173,13 +161,7 @@ public class ModelResolver {
               .tag("agent", agentName)
               .register(meterRegistry)
               .increment();
-          return ResolvedModel.builder()
-              .requestedProvider(userProvider)
-              .actualProvider(fallback)
-              .model(fallbackModel)
-              .agentTier(tier)
-              .fallback(true)
-              .build();
+          return resolved(userProvider, fallback, fallbackModel, tier, true);
         }
       }
     }
@@ -190,26 +172,19 @@ public class ModelResolver {
         userProvider,
         agentName);
     String model = lookupModel(userProvider, tier);
-    return ResolvedModel.builder()
-        .requestedProvider(userProvider)
-        .actualProvider(userProvider)
-        .model(model)
-        .agentTier(tier)
-        .fallback(false)
-        .build();
+    return resolved(userProvider, userProvider, model, tier, false);
   }
 
   /** Resolves a model at a specific tier override (e.g. for stall escalation). */
   public ResolvedModel resolve(String agentName, LlmProvider userProvider, AgentTier tierOverride) {
     ResolvedModel base = resolve(agentName, userProvider);
     String model = lookupModel(base.getActualProvider(), tierOverride);
-    return ResolvedModel.builder()
-        .requestedProvider(base.getRequestedProvider())
-        .actualProvider(base.getActualProvider())
-        .model(model)
-        .agentTier(tierOverride)
-        .fallback(base.isFallback())
-        .build();
+    return resolved(
+        base.getRequestedProvider(),
+        base.getActualProvider(),
+        model,
+        tierOverride,
+        base.isFallback());
   }
 
   /**
@@ -240,13 +215,7 @@ public class ModelResolver {
               fallback,
               agentName,
               tier);
-          return ResolvedModel.builder()
-              .requestedProvider(userProvider)
-              .actualProvider(fallback)
-              .model(model)
-              .agentTier(tier)
-              .fallback(true)
-              .build();
+          return resolved(userProvider, fallback, model, tier, true);
         }
       }
     }
@@ -255,13 +224,7 @@ public class ModelResolver {
     if (!userProvider.name().equalsIgnoreCase(excludeProvider)
         && healthTracker.isHealthy(userProvider)) {
       String model = lookupModel(userProvider, tier);
-      return ResolvedModel.builder()
-          .requestedProvider(userProvider)
-          .actualProvider(userProvider)
-          .model(model)
-          .agentTier(tier)
-          .fallback(true)
-          .build();
+      return resolved(userProvider, userProvider, model, tier, true);
     }
 
     throw new IllegalStateException("No fallback provider available excluding " + excludeProvider);
@@ -306,5 +269,21 @@ public class ModelResolver {
       case WORKHORSE -> models.getWorkhorse();
       case LIGHTWEIGHT -> models.getLightweight();
     };
+  }
+
+  /** Builds a resolved route in one place so all routing branches preserve the same metadata. */
+  private static ResolvedModel resolved(
+      LlmProvider requestedProvider,
+      LlmProvider actualProvider,
+      String model,
+      AgentTier tier,
+      boolean fallback) {
+    return ResolvedModel.builder()
+        .requestedProvider(requestedProvider)
+        .actualProvider(actualProvider)
+        .model(model)
+        .agentTier(tier)
+        .fallback(fallback)
+        .build();
   }
 }
