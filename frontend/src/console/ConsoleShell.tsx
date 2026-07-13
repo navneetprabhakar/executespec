@@ -9,6 +9,7 @@ import {useUiStore} from '@/stores/useUiStore';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import {IdeCommandPalette, usePaletteHotkey, type PaletteCmd, statusKind} from '@/ide/IdeKit';
 import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {AnnouncementBanner} from './AnnouncementBanner';
 import {
   WorkspaceIcon,
@@ -411,11 +412,7 @@ export default function ConsoleShell() {
                 >
                   <StatusDot kind={statusKind(r.status)} size={8} />
                   <span className='con-runitem-label'>{runLabel(r)}</span>
-                  {r.verifiedScore != null && (
-                    <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
-                      {r.verifiedScore}
-                    </span>
-                  )}
+                  {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} compact />}
                 </NavLink>
               ))
             )}
