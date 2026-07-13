@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {createRequire} from 'node:module';
+import {createHash} from 'node:crypto';
 import {createServer} from 'node:net';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -64,6 +65,39 @@ async function waitFor(url, label, timeoutMs = 60_000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`${label} was not ready at ${url}: ${lastError}`);
+}
+
+/**
+ * Wait for a semantically visible page and two identical compositor frames before capturing.
+ * A DOM/network-ready page can still produce a transient black screenshot while fonts and the
+ * first paint are settling.  Returning the stable buffer also prevents the caller from taking
+ * a new, potentially earlier frame after this check succeeds.
+ */
+async function waitForPaintStable(page, timeoutMs = 10_000) {
+  await page.waitForFunction(() => {
+    const body = document.body;
+    if (!body || document.readyState !== 'complete') return false;
+    const rect = body.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && (body.innerText || '').trim().length >= 40;
+  }, {timeout: timeoutMs});
+  await page.evaluate(async () => {
+    if (document.fonts?.ready) await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  const deadline = Date.now() + timeoutMs;
+  let previousHash = null;
+  let stableFrames = 0;
+  let attempts = 0;
+  while (Date.now() < deadline) {
+    attempts += 1;
+    const buffer = await page.screenshot({fullPage: true, animations: 'disabled'});
+    const hash = createHash('sha256').update(buffer).digest('hex');
+    stableFrames = hash === previousHash ? stableFrames + 1 : 1;
+    previousHash = hash;
+    if (stableFrames >= 2) return {buffer, hash, attempts};
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  throw new Error(`paint did not stabilize within ${timeoutMs}ms (last hash ${previousHash || 'none'})`);
 }
 
 async function readLocalCredentials() {
@@ -247,8 +281,13 @@ async function main() {
       'Protected empty state contains no local tool/action capability names',
     ]);
 
-    await page.screenshot({path: screenshot, fullPage: true});
-    results.push(['PASS', 'screenshot', screenshot]);
+    const stableCapture = await waitForPaintStable(page);
+    await writeFile(screenshot, stableCapture.buffer);
+    results.push([
+      'PASS',
+      'paint-ready screenshot',
+      `${screenshot} (stable hash ${stableCapture.hash}, ${stableCapture.attempts} compositor frames)`,
+    ]);
 
     const noisyConsole = consoleMessages.filter(
       (line) => !/Download the React DevTools|favicon/i.test(line),
