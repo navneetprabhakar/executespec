@@ -416,39 +416,6 @@ public class RunOrchestrator implements RunControlPort {
     }
   }
 
-  public PipelineRun submitRun(
-      String userRequest,
-      String source,
-      String repoUrl,
-      String repoMode,
-      String githubPat,
-      String githubOwner,
-      boolean skipApproval,
-      boolean autoMerge,
-      String modelName,
-      String aiProvider,
-      String createdByUserId,
-      String orgId,
-      String projectId,
-      String executionMode) {
-    return submitRun(
-        userRequest,
-        source,
-        repoUrl,
-        repoMode,
-        githubPat,
-        githubOwner,
-        skipApproval,
-        autoMerge,
-        modelName,
-        aiProvider,
-        createdByUserId,
-        orgId,
-        projectId,
-        executionMode,
-        List.of());
-  }
-
   /**
    * Pilot v3.0 — overload that accepts project-scoped multi-repo selection. When {@code
    * selectedRepoIds} is non-empty, the pipeline clones each linked repo into {@code

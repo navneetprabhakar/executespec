@@ -53,6 +53,7 @@ being retained under compatibility aliases.
 | Dead Console CSS selectors `.con-side-mini` / `.con-nav-badge` | DONE — removed after zero non-CSS source references; unrelated legacy Signal/IDE CSS remains pending visual-contract review |
 | Stale Web accessibility guard for model overrides | DONE — guard now checks the actual `ModelPicker` `ariaLabel` prop contract; rendered accessibility remains covered by the component tests |
 | Dead ApplyService workspace git helpers | DONE — removed unused `tryGitCommit` / `runCmd` helpers after confirming all apply flows use `ScmPushService.pushApplyChanges`; no API or runtime contract changed |
+| Legacy 14-argument `RunOrchestrator.submitRun` overload | DONE — `IntegrationManager` now supplies the canonical selected-repository argument explicitly; removed after compile-verified call-graph migration |
 | Duplicate standalone billing API client | DONE — moved `BillingPlan`/`fetchPlans` into canonical `frontend/src/lib/api/billing.ts` and deleted the unused `billing-api.ts` module; no imports remain |
 | Duplicate admin execution-reconcile fetches | DONE — both settings surfaces now use the typed `adminReconcileExecutions` domain helper and shared transport/auth behavior |
 | Raw billing payment-history fetch in `IdeBilling` | DONE — migrated to typed `getPaymentHistory` in the canonical billing API module, preserving best-effort empty-state behavior |
