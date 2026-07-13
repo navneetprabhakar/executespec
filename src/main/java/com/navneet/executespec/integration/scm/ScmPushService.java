@@ -191,7 +191,7 @@ public class ScmPushService {
     String repoMode = run.getRepoMode();
     String repoUrl = run.getRepoUrl();
 
-    if ((repoMode == null || "NONE".equals(repoMode)) && !StringUtils.hasText(repoUrl))
+    if (!StringUtils.hasText(repoUrl) && !"NEW".equals(repoMode))
       return PushResult.noConfiguration("GITHUB", "GitHub repository is not configured");
 
     String pat = resolvePat(run, user);
