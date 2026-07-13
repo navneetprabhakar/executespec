@@ -42,9 +42,8 @@ vi.mock('@/ide/IdeKit', () => ({
   statusKind: () => 'warn',
 }));
 
-(
-  globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}
-).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT =
+  true;
 
 let host: HTMLDivElement;
 let root: Root;
@@ -68,7 +67,9 @@ afterEach(() => {
     hasPrevious: false,
   });
   vi.mocked(api.getProjects).mockReset().mockResolvedValue([]);
-  vi.mocked(api.getMyOrg).mockReset().mockResolvedValue({} as api.OrgDto);
+  vi.mocked(api.getMyOrg)
+    .mockReset()
+    .mockResolvedValue({} as api.OrgDto);
   vi.mocked(api.getOrgMembers).mockReset().mockResolvedValue([]);
   vi.mocked(api.getOrgInvitations).mockReset().mockResolvedValue([]);
   vi.mocked(api.getPrCommentPendingCount).mockReset().mockResolvedValue({count: 0});
