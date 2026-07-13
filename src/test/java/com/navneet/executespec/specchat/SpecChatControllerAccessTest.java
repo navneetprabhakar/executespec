@@ -11,6 +11,7 @@ import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import com.navneet.executespec.agentsession.AgentIntentService;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -38,7 +39,8 @@ class SpecChatControllerAccessTest {
         .assertCanWrite(org.mockito.ArgumentMatchers.eq("foreign"), any(AppUserDetails.class));
 
     SpecChatController controller =
-        new SpecChatController(audit, service, flags, providers, access);
+        new SpecChatController(
+            audit, service, flags, providers, access, mock(AgentIntentService.class));
     var request =
         new SpecChatController.SpecChatRequest(
             "session-1", "foreign", null, List.of(Map.of("role", "user", "content", "list")), null);
