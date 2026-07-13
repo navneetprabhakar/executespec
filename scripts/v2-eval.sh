@@ -169,8 +169,13 @@ run_one() {
        credits:      ($run[0].creditsCharged // 0),
        total_input:  ($run[0].totalInputTokens  // 0),
        total_output: ($run[0].totalOutputTokens // 0),
-       accuracy:     ($report[0].accuracyScore // null),
-       report_ok:    (($report[0].accuracyScore // null) != null)
+       # verifiedScore is the only score that may drive an eval gate. Keep the
+       # legacy LLM self-assessment for diagnostics, but never use it as the
+       # readiness signal (older reports may still contain accuracyScore only).
+       verified_score: ($report[0].verifiedScore // null),
+       legacy_accuracy_score: ($report[0].accuracyScore // null),
+       score_source: (if ($report[0].verifiedScore // null) != null then "verified" else "missing" end),
+       report_ok:    (($report[0].verifiedScore // null) != null)
      }' > "${RAW_DIR}/${provider}-${band}.result.json"
 
   log "done    $label status=$(jq -r '.status // "?"' "${RAW_DIR}/${provider}-${band}.result.json") "
@@ -219,8 +224,8 @@ jq -s 'sort_by(.provider,.band)' "${RAW_DIR}"/*.result.json > "$JSON_OUT"
   echo
   echo "## Summary"
   echo
-  printf '| Provider | Band | Status | Tasks | Duration | Cost USD | In Tokens | Out Tokens | Review | Accuracy |\n'
-  printf '|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| Provider | Band | Status | Tasks | Duration | Cost USD | In Tokens | Out Tokens | Review | Verified score | Legacy accuracy |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
   jq -r '.[] |
     . as $r |
     ($r.run_id // "-") as $id |
@@ -229,11 +234,11 @@ jq -s 'sort_by(.provider,.band)' "${RAW_DIR}"/*.result.json > "$JSON_OUT"
         (($end | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - ($st | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) | tostring + "s"
       else "-" end) as $dur |
     ($r.review // "" | fromjson? // {}) as $rev |
-    "| \($r.provider) | \($r.band) | \($r.status // "?") | \($r.tasks_done)/\($r.tasks_total) | \($dur) | $\($r.actual_cost) | \($r.total_input) | \($r.total_output) | \($rev.overall // "-") | \($r.accuracy // "-") |"' "$JSON_OUT"
+    "| \($r.provider) | \($r.band) | \($r.status // "?") | \($r.tasks_done)/\($r.tasks_total) | \($dur) | $\($r.actual_cost) | \($r.total_input) | \($r.total_output) | \($rev.overall // "-") | \($r.verified_score // "-") | \($r.legacy_accuracy_score // "-") |"' "$JSON_OUT"
   echo
   echo "## Notes"
   echo
-  echo "- \`Accuracy\` comes from the validation report. \`-\` means the report did not generate (often OpenAI hitting the Spring AI 1.1.4 extra_body bug — V2 reroutes to Anthropic for the narrative call; ensure an Anthropic key is configured)."
+  echo "- \`Verified score\` is the deterministic/hybrid validation headline and is the only score used for readiness. \`Legacy accuracy\` is an LLM self-assessment retained for diagnostics only; a missing verified score is not a pass."
   echo "- \`Review\` is the V2 reviewer verdict (CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED)."
   echo "- Cost excludes preview / test execution; only LLM spend from planner + worker + reviewer."
   echo

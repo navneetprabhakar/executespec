@@ -234,7 +234,7 @@ jq -s 'sort_by(.provider,.band)' "${RAW_DIR}"/*.result.json > "$JSON_OUT"
   echo
   echo "## Notes"
   echo
-  echo "- \`Verified\` is the V106 deterministic score; \`Est.\` is the demoted LLM accuracy."
+  echo "- \`Verified\` is the deterministic/hybrid validation headline and the only score used for gates; \`Est.\` is the demoted LLM accuracy diagnostic."
   echo "- \`Reason\` maps to the status_reason taxonomy (V107)."
   echo "- S5 multi-repo runs require a pre-seeded project with 2 linked repos. Set PROJECT_ID env var and extend this script if the default /api/runs path doesn't hydrate the project context."
   echo

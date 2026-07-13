@@ -263,7 +263,13 @@ wait_for_report() {
                 checksPassed: (.checksPassed // []),
                 generationTimeMs: (.generationTimeMs // null),
                 issuesJson: (.issuesJson // "[]"),
+                verifiedScore: (.verifiedScore // null),
+                legacyAccuracyScore: (.accuracyScore // null),
+                legacySpecAdherenceScore: (.specAdherenceScore // null),
+                # Backward-compatible alias for callers that still inspect the
+                # raw report object; no summary or gate reads this field.
                 specAdherenceScore: (.specAdherenceScore // null),
+                scoreSource: (if (.verifiedScore // null) != null then "verified" else "missing" end),
                 endpointCoverage: (.endpointCoverage // null),
                 schemaAccuracy: (.schemaAccuracy // null),
                 testCoverage: (.testCoverage // null),
@@ -353,12 +359,13 @@ run_benchmark() {
     max_iter=$(echo "$metrics" | jq -r '.maxIterations')
     local pipeline_result
     pipeline_result=$(echo "$report_data" | jq -r '.pipelineResult // "N/A"')
-    local adherence_score
-    adherence_score=$(echo "$report_data" | jq -r '.specAdherenceScore // "N/A"')
+    local verified_score adherence_score
+    verified_score=$(echo "$report_data" | jq -r '.verifiedScore // "N/A"')
+    adherence_score=$(echo "$report_data" | jq -r '.legacySpecAdherenceScore // "N/A"')
 
     case "$status" in
         COMPLETE)
-            ok "$status — tasks:$tasks_done/$tasks_total  duration:${duration}s  cost:\$$actual_cost  tokens:${total_in}in/${total_out}out  max_iter:$max_iter  pipeline:$pipeline_result  adherence:$adherence_score"
+            ok "$status — tasks:$tasks_done/$tasks_total  duration:${duration}s  cost:\$$actual_cost  tokens:${total_in}in/${total_out}out  max_iter:$max_iter  pipeline:$pipeline_result  verifiedScore:$verified_score  legacyAdherence:$adherence_score"
             ;;
         PARTIAL)
             warn "$status — tasks:$tasks_done/$tasks_total  duration:${duration}s  cost:\$$actual_cost"
@@ -443,6 +450,11 @@ save_result() {
             checksPassed: ($report.checksPassed // []),
             compilationPassed: (($report.checksPassed // []) | if type == "array" then any(. == "COMPILATION") else false end),
             reportAvailable: (($report.pipelineResult // null) != null),
+            verifiedScore: ($report.verifiedScore // null),
+            legacyAccuracyScore: ($report.legacyAccuracyScore // $report.accuracyScore // null),
+            legacySpecAdherenceScore: ($report.legacySpecAdherenceScore // $report.specAdherenceScore // null),
+            scoreSource: ($report.scoreSource // (if ($report.verifiedScore // null) != null then "verified" else "missing" end)),
+            # Kept as an alias for old consumers; summaries below use verifiedScore.
             specAdherenceScore: ($report.specAdherenceScore // null),
             schemaAccuracy: ($report.schemaAccuracy // null),
             testCoverage: ($report.testCoverage // null),
@@ -535,7 +547,7 @@ generate_report() {
     total_output=$(jq '[.[].totalOutputTokens // 0] | add' "$RESULTS_FILE")
 
     local avg_adherence
-    avg_adherence=$(jq '[.[] | select(.specAdherenceScore != null) | .specAdherenceScore] | if length > 0 then add / length else null end' "$RESULTS_FILE")
+    avg_adherence=$(jq '[.[] | select(.verifiedScore != null) | .verifiedScore] | if length > 0 then add / length else null end' "$RESULTS_FILE")
 
     local compile_passed
     compile_passed=$(jq '[.[] | select(.compilationPassed == true)] | length' "$RESULTS_FILE")
@@ -579,7 +591,7 @@ generate_report() {
         echo "| FAILED | $failed | ≥85% success |"
         echo "| Compile pass rate | $compile_passed/$total | ≥95% |"
         echo "| Task COMPLETE rate | ${task_complete_rate}% | ≥90% |"
-        echo "| Avg spec adherence | $avg_adherence / 100 | ≥75 avg, ≥85 p90 |"
+        echo "| Avg verified score | $avg_adherence / 100 | ≥75 avg, ≥85 p90 |"
         echo "| Avg cost/run | \$$avg_cost | ≤\$0.25 |"
         echo "| Avg wall-clock time | ${avg_duration}s | ≤480s (8 min) |"
         echo "| Total cost | \$$total_cost | — |"
@@ -591,11 +603,11 @@ generate_report() {
         # ── Per-Run Results ────────────────────────────────────────────────
         echo "## 2. Per-Run Results"
         echo ""
-        echo "| # | Spec | Provider | Status | Duration | Cost | Tokens (in/out) | Tasks | Retries | Max Iter | Adherence | Compile | Pipeline |"
+        echo "| # | Spec | Provider | Status | Duration | Cost | Tokens (in/out) | Tasks | Retries | Max Iter | Verified score | Legacy adherence | Compile | Pipeline |"
         echo "|---|------|----------|--------|----------|------|----------------|-------|---------|----------|-----------|---------|----------|"
 
         jq -r 'sort_by(.runNumber) | .[] |
-            "| \(.runNumber) | \(.specLabel) | \(.provider) | \(.status) | \(.durationSeconds)s | $\(.actualCostUsd // "N/A") | \(.totalInputTokens)/\(.totalOutputTokens) | \(.tasksCompleted)/\(.tasksTotal) | \(.totalRetries) | \(.maxIterations) | \(.specAdherenceScore // "N/A") | \(if .compilationPassed then "PASS" else "FAIL" end) | \(.pipelineResult // "N/A") |"' \
+            "| \(.runNumber) | \(.specLabel) | \(.provider) | \(.status) | \(.durationSeconds)s | $\(.actualCostUsd // "N/A") | \(.totalInputTokens)/\(.totalOutputTokens) | \(.tasksCompleted)/\(.tasksTotal) | \(.totalRetries) | \(.maxIterations) | \(.verifiedScore // "N/A") | \(.legacySpecAdherenceScore // "N/A") | \(if .compilationPassed then "PASS" else "FAIL" end) | \(.pipelineResult // "N/A") |"' \
             "$RESULTS_FILE"
 
         echo ""
@@ -624,7 +636,7 @@ generate_report() {
             "Total output tokens|[.[] | select(.provider == \"PROV\") | .totalOutputTokens // 0] | add"
             "Task complete rate|([.[] | select(.provider == \"PROV\") | .tasksCompleted // 0] | add) as \$d | ([.[] | select(.provider == \"PROV\") | .tasksTotal // 0] | add) as \$t | if \$t > 0 then (\$d * 100 / \$t | floor | tostring) + \"%\" else \"N/A\" end"
             "Compile passes|[.[] | select(.provider == \"PROV\" and .compilationPassed == true)] | length"
-            "Avg spec adherence|[.[] | select(.provider == \"PROV\" and .specAdherenceScore != null) | .specAdherenceScore] | if length > 0 then add / length | floor else null end"
+            "Avg verified score|[.[] | select(.provider == \"PROV\" and .verifiedScore != null) | .verifiedScore] | if length > 0 then add / length | floor else null end"
             "Total retries|[.[] | select(.provider == \"PROV\") | .totalRetries // 0] | add"
         )
 
@@ -650,13 +662,13 @@ generate_report() {
             local spec_tier="${SPEC_TIERS[$i]}"
             echo "### Spec $((i+1)): $spec_label (\`$spec_tier\`)"
             echo ""
-            echo "| Provider | Status | Duration | Cost | Tokens (in/out) | Tasks | Adherence | Compile |"
-            echo "|----------|--------|----------|------|----------------|-------|-----------|---------|"
+            echo "| Provider | Status | Duration | Cost | Tokens (in/out) | Tasks | Verified score | Legacy adherence | Compile |"
+            echo "|----------|--------|----------|------|----------------|-------|----------------|------------------|---------|"
 
             jq -r --argjson idx "$i" 'def fmt_cost: if . != null then ("$" + tostring) else "N/A" end;
                 def fmt_score: if . != null then tostring else "N/A" end;
                 [.[] | select(.specIndex == $idx)] | sort_by(.provider) | .[] |
-                "| \(.provider) | \(.status) | \(.durationSeconds)s | \(.actualCostUsd | fmt_cost) | \(.totalInputTokens)/\(.totalOutputTokens) | \(.tasksCompleted)/\(.tasksTotal) | \(.specAdherenceScore | fmt_score) | \(if .compilationPassed then "PASS" else "FAIL" end) |"' \
+                "| \(.provider) | \(.status) | \(.durationSeconds)s | \(.actualCostUsd | fmt_cost) | \(.totalInputTokens)/\(.totalOutputTokens) | \(.tasksCompleted)/\(.tasksTotal) | \(.verifiedScore | fmt_score) | \(.legacySpecAdherenceScore | fmt_score) | \(if .compilationPassed then "PASS" else "FAIL" end) |"' \
                 "$RESULTS_FILE"
 
             echo ""
@@ -681,7 +693,7 @@ generate_report() {
             provider=$(echo "$row" | jq -r '.provider')
             status=$(echo "$row" | jq -r '.status')
             retries=$(echo "$row" | jq -r '.totalRetries // 0')
-            adherence=$(echo "$row" | jq -r '.specAdherenceScore // "null"')
+            adherence=$(echo "$row" | jq -r '.verifiedScore // "null"')
             cost=$(echo "$row" | jq -r '.actualCostUsd // "null"')
 
             local rel_score adh_score cost_score
@@ -720,17 +732,17 @@ generate_report() {
 
         # Spec adherence avg
         local adh_avg
-        adh_avg=$(jq '[.[] | select(.specAdherenceScore != null) | .specAdherenceScore] | if length > 0 then add / length | floor else 0 end' "$RESULTS_FILE")
+        adh_avg=$(jq '[.[] | select(.verifiedScore != null) | .verifiedScore] | if length > 0 then add / length | floor else 0 end' "$RESULTS_FILE")
         gate_status="❌ FAIL"
         [[ $adh_avg -ge 75 ]] && gate_status="✅ PASS" && (( gates_passing++ )) || (( gates_failing++ ))
-        echo "| Spec adherence (avg) | ≥75 | $adh_avg | $gate_status |"
+        echo "| Verified score (avg) | ≥75 | $adh_avg | $gate_status |"
 
         # Spec adherence p90 (approximate with max if < 10 runs)
         local adh_p90
-        adh_p90=$(jq '[.[] | select(.specAdherenceScore != null) | .specAdherenceScore] | sort | if length >= 10 then .[length * 9 / 10 | floor] else last // 0 end' "$RESULTS_FILE")
+        adh_p90=$(jq '[.[] | select(.verifiedScore != null) | .verifiedScore] | sort | if length >= 10 then .[length * 9 / 10 | floor] else last // 0 end' "$RESULTS_FILE")
         gate_status="❌ FAIL"
         [[ $adh_p90 -ge 85 ]] && gate_status="✅ PASS" && (( gates_passing++ )) || (( gates_failing++ ))
-        echo "| Spec adherence (p90) | ≥85 | $adh_p90 | $gate_status |"
+        echo "| Verified score (p90) | ≥85 | $adh_p90 | $gate_status |"
 
         # PARTIAL rate
         local partial_rate=$(( partial * 100 / (total > 0 ? total : 1) ))
