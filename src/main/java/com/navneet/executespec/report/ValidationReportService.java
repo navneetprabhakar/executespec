@@ -961,7 +961,7 @@ public class ValidationReportService {
             passed,
             total,
             entity.getReviewerVerdict(),
-            countBlockingIssues(issues),
+            countUnfixedCriticalIssues(issues),
             accuracy.testCoverageLevel());
     if (trustCap.cap() < 100) {
       out.add(
@@ -1045,6 +1045,28 @@ public class ValidationReportService {
       if (!"WOULD_FAIL_LINT".equals(issue.severity())) {
         count++;
       }
+    }
+    return count;
+  }
+
+  /**
+   * Count only unresolved critical implementation issues for the trust-cap evidence row.
+   *
+   * <p>The report-issues ledger entry intentionally counts every non-lint issue so operators can
+   * see the full backlog. That broader count must not be reused as the CRITICALS trust-cap input: a
+   * minor reviewer finding (or a build/test issue that already has its own cap) would otherwise
+   * make a clean score look capped for an unrelated reason. Persisted report DTOs retain the mapped
+   * severity/source and the auto-fix note, so this is the conservative equivalent of the {@link
+   * #countUnfixedCritical(ReportInput)} contract used by the scoring path.
+   */
+  private int countUnfixedCriticalIssues(List<ReportIssueDTO> issues) {
+    if (issues == null) return 0;
+    int count = 0;
+    for (ReportIssueDTO issue : issues) {
+      if (issue == null || !"WOULD_CAUSE_BUG".equals(issue.severity())) continue;
+      if ("ACCURACY_LLM".equals(issue.stage())) continue;
+      if (issue.fix() != null && issue.fix().startsWith("Auto-fixed successfully")) continue;
+      count++;
     }
     return count;
   }

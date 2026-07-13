@@ -143,6 +143,41 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void ledger_trust_cap_ignores_noncritical_blocking_issue() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-5")
+            .runId("run-5")
+            .filesGenerated(3)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(10)
+            .testsTotal(10)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .accuracyJson("{\"specAdherenceScore\":100,\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+
+    // This remains visible in the report-issues ledger, but must not be treated as an unresolved
+    // CRITICAL for the score trust cap.
+    List<VerificationEvidenceDTO> ledger =
+        svc.buildVerificationLedger(
+            report,
+            List.of(
+                new ReportIssueDTO(
+                    "minor review note",
+                    "WOULD_FAIL_REVIEW",
+                    "Add a test",
+                    "REVIEWER_AGENT",
+                    null)));
+
+    assertEntry(ledger, "report-issues", "FAIL", "HYBRID", "MEDIUM");
+    assertTrue(
+        ledger.stream().noneMatch(entry -> "trust-cap".equals(entry.id())),
+        "non-critical issue must not create a CRITICAL trust-cap evidence row");
+  }
+
+  @Test
   void generateAndPersistPublishesValidationEvidenceEventAfterSave() throws Exception {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     ValidationReportGenerator generator = mock(ValidationReportGenerator.class);
