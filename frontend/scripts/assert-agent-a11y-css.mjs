@@ -206,8 +206,8 @@ assertContains(
 );
 assertContains(
   orgSettings,
-  'aria-label={`${t} ${row.provider} model override`}',
-  'org model matrix select label',
+  'ariaLabel={`${t} ${row.provider} model override`}',
+  'org model matrix picker label',
 );
 
 console.log('Agent a11y guardrail passed.');
