@@ -976,7 +976,7 @@
       "sourceFile": "src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java",
       "sourceTokens": [
         "loadProviderPatchFragment",
-        "prompts/fragments/provider/"
+        "fragments/provider/"
       ],
       "role": "WORKER",
       "mode": "PATCH",
