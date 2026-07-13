@@ -34,11 +34,11 @@ Remediation: keep the tools, add an explicit tool-contract test asserting a pers
 
 ### P2 — Prompt/orphan coverage is intentionally partial and can miss dynamic paths
 
-Evidence: release readiness marks “No orphan prompts” PARTIAL because dynamic recipe/scaffold callers remain outside static coverage (`docs/plans/executespec-2.0-release-readiness.md:30`). Static validation is implemented by `scripts/validate-prompt-manifest.mjs` and `scripts/prompt-manifest.test.mjs`, but runtime prompt loading also occurs through dynamic keys in `SequentialExecutor.loadPromptFragment` (`src/main/java/com/navneet/executespec/harness/SequentialExecutor.java:4892-4908`).
+Evidence: the earlier PARTIAL finding is closed. `scripts/validate-prompt-manifest.mjs` and `scripts/prompt-manifest.test.mjs` now validate executable Java literals plus the dynamic provider/build/patch/terminal resources and every project-type/scaffold alias, including the `java-spring-boot` normalization used by `SequentialExecutor`.
 
 Impact: a renamed or removed dynamic fragment can fail only for a provider/project-type combination. Staff Engineering should treat this as a release-integrity gap rather than a cosmetic documentation issue.
 
-Remediation: add a deterministic runtime-key corpus test covering every provider/build/patch/terminal fragment and every scaffold/recipe key, with a fail-closed missing-resource assertion. Keep dynamic recipe content out of the static manifest only when the corpus covers it.
+Residual: migration recipe content is database catalog data rather than a classpath prompt; it remains covered by its own catalog/schema tests and is intentionally outside the prompt-resource manifest.
 
 ### P2 — Release evidence mixes last-recorded and current-SHA results
 
