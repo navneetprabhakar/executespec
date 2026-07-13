@@ -3145,7 +3145,10 @@
 .agent-jump-latest {
   position: absolute;
   right: clamp(18px, 4vw, 56px);
-  bottom: 86px;
+  /* The composer is a normal flex sibling, not an overlay. Keeping this near
+     the scroll viewport's bottom avoids covering gate actions on short/mobile
+     viewports while still leaving the control above the composer boundary. */
+  bottom: 12px;
   z-index: 2;
   min-height: 32px;
   padding: 6px 12px;
