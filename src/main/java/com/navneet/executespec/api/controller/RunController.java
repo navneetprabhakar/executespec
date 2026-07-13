@@ -877,7 +877,7 @@ public class RunController {
     }
 
     stateStore.save(run);
-    scmPushService.push(run);
+    ScmPushService.PushResult pushResult = scmPushService.push(run);
 
     // Reload to pick up PR URL set during push
     PipelineRun updated = stateStore.findRun(runId).orElse(run);
@@ -887,16 +887,17 @@ public class RunController {
             : (updated.getGithubPrUrl() != null ? updated.getGithubPrUrl() : "");
     String provider = updated.getScmProvider() != null ? updated.getScmProvider() : "";
 
+    String resultPrUrl = pushResult.prUrl().isBlank() ? prUrl : pushResult.prUrl();
     return ResponseEntity.ok(
         Map.of(
-            "status",
-            "pushed",
-            "repoUrl",
-            updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
-            "prUrl",
-            prUrl,
-            "scmProvider",
-            provider));
+            "status", pushResult.status(),
+            "repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
+            "prUrl", resultPrUrl,
+            "scmProvider", provider.isBlank() ? pushResult.scmProvider() : provider,
+            "message", pushResult.message(),
+            "attempted", Integer.toString(pushResult.attempted()),
+            "succeeded", Integer.toString(pushResult.succeeded()),
+            "failed", Integer.toString(pushResult.failed())));
   }
 
   /**
