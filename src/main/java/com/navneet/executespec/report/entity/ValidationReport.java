@@ -159,7 +159,7 @@ public class ValidationReport {
   private Integer rubricScore;
 
   /**
-   * Deterministic preview/boot verification captured while generating the report (V268). These
+   * Deterministic preview/boot verification captured while generating the report (V270). These
    * fields deliberately persist the verifier's verdict and reason instead of relying on the
    * in-memory {@code ReportInput}; later rescoring must not silently discard the BUILD evidence.
    */
