@@ -4,6 +4,7 @@ import {MemoryRouter, Route, Routes} from 'react-router-dom';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import ConsoleShell from './ConsoleShell';
+import * as api from '@/lib/api';
 
 vi.mock('@/lib/api', () => ({
   getRuns: vi.fn().mockResolvedValue({content: []}),
@@ -89,6 +90,28 @@ describe('ConsoleShell focus affordances', () => {
     const shell = host.querySelector<HTMLElement>('.con-root');
     expect(shell?.classList.contains('agent-active')).toBe(true);
     expect(shell?.dataset.surface).toBe('transcript');
+  });
+
+  it('closes the mobile drawer with Escape and returns focus to its trigger', async () => {
+    await renderShell('/home');
+    const trigger = host.querySelector<HTMLButtonElement>('.con-icon.con-only-mobile');
+    expect(trigger).not.toBeNull();
+    await act(async () => trigger?.click());
+    expect(host.querySelector('.con-side.drawer-open')).not.toBeNull();
+    const close = host.querySelector<HTMLButtonElement>('.con-drawer-close');
+    expect(close).not.toBeNull();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    });
+    expect(host.querySelector('.con-side.drawer-open')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('shows a retryable alert when navigation data fails', async () => {
+    vi.mocked(api.getRuns).mockRejectedValueOnce(new Error('offline'));
+    await renderShell('/home');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('temporarily unavailable');
+    expect(host.querySelector('.con-api-error-retry')).not.toBeNull();
   });
 });
 

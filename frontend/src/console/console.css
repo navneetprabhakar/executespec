@@ -146,6 +146,30 @@
   background: var(--ide-hover);
   color: var(--ide-fg-bright);
 }
+.con-api-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 5px 12px;
+  color: var(--ide-fg-bright);
+  background: color-mix(in srgb, var(--ide-red) 14%, var(--ide-bg-widget));
+  border-bottom: 1px solid color-mix(in srgb, var(--ide-red) 42%, var(--ide-border));
+  font-size: 12px;
+}
+.con-api-error-retry {
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--ide-red) 55%, var(--ide-border));
+  border-radius: 4px;
+  color: var(--ide-fg-bright);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 650;
+}
+.con-api-error-retry:hover {
+  background: var(--ide-hover);
+}
 @media (max-width: 640px) {
   .con-root .con-banner {
     padding: 7px 12px;
@@ -860,6 +884,9 @@
 .con-only-mobile {
   display: none;
 }
+.con-drawer-close {
+  display: none;
+}
 .ide-root .con-icon.con-only-mobile {
   display: none;
 }
@@ -924,7 +951,7 @@
   }
   .con-side {
     position: fixed;
-    top: 46px;
+    top: calc(46px + var(--con-banner-height, 0px));
     bottom: 0;
     left: 0;
     z-index: 50;
@@ -955,9 +982,28 @@
   .con-backdrop {
     display: block;
     position: fixed;
-    inset: 46px 0 0 0;
+    inset: calc(46px + var(--con-banner-height, 0px)) 0 0 0;
     z-index: 40;
     background: rgba(0, 0, 0, 0.45);
+  }
+  .con-drawer-close {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: calc(100% - 16px);
+    min-height: 40px;
+    margin: 0 8px 4px;
+    padding: 0 10px;
+    border: 1px solid var(--ide-border);
+    border-radius: 5px;
+    color: var(--ide-fg-muted);
+    background: transparent;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .con-drawer-close:hover {
+    color: var(--ide-fg-bright);
+    background: var(--ide-hover);
   }
   .con-tabbar {
     display: flex;
