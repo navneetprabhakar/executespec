@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +32,16 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 
 class WebQaFixtureControllerTest {
+
+  @Test
+  void cleanupRecognizesSiblingPrefixedFixtureWorkspaceSafely() {
+    WebQaFixtureController controller =
+        controller(mock(PipelineRunRepository.class), mock(AgentSessionRepository.class));
+
+    assertThat(controller.isFixtureWorkspace(Path.of("workspace/web-qa-123"))).isTrue();
+    assertThat(controller.isFixtureWorkspace(Path.of("workspace/customer-run"))).isFalse();
+    assertThat(controller.isFixtureWorkspace(Path.of("workspace/web-qa/nested"))).isFalse();
+  }
 
   @Test
   void cleanupDeletesSeededAgentGraphForTheAuthenticatedUser() throws Exception {
