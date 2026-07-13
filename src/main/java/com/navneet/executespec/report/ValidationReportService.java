@@ -382,6 +382,85 @@ public class ValidationReportService {
     return repository.findByRunId(runId);
   }
 
+  /**
+   * Recompute the persisted score after a concrete workspace-test execution completes.
+   *
+   * <p>Report generation normally happens before generated/preview tests finish. Updating only
+   * {@code testCoverageScore} in that later path left the headline {@code verifiedScore}, the
+   * rubric companion, and the evidence event describing the old test counts. This method keeps the
+   * rescore as one transactional operation: test counts, both headline scores, and the reloadable
+   * evidence ledger are written from the same execution summary.
+   *
+   * <p>The persisted report is the source of truth for every signal other than concrete tests. This
+   * deliberately does not rerun an LLM assessment or reviewer, and therefore cannot invent new
+   * quality evidence. A missing report is returned as empty so the caller can retain its existing
+   * report-generation race handling.
+   */
+  @org.springframework.transaction.annotation.Transactional
+  public Optional<ValidationReport> rescoreAfterConcreteTests(
+      String runId, TestExecutionSummary summary) {
+    if (runId == null || runId.isBlank() || summary == null || repository == null) {
+      return Optional.empty();
+    }
+    Optional<ValidationReport> found = repository.findByRunId(runId);
+    if (found.isEmpty()) {
+      return Optional.empty();
+    }
+
+    ValidationReport report = found.get();
+    int total = Math.max(0, summary.getTotalTests());
+    int passed = Math.max(0, Math.min(summary.getPassed(), total));
+    List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
+    AccuracyFacts accuracy = parseAccuracyFacts(report.getAccuracyJson());
+    int criticals = countUnfixedCriticalIssues(issues);
+
+    report.setTestsTotal(total);
+    report.setTestsPassed(passed);
+    // Keep the existing six-dimension test axis in sync for callers that still render it.
+    report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
+    report.setVerifiedScore(
+        computeVerifiedScore(
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            report.getReviewerVerdict(),
+            criticals,
+            accuracy.endpointCoverage(),
+            accuracy.testCoverageLevel(),
+            report.getFilesGenerated(),
+            null));
+    report.setRubricScore(
+        computeRubricScore(
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            report.getReviewerVerdict(),
+            criticals,
+            accuracy.endpointCoverage(),
+            accuracy.testCoverageLevel()));
+
+    ValidationReport saved = repository.save(report);
+    List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
+    GoalDonenessDecision runGoalDecision =
+        goalProofEvaluator.evaluate(
+            saved.getRunId(),
+            runGoalSummary(findRunForReport(saved.getRunId())),
+            saved.getPipelineResult(),
+            ledger);
+    persistRunGoalDecision(findRunForReport(saved.getRunId()), runGoalDecision);
+    publishEvidenceEvent(saved, ledger, runGoalDecision);
+    return Optional.of(saved);
+  }
+
+  private static int deriveConcreteTestCoverageScore(int total, int passed) {
+    if (total <= 0) return 20;
+    double ratio = (double) passed / total;
+    if (ratio >= 0.90) return 95;
+    if (ratio >= 0.60) return 75;
+    if (ratio >= 0.30) return 55;
+    return 35;
+  }
+
   public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
     return repository.findByShareToken(shareToken).map(this::toShareDTO);
   }
