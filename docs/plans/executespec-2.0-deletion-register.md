@@ -47,8 +47,8 @@ being retained under compatibility aliases.
 | Deprecated `PatchAgent` wrapper | DONE — deleted after `CodeGenEngine`/PATCH characterization; `prompts/patch-agent.md` remains because `CodeGenEngineImpl` owns and actively assembles it |
 | `FallbackLlmRouter` compatibility router | DONE — deleted after all production text callers moved to `LlmRouter.callText`; canonical routing, retry, failover and usage accounting now have one transport |
 | PATCH/conversation prompt fallback stubs | DONE — required prompt resources now fail closed instead of silently substituting generic prompts; provider overlays use `PromptAssembler` |
-| Inert V2 batch scaffold and dead batch-cost configuration | GUARD DONE / RETIREMENT PENDING — new BATCH approvals now return explicit HTTP 410; no production caller exists and provider batch clients bypass the canonical router. Remove scheduler/beans/config after preserving historical batch columns |
-| No-op agent-session summary-email route | PENDING — currently returns 202 without sending; retain only as an explicit deprecated/410 adapter until supported clients and mail tests are migrated |
+| Inert V2 batch scaffold and dead batch-cost configuration | RETIRED — new BATCH approvals return explicit HTTP 410; provider clients, scheduler, coordinator/resume beans, router, and batch-only config are removed. V61/V117 historical columns/flag and runtime read fields remain for compatibility. |
+| No-op agent-session summary-email route | RETIRED — compatibility route remains for source compatibility but returns HTTP 410; current CLI/VS Code sessions do not call it and usage remains available through agent-session turn/event APIs |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |

@@ -72,7 +72,6 @@ public class AgentProperties {
 
     /** Maximum credits a FREE-tier user can consume per run. */
     private int maxCreditsFree = 1;
-
   }
 
   @Data

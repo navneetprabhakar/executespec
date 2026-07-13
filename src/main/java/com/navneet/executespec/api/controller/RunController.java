@@ -1533,7 +1533,8 @@ public class RunController {
     if (approved && "BATCH".equalsIgnoreCase(executionMode)) {
       throw new ResponseStatusException(
           HttpStatus.GONE,
-          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use REALTIME");
+          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
+              + " REALTIME");
     }
   }
 
