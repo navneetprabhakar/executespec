@@ -333,6 +333,21 @@ export default function IdeAgent() {
     return session;
   }
 
+  // Toolbar/drawer actions are intentionally fire-and-forget, but a failed
+  // session creation must still become visible in the same error surface as
+  // initial loading. Without this boundary a rejected promise only hits the
+  // console and leaves the operator with a button that appears to do nothing.
+  async function startNewSession() {
+    try {
+      await createSession();
+    } catch (e) {
+      dispatch({
+        type: 'error',
+        error: e instanceof Error ? e.message : 'Failed to create a new sandbox.',
+      });
+    }
+  }
+
   async function ensureSession() {
     if (selected) return selected;
     return createSession();
@@ -609,7 +624,7 @@ export default function IdeAgent() {
         pendingGateCount={inlineGates.length}
         onNewChat={() => {
           setChatsOpen(false);
-          void createSession();
+          void startNewSession();
         }}
         onOpenApprovals={() => setChatsOpen(true)}
         onToggleChats={toggleChats}
@@ -664,7 +679,7 @@ export default function IdeAgent() {
         }}
         onNewChat={() => {
           setChatsOpen(false);
-          void createSession();
+          void startNewSession();
         }}
         onApproveGate={(gate) => {
           setChatsOpen(false);

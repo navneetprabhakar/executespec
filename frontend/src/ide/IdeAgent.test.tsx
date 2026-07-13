@@ -315,6 +315,24 @@ describe('IdeAgent', () => {
     expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
   });
 
+  it('surfaces new-sandbox creation failures instead of leaving the action silent', async () => {
+    api.createAgentSession.mockRejectedValueOnce(new Error('session service unavailable'));
+    ({host, root} = await renderAgent('/agent'));
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    await act(async () => {
+      newSandbox.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'session service unavailable',
+    );
+  });
+
   it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
     ({host, root} = await renderAgent('/agent'));
     const baseline = api.listAgentSessions.mock.calls.length;
