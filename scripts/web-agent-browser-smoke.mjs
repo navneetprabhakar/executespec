@@ -262,7 +262,11 @@ async function main() {
     // WEB/local-hands boundary without spending an LLM call.
     await page.getByText('Remote sandbox operator').first().waitFor({timeout: 20_000});
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 20_000});
-    await page.getByText('No token usage yet', {exact: true}).waitFor({timeout: 20_000});
+    // The empty-state rail was intentionally de-jargoned: it now explains when usage
+    // appears instead of claiming that no token usage exists. Keep the smoke anchored to
+    // the current user-facing contract so an old marker cannot turn a healthy shell into a
+    // misleading capture failure.
+    await page.getByText('Usage appears after the first response', {exact: true}).waitFor({timeout: 20_000});
     await page.getByText('Remote sandbox only', {exact: true}).waitFor({timeout: 20_000});
     await page.getByRole('button', {name: 'Start a new sandbox'}).waitFor({timeout: 20_000});
     results.push([
