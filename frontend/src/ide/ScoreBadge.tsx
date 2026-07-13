@@ -36,7 +36,7 @@ export function ScoreBadge({score, verificationLedger, compact = false}: ScoreBa
   const label = hasLedger
     ? `${score} / 100`
     : compact
-      ? `${score} · ?`
+      ? `${score} · unverified`
       : `${score} / 100 · unverified`;
   const title = hasLedger
     ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
