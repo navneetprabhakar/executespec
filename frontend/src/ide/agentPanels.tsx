@@ -1691,7 +1691,9 @@ export function AgentConversation({
           )}
           <div ref={endRef} />
         </div>
-        {hasNewActivity && onJumpToLatest && (
+        {/* Never float the scroll affordance over an approval gate. On short
+            viewports it can otherwise cover the primary Approve action. */}
+        {hasNewActivity && gates.length === 0 && onJumpToLatest && (
           <button
             className='agent-jump-latest'
             data-agent-region='new-activity'
