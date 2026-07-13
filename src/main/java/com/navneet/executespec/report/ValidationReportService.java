@@ -1559,13 +1559,7 @@ public class ValidationReportService {
    * builds but doesn't run." Used only when a verifyBoot signal was captured for the run.
    */
   private static double bootSlotScore(BootHealthEvaluator.Verdict verdict) {
-    return switch (verdict) {
-      case HEALTHY -> 100.0; // boots + health path returned 2xx/3xx
-      case UNHEALTHY -> 55.0; // boots + responds, but a non-success status (app-level error)
-      case TIMED_OUT -> 35.0; // process started but never served the health path in time
-      case DID_NOT_START -> 15.0; // image built but the container/process did not come up
-      case BUILD_FAILED -> 0.0; // never built — same as a red build
-    };
+    return ValidationReportScorePolicy.bootSlotScore(verdict);
   }
 
   /**
@@ -2096,13 +2090,7 @@ public class ValidationReportService {
    * </ul>
    */
   static double testFactorFromCoverageLevel(String testCoverageLevel) {
-    if (testCoverageLevel == null) return 0.5;
-    return switch (testCoverageLevel.toUpperCase()) {
-      case "COMPREHENSIVE", "GOOD" -> 1.0;
-      case "PARTIAL" -> 0.7;
-      case "NONE" -> 0.3;
-      default -> 0.5; // forward-compat with new values the AccuracyReport prompt might invent
-    };
+    return ValidationReportScorePolicy.testFactorFromCoverageLevel(testCoverageLevel);
   }
 
   /**
@@ -2110,7 +2098,7 @@ public class ValidationReportService {
    * the rubric's 20-point test slot. Same coverage-level → score mapping shape.
    */
   static int rubricTestPointsFromCoverageLevel(String testCoverageLevel) {
-    return (int) Math.round(20.0 * testFactorFromCoverageLevel(testCoverageLevel));
+    return ValidationReportScorePolicy.rubricTestPointsFromCoverageLevel(testCoverageLevel);
   }
 
   /**
@@ -2214,13 +2202,7 @@ public class ValidationReportService {
    * V1).
    */
   static String mapVerdictToV2Name(ReviewVerdict v) {
-    if (v == null) return null;
-    return switch (v) {
-      case APPROVED -> "CLEAN";
-      case APPROVED_WITH_NOTES -> "FIXED_ISSUES";
-      case NEEDS_FIXES -> "UNRESOLVED_ISSUES";
-      case REJECTED -> "REVIEW_FAILED";
-    };
+    return ValidationReportScorePolicy.mapVerdictToV2Name(v);
   }
 
   /**
@@ -2266,12 +2248,7 @@ public class ValidationReportService {
    * SYNTH-ACC-* id stamp. Kept as a separate predicate so a test can pin the exact prefix list.
    */
   static boolean isAccuracyHallucinationDescription(String description) {
-    if (description == null) return false;
-    String d = description.stripLeading();
-    return d.startsWith("Spec requirement not implemented:")
-        || d.startsWith("Spec requirement only partially implemented:")
-        || d.startsWith("Endpoint from spec not implemented:")
-        || d.startsWith("Endpoint exists but");
+    return ValidationReportScorePolicy.isAccuracyHallucinationDescription(description);
   }
 
   private String truncate(String s, int maxLen) {

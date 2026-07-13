@@ -1,0 +1,59 @@
+package com.navneet.executespec.report;
+
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator;
+import com.navneet.executespec.reviewer.model.ReviewVerdict;
+
+/**
+ * Pure score/report mappings shared by {@link ValidationReportService}.
+ *
+ * <p>This class deliberately has no Spring dependencies or persistence access. Keeping these small
+ * policy functions together makes their contracts independently testable while the service remains
+ * responsible for orchestration and feature-flag selection.
+ */
+final class ValidationReportScorePolicy {
+
+  private ValidationReportScorePolicy() {}
+
+  static double testFactorFromCoverageLevel(String testCoverageLevel) {
+    if (testCoverageLevel == null) return 0.5;
+    return switch (testCoverageLevel.toUpperCase()) {
+      case "COMPREHENSIVE", "GOOD" -> 1.0;
+      case "PARTIAL" -> 0.7;
+      case "NONE" -> 0.3;
+      default -> 0.5;
+    };
+  }
+
+  static int rubricTestPointsFromCoverageLevel(String testCoverageLevel) {
+    return (int) Math.round(20.0 * testFactorFromCoverageLevel(testCoverageLevel));
+  }
+
+  static String mapVerdictToV2Name(ReviewVerdict verdict) {
+    if (verdict == null) return null;
+    return switch (verdict) {
+      case APPROVED -> "CLEAN";
+      case APPROVED_WITH_NOTES -> "FIXED_ISSUES";
+      case NEEDS_FIXES -> "UNRESOLVED_ISSUES";
+      case REJECTED -> "REVIEW_FAILED";
+    };
+  }
+
+  static boolean isAccuracyHallucinationDescription(String description) {
+    if (description == null) return false;
+    String normalized = description.stripLeading();
+    return normalized.startsWith("Spec requirement not implemented:")
+        || normalized.startsWith("Spec requirement only partially implemented:")
+        || normalized.startsWith("Endpoint from spec not implemented:")
+        || normalized.startsWith("Endpoint exists but");
+  }
+
+  static double bootSlotScore(BootHealthEvaluator.Verdict verdict) {
+    return switch (verdict) {
+      case HEALTHY -> 100.0;
+      case UNHEALTHY -> 55.0;
+      case TIMED_OUT -> 35.0;
+      case DID_NOT_START -> 15.0;
+      case BUILD_FAILED -> 0.0;
+    };
+  }
+}
