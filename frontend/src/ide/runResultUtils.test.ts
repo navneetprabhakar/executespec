@@ -2,6 +2,9 @@ import {describe, expect, it} from 'vitest';
 
 import {
   confidenceColor,
+  continuationApprovalCandidate,
+  continuationApprovalReason,
+  continuationSourceLabel,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -9,11 +12,13 @@ import {
   goalDecisionHelp,
   goalDecisionLabel,
   goalStateLabel,
+  goalStateKind,
   hasRunCostEvidence,
   isNoisyLogEvent,
   isFailedTerminalStatus,
   isTestExecutionTerminal,
   lineDiff,
+  latestContinuationAction,
   logIcon,
   logLabel,
   logMeta,
@@ -28,6 +33,8 @@ import {
   shouldShowModelRanking,
   TAB_LABEL,
   testRerunState,
+  taskBudgetFacts,
+  taskGoalLine,
   usd,
   verdictFor,
 } from './runResultUtils';
@@ -194,6 +201,63 @@ describe('runResultUtils', () => {
     expect(goalDecisionHelp('STOP_FAILED')).toContain('proof failure');
     expect(goalDecisionHelp('STOP_FAILED')).not.toContain('STOP_FAILED');
     expect(goalDecisionLabel('STOP_FAILED')).not.toContain('STOP_FAILED');
+  });
+
+  it('keeps continuation and budget presentation logic independently testable', () => {
+    const task = {
+      goalDoneness: {
+        state: 'IN_PROGRESS',
+        recommendedDecision: 'STEP_UP_MODEL',
+        reason: 'build evidence is incomplete',
+        costUsd: 0.1256,
+        totalTokens: 1250,
+        wallClockMs: 65000,
+        budgetCeilingReason: 'task limit',
+      },
+      continuationDecision: {
+        source: 'POST_REVIEW',
+        decision: 'STOP_BLOCKED',
+        approvalRequiredReason: 'BENCHMARK_PRIOR_REQUIRED',
+        selectedCandidate: {
+          provider: 'OPENAI',
+          model: 'gpt-5.4',
+          benchmarkQualityPriorAvailable: false,
+        },
+        policy: {
+          requireBenchmarkPriorForAutomaticContinuation: true,
+          maxTotalCostUsd: 1,
+          maxTotalTokens: 2000,
+          maxTaskWallClockMs: 120000,
+        },
+      },
+      continuationActions: [
+        {
+          source: 'TASK_BOUNDARY',
+          status: 'SKIPPED',
+          decision: 'STEP_UP_MODEL',
+          provider: 'OPENAI',
+          model: 'gpt-5.4',
+          limitName: 'model steps',
+          usedLimit: 1,
+          maxLimit: 2,
+        },
+      ],
+    } as api.TaskSummary;
+
+    expect(continuationSourceLabel('POST_REVIEW')).toBe('Reviewer/build trigger');
+    expect(taskGoalLine(task)).toContain('Goal Still checking -> Try stronger model');
+    expect(taskGoalLine(task)).toContain('Reviewer/build trigger · Next Needs input');
+    expect(continuationApprovalCandidate(task)).toMatchObject({provider: 'OPENAI'});
+    expect(continuationApprovalReason(task)).toContain('no usable benchmark prior');
+    expect(latestContinuationAction(task)).toContain('Skipped STEP_UP_MODEL');
+    expect(latestContinuationAction(task)).toContain('model steps 1/2');
+    expect(goalStateKind('IN_PROGRESS')).toBe('warn');
+    expect(taskBudgetFacts(task)).toEqual([
+      {k: 'Cost', v: '$0.1256 / $1.00'},
+      {k: 'Tokens', v: '1,250 / 2,000'},
+      {k: 'Time', v: '1m 5s / 2m 0s'},
+      {k: 'Ceiling', v: 'task limit'},
+    ]);
   });
 
   it('keeps model ranking copy user-facing instead of leaking policy internals', () => {

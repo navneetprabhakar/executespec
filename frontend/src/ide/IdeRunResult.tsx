@@ -25,6 +25,9 @@ import {
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {
   confidenceColor,
+  continuationApprovalCandidate,
+  continuationApprovalReason,
+  continuationSourceLabel,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -32,6 +35,7 @@ import {
   goalDecisionHelp,
   goalDecisionLabel,
   goalStateLabel,
+  goalStateKind,
   hasRunCostEvidence,
   isNoisyLogEvent,
   isFailedTerminalStatus,
@@ -45,6 +49,7 @@ import {
   modelRankingDetails,
   modelRankingLabel,
   num,
+  latestContinuationAction,
   runPhaseDiagnosis,
   SEV,
   shouldUseRunEvidenceChat,
@@ -55,6 +60,8 @@ import {
   TABS,
   TAB_LABEL,
   testRerunState,
+  taskBudgetFacts,
+  taskGoalLine,
   type Tab,
   toLines,
   usd,
@@ -68,156 +75,6 @@ function Kv({k, v}: {k: string; v: React.ReactNode}) {
       <span>{v}</span>
     </div>
   );
-}
-
-function taskGoalLine(t: api.TaskSummary): string | null {
-  const goal = t.goalDoneness;
-  const continuation = t.continuationDecision;
-  if (!goal && !continuation) return null;
-  const source = continuationSourceLabel(continuation?.source || continuation?.policy?.source);
-  const goalPart =
-    goal?.state && goal?.recommendedDecision
-      ? `Goal ${goalStateLabel(goal.state)} -> ${goalDecisionLabel(goal.recommendedDecision)}`
-      : goal?.state
-        ? `Goal ${goalStateLabel(goal.state)}`
-        : null;
-  const nextPart = continuation?.decision
-    ? `${source ? `${source} · ` : ''}Next ${goalDecisionLabel(continuation.decision)}`
-    : null;
-  const reason = continuation?.reasons?.[0] || goal?.reason || null;
-  return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
-}
-
-function continuationSourceLabel(source?: string | null): string | null {
-  switch ((source || '').toUpperCase()) {
-    case 'POST_REVIEW':
-      return 'Reviewer/build trigger';
-    case 'POST_VALIDATION_REPORT':
-      return 'Final validation trigger';
-    case 'TASK_BOUNDARY':
-      return 'Task trigger';
-    default:
-      return source ? source.replace(/_/g, ' ').toLowerCase() : null;
-  }
-}
-
-function continuationApprovalCandidate(t: api.TaskSummary) {
-  const continuation = t.continuationDecision;
-  const candidate = continuation?.selectedCandidate;
-  const explicitConfirmation = continuation?.policy?.requireConfirmationBeforeExpensiveContinuation;
-  const benchmarkConfidenceBlocked =
-    continuation?.policy?.requireBenchmarkPriorForAutomaticContinuation &&
-    candidate?.benchmarkQualityPriorAvailable === false;
-  if (
-    continuation?.decision !== 'STOP_BLOCKED' ||
-    (!explicitConfirmation && !benchmarkConfidenceBlocked) ||
-    !candidate?.provider ||
-    !candidate?.model
-  ) {
-    return null;
-  }
-  return candidate;
-}
-
-function continuationApprovalReason(t: api.TaskSummary): string | null {
-  const continuation = t.continuationDecision;
-  if (continuation?.decision !== 'STOP_BLOCKED') return null;
-  const source = continuationSourceLabel(continuation.source || continuation.policy?.source);
-  const prefix = source ? `${source}: ` : '';
-  switch ((continuation.approvalRequiredReason || '').toUpperCase()) {
-    case 'BENCHMARK_PRIOR_REQUIRED':
-      return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
-    case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
-      return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
-    case 'ROUTE_PINNED':
-      return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
-    case 'APPROVAL_REQUIRED':
-      return `${prefix}Approval needed before this model/provider upgrade can run.`;
-    default:
-      break;
-  }
-  const candidate = continuation.selectedCandidate;
-  if (
-    continuation.policy?.requireBenchmarkPriorForAutomaticContinuation &&
-    candidate?.benchmarkQualityPriorAvailable === false
-  ) {
-    return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
-  }
-  if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
-    return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
-  }
-  if (continuation.policy?.routePinned) {
-    return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
-  }
-  return null;
-}
-
-function latestContinuationAction(t: api.TaskSummary): string | null {
-  const actions = t.continuationActions || [];
-  const action = actions.length > 0 ? actions[actions.length - 1] : null;
-  if (!action?.decision || !action?.provider || !action?.model) return null;
-  const rawStatus = (action.status || '').toUpperCase();
-  const status =
-    rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
-  const source = continuationSourceLabel(action.source);
-  const sourcePart = source ? `${source}: ` : '';
-  const limit =
-    action.limitName && action.maxLimit != null
-      ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`
-      : '';
-  return `${sourcePart}${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
-}
-
-function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
-  const s = (state || '').toUpperCase();
-  if (s === 'DONE') return 'ok';
-  if (s === 'FAILED' || s === 'BLOCKED' || s === 'WASTE_RISK') return 'bad';
-  return 'warn';
-}
-
-function preciseUsd(n?: number | null): string {
-  if (n == null) return '—';
-  if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
-  return usd(n);
-}
-
-function positive(n?: number | null): number | null {
-  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
-  const goal = t.goalDoneness;
-  if (!goal) return [];
-  const policy = t.continuationDecision?.policy || {};
-  const facts: {k: string; v: string}[] = [];
-  const cost = positive(goal.costUsd);
-  const costLimit = positive(policy.maxTotalCostUsd);
-  if (cost != null || costLimit != null) {
-    facts.push({
-      k: 'Cost',
-      v: costLimit != null ? `${preciseUsd(cost)} / ${preciseUsd(costLimit)}` : preciseUsd(cost),
-    });
-  }
-  const tokens = positive(goal.totalTokens);
-  const tokenLimit = positive(policy.maxTotalTokens);
-  if (tokens != null || tokenLimit != null) {
-    facts.push({
-      k: 'Tokens',
-      v: tokenLimit != null ? `${num(tokens)} / ${num(tokenLimit)}` : num(tokens),
-    });
-  }
-  const wall = positive(goal.wallClockMs);
-  const wallLimit = positive(policy.maxTaskWallClockMs);
-  if (wall != null || wallLimit != null) {
-    facts.push({
-      k: 'Time',
-      v: wallLimit != null ? `${fmtDur(wall)} / ${fmtDur(wallLimit)}` : fmtDur(wall),
-    });
-  }
-  if (goal.budgetCeilingReason) {
-    facts.push({k: 'Ceiling', v: goal.budgetCeilingReason});
-  }
-  return facts;
 }
 
 export default function IdeRunResult() {
