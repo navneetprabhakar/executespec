@@ -1,9 +1,19 @@
 {
   "schemaVersion": 1,
-  "type": "current-tuple-hero-recording",
-  "backendCommit": "7536f6828db23e7c5f466e488af24de71ff33fe0",
-  "cliCommit": "06e543804095b1c7c881c72f971d877d8c933c93",
-  "webFrontendSha": "f2df3a883",
+  "type": "hero-recording-provenance",
+  "recordedAgainst": {
+    "backendCommit": "7536f6828db23e7c5f466e488af24de71ff33fe0",
+    "cliCommit": "06e543804095b1c7c881c72f971d877d8c933c93",
+    "webFrontendSha": "f2df3a883"
+  },
+  "currentCandidate": {
+    "backendCommit": "66b1e64efab561dc1d85155529170beb5b0c3d4b",
+    "backendTree": "69e5ea3bfedf82b9ab58c1a5f0c759704c74e684",
+    "cliCommit": "20008da81715c6a829dccbe6ca323ef92e7d24c2",
+    "cliTree": "dc1d0067bc4a006255139ef2d3df8e63dac0da53",
+    "webFrontendSha": "f2df3a883"
+  },
+  "currentTupleMatch": false,
   "asset": "website/media/hero.webm",
   "sha256": "7f53c9376039f9cfb3c5301ea35fa1e7c825c43379f89a161afd7811c9d8e200",
   "durationSeconds": 60.2,
@@ -15,5 +25,5 @@
   "providerCalls": 0,
   "externalSpendUsd": 0,
   "independentHumanReview": "PENDING",
-  "claim": "Current-tuple provider-free illustrative hero recording with complete UI workflow scenes. It is not a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
+  "claim": "Provider-free illustrative hero recording with complete UI workflow scenes. It is not a current-source release capture, live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
 }
