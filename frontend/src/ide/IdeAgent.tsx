@@ -8,7 +8,6 @@ import {
   initialAgentState,
   isTerminalRunStatus,
   toMessages,
-  type AgentUsageSummary,
   type PendingAction,
 } from '@/ide/agentState';
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
@@ -18,57 +17,7 @@ import {
   webAgentSessionRequest,
 } from '@/ide/agentSession';
 import {useAgentRunStream} from '@/ide/agentRunStream';
-
-const MAX_CONTEXT_TURNS = 8;
-
-function totalUsageTokens(usage: AgentUsageSummary): number {
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
-}
-
-function sessionUsageContext(usage: AgentUsageSummary): api.AgentConversationMessage | null {
-  const totalTokens = totalUsageTokens(usage);
-  if (totalTokens <= 0) return null;
-  return {
-    role: 'system',
-    content:
-      `Conversation usage visible in the web UI before this turn: ${totalTokens} total tokens ` +
-      `(${usage.inputTokens} input, ${usage.outputTokens} output, ${usage.reasoningTokens} reasoning). ` +
-      'Current billing policy: chat turns are included conversation usage and have not charged AI credits. ' +
-      'Run credits are charged separately only when a plan-gated run is approved. ' +
-      'If the user asks what this chat or session cost in AI credits, answer from these facts; do not say you cannot access session usage.',
-  };
-}
-
-function conversationForStream(
-  turns: api.AgentTurnResponse[],
-  latestMessage: string,
-): api.AgentConversationMessage[] {
-  const usageContext = sessionUsageContext(usageFromTurns(turns));
-  const conversation: api.AgentConversationMessage[] = [];
-  if (usageContext) conversation.push(usageContext);
-  for (const turn of turns.slice(-MAX_CONTEXT_TURNS)) {
-    if (turn.userMessage?.trim()) {
-      conversation.push({role: 'user', content: turn.userMessage.trim()});
-    }
-    if (turn.assistantSummary?.trim()) {
-      conversation.push({role: 'assistant', content: turn.assistantSummary.trim()});
-    }
-  }
-  conversation.push({role: 'user', content: latestMessage});
-  return conversation;
-}
-
-function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
-  return turns.reduce(
-    (acc, turn) => ({
-      inputTokens: acc.inputTokens + (turn.inputTokens || 0),
-      outputTokens: acc.outputTokens + (turn.outputTokens || 0),
-      reasoningTokens: acc.reasoningTokens + (turn.reasoningTokens || 0),
-      costUsd: acc.costUsd + (turn.costUsd || 0),
-    }),
-    {inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0},
-  );
-}
+import {conversationForStream, usageFromTurns} from '@/ide/agentConversationContext';
 
 export default function IdeAgent() {
   const navigate = useNavigate();
