@@ -11,7 +11,7 @@ rollout, each phase shippable + green:
 | Phase | What | Status |
 |-------|------|--------|
 | **1** | **The contract** — `CodeGenEngine.solve(EngineRequest) → EngineResult` + supporting records. **No behaviour change.** | **done (this package)** |
-| **2** | **Direct engine worker facade — `CodeGenEngineImpl`** builds the PATCH-style `WorkerTaskRequest` itself (prompt + provider patch fragments + per-provider caps + source-scoped test gate + critic/VBC flags) and calls `WorkerAgent` directly. The former `PatchAgent` wrapper is deleted. | **done** |
+| **2** | **Direct engine worker facade — `CodeGenEngineImpl`** builds the PATCH-style `WorkerTaskRequest` itself (prompt + provider patch fragments + per-provider caps + source-scoped test gate + critic/VBC flags) and calls `WorkerAgent` directly. The former `PatchAgent` wrapper is deleted. Required prompt resources now fail closed at startup; provider overlays use `PromptAssembler` rather than direct classpath reads. | **done** |
 | **3** | **Route benchmark + PATCH orchestration through the engine** — `BenchmarkGenerationService.generate()` and `RunOrchestrator.runPatchPipeline()` call `CodeGenEngine.solve(...)`; benchmark keeps its container diff-capture for the scored patch. | **done** |
 | **4** | **Relocated `WorkerAgent` + `WorkerResult` + `WorkerTaskRequest`** from `agent/` → `engine/` (the worker loop now lives in the engine; worker tools stay in `tool/`). Behaviour-neutral package move — ~30 files re-pointed, `mvn compile` + `test-compile` green. | **worker relocated** |
 | 5 | Lift side effects out — SSE/cost/DB become an `EngineObserver` callback so the engine is pure. | |

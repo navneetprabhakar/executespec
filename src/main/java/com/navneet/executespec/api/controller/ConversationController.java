@@ -1,6 +1,5 @@
 package com.navneet.executespec.api.controller;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,8 +16,6 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,22 +38,13 @@ public class ConversationController {
    * System prompt loaded from {@code prompts/conversation-system.md} at boot. Externalized per
    * CLAUDE.md MUST-pattern + audit 2026-05-12 review item E #32.
    */
-  @Value("classpath:prompts/conversation-system.md")
-  private Resource systemPromptResource;
+  private final com.navneet.executespec.agent.PromptAssembler promptAssembler;
 
   private String systemPrompt;
 
   @PostConstruct
   void loadSystemPrompt() {
-    try {
-      systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.error(
-          "[Conversation] Failed to load system prompt from classpath:prompts/"
-              + "conversation-system.md — falling back to a stub",
-          e);
-      systemPrompt = "You are a requirements analyst. Be concise.";
-    }
+    systemPrompt = promptAssembler.assemble("conversation-system.md");
   }
 
   private final LlmRouter llmRouter;
