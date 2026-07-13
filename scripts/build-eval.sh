@@ -3,7 +3,8 @@
 # BUILD Eval Harness — RL-2026-05-041 (audit risk #1: "the measured thing isn't the sold thing").
 #
 # The product's PRIMARY path is BUILD (greenfield spec → PR). Its only metric today is
-# scripts/v2-eval.sh's accuracyScore, which is LLM-judged (the system grading itself). This harness
+# scripts/v2-eval.sh's verifiedScore, which is deterministic/hybrid. The legacy accuracyScore is
+# retained only as a diagnostic because it is LLM-judged (the system grading itself). This harness
 # is the BUILD analog of the official SWE-bench methodology: a BLIND, HELD-OUT-TEST eval.
 #
 #   1. Run the REAL production BUILD pipeline blind (spec only) via POST /api/runs.
