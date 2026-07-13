@@ -42,12 +42,13 @@ class ValidationReportServiceBootVerificationTest {
   // Scenario held constant across these cases: CODE delivered (4 files), reviewer CLEAN, no
   // criticals, no tests measured. Only the BUILD slot's source (compile vs boot verdict) varies.
   // weights: CODE 30 + BUILD 25 + REVIEWER 20 + CRIT 5 = 80 (TESTS slot dropped — none measured).
+  // The evidence-safe scorer caps otherwise-perfect runs at 90 when the TESTS slot is unmeasured.
 
   @Test
   void null_boot_reproduces_compile_only_behaviour() {
     ValidationReportService svc = svcAdditiveOn();
     // No boot signal → finalBuildPassed drives the BUILD slot, exactly as before verifyBoot.
-    assertEquals(100, svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4));
+    assertEquals(90, svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4));
     assertEquals(69, svc.computeVerifiedScore(false, 0, 0, "CLEAN", 0, null, null, 4));
   }
 
@@ -55,8 +56,7 @@ class ValidationReportServiceBootVerificationTest {
   void healthy_boot_gives_full_build_credit() {
     ValidationReportService svc = svcAdditiveOn();
     assertEquals(
-        100,
-        svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4, boot(Verdict.HEALTHY)));
+        90, svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, null, 4, boot(Verdict.HEALTHY)));
   }
 
   @Test
@@ -99,7 +99,7 @@ class ValidationReportServiceBootVerificationTest {
             + didNotStart
             + " > "
             + buildFailed);
-    assertEquals(100, healthy);
+    assertEquals(90, healthy);
     assertEquals(69, buildFailed);
   }
 

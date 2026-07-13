@@ -53,6 +53,7 @@ class LlmRouterTest {
   private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
   private ManagedAiUsageService managedAiUsageService;
+  private ObjectProvider<AnthropicChatModel> anthropicModelProvider;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
@@ -76,8 +77,7 @@ class LlmRouterTest {
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
     managedAiUsageService = mock(ManagedAiUsageService.class);
-    @SuppressWarnings("unchecked")
-    ObjectProvider<AnthropicChatModel> anthropicModelProvider = mock(ObjectProvider.class);
+    anthropicModelProvider = mock(ObjectProvider.class);
     lenient().when(anthropicModelProvider.getIfAvailable()).thenReturn(null);
     lenient()
         .when(
@@ -165,15 +165,12 @@ class LlmRouterTest {
   void textSeamPreservesAnthropicSystemOnlyCacheIntent() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    @SuppressWarnings("unchecked")
-    ObjectProvider<AnthropicChatModel> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(anthropic);
-    ReflectionTestUtils.setField(router, "anthropicModelProvider", provider);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.callText(
         "anthropic",
-        "claude-sonnet-5",
+        "claude-sonnet-4-6",
         List.of(new UserMessage("stable system context")),
         "run-cache",
         "ConversationAgent",
@@ -186,22 +183,19 @@ class LlmRouterTest {
     AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
     assertThat(options.getCacheOptions().getStrategy())
         .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY);
-    assertThat(options.getTemperature()).isNull();
+    assertThat(options.getTemperature()).isEqualTo(0.0);
   }
 
   @Test
   void textSeamCanDisableAnthropicPromptCaching() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    @SuppressWarnings("unchecked")
-    ObjectProvider<AnthropicChatModel> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(anthropic);
-    ReflectionTestUtils.setField(router, "anthropicModelProvider", provider);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.callText(
         "anthropic",
-        "claude-sonnet-5",
+        "claude-sonnet-4-6",
         List.of(new UserMessage("no cache")),
         "run-cache-none",
         "ConversationAgent",
