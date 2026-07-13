@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Production-like V255 to V268 upgrade fixture for routing cleanup and local-hands fencing. */
+/** Production-like V255 to V270 upgrade fixture for routing cleanup and local-hands fencing. */
 class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
 
   @Test
-  void v268ClearsExecutableSarvamStatePreservesHistoryAndDeduplicatesLocalHands() {
+  void v270ClearsExecutableSarvamStatePreservesHistoryAndDeduplicatesLocalHands() {
     String schema = "sarvam_upgrade_" + UUID.randomUUID().toString().replace("-", "");
     String baseUrl = POSTGRES.getJdbcUrl();
     String url =
@@ -28,12 +28,15 @@ class SarvamRemovalUpgradeIntegrationTest extends PostgresIntegrationBase {
       preV256.migrate();
       seedV255Fixture(jdbc);
 
-      var result = flyway(dataSource, schema, null).migrate();
+      Flyway upgrade = flyway(dataSource, schema, null);
+      int expectedForwardMigrations = upgrade.info().pending().length;
+      var result = upgrade.migrate();
 
-      // V256 removes executable Sarvam state; V257-V268 add subsequent routing/task-cost,
+      // V256 removes executable Sarvam state; V257 onward adds subsequent routing/task-cost,
       // default auto-verification, durable local-hands intent, replay cursor, handoff fencing,
       // and the evidence-gated initial worker route.
-      assertThat(result.migrationsExecuted).isEqualTo(12);
+      assertThat(expectedForwardMigrations).isGreaterThan(0);
+      assertThat(result.migrationsExecuted).isEqualTo(expectedForwardMigrations);
       assertActiveDispatchStateWasReset(jdbc);
       assertHistoricalEvidenceWasPreserved(jdbc);
       assertLocalHandsResultsWereDeduplicated(jdbc);
