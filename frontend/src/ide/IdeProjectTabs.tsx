@@ -532,8 +532,9 @@ function RunDetailPanel({
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState('');
-  const score =
-    scoreOf(run) ?? (run as unknown as {accuracyScore?: number}).accuracyScore ?? undefined;
+  // Legacy accuracyScore is an LLM assessment, not the verified score. Never
+  // present it as the headline correctness metric in the project surface.
+  const score = scoreOf(run);
   const verdict =
     score == null ? '—' : score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;

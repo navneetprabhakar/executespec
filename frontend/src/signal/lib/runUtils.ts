@@ -45,10 +45,9 @@ export function isTerminalStatus(status?: string | null): boolean {
 export function toRunView(r: RunSummary | RunDetail): RunView {
   const id = (r as unknown as {runId?: string}).runId || '';
   const status = (r.status || '').toUpperCase();
-  const score =
-    (r as unknown as {verifiedScore?: number; accuracyScore?: number}).verifiedScore ??
-    (r as unknown as {accuracyScore?: number}).accuracyScore ??
-    null;
+  // accuracyScore is a legacy LLM assessment and must not be displayed as a
+  // verified correctness score when the deterministic field is absent.
+  const score = (r as unknown as {verifiedScore?: number}).verifiedScore ?? null;
   return {
     id,
     short: id ? `R-${id.slice(0, 6)}` : 'R-—',
