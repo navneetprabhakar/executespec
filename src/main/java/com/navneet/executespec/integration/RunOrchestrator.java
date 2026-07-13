@@ -175,6 +175,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunValidationKickoff validationKickoff;
   private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
+  private final BoundedTestGenKickoff boundedTestGenKickoff;
   private final PerkyMessenger perky;
   private final GateStore gateStore;
   private final ModelResolver modelResolver;
@@ -2104,7 +2105,8 @@ public class RunOrchestrator implements RunControlPort {
       if (plan.runtimeSurface() == Plan.RuntimeSurface.HTTP) {
         try {
           String planJson = objectMapper.writeValueAsString(plan);
-          testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+          boundedTestGenKickoff.kickoff(
+              runId, () -> testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson));
         } catch (Exception e) {
           log.warn("RunOrchestrator run={} testGen kickoff failed: {}", runId, e.getMessage());
         }
@@ -3904,7 +3906,7 @@ public class RunOrchestrator implements RunControlPort {
    * intermediate-warning separation from {@link ExecutionResult#anyIntermediateWarning()}).
    *
    * <p>Tests run ASYNC after terminate (see {@code generateValidationReport} → {@code
-   * testGenOrchestrator.runTestGenPipeline}), so test counts are NOT a gating signal here. They're
+   * boundedTestGenKickoff.kickoff, so test counts are NOT a gating signal here. They're
    * captured on ValidationReport via {@code retryValidation} after tests complete and feed
    * verifiedScore.
    */
