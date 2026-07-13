@@ -436,6 +436,11 @@ public class RunController {
         req.executionMode(),
         approveRun.getHarnessVersion());
 
+    // Historical BATCH rows remain readable, but batch execution was never wired into the V2
+    // executor. Reject new approvals explicitly instead of persisting BATCH and silently running
+    // realtime workers with batch-only preview/notification behavior.
+    rejectRetiredBatchApproval(req.approved(), req.executionMode());
+
     // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
     if (req.approved() && req.creditsConfirmed() != null) {
       stateStore
@@ -1523,6 +1528,14 @@ public class RunController {
       String parentTaskId,
       Integer subtaskIndex,
       Integer subtaskTotal) {}
+
+  static void rejectRetiredBatchApproval(boolean approved, String executionMode) {
+    if (approved && "BATCH".equalsIgnoreCase(executionMode)) {
+      throw new ResponseStatusException(
+          HttpStatus.GONE,
+          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use REALTIME");
+    }
+  }
 
   public record MessageResponse(String fromAgent, String contentSummary, Instant sentAt) {}
 

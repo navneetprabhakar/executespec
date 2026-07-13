@@ -8,7 +8,12 @@ the provider returns the first assistant turn, dispatch its tool calls locally a
 **realtime** (the normal `WorkerAgent` loop). Batch is a pure cost optimisation on turn 1 — no
 multi-turn tool-result history crosses the batch boundary.
 
-## State (2026-05-30)
+## State (2026-07-13)
+
+**Retired for ExecuteSpec 2.0.** New `BATCH` approvals are rejected with HTTP 410
+`BATCH_EXECUTION_RETIRED`. Historical batch columns, DTO fields, events, and notifications remain
+read-compatible; the scaffold and provider clients are not a supported execution path and must be
+removed in the retirement tranche before release.
 
 - **P1 (scaffold) + P2/P3a/P3b (the 3 provider clients) done.** All three `BatchClient`s are
   implemented + unit-tested on their JSON shaping.
