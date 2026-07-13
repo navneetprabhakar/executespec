@@ -55,6 +55,7 @@ being retained under compatibility aliases.
 | Dead ApplyService workspace git helpers | DONE — removed unused `tryGitCommit` / `runCmd` helpers after confirming all apply flows use `ScmPushService.pushApplyChanges`; no API or runtime contract changed |
 | Duplicate standalone billing API client | DONE — moved `BillingPlan`/`fetchPlans` into canonical `frontend/src/lib/api/billing.ts` and deleted the unused `billing-api.ts` module; no imports remain |
 | Duplicate admin execution-reconcile fetches | DONE — both settings surfaces now use the typed `adminReconcileExecutions` domain helper and shared transport/auth behavior |
+| Raw billing payment-history fetch in `IdeBilling` | DONE — migrated to typed `getPaymentHistory` in the canonical billing API module, preserving best-effort empty-state behavior |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
