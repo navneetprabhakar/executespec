@@ -34,4 +34,25 @@ class WorkhorseCasesContractTest {
       }
     }
   }
+
+  @Test
+  void validatorsDoNotAwardCompletionForMissingOrMalformedArtifacts() throws Exception {
+    WorkhorseEvalCase add = WorkhorseCases.all().get(0);
+    Path addWorkspace = Files.createDirectory(tempDir.resolve("malformed-add"));
+    Files.writeString(addWorkspace.resolve("calc.py"), "def add(a, b):\n    return a + b\n");
+    assertThat(add.validate(addWorkspace, null).correctness()).isEqualTo(30);
+
+    WorkhorseEvalCase create = WorkhorseCases.all().get(1);
+    Path createWorkspace = Files.createDirectory(tempDir.resolve("malformed-create"));
+    Files.writeString(createWorkspace.resolve("stringutils.py"), "def reverse(s): return s[::-1]\n");
+    Files.writeString(createWorkspace.resolve("test_stringutils.py"), "reverse('abc') == 'cba'\n");
+    assertThat(create.validate(createWorkspace, null).correctness()).isEqualTo(55);
+  }
+
+  @Test
+  void fixValidatorRejectsMissingSourceEvenWhenOutcomeClaimsCompletion() throws Exception {
+    WorkhorseEvalCase fix = WorkhorseCases.all().get(2);
+    Path workspace = Files.createDirectory(tempDir.resolve("malformed-fix"));
+    assertThat(fix.validate(workspace, null).correctness()).isZero();
+  }
 }
