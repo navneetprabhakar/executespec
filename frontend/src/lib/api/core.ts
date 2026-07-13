@@ -1199,28 +1199,6 @@ export interface WebhookEventEntry {
   processedAt: string | null;
 }
 
-export interface NotificationItem {
-  id: string;
-  userId: string;
-  type: string;
-  title: string;
-  body: string | null;
-  link: string | null;
-  read: boolean;
-  createdAt: string;
-}
-
-// Notification preferences (M-003 Wave 2)
-
-export interface NotificationPrefRow {
-  eventType: string; // canonical ActivityEventType name
-  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE';
-  channel: 'IN_APP' | 'EMAIL';
-  enabled: boolean; // effective (override → override; else default)
-  defaultEnabled: boolean;
-  override: boolean; // true if the user has an explicit row
-}
-
 // SSO config (M-004 Wave 2)
 
 export type SsoProvider = 'GOOGLE_OIDC' | 'OKTA_SAML' | 'AZURE_AD_SAML';
