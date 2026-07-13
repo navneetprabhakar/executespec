@@ -53,4 +53,13 @@ class AvailableProviderResolverTest {
 
     assertThat(resolver.resolve("run-3")).containsExactly(LlmProvider.ANTHROPIC);
   }
+
+  @Test
+  void missingRunContextDoesNotInventAProviderWhenNoSystemKeyExists() {
+    ReflectionTestUtils.setField(resolver, "systemAnthropicKey", "");
+
+    when(runKeyStore.get("run-without-context")).thenReturn(null);
+
+    assertThat(resolver.resolve("run-without-context")).isEmpty();
+  }
 }

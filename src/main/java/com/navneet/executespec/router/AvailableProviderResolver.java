@@ -58,7 +58,7 @@ public class AvailableProviderResolver {
    * {@link RunKeyStore}.
    *
    * @param runId the pipeline run ID
-   * @return set of available providers (never empty — falls back to system keys)
+   * @return set of available providers; empty means no provider is configured or allowed
    */
   public Set<LlmProvider> resolve(String runId) {
     ResolvedKeys keys = runKeyStore.get(runId);
@@ -124,10 +124,6 @@ public class AvailableProviderResolver {
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
     providers.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
-    if (providers.isEmpty()) {
-      // Last resort: assume Anthropic is available (system default)
-      providers.add(LlmProvider.ANTHROPIC);
-    }
     return providers;
   }
 
