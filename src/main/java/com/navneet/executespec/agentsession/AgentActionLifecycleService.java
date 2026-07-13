@@ -82,6 +82,21 @@ class AgentActionLifecycleService {
   ActionRecordResponse recordResult(
       AgentSession session, String actionId, ActionResultRequest request) {
     Instant now = Instant.now();
+    // A browser disconnect followed by a CLI attach can replay the same terminal action result.
+    // Return the first durable result instead of appending a second terminal row. The database
+    // partial unique index (V272) is the cross-JVM fence; this read makes the common retry path
+    // deterministic and keeps the response identical across surfaces.
+    var existing = eventRecorder.findFirstActionResult(session.getId(), actionId);
+    if (existing.isPresent()) {
+      String existingStatus = eventRecorder.actionResultStatus(existing.get());
+      String existingSummary = eventRecorder.actionResultSummary(existing.get());
+      return new ActionRecordResponse(
+          actionId,
+          session.getId(),
+          existingStatus,
+          existingSummary,
+          existing.get().getCreatedAt());
+    }
     String status =
         request == null || request.status() == null || request.status().isBlank()
             ? "UNKNOWN"

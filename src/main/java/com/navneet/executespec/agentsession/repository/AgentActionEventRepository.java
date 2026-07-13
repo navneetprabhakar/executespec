@@ -41,6 +41,15 @@ public interface AgentActionEventRepository extends JpaRepository<AgentActionEve
 
   List<AgentActionEvent> findBySessionIdAndTypeOrderByCreatedAtAsc(String sessionId, String type);
 
+  /**
+   * First terminal result for an action. Action results are a first-writer-wins lifecycle event:
+   * Web and CLI may both retry the same result after a reconnect, but must observe one durable
+   * terminal row rather than append competing results.
+   */
+  java.util.Optional<AgentActionEvent>
+      findFirstBySessionIdAndActionIdAndTypeOrderByCreatedAtAscIdAsc(
+          String sessionId, String actionId, String type);
+
   long countBySessionIdAndType(String sessionId, String type);
 
   /** Legacy rows pre-dating V262 have no durable cursor and cannot be replayed after a cursor. */
