@@ -74,7 +74,33 @@ class ContextEvidenceAssemblerTest {
 
     // Ten entries fit only when planning charges the same 1,000-char cap the bundle writer
     // applies. Before this guard, each 4,000-char hit consumed about 1,000 tokens and six won.
-    assertThat(selected.packageIndexes()).containsExactlyElementsOf(oversized);
+    assertThat(selected.packageIndexes())
+        .containsExactlyElementsOf(
+            oversized.stream().map(ContextEvidenceAssembler::canonicalize).toList());
+  }
+
+  @Test
+  void deduplicatesAfterSerializationCapSoHeadroomMatchesPersistedBundle() {
+    String sharedPrefix = "x".repeat(ContextEvidenceAssembler.MAX_ITEM_CHARS);
+    String first = sharedPrefix + "-first-payload";
+    String second = sharedPrefix + "-second-payload";
+
+    var assembler = new ContextEvidenceAssembler(new ContextPlanner());
+    var selected =
+        assembler.select(
+            new ContextAgentInput(
+                "context",
+                "diff",
+                List.of(first, second),
+                List.of(),
+                List.of(),
+                "review",
+                "decision",
+                "run-1",
+                "goal"));
+
+    assertThat(selected.packageIndexes())
+        .containsExactly(ContextEvidenceAssembler.canonicalize(first));
   }
 
   @Test
