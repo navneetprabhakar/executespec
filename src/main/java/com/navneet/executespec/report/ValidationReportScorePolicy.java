@@ -28,6 +28,20 @@ final class ValidationReportScorePolicy {
     return (int) Math.round(20.0 * testFactorFromCoverageLevel(testCoverageLevel));
   }
 
+  /**
+   * Maps endpoint coverage to the rubric's 15-point dimension.
+   *
+   * <p>A missing endpoint signal is not proof that the dimension is irrelevant. It is an unmeasured
+   * claim, so it receives the neutral midpoint rather than the former full N/A credit. This keeps
+   * unknown evidence from inflating a shared/public score while retaining partial credit for
+   * non-HTTP or otherwise unmeasurable work.
+   */
+  static int rubricEndpointPoints(Integer endpointCoveragePercent) {
+    if (endpointCoveragePercent == null) return 8;
+    double ratio = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
+    return (int) Math.round(15.0 * ratio);
+  }
+
   static String mapVerdictToV2Name(ReviewVerdict verdict) {
     if (verdict == null) return null;
     return switch (verdict) {

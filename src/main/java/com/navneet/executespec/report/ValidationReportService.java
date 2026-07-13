@@ -2178,13 +2178,9 @@ public class ValidationReportService {
           };
     }
 
-    // Endpoint coverage — linear 15 pts; n/a → 15 (no spec endpoints means signal not relevant)
-    if (endpointCoveragePercent == null) {
-      total += 15;
-    } else {
-      double ratio = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
-      total += (int) Math.round(15.0 * ratio);
-    }
+    // Endpoint coverage — linear 15 pts; missing evidence gets neutral midpoint credit, not a
+    // full N/A award. Unknown evidence must not inflate the public/shared score.
+    total += ValidationReportScorePolicy.rubricEndpointPoints(endpointCoveragePercent);
 
     // Critical-issue damper — 10 minus 1 per critical, floored at 0
     total += Math.max(0, 10 - Math.max(0, unfixedCriticalCount));

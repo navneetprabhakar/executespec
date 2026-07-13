@@ -13,9 +13,9 @@ signals, derives the internal verified/rubric summaries, and reconstructs the re
   `INTERNAL_FORMULA`). A score is a summary, not independent proof.
 - Public/shared report DTOs expose score metadata and the same sanitized ledger, but not run-goal
   persistence or credentials.
-- Missing endpoint coverage remains a backwards-compatible rubric N/A policy (full endpoint points);
-  the ledger explicitly marks that signal `UNKNOWN` so consumers cannot mistake it for measured
-  coverage. Changing the rubric policy requires a separate versioned scoring decision and tests.
+- Missing endpoint coverage is explicitly `UNKNOWN` in the ledger and receives neutral midpoint
+  rubric credit (8/15), never full endpoint points. This prevents a public/shared score from being
+  inflated by absent evidence while preserving partial credit for non-HTTP or unmeasurable work.
 
 ## Migration
 
