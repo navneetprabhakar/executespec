@@ -401,7 +401,7 @@ export interface CredentialSummary {
   validatedAt: string | null;
 }
 
-export interface ValidationResult {
+export interface GcpValidationResult {
   valid: boolean;
   issues: string[];
   gcpProjectId: string | null;
@@ -732,7 +732,7 @@ export interface SandboxStatus {
   hasSandbox: boolean;
 }
 
-export interface ValidationResult {
+export interface IntegrationValidationResult {
   valid: boolean;
   message: string;
 }

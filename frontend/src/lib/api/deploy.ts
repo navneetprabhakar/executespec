@@ -2,7 +2,7 @@ import {
   CredentialSummary,
   DeployAnalysisResult,
   DeploymentSummary,
-  ValidationResult,
+  GcpValidationResult,
   req,
 } from './core';
 
@@ -54,7 +54,7 @@ export const listGcpCredentials = () => req<CredentialSummary[]>('/credentials/g
 
 export const validateGcpCredential = (projectId?: string) => {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-  return req<ValidationResult>(`/credentials/gcp/validate${qs}`);
+  return req<GcpValidationResult>(`/credentials/gcp/validate${qs}`);
 };
 
 export const deleteGcpCredential = (projectId?: string) => {

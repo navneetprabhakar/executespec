@@ -4,7 +4,7 @@ import {
   OrgDto,
   RegisterPayload,
   RequiredPermission,
-  ValidationResult,
+  IntegrationValidationResult,
   req,
 } from './core';
 
@@ -73,7 +73,7 @@ export const validateAiKey = (
   provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI' | 'OPENROUTER' | 'DEEPSEEK' | 'FIREWORKS',
   apiKey: string,
 ) =>
-  req<ValidationResult>('/auth/settings/ai-keys/validate', {
+  req<IntegrationValidationResult>('/auth/settings/ai-keys/validate', {
     method: 'POST',
     body: JSON.stringify({provider, apiKey}),
   });
