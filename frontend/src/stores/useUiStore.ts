@@ -35,19 +35,10 @@ type Theme = 'dark' | 'light' | 'system';
 type UiMode = 'signal' | 'ide' | 'console';
 
 interface UiStore {
-  sidebarExpanded: boolean;
-  mobileSidebarOpen: boolean;
-  commandPaletteOpen: boolean;
   activeTab: string;
   toasts: Toast[];
   /** Pre-filled config for NewRunModal — set by Re-run or Copilot "Iterate as New Run". */
   pendingNewRunConfig: NewRunConfig | null;
-  /** Whether the run list panel is collapsed to give more space to run detail. */
-  runListCollapsed: boolean;
-  /** Width of the run list panel in pixels (persisted). */
-  runListWidth: number;
-  /** Whether the copilot chat panel is maximized (full-width overlay). */
-  copilotMaximized: boolean;
   /** Pro (full pipeline) or Project (multi-repo) view mode. R-190 removed
    *  the legacy Vibe simplified mode; persisted 'vibe' values normalize to
    *  'pro' at parse time (see lib/api.ts + the saved-value coercion below). */
@@ -65,16 +56,10 @@ interface UiStore {
    */
   currentProjectName: string | null;
 
-  setSidebarExpanded: (v: boolean) => void;
-  setMobileSidebarOpen: (v: boolean) => void;
-  setCommandPaletteOpen: (v: boolean) => void;
   setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
   setPendingNewRunConfig: (config: NewRunConfig | null) => void;
-  setRunListCollapsed: (v: boolean) => void;
-  setRunListWidth: (w: number) => void;
-  setCopilotMaximized: (v: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
@@ -142,30 +127,10 @@ function initUiMode(): UiMode {
   return 'console';
 }
 
-// M-026 (Wave 1) — first-time users land with sidebar expanded so they can
-// see the nav labels. Returning users get whatever they last set. Persistence
-// key: es:sidebarExpanded ('true' | 'false'); absent = first-time → default true.
-function initSidebarExpanded(): boolean {
-  try {
-    const saved = localStorage.getItem('es:sidebarExpanded');
-    if (saved === 'true') return true;
-    if (saved === 'false') return false;
-    return true; // first-time default
-  } catch {
-    return true;
-  }
-}
-
 export const useUiStore = create<UiStore>((set, get) => ({
-  sidebarExpanded: initSidebarExpanded(),
-  mobileSidebarOpen: false,
-  commandPaletteOpen: false,
   activeTab: 'overview',
   toasts: [],
   pendingNewRunConfig: null,
-  runListCollapsed: false,
-  runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
-  copilotMaximized: false,
   theme: initTheme(),
   uiMode: initUiMode(),
   currentProjectName: null,
@@ -178,22 +143,8 @@ export const useUiStore = create<UiStore>((set, get) => ({
     return 'pro';
   })(),
 
-  setSidebarExpanded: (v) => {
-    try {
-      localStorage.setItem('es:sidebarExpanded', String(v));
-    } catch {}
-    set({sidebarExpanded: v});
-  },
-  setMobileSidebarOpen: (v) => set({mobileSidebarOpen: v}),
-  setCommandPaletteOpen: (v) => set({commandPaletteOpen: v}),
   setActiveTab: (t) => set({activeTab: t}),
   setPendingNewRunConfig: (config) => set({pendingNewRunConfig: config}),
-  setRunListCollapsed: (v) => set({runListCollapsed: v}),
-  setRunListWidth: (w) => {
-    localStorage.setItem('es:runListWidth', String(w));
-    set({runListWidth: w});
-  },
-  setCopilotMaximized: (v) => set({copilotMaximized: v}),
   setViewMode: (mode) => {
     localStorage.setItem('es:viewMode', mode);
     // R-190 (post-cutover): both surviving modes (pro / project) start on
