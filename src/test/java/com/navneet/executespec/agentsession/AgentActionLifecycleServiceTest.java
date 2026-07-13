@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
 class AgentActionLifecycleServiceTest {
@@ -175,6 +178,41 @@ class AgentActionLifecycleServiceTest {
     assertThat(event.getValue().getPayloadJson()).contains("\"runId\":\"\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"summary\":\"\"");
     assertThat(event.getValue().getPayloadJson()).contains("skipped");
+  }
+
+  @Test
+  @MockitoSettings(strictness = Strictness.LENIENT)
+  void repeatedTerminalResultReturnsFirstWriterWithoutAppendingDuplicate() {
+    AgentActionEvent first =
+        AgentActionEvent.builder()
+            .id("result-1")
+            .sessionId("s1")
+            .actionId("a-terminal")
+            .type("ACTION_RESULT")
+            .createdAt(java.time.Instant.parse("2026-07-13T00:00:01Z"))
+            .payloadJson(
+                "{\"actionId\":\"a-terminal\",\"status\":\"COMPLETED\",\"summary\":\"verified by"
+                    + " Web\"}")
+            .build();
+    when(eventRepo.findFirstBySessionIdAndActionIdAndTypeOrderByCreatedAtAscIdAsc(
+            "s1", "a-terminal", "ACTION_RESULT"))
+        .thenReturn(Optional.of(first));
+
+    var response =
+        service.recordResult(
+            session(),
+            "a-terminal",
+            new ActionResultRequest(
+                "FAILED", "stale CLI retry", "run-1", List.of("wrong.txt"), Map.of()));
+
+    assertThat(response.actionId()).isEqualTo("a-terminal");
+    assertThat(response.status()).isEqualTo("COMPLETED");
+    assertThat(response.summary()).isEqualTo("verified by Web");
+    verify(eventRepo)
+        .findFirstBySessionIdAndActionIdAndTypeOrderByCreatedAtAscIdAsc(
+            "s1", "a-terminal", "ACTION_RESULT");
+    verify(eventRepo, org.mockito.Mockito.never()).save(any(AgentActionEvent.class));
+    verify(sessionRepo, org.mockito.Mockito.never()).save(any(AgentSession.class));
   }
 
   private static AgentSession session() {

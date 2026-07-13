@@ -279,6 +279,8 @@ turns separately from runs.
   rejection.
 - `AgentActionLifecycleServiceTest` pins planned-action event payloads, generic action events,
   result status normalization, touched files, verification payloads, and session timestamp updates.
+  Terminal `ACTION_RESULT` retries are first-writer-wins: a Web disconnect followed by a CLI attach
+  returns the original status/summary without appending a duplicate row (V272 partial unique fence).
 - `AgentOrchestratorTurnServiceTest` pins structured turn creation, read-only permission downgrade,
   idempotent replay, conflicting turn-id rejection, project read checks, and trace event append.
 - `AgentRunConfirmationServiceTest` pins confirmed run-submission wrapping: non-run rejection,

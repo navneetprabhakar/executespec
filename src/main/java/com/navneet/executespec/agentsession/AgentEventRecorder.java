@@ -1,6 +1,7 @@
 package com.navneet.executespec.agentsession;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +18,30 @@ class AgentEventRecorder {
 
   private final AgentActionEventRepository eventRepo;
   private final ObjectMapper objectMapper;
+
+  Optional<AgentActionEvent> findFirstActionResult(String sessionId, String actionId) {
+    if (sessionId == null || actionId == null || actionId.isBlank()) return Optional.empty();
+    return eventRepo.findFirstBySessionIdAndActionIdAndTypeOrderByCreatedAtAscIdAsc(
+        sessionId, actionId, "ACTION_RESULT");
+  }
+
+  String actionResultStatus(AgentActionEvent event) {
+    return readString(event, "status", "UNKNOWN");
+  }
+
+  String actionResultSummary(AgentActionEvent event) {
+    return readString(event, "summary", "");
+  }
+
+  private String readString(AgentActionEvent event, String field, String fallback) {
+    if (event == null || event.getPayloadJson() == null) return fallback;
+    try {
+      var node = objectMapper.readTree(event.getPayloadJson()).get(field);
+      return node == null || node.isNull() ? fallback : node.asText(fallback);
+    } catch (Exception ignored) {
+      return fallback;
+    }
+  }
 
   AgentActionEvent append(String sessionId, String type, Object payload) {
     return append(sessionId, null, null, type, payload);
