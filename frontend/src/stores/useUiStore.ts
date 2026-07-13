@@ -17,8 +17,6 @@ export interface NewRunConfig {
 }
 
 // R-190 (post-cutover) — Vibe view-mode removed. 'pro' is default; 'project'
-// is session-local opt-in for multi-repo project mode.
-type ViewMode = 'pro' | 'project';
 /**
  * Theme preference. X-07 (UX audit, 2026-05-03) introduces a 'system' option
  * which defers to `prefers-color-scheme` and re-resolves whenever the OS
@@ -33,10 +31,6 @@ interface UiStore {
   toasts: Toast[];
   /** Pre-filled config for NewRunModal — set by Re-run or Copilot "Iterate as New Run". */
   pendingNewRunConfig: NewRunConfig | null;
-  /** Pro (full pipeline) or Project (multi-repo) view mode. R-190 removed
-   *  the legacy Vibe simplified mode; persisted 'vibe' values normalize to
-   *  'pro' at parse time (see lib/api.ts + the saved-value coercion below). */
-  viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
   /**
@@ -52,7 +46,6 @@ interface UiStore {
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
   setPendingNewRunConfig: (config: NewRunConfig | null) => void;
-  setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setCurrentProjectName: (name: string | null) => void;
@@ -117,24 +110,9 @@ export const useUiStore = create<UiStore>((set, get) => ({
   pendingNewRunConfig: null,
   theme: initTheme(),
   currentProjectName: null,
-  viewMode: ((): ViewMode => {
-    const saved = localStorage.getItem('es:viewMode');
-    // 'project' is a deliberate opt-in — never persist as the default session mode.
-    // R-190 (post-cutover): saved 'vibe' from V48-era users coerces to 'pro';
-    // any other value also falls through to the 'pro' default.
-    if (saved === 'pro') return 'pro';
-    return 'pro';
-  })(),
 
   setActiveTab: (t) => set({activeTab: t}),
   setPendingNewRunConfig: (config) => set({pendingNewRunConfig: config}),
-  setViewMode: (mode) => {
-    localStorage.setItem('es:viewMode', mode);
-    // R-190 (post-cutover): both surviving modes (pro / project) start on
-    // 'overview' tab. The previous Vibe mode started on 'code'; that path
-    // is gone with the surface.
-    set({viewMode: mode, activeTab: 'overview'});
-  },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
     applyThemeAttrs(t === 'system' ? resolveSystemTheme() : t);
