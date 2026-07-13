@@ -1,7 +1,6 @@
 import {create} from 'zustand';
 import {errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
-import {useUiStore} from '@/stores/useUiStore';
 
 interface RunStore {
   runs: api.RunSummary[];
@@ -101,7 +100,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   setActiveRunId: (id) => {
     set({activeRunId: id, activeRun: null});
-    useUiStore.getState().setActiveTab('overview');
     if (id) get().fetchRun(id);
   },
 

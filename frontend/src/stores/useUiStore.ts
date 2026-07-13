@@ -27,7 +27,6 @@ export interface NewRunConfig {
 type Theme = 'dark' | 'light' | 'system';
 
 interface UiStore {
-  activeTab: string;
   toasts: Toast[];
   /** Pre-filled config for NewRunModal — set by Re-run or Copilot "Iterate as New Run". */
   pendingNewRunConfig: NewRunConfig | null;
@@ -42,7 +41,6 @@ interface UiStore {
    */
   currentProjectName: string | null;
 
-  setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
   setPendingNewRunConfig: (config: NewRunConfig | null) => void;
@@ -105,13 +103,11 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
 }
 
 export const useUiStore = create<UiStore>((set, get) => ({
-  activeTab: 'overview',
   toasts: [],
   pendingNewRunConfig: null,
   theme: initTheme(),
   currentProjectName: null,
 
-  setActiveTab: (t) => set({activeTab: t}),
   setPendingNewRunConfig: (config) => set({pendingNewRunConfig: config}),
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
