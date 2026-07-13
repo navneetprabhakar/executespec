@@ -3498,7 +3498,7 @@
 }
 .agent-btn-primary {
   border-color: var(--ide-blue) !important;
-  color: var(--ide-blue) !important;
+  color: var(--ide-accent-fg) !important;
 }
 .agent-sandbox-proposal {
   border-color: rgba(91, 141, 239, 0.44);
