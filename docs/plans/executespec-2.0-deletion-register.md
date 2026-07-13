@@ -46,6 +46,7 @@ being retained under compatibility aliases.
 | Historical backend/CLI fake `spawn_subagent` aliases and reconnaissance stub | Superseded. Current backend `spawn_subagent`/`spawn_subagents` callbacks call persisted `SubagentExecutionService` with eligibility, bounded reservations, child sessions, and audit events. Retain the current contract; delete only after an explicit replacement/API migration. |
 | Deprecated `PatchAgent` wrapper | DONE — deleted after `CodeGenEngine`/PATCH characterization; `prompts/patch-agent.md` remains because `CodeGenEngineImpl` owns and actively assembles it |
 | `FallbackLlmRouter` compatibility router | DONE — deleted after all production text callers moved to `LlmRouter.callText`; canonical routing, retry, failover and usage accounting now have one transport |
+| PATCH/conversation prompt fallback stubs | DONE — required prompt resources now fail closed instead of silently substituting generic prompts; provider overlays use `PromptAssembler` |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |

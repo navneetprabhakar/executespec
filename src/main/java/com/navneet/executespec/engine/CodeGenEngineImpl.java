@@ -1,7 +1,6 @@
 package com.navneet.executespec.engine;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -16,7 +15,6 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -162,27 +160,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private String loadProviderPatchFragment(String provider) {
     if (provider == null || provider.isBlank()) return "";
     String key = provider.trim().toLowerCase();
-    try {
-      Resource r =
-          new org.springframework.core.io.ClassPathResource(
-              "prompts/fragments/provider/" + key + "/patch.md");
-      if (!r.exists()) return "";
-      return r.getContentAsString(StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadProviderPatchFragment({}) failed: {}", provider, e.getMessage());
-      return "";
-    }
+    return promptAssembler.loadFileSafe("fragments/provider/" + key + "/patch.md");
   }
 
   @PostConstruct
   void loadPatchPrompt() {
-    try {
-      patchPrompt = promptAssembler.assemble("patch-agent.md");
-    } catch (Exception e) {
-      log.error("[CodeGenEngine] Failed to load classpath:prompts/patch-agent.md; using stub", e);
-      patchPrompt =
-          "You are a patch-mode coding agent. Make the minimum change that fixes the issue.";
-    }
+    patchPrompt = promptAssembler.assemble("patch-agent.md");
   }
 
   private static int iterCapFor(String provider) {
