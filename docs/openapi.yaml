@@ -1372,10 +1372,11 @@ paths:
   /agent/sessions/{sessionId}/summary-email:
     post:
       tags: [Agent Sessions]
-      summary: Deprecated no-op session summary email route
+      summary: Retired session summary email route
       description: >
         Compatibility endpoint for older local clients. New CLI / VS Code sessions keep usage and
-        cost visibility locally and this route returns 202 without sending email.
+        cost visibility in the agent-session turn and event APIs. This route never sent email and
+        now returns 410 Gone so callers cannot mistake the retired operation for successful delivery.
       parameters:
         - $ref: "#/components/parameters/sessionId"
       requestBody:
@@ -1385,8 +1386,8 @@ paths:
             schema:
               $ref: "#/components/schemas/SessionSummaryEmailRequest"
       responses:
-        "202":
-          description: Accepted no-op
+        "410":
+          description: Session summary email is retired; use agent-session turn or event APIs.
 
   /agent/sessions/{sessionId}/turns/stream:
     post:

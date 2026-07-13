@@ -41,6 +41,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import io.micrometer.context.ContextSnapshotFactory;
@@ -343,16 +344,18 @@ public class AgentSessionController {
   }
 
   /**
-   * Deprecated compatibility endpoint. Local CLI/VS Code sessions must not send email; newer
-   * clients keep usage/cost visibility in the terminal. Keep the route as a no-op so older clients
-   * can exit cleanly without triggering mail.
+   * Retained only as a compatibility signal for clients that have not yet removed the old call.
+   * Session usage is visible through the agent-session turn/event APIs; this route never sent mail
+   * and must not report a successful delivery.
    */
   @PostMapping("/sessions/{sessionId}/summary-email")
   public ResponseEntity<Void> sessionSummaryEmail(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
       @RequestBody SessionSummaryEmailRequest request) {
-    return ResponseEntity.accepted().build();
+    throw new ResponseStatusException(
+        org.springframework.http.HttpStatus.GONE,
+        "Session summary email is retired; read usage from the agent-session turn or event APIs.");
   }
 
   /** Legacy request body retained for older clients that still POST this route. */
