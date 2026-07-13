@@ -1,5 +1,6 @@
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
+import type {ReactNode} from 'react';
 import {MemoryRouter} from 'react-router-dom';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -19,14 +20,22 @@ vi.mock('@/stores/useAuthStore', () => ({
 vi.mock('@/ide/IdeIcons', () => ({StatusDot: () => null}));
 vi.mock('@/ide/ScoreBadge', () => ({ScoreBadge: () => null}));
 vi.mock('@/ide/IdeKit', () => ({
-  IdeBadge: ({children}: {children: unknown}) => <span>{children}</span>,
+  IdeBadge: ({children}: {children: ReactNode}) => <span>{children}</span>,
   statusKind: () => 'warn',
 }));
 
 (globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-const emptyPage = {content: [], page: 0, size: 30, totalElements: 0, totalPages: 0};
+const emptyPage = {
+  content: [],
+  page: 0,
+  size: 30,
+  totalElements: 0,
+  totalPages: 0,
+  hasNext: false,
+  hasPrevious: false,
+};
 
 let host: HTMLDivElement;
 let root: Root;
