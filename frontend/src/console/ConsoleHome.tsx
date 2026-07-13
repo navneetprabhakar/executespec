@@ -2,6 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {CommandIcon, PlusIcon, ProjectsIcon, RunsIcon, StatusDot} from '@/ide/IdeIcons';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -14,12 +15,6 @@ import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'];
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
 const isFailed = (s?: string | null) => ['FAILED', 'ERROR'].includes((s || '').toUpperCase());
-
-// C5 — the verified score (the product's headline metric) + cost render on
-// every run row; "no project" reads as "Sandbox" (§5 copy).
-function scoreKind(s: number): 'ok' | 'warn' | 'bad' {
-  return s >= 85 ? 'ok' : s >= 70 ? 'warn' : 'bad';
-}
 
 function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string}) {
   const navigate = useNavigate();
@@ -41,9 +36,7 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
             : ''}
         </span>
       </span>
-      {r.verifiedScore != null && (
-        <IdeBadge kind={scoreKind(r.verifiedScore)}>{r.verifiedScore}</IdeBadge>
-      )}
+      {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} />}
       {action ? (
         <span className='con-runrow-action'>{action}</span>
       ) : (

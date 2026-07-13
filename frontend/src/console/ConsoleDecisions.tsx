@@ -2,6 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {StatusDot} from '@/ide/IdeIcons';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -47,11 +48,7 @@ function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}
             : ''}
         </span>
       </span>
-      {r.verifiedScore != null && (
-        <IdeBadge kind={r.verifiedScore >= 85 ? 'ok' : r.verifiedScore >= 70 ? 'warn' : 'bad'}>
-          {r.verifiedScore}
-        </IdeBadge>
-      )}
+      {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} />}
       <IdeBadge kind={decision.tone}>{decision.label}</IdeBadge>
     </button>
   );
