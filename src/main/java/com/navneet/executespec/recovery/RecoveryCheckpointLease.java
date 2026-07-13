@@ -82,15 +82,88 @@ public final class RecoveryCheckpointLease {
           StandardOpenOption.CREATE,
           StandardOpenOption.TRUNCATE_EXISTING,
           StandardOpenOption.WRITE);
-      try {
-        Files.move(
-            temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-      } catch (java.nio.file.AtomicMoveNotSupportedException e) {
-        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+      /*
+       * The first owner is a special case: there is no durable lease to replace yet.  A
+       * replace-based move here lets two JVMs both observe a missing sidecar and both report
+       * ACQUIRED; whichever move happens last silently wins.  The database CAS is the primary
+       * fence, but this sidecar is deliberately an independent workspace fence, so the first
+       * publication must also be first-writer-wins.
+       *
+       * Keep the no-replace publication separate from stale-owner takeover.  If another process
+       * created the target between our existence check and move, re-read its lease and apply the
+       * normal compatibility/fresh-owner rules rather than overwriting it.
+       */
+      if (!Files.exists(target)) {
+        try {
+          moveWithoutReplacement(temp, target);
+          return AcquireResult.accepted();
+        } catch (java.nio.file.FileAlreadyExistsException raced) {
+          Files.deleteIfExists(temp);
+          return inspectExistingLease(target, runId, planSha, instanceId, now);
+        }
       }
+      moveReplacing(temp, target);
       return AcquireResult.accepted();
     } catch (Exception e) {
       return AcquireResult.refused("LEASE_IO_FAILURE");
+    }
+  }
+
+  private static void moveWithoutReplacement(Path source, Path target) throws java.io.IOException {
+    try {
+      // A hard-link publication is the portable POSIX primitive that gives us CREATE_NEW
+      // semantics without exposing a partially-written target.  The source is already complete;
+      // linking it makes the target visible in one filesystem operation, and removing the source
+      // leaves exactly one lease file.
+      Files.createLink(target, source);
+      Files.delete(source);
+    } catch (UnsupportedOperationException unsupported) {
+      // Keep a non-POSIX fallback for development filesystems.  The default move has no replace
+      // option, so FileAlreadyExistsException still fences a concurrent first owner.
+      Files.move(source, target);
+    } catch (java.nio.file.FileSystemException unsupported) {
+      // Some mounted filesystems report hard-link support as an IOException rather than
+      // UnsupportedOperationException. Preserve the race signal, but fall back when the
+      // filesystem simply lacks links.
+      if (unsupported instanceof java.nio.file.FileAlreadyExistsException) {
+        throw unsupported;
+      }
+      Files.move(source, target);
+    }
+  }
+
+  private static void moveReplacing(Path source, Path target) throws java.io.IOException {
+    try {
+      Files.move(
+          source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+      Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  /** Re-apply the existing-target checks after a first-owner publication race. */
+  private static AcquireResult inspectExistingLease(
+      Path target, String runId, String planSha, String instanceId, Instant now) {
+    try {
+      JsonNode current = MAPPER.readTree(Files.readString(target));
+      if (current == null || current.path("schemaVersion").asInt(-1) != SCHEMA_VERSION) {
+        return AcquireResult.refused("MALFORMED_LEASE");
+      }
+      if (!runId.equals(current.path("runId").asText())
+          || !planSha.equals(current.path("planSha256").asText())) {
+        return AcquireResult.refused("INCOMPATIBLE_CHECKPOINT");
+      }
+      String owner = current.path("instanceId").asText("");
+      Instant claimedAt = parseInstant(current.path("claimedAt").asText(null));
+      if (!owner.isBlank()
+          && !owner.equals(instanceId)
+          && claimedAt != null
+          && claimedAt.isAfter(now.minus(FRESH_OWNER_WINDOW))) {
+        return AcquireResult.refused("FRESH_CHECKPOINT_OWNER");
+      }
+      return AcquireResult.refused("LEASE_PUBLICATION_RACE");
+    } catch (Exception malformed) {
+      return AcquireResult.refused("MALFORMED_LEASE");
     }
   }
 

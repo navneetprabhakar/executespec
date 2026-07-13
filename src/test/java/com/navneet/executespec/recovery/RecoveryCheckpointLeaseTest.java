@@ -6,6 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -82,5 +86,49 @@ class RecoveryCheckpointLeaseTest {
                     workspace, "run-1", "instance-b", "plan-a", now.plus(Duration.ofHours(1)))
                 .reason())
         .isEqualTo("MALFORMED_LEASE");
+  }
+
+  @Test
+  void concurrentFirstOwners_haveOneDurableWinner() throws Exception {
+    // This is the RW-01 first-publication fence: two JVMs may both start recovery with no
+    // sidecar. Exactly one may publish the initial lease; the other must observe that owner and
+    // refuse instead of replacing it.
+    try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+      for (int attempt = 0; attempt < 20; attempt++) {
+        int runNumber = attempt;
+        Path runWorkspace = workspace.resolve("run-" + runNumber);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        Future<RecoveryCheckpointLease.AcquireResult> first =
+            pool.submit(
+                () -> {
+                  ready.countDown();
+                  start.await();
+                  return RecoveryCheckpointLease.acquire(
+                      runWorkspace,
+                      "run-" + runNumber,
+                      "instance-a",
+                      "same-plan",
+                      Instant.parse("2026-07-12T10:00:00Z"));
+                });
+        Future<RecoveryCheckpointLease.AcquireResult> second =
+            pool.submit(
+                () -> {
+                  ready.countDown();
+                  start.await();
+                  return RecoveryCheckpointLease.acquire(
+                      runWorkspace,
+                      "run-" + runNumber,
+                      "instance-b",
+                      "same-plan",
+                      Instant.parse("2026-07-12T10:00:00Z"));
+                });
+        assertThat(ready.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        RecoveryCheckpointLease.AcquireResult firstResult = first.get();
+        RecoveryCheckpointLease.AcquireResult secondResult = second.get();
+        assertThat(firstResult.acquired()).isNotEqualTo(secondResult.acquired());
+      }
+    }
   }
 }
