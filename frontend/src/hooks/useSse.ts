@@ -3,12 +3,6 @@ import {useSseStore} from '@/stores/useSseStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {getMessages, getSseToken} from '@/lib/api';
 
-// Inlined from the retired `@/components/billing/UsageBadge` — fire a window event
-// that any usage-badge / quota display can listen for. Signal pages don't render
-// the legacy UsageBadge anymore, but other surfaces may; the event is a no-op
-// when no listener is attached.
-const refreshUsageBadge = () => window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
-
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
 export function useSse(runId: string | null) {
@@ -134,10 +128,6 @@ export function useSse(runId: string | null) {
             ) {
               // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
               fetchRun(runId!);
-            }
-            // Credits charged when run transitions to WORKING — refresh sidebar usage
-            if (data.payload === 'WORKING') {
-              refreshUsageBadge();
             }
           }
           // Gate opened = plan tasks are now saved; RUN_DETAIL push covers this
