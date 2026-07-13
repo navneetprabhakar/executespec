@@ -78,8 +78,9 @@ export function ForgotPasswordPage() {
         <RecoveryFormSuccess msg={ok} />
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
-            <label>Email</label>
+            <label htmlFor='recovery-email'>Email</label>
             <input
+              id='recovery-email'
               type='email'
               autoComplete='email'
               placeholder='you@company.com'
@@ -145,8 +146,9 @@ export function ResetPasswordPage() {
         <RecoveryFormError msg={err} />
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
-            <label>New password</label>
+            <label htmlFor='reset-password'>New password</label>
             <input
+              id='reset-password'
               type='password'
               autoComplete='new-password'
               placeholder='••••••••'
@@ -157,8 +159,9 @@ export function ResetPasswordPage() {
             />
           </div>
           <div className='signal-field'>
-            <label>Confirm</label>
+            <label htmlFor='reset-password-confirm'>Confirm</label>
             <input
+              id='reset-password-confirm'
               type='password'
               autoComplete='new-password'
               placeholder='••••••••'
