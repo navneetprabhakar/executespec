@@ -214,6 +214,8 @@ model-matrix:
   # SHIPPED DARK: entries below are commented out until each passes its k>=3 gate vs the Phase-0
   # baseline (see infra/benchmark/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
   # the graduation act — do not do it without the eval evidence.
+  # Activation is separately gated by worker.capability-profiles.enabled (V271), seeded false;
+  # a YAML profile must never widen a worker schema or change thresholds by itself.
   capability-profiles: {}
   #  anthropic:
   #    optional-tools: [runWorkspaceTests, readCodeOutline, verifyBoot]

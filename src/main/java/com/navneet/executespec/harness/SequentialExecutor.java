@@ -4176,7 +4176,9 @@ to boot — skip it for those.""";
    * implementation in the worker loop.
    */
   private int[] capabilityStagnationThresholds(String provider, String model) {
-    if (matrixProps == null || matrixProps.getCapabilityProfiles() == null) return new int[] {0, 0};
+    if (matrixProps == null
+        || matrixProps.getCapabilityProfiles() == null
+        || !capabilityProfilesEnabled()) return new int[] {0, 0};
     try {
       var profiles = matrixProps.getCapabilityProfiles();
       com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile profile = null;
@@ -4216,6 +4218,15 @@ to boot — skip it for those.""";
           model,
           e.getMessage());
       return new int[] {0, 0};
+    }
+  }
+
+  private boolean capabilityProfilesEnabled() {
+    try {
+      return featureFlagService != null && featureFlagService.isEnabled(FLAG_CAPABILITY_PROFILES);
+    } catch (RuntimeException e) {
+      log.warn("Capability-profile flag lookup failed; profile thresholds remain disabled", e);
+      return false;
     }
   }
 
@@ -4569,6 +4580,9 @@ to boot — skip it for those.""";
    * prompts/fragments/provider/{name}/patch.md (RL-2026-05-052, T3.10).
    */
   public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
+
+  /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
+  public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
 
   /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
   public static final String FLAG_CROSS_PROVIDER_FALLBACK =
