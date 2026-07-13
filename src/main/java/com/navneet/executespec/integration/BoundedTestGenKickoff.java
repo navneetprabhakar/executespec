@@ -14,6 +14,7 @@ import jakarta.annotation.PreDestroy;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -36,6 +37,7 @@ public class BoundedTestGenKickoff {
   private final ExecutorService workerExecutor;
   private final ScheduledExecutorService timeoutExecutor;
 
+  @Autowired
   public BoundedTestGenKickoff(
       SseBroadcaster broadcaster,
       @Value("${test-generation.timeout-seconds:600}") long timeoutSeconds) {
