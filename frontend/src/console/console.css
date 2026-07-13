@@ -421,23 +421,6 @@
   line-height: 16px;
   color: var(--ide-fg-muted);
 }
-.con-side-mini {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 32px;
-  min-height: 32px;
-  margin: -4px -4px -4px 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ide-fg-muted);
-  cursor: pointer;
-}
-.con-side-mini:hover {
-  background: var(--ide-hover);
-  color: var(--ide-fg-bright);
-}
 .con-side-empty {
   padding: 4px 10px;
   font-size: 12px;
@@ -485,18 +468,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.con-nav-badge {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--ide-red);
-  color: var(--ide-accent-fg);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
 }
 .con-side-grow {
   flex: 1;

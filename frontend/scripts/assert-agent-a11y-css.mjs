@@ -54,8 +54,6 @@ assertContains(rule('.con-side-collapse'), 'width: 32px', '.con-side-collapse wi
 assertContains(rule('.con-side-collapse'), 'height: 32px', '.con-side-collapse height');
 assertContains(rule('.con-navitem'), 'min-height: 32px', '.con-navitem target size');
 assertContains(rule('.con-runitem'), 'min-height: 32px', '.con-runitem target size');
-assertContains(rule('.con-side-mini'), 'min-width: 32px', '.con-side-mini width');
-assertContains(rule('.con-side-mini'), 'min-height: 32px', '.con-side-mini height');
 assertContains(rule('.con-section-link'), 'min-height: 32px', '.con-section-link target size');
 assertContains(rule('.con-inline-link'), 'min-height: 32px', '.con-inline-link target size');
 assertContains(
