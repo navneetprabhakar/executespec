@@ -814,6 +814,56 @@ describe('IdeAgent', () => {
       type: 'input:set',
       input: expect.stringContaining('artifact-1.html'),
     });
+
+    const originalClipboard = navigator.clipboard;
+    const originalOpen = window.open;
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {writeText: vi.fn().mockRejectedValue(new Error('clipboard denied'))},
+    });
+    Object.defineProperty(window, 'open', {
+      configurable: true,
+      value: vi.fn(() => null),
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:test-artifact'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      const copy = [...host.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Copy',
+      );
+      const preview = [...host.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Preview',
+      );
+      if (!copy || !preview) throw new Error('Artifact actions were not rendered.');
+      await act(async () => {
+        copy.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        preview.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        await Promise.resolve();
+      });
+      expect(host.textContent).toContain('Clipboard access was denied. Use Download instead.');
+      expect(host.textContent).toContain(
+        'Preview was blocked. Allow pop-ups or use Download instead.',
+      );
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: originalClipboard});
+      Object.defineProperty(window, 'open', {configurable: true, value: originalOpen});
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectUrl,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectUrl,
+      });
+    }
   });
 
   it('renders multi-file generated output as separate artifact actions', async () => {

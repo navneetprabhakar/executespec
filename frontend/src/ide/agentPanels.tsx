@@ -629,15 +629,28 @@ function ArtifactRail({
   dispatch: Dispatch<AgentAction>;
 }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
+  const [previewErrorId, setPreviewErrorId] = useState<string | null>(null);
   if (!artifacts.length) return null;
 
   async function copyArtifact(artifact: AgentArtifact) {
-    await navigator.clipboard?.writeText(artifact.content);
-    setCopiedId(artifact.id);
-    window.setTimeout(
-      () => setCopiedId((current) => (current === artifact.id ? null : current)),
-      1600,
-    );
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(artifact.content);
+      setCopyErrorId(null);
+      setCopiedId(artifact.id);
+      window.setTimeout(
+        () => setCopiedId((current) => (current === artifact.id ? null : current)),
+        1600,
+      );
+    } catch {
+      setCopiedId(null);
+      setCopyErrorId(artifact.id);
+      window.setTimeout(
+        () => setCopyErrorId((current) => (current === artifact.id ? null : current)),
+        3000,
+      );
+    }
   }
 
   function downloadArtifact(artifact: AgentArtifact) {
@@ -653,7 +666,13 @@ function ArtifactRail({
   function previewArtifact(artifact: AgentArtifact) {
     const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    try {
+      const preview = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!preview) throw new Error('Preview popup blocked');
+      setPreviewErrorId(null);
+    } catch {
+      setPreviewErrorId(artifact.id);
+    }
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
@@ -684,7 +703,11 @@ function ArtifactRail({
             </div>
             <div className='agent-artifact-actions'>
               <button className='ide-btn ghost' onClick={() => void copyArtifact(artifact)}>
-                {copiedId === artifact.id ? 'Copied' : 'Copy'}
+                {copiedId === artifact.id
+                  ? 'Copied'
+                  : copyErrorId === artifact.id
+                    ? 'Copy unavailable'
+                    : 'Copy'}
               </button>
               <button className='ide-btn ghost' onClick={() => downloadArtifact(artifact)}>
                 Download
@@ -705,6 +728,16 @@ function ArtifactRail({
                 Use in sandbox
               </button>
             </div>
+            {copyErrorId === artifact.id && (
+              <div className='agent-artifact-action-error' role='alert'>
+                Clipboard access was denied. Use Download instead.
+              </div>
+            )}
+            {previewErrorId === artifact.id && (
+              <div className='agent-artifact-action-error' role='alert'>
+                Preview was blocked. Allow pop-ups or use Download instead.
+              </div>
+            )}
           </div>
         ))}
       </div>
