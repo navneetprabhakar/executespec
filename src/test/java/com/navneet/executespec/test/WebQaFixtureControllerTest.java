@@ -14,16 +14,20 @@ import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.testgen.model.TestPlan;
+import com.navneet.executespec.testgen.model.TestTask;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestResultRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 
 class WebQaFixtureControllerTest {
@@ -136,6 +140,40 @@ class WebQaFixtureControllerTest {
                 controller.advance(
                     "web-qa-gate", new WebQaFixtureController.AdvanceRequest("COMPLETE"), user))
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+  }
+
+  @Test
+  void visualFixtureDoesNotPublishSyntheticVerifiedScore() throws Exception {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    ValidationReportRepository reports = mock(ValidationReportRepository.class);
+    TestPlanRepository plans = mock(TestPlanRepository.class);
+    TestTaskRepository testTasks = mock(TestTaskRepository.class);
+    TestResultRepository testResults = mock(TestResultRepository.class);
+
+    when(plans.save(any(TestPlan.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(testTasks.save(any(TestTask.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    WebQaFixtureController controller =
+        new WebQaFixtureController(
+            runs,
+            tasks,
+            reports,
+            plans,
+            testTasks,
+            testResults,
+            mock(AgentSessionRepository.class),
+            mock(AgentTurnRepository.class),
+            mock(AgentActionEventRepository.class),
+            mock(SseBroadcaster.class));
+
+    PipelineRun run =
+        controller.createRun("user-1", "org-1", "COMPLETE", "CLEAN_COMPLETION", "fixture", true);
+
+    ArgumentCaptor<ValidationReport> reportCaptor = ArgumentCaptor.forClass(ValidationReport.class);
+    verify(reports).save(reportCaptor.capture());
+    assertThat(run.getRunId()).startsWith("web-qa-");
+    assertThat(reportCaptor.getValue().getVerifiedScore()).isNull();
   }
 
   private static AppUserDetails user() {
