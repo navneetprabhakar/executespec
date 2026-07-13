@@ -4873,16 +4873,8 @@ to boot — skip it for those.""";
   String loadProviderFragment(String provider) {
     if (provider == null || provider.isBlank()) return "";
     String key = provider.trim().toLowerCase();
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource(
-              "prompts/fragments/provider/" + key + "/build.md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadProviderFragment({}) failed: {}", provider, e.getMessage());
-      return "";
-    }
+    if (!PromptResourceReader.isSafeSegment(key)) return "";
+    return PromptResourceReader.readOptional("prompts/fragments/provider/" + key, "build");
   }
 
   String loadProjectTypeFragments(String projectType) {
@@ -4899,16 +4891,7 @@ to boot — skip it for those.""";
   }
 
   private String loadPromptFragment(String key) {
-    if (key == null || key.isBlank()) return "";
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource("prompts/fragments/" + key + ".md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadPromptFragment({}) failed: {}", key, e.getMessage());
-      return "";
-    }
+    return PromptResourceReader.readOptional("prompts/fragments", key);
   }
 
   /**
@@ -4921,16 +4904,7 @@ to boot — skip it for those.""";
   private String loadScaffoldForProjectType(String projectType) {
     if (projectType == null || projectType.isBlank()) return "";
     String key = scaffoldKeyForProjectType(projectType);
-    if (key.isBlank()) return "";
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource("prompts/scaffolds/" + key + ".md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadScaffoldForProjectType({}) failed: {}", projectType, e.getMessage());
-      return "";
-    }
+    return PromptResourceReader.readOptional("prompts/scaffolds", key);
   }
 
   static String scaffoldKeyForProjectType(String projectType) {
