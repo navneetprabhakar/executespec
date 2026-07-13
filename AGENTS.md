@@ -227,6 +227,10 @@ cd observability && docker compose up -d
 
 # V2 eval matrix
 scripts/v2-eval.sh   # LOW/MEDIUM/HIGH × anthropic/openai/gemini, outputs scripts/v2-eval-results/
+
+# BUILD held-out evaluator
+# scripts/build-eval.sh scores our acceptance tests only when the production run reaches COMPLETE;
+# PARTIAL/FAILED/CANCELLED workspaces are retained as diagnostics but contribute no correctness score.
 ```
 
 ## Required environment variables

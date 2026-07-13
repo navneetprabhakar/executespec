@@ -90,6 +90,16 @@ run_case() {
   done
   log "  $id terminal=$status (${elapsed}s)"
 
+  # A held-out acceptance pass is a correctness score only for a terminal, successful BUILD.
+  # PARTIAL/FAILED/CANCELLED runs may leave a plausible workspace behind; scoring that workspace
+  # would turn an incomplete agent run into a misleading product-quality number. Keep the original
+  # terminal status in the CSV, but contribute 0/0 so the headline excludes the unscoreable case.
+  if [[ "$status" != "COMPLETE" ]]; then
+    log "  $id held-out score unavailable: run status is $status"
+    echo "$id,$band,$status,0,0"
+    return 0
+  fi
+
   # Locate the generated workspace + run OUR held-out acceptance tests against it.
   local ws="${WORKSPACE_ROOT}/${run_id}"
   if [[ ! -d "$ws" ]]; then log "  $id workspace gone — score 0"; echo "$id,$band,NO_WORKSPACE,0,0"; return 0; fi
