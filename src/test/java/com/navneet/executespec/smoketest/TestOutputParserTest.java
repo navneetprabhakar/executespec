@@ -35,7 +35,7 @@ class TestOutputParserTest {
   void pytest_all_passed_with_skips() {
     var s =
         ok(TestOutputParser.parse(Framework.PYTEST, "==== 9 passed, 1 skipped in 0.4s ====", 0));
-    assertEquals(9, s.getTotalTests());
+    assertEquals(10, s.getTotalTests());
     assertEquals(9, s.getPassed());
     assertEquals(0, s.getFailed());
     assertEquals(1, s.getSkipped());
@@ -74,7 +74,7 @@ class TestOutputParserTest {
         ok(
             TestOutputParser.parse(
                 Framework.CARGO, "test result: ok. 8 passed; 0 failed; 1 ignored;", 0));
-    assertEquals(8, s.getTotalTests());
+    assertEquals(9, s.getTotalTests());
     assertEquals(8, s.getPassed());
   }
 

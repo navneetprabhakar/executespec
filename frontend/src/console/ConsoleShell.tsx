@@ -193,8 +193,11 @@ export default function ConsoleShell() {
       }
     };
     document.addEventListener('keydown', onKeyDown);
-    requestAnimationFrame(() => drawerCloseRef.current?.focus());
-    return () => document.removeEventListener('keydown', onKeyDown);
+    const focusFrame = requestAnimationFrame(() => drawerCloseRef.current?.focus());
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [drawerOpen]);
 
   const path = location.pathname;

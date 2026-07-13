@@ -85,7 +85,7 @@ public final class TestOutputParser {
       return Optional.empty();
     }
     int p = orZero(passed), f = orZero(failed), e = orZero(errors), s = orZero(skipped);
-    return Optional.of(summary(p + f + e, p, f, e, s));
+    return Optional.of(summary(p + f + e + s, p, f, e, s));
   }
 
   private static Optional<TestExecutionSummary> parseJest(String out) {
@@ -164,7 +164,7 @@ public final class TestOutputParser {
       ignored += m.group(3) != null ? Integer.parseInt(m.group(3)) : 0;
     }
     if (!any) return Optional.empty();
-    return Optional.of(summary(passed + failed, passed, failed, 0, ignored));
+    return Optional.of(summary(passed + failed + ignored, passed, failed, 0, ignored));
   }
 
   private static Optional<TestExecutionSummary> parseGo(String out, int exitCode) {

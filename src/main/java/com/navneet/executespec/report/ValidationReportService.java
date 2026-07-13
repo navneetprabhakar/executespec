@@ -413,6 +413,9 @@ public class ValidationReportService {
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     AccuracyFacts accuracy = parseAccuracyFacts(report.getAccuracyJson());
     int criticals = countUnfixedCriticalIssues(issues);
+    // A concrete runner returning 0/0 is evidence that no tests were executed. Do not
+    // fall back to an optimistic LLM coverage label from the original report.
+    String concreteCoverageLevel = total == 0 ? "NONE" : accuracy.testCoverageLevel();
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
@@ -426,7 +429,7 @@ public class ValidationReportService {
             report.getReviewerVerdict(),
             criticals,
             accuracy.endpointCoverage(),
-            accuracy.testCoverageLevel(),
+            concreteCoverageLevel,
             report.getFilesGenerated(),
             null));
     report.setRubricScore(
@@ -437,7 +440,7 @@ public class ValidationReportService {
             report.getReviewerVerdict(),
             criticals,
             accuracy.endpointCoverage(),
-            accuracy.testCoverageLevel()));
+            concreteCoverageLevel));
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
@@ -1780,6 +1783,9 @@ public class ValidationReportService {
       } else if ("UNKNOWN".equals(level)) {
         cap = Math.min(cap, 90);
         reasons.add("tests were not concretely measured");
+      } else if (level == null) {
+        cap = Math.min(cap, 90);
+        reasons.add("tests were not measured");
       }
     }
 

@@ -56,12 +56,13 @@ beforeEach(() => {
   root = createRoot(host);
   api.getSharedProjectSurface.mockRejectedValue(new Error('not a project share'));
   api.getSharedReport.mockResolvedValue({
-    verifiedScore: 92,
-    userRequest: 'Build a public report smoke',
-    testsPassed: 3,
-    testsTotal: 3,
-    totalCost: 0.42,
-    prUrl: 'https://github.com/acme/app/pull/12',
+    filesGenerated: 1,
+    languages: ['TypeScript'],
+    pipelineResult: 'PASSED',
+    issues: [],
+    checksPassed: ['build'],
+    reportMarkdown: 'Build a public report smoke',
+    createdAt: '2026-07-13T00:00:00Z',
   });
 });
 
@@ -91,8 +92,7 @@ describe('SharedPages', () => {
     expect(api.getSharedProjectSurface).not.toHaveBeenCalled();
     expect(api.getSharedReport).toHaveBeenCalledWith('share-token');
     expect(host.textContent).toContain('Public report');
-    expect(host.textContent).toContain('Build a public report smoke');
-    expect(host.textContent).toContain('92');
-    expect(host.textContent).toContain('3/3');
+    expect(host.textContent).toContain('Verified score unavailable');
+    expect(host.textContent).not.toContain('Verified score · unverified');
   });
 });
