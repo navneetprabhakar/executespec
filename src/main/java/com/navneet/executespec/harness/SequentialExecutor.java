@@ -1558,6 +1558,16 @@ to boot — skip it for those.""";
           List.of(),
           List.of("initial routing disabled or route is not a first attempt"));
     }
+    if (Boolean.getBoolean("executespec.strict-provider")) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("strict provider mode; initial routing kept the explicit provider/model"));
+    }
     if (req != null && Boolean.TRUE.equals(req.routePinned())) {
       return new InitialRoutingDecision(
           currentProvider,
