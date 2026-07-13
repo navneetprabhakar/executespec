@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
 class RunOrchestratorReviewerRouteTest {
 
   /**
-   * Characterization seam for post-review continuation: only explicit reviewer failure evidence
-   * (or an exception) may open the continuation path; missing optional evidence stays fail-open.
+   * Characterization seam for post-review continuation: only explicit reviewer failure evidence (or
+   * an exception) may open the continuation path; missing optional evidence stays fail-open.
    */
   @Test
   void postReviewQualityBoundaryTreatsReviewerExceptionAsFailureButMissingReviewAsUnknown() {
