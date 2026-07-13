@@ -673,7 +673,7 @@ append_error_result() {
     '{provider:$provider,spec_name:$spec_name,spec_type:$spec_type,language:$lang,
       run_id:$run_id,timestamp:$ts,status:$error,worker_model:"",failover_detected:false,
       time:{wall_seconds:0},cost:{actual_usd:"null"},efficiency:{tasks_total:0},
-      accuracy:{score:"N/A",grade:"N/A",issues_total:0,report_status:"SKIPPED",issues:[]}}' \
+      accuracy:{score:"N/A",grade:"N/A",source:"missing",legacy_score:"N/A",legacy_grade:"N/A",issues_total:0,report_status:"SKIPPED",issues:[]}}' \
     >> "$RESULTS_JSONL"
 }
 
