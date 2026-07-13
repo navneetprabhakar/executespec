@@ -28,7 +28,10 @@ public final class RecoveryCheckpointLease {
   static final Duration FRESH_OWNER_WINDOW = Duration.ofMinutes(2);
   static final String FILE_NAME = "recovery-lease.json";
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  /** Serializes first publication within a JVM; the no-replace filesystem operation fences peers. */
+
+  /**
+   * Serializes first publication within a JVM; the no-replace filesystem operation fences peers.
+   */
   private static final Object FIRST_PUBLICATION_LOCK = new Object();
 
   private RecoveryCheckpointLease() {}

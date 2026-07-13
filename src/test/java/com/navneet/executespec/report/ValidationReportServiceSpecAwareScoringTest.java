@@ -120,7 +120,8 @@ class ValidationReportServiceSpecAwareScoringTest {
 
   @Test
   void rubric_helloWorld_spec_with_unknown_endpoints_scores_93() {
-    // build=25 + tests=20 (GOOD via PR-R) + reviewer=20 + endpoints=8 (UNKNOWN) + damper=10 + quality=10
+    // build=25 + tests=20 (GOOD via PR-R) + reviewer=20 + endpoints=8 (UNKNOWN) + damper=10 +
+    // quality=10
     // = 93; missing endpoint evidence must not receive full credit.
     int score = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, "GOOD");
     assertEquals(93, score);
@@ -162,6 +163,8 @@ class ValidationReportServiceSpecAwareScoringTest {
     int rubric = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, "GOOD");
     assertEquals(100, verified, "Pre-PR-R the user saw 50 here; post-PR-R must be 100");
     assertEquals(93, rubric, "Rubric must withhold unknown endpoint credit");
-    assertTrue(verified > rubric, "Verified score may retain legacy N/A treatment while rubric stays conservative");
+    assertTrue(
+        verified > rubric,
+        "Verified score may retain legacy N/A treatment while rubric stays conservative");
   }
 }
