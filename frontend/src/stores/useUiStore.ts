@@ -28,12 +28,6 @@ type ViewMode = 'pro' | 'project';
  */
 type Theme = 'dark' | 'light' | 'system';
 
-/**
- * UI chrome mode. Console is the protected app shell; the older values survive
- * only so stale persisted state and retired call sites do not break.
- */
-type UiMode = 'signal' | 'ide' | 'console';
-
 interface UiStore {
   activeTab: string;
   toasts: Toast[];
@@ -45,8 +39,6 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
-  /** UI chrome mode for the protected shell. */
-  uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
    * viewing on a /projects/:id/dashboard route. ProjectDashboardPage sets
@@ -63,7 +55,6 @@ interface UiStore {
   setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
-  setUiMode: (m: UiMode) => void;
   setCurrentProjectName: (name: string | null) => void;
 }
 
@@ -120,19 +111,11 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
   });
 }
 
-// UI chrome — Console is now the protected shell. Ignore stale local chrome
-// persistence from earlier builds so /home and protected routes start together.
-function initUiMode(): UiMode {
-  if (typeof document !== 'undefined') document.documentElement.dataset.ui = 'console';
-  return 'console';
-}
-
 export const useUiStore = create<UiStore>((set, get) => ({
   activeTab: 'overview',
   toasts: [],
   pendingNewRunConfig: null,
   theme: initTheme(),
-  uiMode: initUiMode(),
   currentProjectName: null,
   viewMode: ((): ViewMode => {
     const saved = localStorage.getItem('es:viewMode');
@@ -168,12 +151,6 @@ export const useUiStore = create<UiStore>((set, get) => ({
     applyThemeAttrs(next === 'system' ? resolveSystemTheme() : next);
     set({theme: next});
   },
-  setUiMode: (m) => {
-    localStorage.setItem('es:uiMode', m);
-    if (typeof document !== 'undefined') document.documentElement.dataset.ui = m;
-    set({uiMode: m});
-  },
-
   setCurrentProjectName: (name) => set({currentProjectName: name}),
 
   addToast: (t) => {
