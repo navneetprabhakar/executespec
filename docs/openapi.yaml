@@ -1841,10 +1841,57 @@ paths:
                   contentType:
                     type: string
 
+  /runs/{runId}/push-scm:
+    post:
+      tags: [Deployment]
+      summary: Push workspace to the configured source-control provider
+      parameters:
+        - $ref: "#/components/parameters/runId"
+        - name: repoUrl
+          in: query
+          schema:
+            type: string
+        - name: repoMode
+          in: query
+          schema:
+            type: string
+            enum: [NEW, EXISTING]
+            default: EXISTING
+      responses:
+        "200":
+          description: Push attempt completed; inspect status for the outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, repoUrl, prUrl, scmProvider]
+                properties:
+                  status:
+                    type: string
+                    description: Truthful result of the push attempt.
+                    enum: [PUSHED, PARTIAL, FAILED, NO_CONFIGURATION, NO_CHANGES]
+                  repoUrl:
+                    type: string
+                  prUrl:
+                    type: string
+                  scmProvider:
+                    type: string
+                  message:
+                    type: string
+                  attempted:
+                    type: string
+                  succeeded:
+                    type: string
+                  failed:
+                    type: string
+        "409":
+          description: Run is not in a pushable terminal state.
+
   /runs/{runId}/push-github:
     post:
       tags: [Deployment]
-      summary: Push workspace to GitHub (creates branch + PR)
+      summary: Deprecated GitHub push alias; use push-scm
+      deprecated: true
       parameters:
         - $ref: "#/components/parameters/runId"
         - name: repoUrl
