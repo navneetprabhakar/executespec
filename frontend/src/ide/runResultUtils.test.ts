@@ -204,7 +204,18 @@ describe('runResultUtils', () => {
   });
 
   it('keeps continuation and budget presentation logic independently testable', () => {
-    const task = {
+    const task: api.TaskSummary = {
+      taskId: 'task-1',
+      title: 'Example task',
+      status: 'PARTIAL',
+      assignedModel: 'gpt-5.4',
+      inputTokens: 1000,
+      outputTokens: 250,
+      durationMs: 65000,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
       goalDoneness: {
         state: 'IN_PROGRESS',
         recommendedDecision: 'STEP_UP_MODEL',
@@ -242,7 +253,7 @@ describe('runResultUtils', () => {
           maxLimit: 2,
         },
       ],
-    } as api.TaskSummary;
+    };
 
     expect(continuationSourceLabel('POST_REVIEW')).toBe('Reviewer/build trigger');
     expect(taskGoalLine(task)).toContain('Goal Still checking -> Try stronger model');

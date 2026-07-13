@@ -27,7 +27,6 @@ import {
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
-  continuationSourceLabel,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
