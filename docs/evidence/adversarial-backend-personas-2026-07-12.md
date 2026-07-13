@@ -1,4 +1,6 @@
-# ExecuteSpec backend adversarial assessment — engineering personas
+# ExecuteSpec backend adversarial assessment — engineering personas (historical)
+
+> **Historical snapshot only.** This document was captured against an earlier tuple and must not be used as current release evidence. In particular, its approval-gate finding predates the durable non-blocking `GateStore` implementation. Re-run the scenarios in [`post-goal-adversarial-assessment-protocol-2026-07-13.md`](post-goal-adversarial-assessment-protocol-2026-07-13.md) against a sealed current tuple.
 
 Date: 2026-07-12  
 Scope: backend worktree `executespec-2.0`, current branch `codex/executespec-2.0`  
