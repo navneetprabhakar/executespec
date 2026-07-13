@@ -28,10 +28,12 @@ public final class RecoveryCheckpointLease {
   static final Duration FRESH_OWNER_WINDOW = Duration.ofMinutes(2);
   static final String FILE_NAME = "recovery-lease.json";
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  /** Serializes first publication within a JVM; the no-replace filesystem operation fences peers. */
+  private static final Object FIRST_PUBLICATION_LOCK = new Object();
 
   private RecoveryCheckpointLease() {}
 
-  public static AcquireResult acquire(
+  public static synchronized AcquireResult acquire(
       Path workspace, String runId, String instanceId, String planJson, Instant now) {
     if (workspace == null
         || runId == null
@@ -93,13 +95,24 @@ public final class RecoveryCheckpointLease {
        * created the target between our existence check and move, re-read its lease and apply the
        * normal compatibility/fresh-owner rules rather than overwriting it.
        */
-      if (!Files.exists(target)) {
-        try {
-          moveWithoutReplacement(temp, target);
-          return AcquireResult.accepted();
-        } catch (java.nio.file.FileAlreadyExistsException raced) {
-          Files.deleteIfExists(temp);
-          return inspectExistingLease(target, runId, planSha, instanceId, now);
+      boolean targetMissingBeforePublication = !Files.exists(target);
+      if (targetMissingBeforePublication) {
+        synchronized (FIRST_PUBLICATION_LOCK) {
+          if (!Files.exists(target)) {
+            try {
+              moveWithoutReplacement(temp, target);
+              return AcquireResult.accepted();
+            } catch (java.nio.file.FileAlreadyExistsException raced) {
+              Files.deleteIfExists(temp);
+              return inspectExistingLease(target, runId, planSha, instanceId, now);
+            }
+          }
+          // Another thread published while this caller was waiting for the JVM fence. Do not fall
+          // through to stale-owner replacement; the newly published lease is the winner.
+          if (Files.exists(target)) {
+            Files.deleteIfExists(temp);
+            return inspectExistingLease(target, runId, planSha, instanceId, now);
+          }
         }
       }
       moveReplacing(temp, target);
