@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V261** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V267** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -195,7 +195,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 
 ### Current-state corrections (2026-07-11)
 
-- The current migration head is V261; older V258 references in this file are historical and must not be used as release facts.
+- The current migration head is V267; older V261/V258 references in this file are historical and must not be used as release facts.
 - `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
 - Current source-size facts are RunOrchestrator 4,140 lines, `frontend/src/lib/api/core.ts` 2,177 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 
