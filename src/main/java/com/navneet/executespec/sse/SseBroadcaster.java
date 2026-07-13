@@ -170,6 +170,12 @@ public class SseBroadcaster {
     emitter.onTimeout(() -> remove(runId, emitter));
     emitter.onError(e -> remove(runId, emitter));
 
+    // Flush the response headers immediately. Without a comment frame an idle subscription may
+    // remain buffered until the first run event, leaving EventSource clients stuck in CONNECTING
+    // or RECONNECTING even though the emitter is registered. Comments carry no event id and are
+    // therefore safe to send before replaying durable events on reconnect.
+    sendInitialConnectionComment(emitter);
+
     // Replay missed events if Last-Event-ID was provided
     if (lastEventId != null && !lastEventId.isBlank()) {
       replayMissedEvents(runId, lastEventId, emitter);
@@ -181,6 +187,15 @@ public class SseBroadcaster {
   /** Convenience overload for callers that don't support reconnect replay. */
   public SseEmitter subscribe(String runId) {
     return subscribe(runId, null);
+  }
+
+  /** Send a comment-only frame so an idle SSE response flushes its headers immediately. */
+  void sendInitialConnectionComment(SseEmitter emitter) {
+    try {
+      emitter.send(SseEmitter.event().comment("connected"));
+    } catch (Exception e) {
+      log.debug("[SSE] Initial connection comment failed: {}", e.getMessage());
+    }
   }
 
   /**

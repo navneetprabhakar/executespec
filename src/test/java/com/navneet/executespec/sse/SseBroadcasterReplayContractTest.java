@@ -16,6 +16,7 @@ import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
@@ -86,5 +87,15 @@ class SseBroadcasterReplayContractTest {
     assertThat(replay.get(0)).containsEntry("payload", "done");
     assertThat(replay.get(0)).containsEntry("data", Map.of("state", "DONE"));
     assertThat(replay.get(1)).containsEntry("type", "LOG").containsEntry("payload", "legacy");
+  }
+
+  @Test
+  void idleSubscriptionFlushesAnInitialComment() throws Exception {
+    SseEmitter emitter = mock(SseEmitter.class);
+
+    broadcaster().sendInitialConnectionComment(emitter);
+
+    org.mockito.Mockito.verify(emitter)
+        .send(org.mockito.ArgumentMatchers.<SseEmitter.SseEventBuilder>any());
   }
 }
