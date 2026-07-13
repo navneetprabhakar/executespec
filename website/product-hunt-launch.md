@@ -97,7 +97,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
 2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
-3. ✅ **Illustrative demo video** — `website/media/hero.webm` was regenerated 2026-07-13 against the current release tuple and covers the agent, plan gate, working task, verdict, code diff, and terminal outcome scenes. It uses provider-free synthetic fixture data and must not be presented as a live customer run, benchmark, or SOTA result.
+3. ✅ **Illustrative demo video** — `website/media/hero.webm` was regenerated 2026-07-13 from the current product walkthrough. It uses provider-free synthetic fixture data; the exact source tuple and independent human review are not sealed, so it must not be presented as a live customer run, benchmark, or SOTA result.
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 
