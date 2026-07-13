@@ -286,6 +286,60 @@ class ToolRegistryWorkerBindTest {
         .containsExactlyInAnyOrder("readFile", "read_file", "bash");
   }
 
+  @Test
+  void serverWorkersNeverAdvertiseFallbackStructuralTools_evenWhenLeanFlagIsOff() {
+    var flags = org.mockito.Mockito.mock(FeatureFlagService.class);
+    org.mockito.Mockito.when(flags.isEnabled("worker.lean-toolset.enabled")).thenReturn(false);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("ast_search"),
+                fakeTool("astSearch"),
+                fakeTool("ast_edit"),
+                fakeTool("astEdit"),
+                fakeTool("lsp"),
+                fakeTool("mcp_client"),
+                fakeTool("mcpClient"),
+                fakeTool("shell")),
+            new ObjectMapper(),
+            null,
+            flags,
+            null);
+
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "shell")
+        .doesNotContain(
+            "ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+  }
+
+  @Test
+  void remoteWorkersRetainCompatibilityTools() {
+    var remote =
+        org.mockito.Mockito.mock(com.navneet.executespec.tool.remote.RemoteToolDispatcher.class);
+    org.mockito.Mockito.when(remote.isRemote("run-1")).thenReturn(true);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("ast_search"),
+                fakeTool("lsp"),
+                fakeTool("mcp_client")),
+            new ObjectMapper(),
+            remote,
+            null,
+            null);
+
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "ast_search", "lsp", "mcp_client");
+  }
+
   // ---- harness-resolution task 10: capability-profile optional tools ----
 
   @Test

@@ -78,6 +78,18 @@ public class ToolRegistry {
   public static final Set<String> WORKER_DENY_TOOLS = Set.of("gitCommit");
 
   /**
+   * Compatibility fallbacks that must never be advertised to a server-side worker. These tools
+   * either claim a capability that is not actually wired (LSP/MCP), or silently substitute a
+   * regex/edit fallback for a structural operation (AST). Keeping them in the global bean list is
+   * intentional for local-hands clients, but exposing them to a coding worker makes the model
+   * choose between misleading schemas and the canonical tools. This deny list is unconditional so
+   * an older database row with {@code worker.lean-toolset.enabled=false} cannot regress production
+   * worker behavior. Remote/local-hands runs explicitly retain the compatibility surface below.
+   */
+  public static final Set<String> SERVER_WORKER_EXCLUDED_TOOLS =
+      Set.of("ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+
+  /**
    * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
    * canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
    * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
@@ -201,15 +213,20 @@ public class ToolRegistry {
    * different tool-schema behaviour.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
+    final boolean remote = isRemoteRun(ctx);
     // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
     // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
-            && !isRemoteRun(ctx);
+            && !remote;
     final java.util.Set<String> profileTools = profileOptionalTools(provider, model);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
+        // Fallback/structural compatibility tools remain available to explicit local-hands
+        // sessions, but are never advertised to a server worker even while the legacy lean flag is
+        // OFF. This keeps old persisted flag state from reintroducing misleading schemas.
+        .filter(t -> remote || !SERVER_WORKER_EXCLUDED_TOOLS.contains(t.name()))
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
