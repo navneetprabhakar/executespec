@@ -10,9 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
-import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -77,7 +75,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ProjectChatTools {
 
-  private final ProjectRepository projectRepo;
   private final ProjectArchitectureService architectureService;
   private final ProjectDocGeneratorService docGeneratorService;
   private final ProjectRepoRepository repoRepo;
@@ -767,14 +764,6 @@ public class ProjectChatTools {
   @FunctionalInterface
   private interface ToolBody {
     ObjectNode run(JsonNode args) throws Exception;
-  }
-
-  /** Resolve the project entity. Currently unused outside the bind helpers but kept for parity. */
-  @SuppressWarnings("unused")
-  private Project requireProject(ToolContext ctx) {
-    return projectRepo
-        .findById(ctx.projectId())
-        .orElseThrow(() -> new IllegalArgumentException("project not found: " + ctx.projectId()));
   }
 
   // Tool 8: run code review (whole-repo Code Review Agent)
