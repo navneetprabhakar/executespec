@@ -337,18 +337,13 @@ export function IdeAccount() {
     }
   }
 
-  // GDPR data export — no api helper exists, so fetch the ZIP with the bearer
-  // token (same key the api client uses) and trigger a blob download.
+  // GDPR data export — the API module owns auth and response errors; this surface
+  // only controls the browser download affordance.
   async function onExport() {
     setExporting(true);
     setMsg('');
     try {
-      const token = localStorage.getItem('access_token') ?? '';
-      const resp = await fetch('/api/auth/me/data-export', {
-        headers: token ? {Authorization: `Bearer ${token}`} : {},
-      });
-      if (!resp.ok) throw new Error(`Export failed (${resp.status}).`);
-      const blob = await resp.blob();
+      const blob = await api.downloadUserDataExport();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
