@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
   "fixtureId": "low-python-addition-v1",
+  "evidenceStatus": "HISTORICAL_UNSUPPORTED",
+  "readinessClaim": "NOT_VERIFIED",
+  "statusReason": "This artifact is retained for audit only. Its source commit predates the current release tuple and its listed successes cannot be reconciled to the canonical provider-spend ledger, which records zero dispatched calls. Do not use it as live-provider or quality evidence.",
   "sourceBackendCommit": "7e33c6ff7bef40528dcc79d01848b3ae1d33cb88",
   "comparison": "same fixture, prompt, tool schema, harness, LOW caps, and independent evaluator",
   "results": [
@@ -16,5 +19,5 @@
     "toolSchema":"d35b7eb262ed88759161bdacba733bbf5e16e8ef825a81995f4cf91ae4a70563",
     "harness":"36b4d73094dd79489d052fce39a9f332b11b9aacf8283b7eb4b644e3ad90b168"
   },
-  "claim": "Five matched LOW fixture successes provide limited capability evidence only; this is not a benchmark, SOTA parity, or statistically significant quality ranking."
+  "claim": "Historical fixture record only; live-provider capability is NOT_VERIFIED until rerun under the canonical ledger with reconciled provider spend. This is not a benchmark, SOTA parity, or statistically significant quality ranking."
 }
