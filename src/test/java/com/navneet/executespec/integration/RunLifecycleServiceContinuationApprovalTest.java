@@ -133,8 +133,6 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(runRepo.findById(RUN_ID))
         .thenReturn(
             Optional.of(PipelineRun.builder().runId(RUN_ID).status("AWAITING_APPROVAL").build()));
-    when(gateStore.isPlanGateWaiting(RUN_ID)).thenReturn(false);
-
     assertThat(service.cancel(RUN_ID)).isTrue();
 
     verify(gateStore).setPlanGate(RUN_ID, false);
