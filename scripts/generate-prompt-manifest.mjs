@@ -47,7 +47,7 @@ const runtimeCoverage = [
     id: 'patch-worker',
     caller: 'engine.CodeGenEngineImpl.buildSystemPrompt',
     sourceFile: 'src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java',
-    sourceTokens: ['loadProviderPatchFragment', 'prompts/fragments/provider/'],
+    sourceTokens: ['loadProviderPatchFragment', 'fragments/provider/'],
     role: 'WORKER',
     mode: 'PATCH',
     profile: 'patch-worker',

@@ -63,6 +63,7 @@ being retained under compatibility aliases.
 | Post-review quality policy embedded in `RunOrchestrator` | DONE — extracted pure reviewer/validation quality decisions into `PostReviewQualityPolicy`; characterization tests pin the boundary |
 | Notification DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved `NotificationItem` and `NotificationPrefRow` to `notifications.ts`; the API barrel preserves consumer compatibility |
 | Unassociated public auth form labels | DONE — login, signup, forgot-password, and reset-password labels now target stable input ids; recovery tests pin the association |
+| Stale PATCH prompt runtime-coverage token | DONE — manifest now matches the actual `PromptAssembler` relative fragment path and the validator passes against the packaged graph |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
