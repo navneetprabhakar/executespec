@@ -16,7 +16,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {fetchPlans, type BillingPlan} from '@/lib/billing-api';
+import {fetchPlans, type BillingPlan} from '@/lib/api/billing';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';

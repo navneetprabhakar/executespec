@@ -1,5 +1,5 @@
 import type * as api from '@/lib/api';
-import type {BillingPlan} from '@/lib/billing-api';
+import type {BillingPlan} from '@/lib/api/billing';
 
 export type BadgeKind = 'ok' | 'warn' | 'bad';
 
