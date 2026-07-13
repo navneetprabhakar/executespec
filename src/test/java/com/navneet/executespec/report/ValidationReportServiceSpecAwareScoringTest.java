@@ -119,41 +119,41 @@ class ValidationReportServiceSpecAwareScoringTest {
   // Rubric — same fix, additive shape
 
   @Test
-  void rubric_helloWorld_spec_now_scores_100() {
-    // build=25 + tests=20 (GOOD via PR-R) + reviewer=20 + endpoints=15 + damper=10 + quality=10
-    // = 100
+  void rubric_helloWorld_spec_with_unknown_endpoints_scores_93() {
+    // build=25 + tests=20 (GOOD via PR-R) + reviewer=20 + endpoints=8 (UNKNOWN) + damper=10 + quality=10
+    // = 93; missing endpoint evidence must not receive full credit.
     int score = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, "GOOD");
-    assertEquals(100, score);
+    assertEquals(93, score);
   }
 
   @Test
   void rubric_spec_needed_tests_drops_test_slot() {
     // testCoverageLevel=NONE → rubricTestPoints = round(20 * 0.3) = 6
-    // build=25 + tests=6 + reviewer=20 + endpoints=15 + damper=10 + quality=10 = 86
+    // build=25 + tests=6 + reviewer=20 + endpoints=8 + damper=10 + quality=10 = 79
     int score = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, "NONE");
-    assertEquals(86, score);
+    assertEquals(79, score);
   }
 
   @Test
   void rubric_legacy_null_preserves_neutral_10_pts() {
     int score = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, null);
-    // build=25 + tests=10 (neutral, 0.5 × 20) + reviewer=20 + endpoints=15 + damper=10 + quality=10
-    // = 90
-    assertEquals(90, score);
+    // build=25 + tests=10 (neutral, 0.5 × 20) + reviewer=20 + endpoints=8 + damper=10 + quality=10
+    // = 83
+    assertEquals(83, score);
   }
 
   @Test
   void rubric_testsTotal_positive_ignores_coverageLevel() {
     // Same protection as multiplicative: concrete tests captured → ratio wins
     int score = svc.computeRubricScore(true, 3, 10, "CLEAN", 0, null, "COMPREHENSIVE");
-    // build=25 + tests=6 (3/10 × 20) + reviewer=20 + endpoints=15 + damper=10 + quality=10 = 86
-    assertEquals(86, score);
+    // build=25 + tests=6 (3/10 × 20) + reviewer=20 + endpoints=8 + damper=10 + quality=10 = 79
+    assertEquals(79, score);
   }
 
   // Reality check: the user's exact smoke-run inputs
 
   @Test
-  void smoke_run_anthropic_hello_py_scores_100_after_PR_R() {
+  void smoke_run_anthropic_hello_py_preserves_conservative_rubric_score() {
     // The literal shape of the Anthropic smoke run that produced verifiedScore=50:
     //   finalBuildPassed=true, testsPassed=null/0, testsTotal=null/0,
     //   reviewerVerdict="CLEAN", endpointCoverage=null, unfixedCritical=0,
@@ -161,7 +161,7 @@ class ValidationReportServiceSpecAwareScoringTest {
     int verified = svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0, null, "GOOD");
     int rubric = svc.computeRubricScore(true, 0, 0, "CLEAN", 0, null, "GOOD");
     assertEquals(100, verified, "Pre-PR-R the user saw 50 here; post-PR-R must be 100");
-    assertEquals(100, rubric, "Rubric must also hit 100 on the same input");
-    assertTrue(verified == rubric, "Both formulas agree on the perfect case");
+    assertEquals(93, rubric, "Rubric must withhold unknown endpoint credit");
+    assertTrue(verified > rubric, "Verified score may retain legacy N/A treatment while rubric stays conservative");
   }
 }
