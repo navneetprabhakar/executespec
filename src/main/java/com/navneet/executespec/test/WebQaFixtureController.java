@@ -248,7 +248,8 @@ public class WebQaFixtureController {
     return Map.of("deletedRuns", runs.size(), "deletedAgentSessions", sessions.size());
   }
 
-  private PipelineRun createRun(
+  // Package-visible for the regression test that ensures visual fixtures remain score-neutral.
+  PipelineRun createRun(
       String userId, String orgId, String status, String reason, String title, boolean success)
       throws IOException {
     String runId = PREFIX + UUID.randomUUID();
@@ -313,7 +314,12 @@ public class WebQaFixtureController {
                 success ? "[]" : "[{\"severity\":\"CRITICAL\",\"message\":\"Build failed\"}]")
             .checksPassed(success ? "build,tests,review" : "none")
             .reportMarkdown(success ? "# Verified fixture\n" : "# Failed fixture\n")
-            .verifiedScore(success ? 92 : 38)
+            // This fixture exists only to exercise authenticated Web states. It does not run the
+            // production validation/scoring pipeline, so it must not publish a synthetic headline
+            // score that could be mistaken for score-validation evidence. The report deliberately
+            // leaves verifiedScore null; capture tooling should validate the rendered states and
+            // evidence fields, while score correctness is covered by ValidationReportService tests
+            // and real runs.
             .finalBuildPassed(success)
             .testsPassed(success ? 2 : 0)
             .testsTotal(2)
