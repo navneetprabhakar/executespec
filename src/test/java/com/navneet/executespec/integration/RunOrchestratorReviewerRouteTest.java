@@ -257,6 +257,34 @@ class RunOrchestratorReviewerRouteTest {
     assertThat(target.get().taskId()).isEqualTo("T1");
   }
 
+  /** Pins recovery behavior when continuation evidence exists but has no usable route. */
+  @Test
+  void reviewerRouteRecoveryKeepsDefaultWhenUpgradeRouteIsIncomplete() {
+    RunOrchestrator.ProviderModel route =
+        RunOrchestrator.reviewerRouteFor(
+            "deepseek",
+            "deepseek-v4-pro-native",
+            result(
+                task(
+                    TaskOutcome.Status.SUCCESS,
+                    RunContinuationDecision.STEP_UP_MODEL,
+                    null,
+                    null,
+                    "deepseek",
+                    "deepseek-v4-pro-native")));
+
+    assertThat(route.provider()).isEqualTo("deepseek");
+    assertThat(route.model()).isEqualTo("deepseek-v4-pro-native");
+  }
+
+  /** Pins the no-evidence recovery path used when a reviewer continuation cannot be targeted. */
+  @Test
+  void reviewerContinuationTargetReturnsEmptyForMissingExecutionEvidence() {
+    assertThat(RunOrchestrator.reviewerContinuationTarget(null)).isEmpty();
+    assertThat(RunOrchestrator.reviewerContinuationTarget(ExecutionResult.builder().build()))
+        .isEmpty();
+  }
+
   @Test
   void reviewerProviderPreferenceOrderStartsWithCurrentProviderAndDedupes() {
     assertThat(RunOrchestrator.reviewerProviderPreferenceOrder("Anthropic"))
