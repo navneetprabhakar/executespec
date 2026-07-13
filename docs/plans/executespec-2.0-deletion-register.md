@@ -53,6 +53,8 @@ being retained under compatibility aliases.
 | Dead Console CSS selectors `.con-side-mini` / `.con-nav-badge` | DONE — removed after zero non-CSS source references; unrelated legacy Signal/IDE CSS remains pending visual-contract review |
 | Stale Web accessibility guard for model overrides | DONE — guard now checks the actual `ModelPicker` `ariaLabel` prop contract; rendered accessibility remains covered by the component tests |
 | Dead ApplyService workspace git helpers | DONE — removed unused `tryGitCommit` / `runCmd` helpers after confirming all apply flows use `ScmPushService.pushApplyChanges`; no API or runtime contract changed |
+| Duplicate standalone billing API client | DONE — moved `BillingPlan`/`fetchPlans` into canonical `frontend/src/lib/api/billing.ts` and deleted the unused `billing-api.ts` module; no imports remain |
+| Duplicate admin execution-reconcile fetches | DONE — both settings surfaces now use the typed `adminReconcileExecutions` domain helper and shared transport/auth behavior |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
