@@ -1,6 +1,7 @@
 package com.navneet.executespec.report;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -11,6 +12,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.VerificationEvidenceDTO;
@@ -39,6 +41,9 @@ class ValidationReportServiceConcreteRescoreTest {
             .reviewerVerdict("CLEAN")
             .verifiedScore(76)
             .rubricScore(80)
+            .bootVerdict(Verdict.BUILD_FAILED.name())
+            .bootHealthy(false)
+            .bootReason("image/build step failed")
             .issuesJson("[]")
             .accuracyJson(
                 "{\"specAdherenceScore\":90,"
@@ -68,13 +73,15 @@ class ValidationReportServiceConcreteRescoreTest {
     assertTrue(result.isPresent());
     assertEquals(10, report.getTestsTotal());
     assertEquals(8, report.getTestsPassed());
-    assertEquals(96, report.getVerifiedScore());
+    assertEquals(69, report.getVerifiedScore());
     assertEquals(96, report.getRubricScore());
+    assertEquals(Verdict.BUILD_FAILED.name(), report.getBootVerdict());
+    assertFalse(report.getBootHealthy());
     verify(repository).save(report);
     var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
     verify(events).publishEvent(eventCaptor.capture());
     ValidationReportEvidenceEvent event = eventCaptor.getValue();
-    assertEquals(96, event.verifiedScore());
+    assertEquals(69, event.verifiedScore());
     assertEquals(96, event.rubricScore());
     VerificationEvidenceDTO tests =
         event.verificationLedger().stream()
@@ -82,6 +89,12 @@ class ValidationReportServiceConcreteRescoreTest {
             .findFirst()
             .orElseThrow();
     assertEquals("8/10 tests passed.", tests.summary());
+    VerificationEvidenceDTO boot =
+        event.verificationLedger().stream()
+            .filter(e -> "boot-verification".equals(e.id()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("FAIL", boot.status());
   }
 
   @Test

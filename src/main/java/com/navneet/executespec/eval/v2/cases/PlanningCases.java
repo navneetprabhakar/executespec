@@ -197,10 +197,7 @@ public final class PlanningCases {
           for (int i = 0; i < tasks.size(); i++) {
             JsonNode t = tasks.get(i);
             boolean validTaskIdentity =
-                t != null
-                    && t.isObject()
-                    && nonBlankText(t, "id")
-                    && nonBlankText(t, "title");
+                t != null && t.isObject() && nonBlankText(t, "id") && nonBlankText(t, "title");
             if (!validTaskIdentity) {
               allHaveIdTitle = false;
             }

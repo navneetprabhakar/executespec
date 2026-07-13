@@ -279,6 +279,14 @@ public class ValidationReportService {
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
+              .bootVerdict(
+                  input.bootVerification() == null
+                      ? null
+                      : input.bootVerification().verdict().name())
+              .bootHealthy(
+                  input.bootVerification() == null ? null : input.bootVerification().healthy())
+              .bootReason(
+                  input.bootVerification() == null ? null : input.bootVerification().reason())
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -431,7 +439,7 @@ public class ValidationReportService {
             accuracy.endpointCoverage(),
             concreteCoverageLevel,
             report.getFilesGenerated(),
-            null));
+            bootVerification(report)));
     report.setRubricScore(
         computeRubricScore(
             report.getFinalBuildPassed(),
@@ -921,6 +929,28 @@ public class ValidationReportService {
             build == null ? null : build ? 1 : 0,
             build == null ? null : 1));
 
+    if (entity.getBootVerdict() != null) {
+      String verdict = entity.getBootVerdict();
+      String status =
+          "HEALTHY".equals(verdict) ? "PASS" : "UNHEALTHY".equals(verdict) ? "WARN" : "FAIL";
+      out.add(
+          evidence(
+              "boot-verification",
+              "Application boot verification",
+              "BUILD",
+              status,
+              "DETERMINISTIC",
+              "HIGH",
+              "The generated application built, started, and was probed by the configured health"
+                  + " check.",
+              (entity.getBootReason() == null || entity.getBootReason().isBlank())
+                  ? "Boot verdict: " + verdict + "."
+                  : "Boot verdict: " + verdict + "; " + entity.getBootReason(),
+              "validation_report.boot_verdict",
+              Boolean.TRUE.equals(entity.getBootHealthy()) ? 1 : 0,
+              1));
+    }
+
     Integer testsPassed = entity.getTestsPassed();
     Integer testsTotal = entity.getTestsTotal();
     int total = testsTotal == null ? 0 : testsTotal;
@@ -996,23 +1026,26 @@ public class ValidationReportService {
             accuracy.score(),
             accuracy.score() == null ? null : 100));
 
-    if (accuracy.endpointCoverage() != null) {
-      out.add(
-          evidence(
-              "endpoint-coverage",
-              "Endpoint coverage",
-              "ENDPOINTS",
-              accuracy.endpointCoverage() >= 95
-                  ? "PASS"
-                  : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
-              "LLM_ASSISTED_COUNT",
-              "MEDIUM",
-              "Expected API endpoints are present in the generated implementation.",
-              "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
-              "validation_report.accuracy_json.endpointCoverage",
-              accuracy.endpointCoverage(),
-              100));
-    }
+    out.add(
+        evidence(
+            "endpoint-coverage",
+            "Endpoint coverage",
+            "ENDPOINTS",
+            accuracy.endpointCoverage() == null
+                ? "UNKNOWN"
+                : accuracy.endpointCoverage() >= 95
+                    ? "PASS"
+                    : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
+            "LLM_ASSISTED_COUNT",
+            accuracy.endpointCoverage() == null ? "LOW" : "MEDIUM",
+            "Expected API endpoints are present in the generated implementation.",
+            accuracy.endpointCoverage() == null
+                ? "No endpoint coverage evidence was captured; the rubric's N/A policy may still"
+                    + " award this dimension."
+                : "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
+            "validation_report.accuracy_json.endpointCoverage",
+            accuracy.endpointCoverage(),
+            accuracy.endpointCoverage() == null ? null : 100));
 
     if (accuracy.testCoverageLevel() != null) {
       String level = accuracy.testCoverageLevel();
@@ -1182,6 +1215,7 @@ public class ValidationReportService {
 
   private ValidationReportShareDTO toShareDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
+    List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -1198,7 +1232,30 @@ public class ValidationReportService {
         issues,
         checksPassed,
         entity.getReportMarkdown(),
-        entity.getCreatedAt());
+        entity.getCreatedAt(),
+        entity.getVerifiedScore(),
+        entity.getRubricScore(),
+        entity.getFinalBuildPassed(),
+        entity.getTestsPassed(),
+        entity.getTestsTotal(),
+        entity.getReviewerVerdict(),
+        verificationLedger);
+  }
+
+  /** Rehydrate the deterministic boot signal for a later concrete-test rescore. */
+  private static BootVerification bootVerification(ValidationReport report) {
+    if (report == null || report.getBootVerdict() == null) return null;
+    try {
+      return new BootVerification(
+          BootHealthEvaluator.Verdict.valueOf(report.getBootVerdict()),
+          Boolean.TRUE.equals(report.getBootHealthy()),
+          report.getBootReason());
+    } catch (IllegalArgumentException ex) {
+      // Never let malformed historical evidence break report rescoring. The compile signal remains
+      // the safe fallback, and the malformed value is still visible in the persisted row for
+      // repair.
+      return null;
+    }
   }
 
   private List<ReportIssueDTO> parseIssues(String json) {
