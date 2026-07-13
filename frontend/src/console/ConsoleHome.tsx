@@ -80,6 +80,7 @@ export default function ConsoleHome() {
   const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
   const [orgInvites, setOrgInvites] = useState<api.OrgInvitation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   // C1.2 (reframe §7 item 3) — PRs with inbound review comments belong in
   // "Needs your attention". The API is per-run only, so this is bounded:
   // pending-counts for the ≤8 recent runs that actually have a PR, fetched
@@ -87,6 +88,7 @@ export default function ConsoleHome() {
   const [prPending, setPrPending] = useState<Record<string, number>>({});
 
   const load = useCallback(() => {
+    setLoadError(false);
     api
       .getRuns({size: 25})
       .then((r) => {
@@ -106,28 +108,37 @@ export default function ConsoleHome() {
           setPrPending(next);
         });
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
     api
       .getRuns({status: 'AWAITING_APPROVAL', size: 25})
       .then((r) => setGate(r.content ?? []))
-      .catch(() => {});
+      .catch(() => setLoadError(true));
     api
       .getProjects()
       .then(setProjects)
-      .catch(() => {});
+      .catch(() => setLoadError(true));
     api
       .getMyOrg()
       .then(setOrg)
-      .catch(() => setOrg(null));
+      .catch(() => {
+        setOrg(null);
+        setLoadError(true);
+      });
     api
       .getOrgMembers()
       .then(setMembers)
-      .catch(() => setMembers([]));
+      .catch(() => {
+        setMembers([]);
+        setLoadError(true);
+      });
     api
       .getOrgInvitations()
       .then(setOrgInvites)
-      .catch(() => setOrgInvites([]));
+      .catch(() => {
+        setOrgInvites([]);
+        setLoadError(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -240,6 +251,15 @@ export default function ConsoleHome() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className='con-api-error con-home-api-error' role='alert'>
+          <span>Some workspace data could not be loaded.</span>
+          <button type='button' className='con-api-error-retry' onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
 
       <section className='con-product-strip' aria-label='Product overview'>
         <button type='button' className='con-product-card' onClick={() => navigate('/compose')}>

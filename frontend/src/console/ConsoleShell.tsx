@@ -61,6 +61,11 @@ export default function ConsoleShell() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const tier = useAuthStore(selectNormalizedTier);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [apiError, setApiError] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('es:nav:collapsed') === '1',
   );
@@ -82,20 +87,20 @@ export default function ConsoleShell() {
     api
       .getRuns({size: 6})
       .then((r) => setRuns(r.content ?? []))
-      .catch(() => {});
+      .catch(() => setApiError(true));
   }, []);
   // Unread notification count for the top-bar bell (founder report #2) — same cadence.
   const refreshUnread = useCallback(() => {
     api
       .getUnreadCount()
       .then((r) => setUnread(r.count ?? 0))
-      .catch(() => {});
+      .catch(() => setApiError(true));
   }, []);
   const refreshProjects = useCallback(() => {
     api
       .getProjects()
       .then((items) => setProjects(items.filter((p) => !p.archivedAt)))
-      .catch(() => {});
+      .catch(() => setApiError(true));
   }, []);
   useEffect(() => {
     refreshRuns();
@@ -129,6 +134,68 @@ export default function ConsoleShell() {
   // Account dropdown (C1.3) — closes on navigation.
   const [accountOpen, setAccountOpen] = useState(false);
   useEffect(() => setAccountOpen(false), [location.pathname]);
+
+  // The mobile drawer is fixed below both the announcement and top bar. Keep
+  // the offset measured instead of guessing a banner height (the message can
+  // wrap differently on narrow screens). Focus is returned to the trigger and
+  // keyboard users cannot tab behind the open drawer.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const updateBannerHeight = () => {
+      const noticeHeight = Array.from(
+        shell.querySelectorAll<HTMLElement>('.con-banner, .con-api-error'),
+      ).reduce((height, notice) => height + notice.offsetHeight, 0);
+      shell.style.setProperty('--con-banner-height', `${noticeHeight}px`);
+    };
+    updateBannerHeight();
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateBannerHeight);
+    shell.querySelectorAll<HTMLElement>('.con-banner, .con-api-error').forEach((notice) => {
+      resizeObserver?.observe(notice);
+    });
+    // Dismissal removes the banner node, which does not produce a resize on
+    // the removed element. Observe the shell tree so the offset resets to zero
+    // immediately after dismissal as well.
+    const mutationObserver =
+      typeof MutationObserver === 'undefined' ? null : new MutationObserver(updateBannerHeight);
+    mutationObserver?.observe(shell, {childList: true, subtree: true});
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDrawerOpen(false);
+        menuButtonRef.current?.focus();
+        return;
+      }
+      if (event.key !== 'Tab' || !drawerRef.current) return;
+      const focusable = Array.from(
+        drawerRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    requestAnimationFrame(() => drawerCloseRef.current?.focus());
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
 
   const path = location.pathname;
   const workFocusedPath =
@@ -236,6 +303,7 @@ export default function ConsoleShell() {
 
   return (
     <div
+      ref={shellRef}
       className={shellClasses}
       data-surface={path.startsWith('/agent') ? 'transcript' : 'console'}
     >
@@ -254,6 +322,7 @@ export default function ConsoleShell() {
         <button
           type='button'
           className='con-icon con-only-mobile'
+          ref={menuButtonRef}
           onClick={() => setDrawerOpen(true)}
           title='Open navigation menu'
           aria-label='Open navigation menu'
@@ -350,9 +419,51 @@ export default function ConsoleShell() {
         </div>
       </header>
 
+      {apiError && (
+        <div className='con-api-error' role='alert'>
+          <span>Workspace data is temporarily unavailable.</span>
+          <button
+            type='button'
+            className='con-api-error-retry'
+            onClick={() => {
+              setApiError(false);
+              refreshRuns();
+              refreshUnread();
+              refreshProjects();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className='con-body'>
-        {drawerOpen && <div className='con-backdrop' onClick={() => setDrawerOpen(false)} />}
-        <nav className={`con-side${drawerOpen ? ' drawer-open' : ''}`}>
+        {drawerOpen && (
+          <div
+            className='con-backdrop'
+            onClick={() => {
+              setDrawerOpen(false);
+              menuButtonRef.current?.focus();
+            }}
+            aria-hidden='true'
+          />
+        )}
+        <nav
+          ref={drawerRef}
+          className={`con-side${drawerOpen ? ' drawer-open' : ''}`}
+          aria-label='Primary navigation'
+        >
+          <button
+            type='button'
+            ref={drawerCloseRef}
+            className='con-drawer-close con-only-mobile'
+            onClick={() => {
+              setDrawerOpen(false);
+              menuButtonRef.current?.focus();
+            }}
+          >
+            Close navigation
+          </button>
           <div className='con-side-brand'>
             <img src={MERGE_RAIL_MARK} alt='' aria-hidden='true' />
             <span>ExecuteSpec</span>
