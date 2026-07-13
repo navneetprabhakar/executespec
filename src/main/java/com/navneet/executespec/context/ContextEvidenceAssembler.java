@@ -84,11 +84,12 @@ public class ContextEvidenceAssembler {
     for (int i = 0; i < values.size(); i++) {
       String value = values.get(i);
       if (value == null || value.isBlank()) continue;
-      String bounded = value.strip();
+      // Canonicalize before deduplication. ContextEvidenceBundleWriter applies the same cap
+      // while serializing; deduping the uncapped values here would spend planner budget twice on
+      // entries that collapse to one persisted value (for example two long search hits sharing
+      // their first 1,000 characters).
+      String bounded = canonicalize(value);
       if (!seen.add(bounded)) continue;
-      if (bounded.length() > MAX_ITEM_CHARS) {
-        bounded = bounded.substring(0, MAX_ITEM_CHARS) + "\n[truncated]";
-      }
       out.add(
           new ContextPlanner.Item(
               prefix + ":" + i,
@@ -114,8 +115,19 @@ public class ContextEvidenceAssembler {
         .map(Integer::parseInt)
         .sorted()
         .filter(i -> i >= 0 && i < values.size())
-        .map(values::get)
+        // Return the exact bounded representation charged by the planner and persisted by the
+        // bundle writer. Returning raw values here would make the selected evidence appear larger
+        // than the budget that admitted it.
+        .map(i -> canonicalize(values.get(i)))
         .toList();
+  }
+
+  static String canonicalize(String value) {
+    if (value == null) return "";
+    String stripped = value.strip();
+    return stripped.length() <= MAX_ITEM_CHARS
+        ? stripped
+        : stripped.substring(0, MAX_ITEM_CHARS) + "\n[truncated]";
   }
 
   public record Selection(
