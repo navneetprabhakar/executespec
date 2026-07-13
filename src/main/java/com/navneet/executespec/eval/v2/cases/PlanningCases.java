@@ -155,7 +155,8 @@ public final class PlanningCases {
         //   +15  projectType present
         //   +25  tasks present + in the expected count band
         //   +10  every task has id + title
-        //   +10  at least one task carries a meetsRequirements array
+        //   +10  every task carries a non-empty meetsRequirements array
+        //   +5   some (but not every) task carries a non-empty meetsRequirements array
         int score = 0;
         java.util.List<String> notes = new java.util.ArrayList<>();
         if (args.has("planTitle") && !args.get("planTitle").asText("").isBlank()) {
@@ -185,7 +186,7 @@ public final class PlanningCases {
             notes.add("tasks=" + count + " (out of band " + minTasks + "-" + maxTasks + ")");
           }
           boolean allHaveIdTitle = true;
-          boolean anyMeetsReq = false;
+          int tasksWithMeetsReq = 0;
           for (int i = 0; i < tasks.size(); i++) {
             JsonNode t = tasks.get(i);
             if (!t.has("id") || !t.has("title")) {
@@ -194,13 +195,19 @@ public final class PlanningCases {
             if (t.has("meetsRequirements")
                 && t.get("meetsRequirements").isArray()
                 && t.get("meetsRequirements").size() > 0) {
-              anyMeetsReq = true;
+              tasksWithMeetsReq++;
             }
           }
           if (allHaveIdTitle) score += 10;
           else notes.add("some tasks missing id/title");
-          if (anyMeetsReq) score += 10;
-          else notes.add("no task cites meetsRequirements");
+          if (tasksWithMeetsReq == tasks.size()) {
+            score += 10;
+          } else if (tasksWithMeetsReq > 0) {
+            score += 5;
+            notes.add("requirement coverage=" + tasksWithMeetsReq + "/" + tasks.size());
+          } else {
+            notes.add("no task cites meetsRequirements");
+          }
         } else {
           notes.add("no tasks array");
         }
