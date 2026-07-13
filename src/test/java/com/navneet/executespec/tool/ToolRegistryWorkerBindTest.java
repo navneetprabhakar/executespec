@@ -348,13 +348,15 @@ class ToolRegistryWorkerBindTest {
     var profile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
     profile.setOptionalTools(List.of("runWorkspaceTests"));
     org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic")).thenReturn(profile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
 
     ToolRegistry toolRegistry =
         new ToolRegistry(
             List.of(fakeTool("readFile"), workspaceRunTests(false)),
             new ObjectMapper(),
             null,
-            null,
+            featureFlags,
             registry);
 
     List<String> withProfile =
@@ -387,13 +389,15 @@ class ToolRegistryWorkerBindTest {
         .thenReturn(providerProfile);
     org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic", "claude-sonnet-5"))
         .thenReturn(modelProfile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
 
     ToolRegistry toolRegistry =
         new ToolRegistry(
             List.of(fakeTool("readFile"), workspaceRunTests(false), verifyBoot(false)),
             new ObjectMapper(),
             null,
-            null,
+            featureFlags,
             registry);
 
     List<String> names =
@@ -403,5 +407,29 @@ class ToolRegistryWorkerBindTest {
     org.assertj.core.api.Assertions.assertThat(names)
         .containsExactlyInAnyOrder("readFile", "verifyBoot")
         .doesNotContain("runWorkspaceTests");
+  }
+
+  @Test
+  void profileOptionalToolsStayDisabledWhenEvidenceGateIsOff() {
+    var registry = org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class);
+    var profile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    profile.setOptionalTools(List.of("runWorkspaceTests"));
+    when(registry.capabilityProfileFor("anthropic")).thenReturn(profile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(false);
+
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(false)),
+            new ObjectMapper(),
+            null,
+            featureFlags,
+            registry);
+
+    org.assertj.core.api.Assertions.assertThat(
+            toolRegistry.bindForWorker(ctx(), "anthropic").stream()
+                .map(t -> t.getToolDefinition().name())
+                .toList())
+        .containsExactly("readFile");
   }
 }

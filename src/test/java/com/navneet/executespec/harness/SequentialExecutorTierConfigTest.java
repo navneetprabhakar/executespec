@@ -65,6 +65,16 @@ class SequentialExecutorTierConfigTest {
 
   private SequentialExecutor newExecutor(
       ModelResolver modelResolver, ModelMatrixProperties matrixProperties) {
+    return newExecutor(
+        modelResolver,
+        matrixProperties,
+        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class));
+  }
+
+  private SequentialExecutor newExecutor(
+      ModelResolver modelResolver,
+      ModelMatrixProperties matrixProperties,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags) {
     return new SequentialExecutor(
         mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(BuildProjectTool.class),
@@ -76,7 +86,7 @@ class SequentialExecutorTierConfigTest {
         matrixProperties,
         mock(RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
-        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+        featureFlags,
         mock(ContextStore.class),
         mock(RunCostTracker.class),
         mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
@@ -358,10 +368,13 @@ class SequentialExecutorTierConfigTest {
     ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
     org.mockito.Mockito.when(matrix.getCapabilityProfiles())
         .thenReturn(Map.of("anthropic/claude-sonnet-profiled", profile));
+    var featureFlags = mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(featureFlags.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES))
+        .thenReturn(true);
 
     Cfg cfg =
         invoke(
-            newExecutor(modelResolver, matrix),
+            newExecutor(modelResolver, matrix, featureFlags),
             PlannedTask.Complexity.LOW,
             "anthropic",
             "fallback",
@@ -369,6 +382,30 @@ class SequentialExecutorTierConfigTest {
 
     assertEquals(22, cfg.stagnationWarnAfter);
     assertEquals(47, cfg.stagnationForceAfter);
+  }
+
+  @Test
+  void model_capability_profile_is_ignored_when_evidence_gate_is_off() throws Exception {
+    ModelMatrixProperties.CapabilityProfile profile = new ModelMatrixProperties.CapabilityProfile();
+    profile.setStagnationWarnAfter(22);
+    profile.setStagnationForceAfter(47);
+    ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
+    org.mockito.Mockito.when(matrix.getCapabilityProfiles())
+        .thenReturn(Map.of("anthropic", profile));
+    var featureFlags = mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(featureFlags.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES))
+        .thenReturn(false);
+
+    Cfg cfg =
+        invoke(
+            newExecutorWithTierResolvingModelWithMatrix(matrix, featureFlags),
+            PlannedTask.Complexity.MEDIUM,
+            "anthropic",
+            "fallback",
+            false);
+
+    assertEquals(16, cfg.stagnationWarnAfter);
+    assertEquals(28, cfg.stagnationForceAfter);
   }
 
   @Test
@@ -394,6 +431,13 @@ class SequentialExecutorTierConfigTest {
 
   private SequentialExecutor newExecutorWithTierResolvingModelWithMatrix(
       ModelMatrixProperties matrix) {
+    return newExecutorWithTierResolvingModelWithMatrix(
+        matrix, mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class));
+  }
+
+  private SequentialExecutor newExecutorWithTierResolvingModelWithMatrix(
+      ModelMatrixProperties matrix,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags) {
     ModelResolver modelResolver = mock(ModelResolver.class);
     lenient()
         .when(modelResolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
@@ -408,6 +452,6 @@ class SequentialExecutorTierConfigTest {
                   .model("profiled")
                   .build();
             });
-    return newExecutor(modelResolver, matrix);
+    return newExecutor(modelResolver, matrix, featureFlags);
   }
 }

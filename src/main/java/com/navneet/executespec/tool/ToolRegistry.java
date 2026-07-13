@@ -36,6 +36,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ToolRegistry {
 
+  /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
+  public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
+
   private final List<Tool> allTools;
   private final ObjectMapper objectMapper;
 
@@ -241,7 +244,8 @@ public class ToolRegistry {
   }
 
   private java.util.Set<String> profileOptionalTools(String provider, String model) {
-    if (provider == null || modelRegistry == null) return java.util.Set.of();
+    if (provider == null || modelRegistry == null || !capabilityProfilesEnabled())
+      return java.util.Set.of();
     try {
       var profile =
           model == null
@@ -251,6 +255,15 @@ public class ToolRegistry {
       return new java.util.HashSet<>(profile.getOptionalTools());
     } catch (Exception e) {
       return java.util.Set.of();
+    }
+  }
+
+  private boolean capabilityProfilesEnabled() {
+    try {
+      return featureFlagService != null && featureFlagService.isEnabled(FLAG_CAPABILITY_PROFILES);
+    } catch (RuntimeException e) {
+      log.warn("Capability-profile flag lookup failed; optional tools remain disabled", e);
+      return false;
     }
   }
 
