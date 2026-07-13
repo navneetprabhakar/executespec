@@ -803,6 +803,7 @@ function SandboxRunCard({
   run,
   liveCostUsd,
   streamStatus,
+  unavailable,
   busy,
   onOpen,
   onStop,
@@ -810,6 +811,7 @@ function SandboxRunCard({
   run: api.RunDetail;
   liveCostUsd: number | null;
   streamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  unavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
@@ -828,15 +830,19 @@ function SandboxRunCard({
     run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100 · internal`;
   const provider = run.aiProvider || run.workerModel || 'default route';
   const streamLabel =
-    streamStatus === 'RECONNECTING'
-      ? 'Reconnecting live events'
-      : streamStatus === 'CONNECTING'
-        ? 'Connecting live events'
-        : streamStatus === 'CONNECTED'
-          ? 'Live events connected'
-          : streamStatus === 'CLOSED' && !terminal
-            ? 'Snapshot only · live events unavailable'
-            : null;
+    unavailable === 'RUN_NOT_FOUND'
+      ? 'Run no longer available'
+      : unavailable === 'AUTH_REQUIRED'
+        ? 'Sign in again to view this run'
+        : streamStatus === 'RECONNECTING'
+          ? 'Reconnecting live events'
+          : streamStatus === 'CONNECTING'
+            ? 'Connecting live events'
+            : streamStatus === 'CONNECTED'
+              ? 'Live events connected'
+              : streamStatus === 'CLOSED' && !terminal
+                ? 'Snapshot only · live events unavailable'
+                : null;
   const prUrl = run.scmPrUrl || run.githubPrUrl;
   const terminalLabel = failed
     ? 'Open failure evidence'
@@ -849,6 +855,7 @@ function SandboxRunCard({
       data-agent-region='run-card'
       data-run-status={run.status || 'UNKNOWN'}
       data-stream-status={streamStatus || 'IDLE'}
+      data-run-unavailable={unavailable || undefined}
     >
       <div className='agent-runcard-head'>
         <RunsIcon size={16} />
@@ -1519,6 +1526,7 @@ export function AgentConversation({
   runCard,
   runCost,
   runStreamStatus,
+  runUnavailable,
   routingState,
   hasNewActivity = false,
   input,
@@ -1548,6 +1556,7 @@ export function AgentConversation({
   runCard: api.RunDetail | null;
   runCost: number | null;
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
   routingState?: RoutingState;
   hasNewActivity?: boolean;
   input: string;
@@ -1580,11 +1589,15 @@ export function AgentConversation({
         <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {runCard
             ? `Remote sandbox ${runPhaseLabel(runCard.status)}${
-                runStreamStatus === 'RECONNECTING'
-                  ? '. Reconnecting live events.'
-                  : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
-                    ? '. Live events unavailable; showing the latest snapshot.'
-                    : ''
+                runUnavailable === 'RUN_NOT_FOUND'
+                  ? '. Run no longer available.'
+                  : runUnavailable === 'AUTH_REQUIRED'
+                    ? '. Sign in again to view this run.'
+                    : runStreamStatus === 'RECONNECTING'
+                      ? '. Reconnecting live events.'
+                      : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
+                        ? '. Live events unavailable; showing the latest snapshot.'
+                        : ''
               }`
             : isBusy
               ? streamText
@@ -1629,6 +1642,7 @@ export function AgentConversation({
               run={runCard}
               liveCostUsd={runCost}
               streamStatus={runStreamStatus}
+              unavailable={runUnavailable}
               busy={isBusy}
               onOpen={onOpenRun}
               onStop={onStopRun}
