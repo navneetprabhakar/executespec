@@ -33,7 +33,11 @@ export function scoreTrustLabel(
 export function ScoreBadge({score, verificationLedger, compact = false}: ScoreBadgeProps) {
   const hasLedger = !!verificationLedger?.length;
   const trust = scoreTrustLabel(verificationLedger);
-  const label = hasLedger ? `${score}` : compact ? `${score} · ?` : `${score} · unverified`;
+  const label = hasLedger
+    ? `${score} / 100`
+    : compact
+      ? `${score} · ?`
+      : `${score} / 100 · unverified`;
   const title = hasLedger
     ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
     : 'Internal score only. Verification evidence is not loaded in this run list.';

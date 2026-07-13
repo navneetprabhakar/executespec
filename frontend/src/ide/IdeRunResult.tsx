@@ -22,6 +22,7 @@ import {
   ResizeHandle,
   type DiffLine,
 } from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {
   confidenceColor,
   evidenceKind,
@@ -870,10 +871,7 @@ export default function IdeRunResult() {
             <div style={{display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 18px'}}>
               <IdeBadge kind={v.kind}>{v.label}</IdeBadge>
               {score != null && (
-                <span style={{fontSize: 20, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
-                  {score}
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}> / 100</span>
-                </span>
+                <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
               <span style={{flex: 1}} />
               {run?.statusReason && humanStatusReason(run.statusReason) && (
