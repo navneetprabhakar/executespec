@@ -27,6 +27,15 @@ test('prompt manifest is generated and hashes all prompt resources', () => {
     assert.ok(entry.caller && entry.role && entry.mode && entry.profile);
     assert.ok(entry.tools.length > 0);
   }
+  const worker = manifest.runtimeCoverage.find((entry) => entry.id === 'worker-build');
+  assert.deepEqual(worker.projectTypes, [
+    'all', 'fullstack', 'go', 'java', 'java-spring-boot', 'node-backend', 'node-frontend',
+    'python', 'react-native-expo', 'rust', 'spring-boot', 'static-html',
+  ]);
+  assert.deepEqual(worker.scaffolds, [
+    'all', 'fullstack', 'go', 'java', 'node-backend', 'node-frontend', 'python',
+    'react-native-expo', 'rust', 'spring-boot', 'static-html',
+  ]);
 });
 
 test('prompt manifest rejects a deleted base or role fragment', () => {
@@ -72,4 +81,17 @@ test('runtime coverage rejects a missing dynamic provider fragment, scaffold, or
   assert.ok(errors.some((error) => error.includes('missing runtime provider fragment')));
   assert.ok(errors.some((error) => error.includes('missing runtime project fragment')));
   assert.ok(errors.some((error) => error.includes('missing runtime scaffold')));
+  assert.ok(errors.some((error) => error.includes('missing runtime projectType scaffold')) === false);
+});
+
+test('runtime coverage rejects an alias whose normalized scaffold was deleted', () => {
+  const errors = validatePromptManifest({
+    prompts: [],
+    runtimeCoverage: [{
+      id: 'fixture', caller: 'fixture.caller', sourceFile: 'src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java',
+      sourceTokens: ['buildSystemPrompt'], role: 'WORKER', mode: 'BUILD', profile: 'fixture', tools: ['readFile'],
+      projectTypes: ['java-spring-boot'], scaffolds: [],
+    }],
+  }, root);
+  assert.deepEqual(errors, []);
 });

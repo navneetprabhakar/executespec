@@ -935,22 +935,31 @@
         "build"
       ],
       "projectTypes": [
+        "all",
         "fullstack",
+        "go",
+        "java",
+        "java-spring-boot",
         "node-backend",
         "node-frontend",
-        "spring-boot",
         "python",
-        "go",
-        "rust"
+        "react-native-expo",
+        "rust",
+        "spring-boot",
+        "static-html"
       ],
       "scaffolds": [
+        "all",
         "fullstack",
+        "go",
+        "java",
         "node-backend",
         "node-frontend",
-        "spring-boot",
         "python",
-        "go",
-        "rust"
+        "react-native-expo",
+        "rust",
+        "spring-boot",
+        "static-html"
       ],
       "fragments": [
         "api-url-rules",

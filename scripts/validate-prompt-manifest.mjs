@@ -91,6 +91,18 @@ export function validatePromptManifest(manifest, repositoryRoot = root) {
         errors.push(`missing runtime scaffold: ${coverage.id} -> ${relative}`);
       }
     }
+    // projectTypes are the untrusted/dynamic keys that reach the Java resolver.  Validate their
+    // normalized scaffold target here as well, including the planner's java-spring-boot alias.
+    for (const projectType of coverage.projectTypes ?? []) {
+      const normalized = String(projectType).trim().toLowerCase().replaceAll('_', '-');
+      const scaffold = normalized === 'java-spring-boot' || normalized === 'springboot'
+        ? 'spring-boot'
+        : normalized;
+      const relative = `src/main/resources/prompts/scaffolds/${scaffold}.md`;
+      if (!fs.existsSync(path.join(repositoryRoot, relative))) {
+        errors.push(`missing runtime projectType scaffold: ${coverage.id} -> ${projectType} -> ${relative}`);
+      }
+    }
   }
   return errors;
 }

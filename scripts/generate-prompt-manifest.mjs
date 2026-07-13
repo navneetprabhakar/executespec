@@ -36,8 +36,11 @@ const runtimeCoverage = [
     tools: ['readFile', 'writeFile', 'editFile', 'listFiles', 'searchFiles', 'shell', 'buildProject', 'completeTask'],
     providers: ['anthropic', 'deepseek', 'fireworks', 'gemini', 'openai', 'openrouter'],
     providerModes: ['build'],
-    projectTypes: ['fullstack', 'node-backend', 'node-frontend', 'spring-boot', 'python', 'go', 'rust'],
-    scaffolds: ['fullstack', 'node-backend', 'node-frontend', 'spring-boot', 'python', 'go', 'rust'],
+    // Keep every projectType accepted by ScaffoldController and the planner alias normalizer in
+    // this contract.  A dynamic ClassPathResource lookup otherwise turns a renamed template into
+    // a silent empty prompt block.
+    projectTypes: ['all', 'fullstack', 'go', 'java', 'java-spring-boot', 'node-backend', 'node-frontend', 'python', 'react-native-expo', 'rust', 'spring-boot', 'static-html'],
+    scaffolds: ['all', 'fullstack', 'go', 'java', 'node-backend', 'node-frontend', 'python', 'react-native-expo', 'rust', 'spring-boot', 'static-html'],
     fragments: ['api-url-rules', 'backend-robustness', 'fullstack-directory', 'module-system', 'preview-defaults', 'router-isolation'],
   },
   {
