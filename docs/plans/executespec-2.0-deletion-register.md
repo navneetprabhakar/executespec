@@ -52,6 +52,7 @@ being retained under compatibility aliases.
 | CLI duplicate slash alias normalization | PARTIAL — shared typed resolver now feeds REPL and native OpenTUI; headless dispatch and the remaining route shell still need migration |
 | Dead Console CSS selectors `.con-side-mini` / `.con-nav-badge` | DONE — removed after zero non-CSS source references; unrelated legacy Signal/IDE CSS remains pending visual-contract review |
 | Stale Web accessibility guard for model overrides | DONE — guard now checks the actual `ModelPicker` `ariaLabel` prop contract; rendered accessibility remains covered by the component tests |
+| Dead ApplyService workspace git helpers | DONE — removed unused `tryGitCommit` / `runCmd` helpers after confirming all apply flows use `ScmPushService.pushApplyChanges`; no API or runtime contract changed |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
