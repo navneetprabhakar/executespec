@@ -1,15 +1,77 @@
 import {
   ApiError,
   BASE,
-  BillingOverviewData,
   PagedResponse,
-  PaymentAuditEntry,
-  PricingRow,
   TopupPackageAdmin,
   authHeader,
   parseErrorMessage,
   req,
 } from './core';
+
+export interface PricingRow {
+  provider: string;
+  model: string;
+  inputCostPer1m: number;
+  cachedInputCostPer1m: number;
+  outputCostPer1m: number;
+  notes: string | null;
+  /** Chain tier from the YAML model matrix. */
+  chainTier: string | null;
+  /** Display label from the YAML model matrix. */
+  displayLabel: string | null;
+  updatedAt: string | null;
+}
+
+export interface UsageMetrics {
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+  partialRuns: number;
+  runsByDay: {date: string; count: number; successRate: number}[];
+  runsByProject: Record<string, number>;
+  avgTimeToCompleteSeconds: number;
+  totalCost: number;
+  costByModel: Record<string, number>;
+}
+
+export interface BillingOverviewData {
+  billingEntityType: string;
+  billingEntityName: string;
+  currentPlan: string;
+  subscriptionStatus: string;
+  nextBillingDate: string | null;
+  periodUsage: number;
+  remainingRuns: number;
+  runLimit: number;
+  gateway: string | null;
+  topupCredits: number;
+  recentInvoices: {
+    invoiceNumber: string;
+    amount: number;
+    currency: string;
+    status: string;
+    issuedAt: string;
+  }[];
+}
+
+export interface PaymentAuditEntry {
+  id: string;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  oldTier: string | null;
+  newTier: string | null;
+  performedBy: string | null;
+  notes: string | null;
+  gatewayProvider: string | null;
+  gatewayEventId: string | null;
+  gatewayPaymentId: string | null;
+  currency: string | null;
+  amountMinor: number | null;
+  userId: string | null;
+  orgId: string | null;
+  createdAt: string;
+}
 
 /**
  * Customer-facing billing plan returned by GET /api/billing/plans.

@@ -59,6 +59,8 @@ being retained under compatibility aliases.
 | Raw billing payment-history fetch in `IdeBilling` | DONE — migrated to typed `getPaymentHistory` in the canonical billing API module, preserving best-effort empty-state behavior |
 | Raw project-settings PATCH in `IdeProjectSettings` | DONE — migrated to typed `updateProjectSettings` with shared auth/refresh transport and full payload coverage |
 | Raw GDPR export request in `IdeMore` | DONE — migrated to typed `downloadUserDataExport` while preserving blob-download behavior; DSAR/erasure and multipart paths remain contract-specific |
+| Billing DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved cohesive pricing/usage/payment types to `billing.ts`; type re-exports preserve the stable `core` import surface |
+| Post-review quality policy embedded in `RunOrchestrator` | DONE — extracted pure reviewer/validation quality decisions into `PostReviewQualityPolicy`; characterization tests pin the boundary |
 | CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
 | CLI split-footer implementation | After OpenTUI transcript vertical slice |
 | `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
