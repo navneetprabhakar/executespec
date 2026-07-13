@@ -151,6 +151,22 @@ class SequentialExecutorInitialRoutingTest {
   }
 
   @Test
+  void strictProviderModeBypassesInitialSelectionEvenWhenEnabled() {
+    when(featureFlags.isEnabled(SequentialExecutor.FLAG_INITIAL_ROUTING)).thenReturn(true);
+    System.setProperty("executespec.strict-provider", "true");
+    try {
+      InitialRoutingDecision result =
+          executor.initialRouteFor(task, request, "openai", "current", true);
+
+      assertThat(result.routeLabel()).isEqualTo("openai/current");
+      assertThat(result.reasons()).anyMatch(reason -> reason.contains("strict provider mode"));
+      verify(initialRouting, never()).decide(any(), any(), any());
+    } finally {
+      System.clearProperty("executespec.strict-provider");
+    }
+  }
+
+  @Test
   void noObservedEvidenceKeepsCurrentRoute() {
     when(featureFlags.isEnabled(SequentialExecutor.FLAG_INITIAL_ROUTING)).thenReturn(true);
     InitialRoutingDecision unchanged =
