@@ -104,6 +104,13 @@ public class LlmRouter {
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
+  /** Model-specific Anthropic clients whose defaults never include deprecated temperature. */
+  private final Cache<String, AnthropicChatModel> anthropicDeprecatedModelCache =
+      Caffeine.newBuilder().maximumSize(256).expireAfterAccess(Duration.ofHours(1)).build();
+
+  @Value("${spring.ai.anthropic.api-key:}")
+  private String platformAnthropicApiKey;
+
   /**
    * Provider-transport kill switch. Maven test forks force this off; live tests must opt in
    * explicitly after reserving provider budget. Initialized true so constructor-only unit tests
@@ -658,10 +665,15 @@ public class LlmRouter {
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
+    boolean deprecatedTemperatureModel =
+        ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
+            || AnthropicModelOptions.shouldOmitTemperature(r.model());
     AnthropicChatModel model =
-        (apiKey != null && !apiKey.isBlank())
-            ? perKeyAnthropicModel(apiKey)
-            : anthropicModelProvider.getIfAvailable();
+        deprecatedTemperatureModel
+            ? modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), apiKey)
+            : ((apiKey != null && !apiKey.isBlank())
+                ? perKeyAnthropicModel(apiKey)
+                : anthropicModelProvider.getIfAvailable());
     if (model == null) throw new IllegalStateException("Anthropic model not configured");
     // RL-2026-05-059 — FORCED tool-choice salvage. Spring AI's AnthropicChatOptions can't set
     // tool_choice, so when the WorkerAgent Lever-B salvage requests it (toolChoice="required"),
@@ -706,9 +718,7 @@ public class LlmRouter {
                 .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
                 .messageTypeMinContentLength(MessageType.TOOL, 512)
                 .build();
-    boolean dropTemperature =
-        ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
-            || AnthropicModelOptions.shouldOmitTemperature(r.model());
+    boolean dropTemperature = deprecatedTemperatureModel;
     var b =
         AnthropicChatOptions.builder()
             .model(r.model())
@@ -726,6 +736,9 @@ public class LlmRouter {
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      AnthropicChatModel retryModel =
+          modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), apiKey);
+      if (retryModel != null) model = retryModel;
       var retry =
           AnthropicChatOptions.builder()
               .model(r.model())
@@ -735,6 +748,33 @@ public class LlmRouter {
       if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
       return model.call(new Prompt(r.messages(), retry.build()));
     }
+  }
+
+  /**
+   * Build a cached Anthropic model with no temperature default. Spring AI merges model defaults
+   * into request options, so the shared Haiku-configured bean cannot safely serve Sonnet 5/Opus
+   * 4.7+ requests.
+   */
+  private AnthropicChatModel modelWithoutDeprecatedDefaults(
+      String model, Integer maxTokens, String apiKeyOverride) {
+    String key =
+        (apiKeyOverride != null && !apiKeyOverride.isBlank())
+            ? apiKeyOverride
+            : platformAnthropicApiKey;
+    if (key == null || key.isBlank()) return null;
+    String cacheKey =
+        sha256Hex(key) + ":" + model + ":" + (maxTokens == null ? "default" : maxTokens);
+    return anthropicDeprecatedModelCache.get(
+        cacheKey,
+        ignored -> {
+          AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
+          AnthropicChatOptions.Builder options = AnthropicChatOptions.builder().model(model);
+          if (maxTokens != null && maxTokens > 0) options.maxTokens(maxTokens);
+          return AnthropicChatModel.builder()
+              .anthropicApi(api)
+              .defaultOptions(options.build())
+              .build();
+        });
   }
 
   /**
