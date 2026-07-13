@@ -1299,7 +1299,12 @@ export interface WorkspaceHealthReport {
 // E2.3 — contract coverage panel (UX-preserved: drives ContractCoveragePanel.tsx
 // which reuses the WorkspaceHealthPanel layout + 4-band semantic tokens).
 export type ContractType =
-  'OPENAPI' | 'PROTO' | 'GRAPHQL' | 'JSON_SCHEMA' | 'ASYNCAPI' | 'EVENT_SCHEMA';
+  | 'OPENAPI'
+  | 'PROTO'
+  | 'GRAPHQL'
+  | 'JSON_SCHEMA'
+  | 'ASYNCAPI'
+  | 'EVENT_SCHEMA';
 export type DetectorStatus = 'SCANNED' | 'FAILED' | 'SKIPPED';
 export interface DetectorSummary {
   detector: string;
