@@ -159,6 +159,20 @@ public class ValidationReport {
   private Integer rubricScore;
 
   /**
+   * Deterministic preview/boot verification captured while generating the report (V268). These
+   * fields deliberately persist the verifier's verdict and reason instead of relying on the
+   * in-memory {@code ReportInput}; later rescoring must not silently discard the BUILD evidence.
+   */
+  @Column(name = "boot_verdict", length = 32)
+  private String bootVerdict;
+
+  @Column(name = "boot_healthy")
+  private Boolean bootHealthy;
+
+  @Column(name = "boot_reason", columnDefinition = "TEXT")
+  private String bootReason;
+
+  /**
    * Preview URL captured at report generation time. Null if preview expired or was never started.
    */
   @Column(name = "preview_url", length = 512)

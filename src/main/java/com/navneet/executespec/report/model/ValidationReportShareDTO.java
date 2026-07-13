@@ -12,4 +12,11 @@ public record ValidationReportShareDTO(
     List<ReportIssueDTO> issues,
     List<String> checksPassed,
     String reportMarkdown,
-    Instant createdAt) {}
+    Instant createdAt,
+    Integer verifiedScore,
+    Integer rubricScore,
+    Boolean finalBuildPassed,
+    Integer testsPassed,
+    Integer testsTotal,
+    String reviewerVerdict,
+    List<VerificationEvidenceDTO> verificationLedger) {}
