@@ -1,6 +1,7 @@
 package com.navneet.executespec.router;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -317,15 +318,89 @@ public class ModelProviderCandidateService {
       if (runs == null || runs.isEmpty()) {
         return List.of();
       }
-      return runs.stream()
-          .filter(run -> run != null && run.getTotalTasks() > 0)
-          .map(run -> benchmarkSignal(run, taskCategory, minSampleTasks))
-          .toList();
+      // Do not let a set of differently-sized benchmark runs distort routing by giving every run
+      // the same weight. A 5-task smoke and a 200-task evaluation must contribute in proportion
+      // to the evidence they contain. Keep below-threshold/incompatible rows as individual
+      // explanatory signals, but combine all eligible rows for a provider/model into one
+      // sample-weighted prior. This also prevents the candidate scorer from averaging stale run
+      // snapshots as if they were independent observations.
+      Map<BenchmarkAggregateKey, List<BenchmarkRun>> eligible = new LinkedHashMap<>();
+      List<ModelProviderCapabilitySignal> informational = new ArrayList<>();
+      for (BenchmarkRun run : runs) {
+        if (run == null || run.getTotalTasks() <= 0) continue;
+        // A benchmark row without a provider/model cannot influence any candidate. Ignore it
+        // rather than allowing one malformed historical row to fail closed for every route.
+        if (!hasRouteIdentity(run)) continue;
+        boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
+        boolean compatibleTaskCategory =
+            benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
+        if (enoughSample && compatibleTaskCategory) {
+          eligible
+              .computeIfAbsent(
+                  new BenchmarkAggregateKey(run.getProvider(), run.getModel(), taskCategory),
+                  ignored -> new ArrayList<>())
+              .add(run);
+        } else {
+          informational.add(benchmarkSignal(run, taskCategory, minSampleTasks));
+        }
+      }
+      List<ModelProviderCapabilitySignal> out = new ArrayList<>(informational);
+      eligible.values().stream()
+          .map(group -> benchmarkAggregateSignal(group, taskCategory, minSampleTasks))
+          .forEach(out::add);
+      return List.copyOf(out);
     } catch (RuntimeException ex) {
       log.warn("ModelProviderCandidateService benchmark signal read failed: {}", ex.getMessage());
       return List.of();
     }
   }
+
+  private static boolean hasRouteIdentity(BenchmarkRun run) {
+    return run.getProvider() != null
+        && !run.getProvider().isBlank()
+        && run.getModel() != null
+        && !run.getModel().isBlank();
+  }
+
+  private static ModelProviderCapabilitySignal benchmarkAggregateSignal(
+      List<BenchmarkRun> runs, String taskCategory, int minSampleTasks) {
+    BenchmarkRun first = runs.getFirst();
+    long totalTasks = runs.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
+    long resolvedTasks = runs.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
+    double resolvedRate = totalTasks <= 0 ? 0.0 : (resolvedTasks * 100.0) / totalTasks;
+    String reason;
+    if (runs.size() == 1) {
+      reason =
+          String.format(
+              Locale.ROOT,
+              "benchmark %s/%s resolved %d/%d tasks (used as quality prior)",
+              first.getSuite(),
+              first.getDataset(),
+              first.getResolvedTasks(),
+              first.getTotalTasks());
+    } else {
+      reason =
+          String.format(
+              Locale.ROOT,
+              "benchmark aggregate %s/%s resolved %d/%d tasks across %d runs (sample-weighted;"
+                  + " minimum %d-task prior)",
+              first.getProvider(),
+              first.getModel(),
+              resolvedTasks,
+              totalTasks,
+              runs.size(),
+              minSampleTasks);
+    }
+    return ModelProviderCapabilitySignal.builder()
+        .provider(first.getProvider())
+        .model(first.getModel())
+        .taskCategory(taskCategory)
+        .benchmarkQualityScore(resolvedRate)
+        .reasons(List.of(reason))
+        .build();
+  }
+
+  private record BenchmarkAggregateKey(String provider, String model, String taskCategory) {}
 
   private static ModelProviderCapabilitySignal benchmarkSignal(
       BenchmarkRun run, String taskCategory, int minSampleTasks) {
