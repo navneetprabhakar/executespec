@@ -75,9 +75,10 @@ import lombok.extern.slf4j.Slf4j;
  * once (each with its own transient retry). Graduated ON by V266 and gated by {@link
  * #FAILOVER_FLAG} so operators can disable it during incident response. BYOK-safe: a run on a
  * customer key only fails over to a provider the customer also keyed (never silently to a platform
- * key); {@code deepseek}/{@code openrouter} are never targets. Provider health and tier-based model
- * resolution happen in the canonical routing seams upstream in {@code ModelResolver}; this router
- * owns the actual provider dispatch and bounded retry.
+ * key). DeepSeek has an explicit provider-local recovery chain (native -> OpenRouter -> Fireworks);
+ * other providers use their configured tier chain. Provider health and tier-based model resolution
+ * happen in the canonical routing seams upstream in {@code ModelResolver}; this router owns the
+ * actual provider dispatch and bounded retry.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
