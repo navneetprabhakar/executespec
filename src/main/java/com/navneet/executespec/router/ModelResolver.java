@@ -115,8 +115,16 @@ public class ModelResolver {
       //      operator can flip on globally if they want adaptive behaviour back
       // If neither says "let adaptive run", we always use the user's provider.
       boolean strict = Boolean.getBoolean("executespec.strict-provider");
+      // DeepSeek has a deliberately ordered recovery policy: native first, then OpenRouter,
+      // then Fireworks. Adaptive routing must not turn a healthy native DeepSeek request into a
+      // direct gateway request merely because a gateway has a better historical score. That would
+      // make the documented recovery order nondeterministic and hide which route was actually
+      // exercised. Explicit provider selection (for example provider=FIREWORKS) is still honored;
+      // this guard only applies when DeepSeek is the requested provider.
+      boolean deepSeekOrderedRoute = userProvider == LlmProvider.DEEPSEEK;
       boolean adaptiveAllowed =
-          !strict
+          !deepSeekOrderedRoute
+              && !strict
               && featureFlagService != null
               && featureFlagService.isEnabled(FLAG_ADAPTIVE_ROUTING);
       LlmProvider adaptiveProvider =
