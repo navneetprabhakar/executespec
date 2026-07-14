@@ -21,7 +21,8 @@ public record ModelProviderScore(
     boolean benchmarkQualityPriorAvailable,
     boolean observedQualityEvidenceAvailable,
     boolean providerAvailable,
-    List<String> reasons) {
+    List<String> reasons,
+    boolean contextFitsRequestedBudget) {
 
   public ModelProviderScore {
     if (provider == null || provider.isBlank()) {
@@ -56,7 +57,8 @@ public record ModelProviderScore(
         false,
         false,
         providerAvailability(reasons),
-        reasons);
+        reasons,
+        true);
   }
 
   /**
@@ -89,7 +91,38 @@ public record ModelProviderScore(
         benchmarkQualityPriorAvailable,
         false,
         providerAvailability(reasons),
-        reasons);
+        reasons,
+        true);
+  }
+
+  /** Compatibility constructor retaining the pre-context-budget score shape. */
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      boolean benchmarkQualityPriorAvailable,
+      boolean observedQualityEvidenceAvailable,
+      boolean providerAvailable,
+      List<String> reasons) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        benchmarkQualityPriorAvailable,
+        observedQualityEvidenceAvailable,
+        providerAvailable,
+        reasons,
+        true);
   }
 
   public boolean meetsQualityThreshold() {

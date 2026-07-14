@@ -21,7 +21,8 @@ public record ModelProviderCandidateRequest(
     List<String> modelAllowList,
     List<ModelProviderCapabilitySignal> externalSignals,
     Map<String, Boolean> providerAvailability,
-    List<String> providerPreferenceOrder) {
+    List<String> providerPreferenceOrder,
+    long requiredContextTokens) {
 
   public ModelProviderCandidateRequest {
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
@@ -35,5 +36,6 @@ public record ModelProviderCandidateRequest(
         providerAvailability == null ? Map.of() : Map.copyOf(providerAvailability);
     providerPreferenceOrder =
         providerPreferenceOrder == null ? List.of() : List.copyOf(providerPreferenceOrder);
+    requiredContextTokens = Math.max(0L, requiredContextTokens);
   }
 }
