@@ -403,11 +403,15 @@ public class ProjectDocGeneratorService {
   static String capSourceBundle(String source) {
     if (source == null || source.length() <= 60_000) return source;
     int cut = source.lastIndexOf('\n', 60_000);
-    if (cut < 1) cut = 60_000;
-    else cut++;
+    boolean lineBoundary = cut >= 1;
+    if (lineBoundary) cut++;
+    else cut = 60_000;
+    String boundaryNote = lineBoundary ? "the last complete source line" : "the 60k context limit";
     return source.substring(0, cut)
         + "\n\n"
-        + "[truncated at the last complete source line; additional repository evidence omitted]\n";
+        + "[truncated at "
+        + boundaryNote
+        + "; additional repository evidence omitted]\n";
   }
 
   private LlmProvider resolveProvider(Project project) {
