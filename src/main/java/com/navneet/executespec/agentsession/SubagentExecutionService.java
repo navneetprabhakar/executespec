@@ -117,7 +117,9 @@ public class SubagentExecutionService {
 
       long turnsBeforeModel = turnRepository.countBySessionId(child.getId());
       int remainingTurns = Math.toIntExact(Math.max(0, handle.maxTurns() - turnsBeforeModel));
-      if (remainingTurns < 1) throw new IllegalStateException("Subagent turn budget exhausted");
+      if (remainingTurns < 1)
+        throw new SubagentBudgetExceededException(
+            "SUBAGENT_TURN_BUDGET_EXHAUSTED", "Subagent turn budget exhausted");
       int maxRounds = Math.min(MAX_EXECUTION_ROUNDS, remainingTurns);
       AtomicInteger roundsStarted = new AtomicInteger();
       CapturingSink sink = new CapturingSink();
@@ -137,19 +139,28 @@ public class SubagentExecutionService {
           maxRounds,
           () -> {
             var budget = protocolService.authorizeNextTurn(child.getId(), userId, orgId);
-            if (!budget.canContinue()) throw new CancellationException(budget.reason());
+            if (!budget.canContinue()) {
+              String code =
+                  budget.reason().toLowerCase(java.util.Locale.ROOT).contains("cost")
+                      ? "SUBAGENT_COST_BUDGET_EXHAUSTED"
+                      : "SUBAGENT_TURN_BUDGET_EXHAUSTED";
+              throw new SubagentBudgetExceededException(code, budget.reason());
+            }
             if (roundsStarted.incrementAndGet() > maxRounds) {
-              throw new CancellationException("subagent round budget exhausted");
+              throw new SubagentBudgetExceededException(
+                  "SUBAGENT_TURN_BUDGET_EXHAUSTED", "subagent round budget exhausted");
             }
             if (costTracker.snapshot(child.getId()).costUsd() >= handle.maxCostUsd()) {
-              throw new CancellationException("subagent cost budget exhausted");
+              throw new SubagentBudgetExceededException(
+                  "SUBAGENT_COST_BUDGET_EXHAUSTED", "subagent cost budget exhausted");
             }
           },
           handle.parentTurnId());
 
       RunCostTracker.Snapshot usage = sink.usage();
       if (usage.costUsd() > handle.maxCostUsd()) {
-        throw new CancellationException("subagent cost budget exceeded");
+        throw new SubagentBudgetExceededException(
+            "SUBAGENT_COST_BUDGET_EXHAUSTED", "subagent cost budget exceeded");
       }
       String summary = sink.summary();
       List<Evidence> evidence = extractEvidence(summary, sink.toolEvidence());

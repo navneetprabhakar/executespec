@@ -53,6 +53,9 @@ turns separately from runs.
   run authority. Child reservation and `SUBAGENT_COORDINATOR_ACCEPTED` parent activity are written
   in one transaction with the actual child id, so a stale eligibility probe cannot leave a false
   acceptance event when another coordinator wins the slot.
+
+  Tree turn/cost budget exhaustion is returned as HTTP 422 with the typed
+  `SUBAGENT_*_BUDGET_EXHAUSTED` error code; it is a client-correctable outcome, not an opaque 500.
   `POST /api/agent/sessions/{parentSessionId}/subagents/batch` is the bounded fan-out surface: it
   accepts at most four unique requests for the same parent, reserves every child before model
   execution, consumes those exact persisted child handles (no second spawn), then runs the children concurrently on a fixed pool. A sibling failure cancels active

@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
@@ -213,14 +214,16 @@ public class SubagentProtocolService {
     }
     TreeBudget treeBudget = treeBudget(parent.getId());
     if (treeBudget.turns() + request.maxTurns() > MAX_TURNS_PER_TREE) {
-      throw new IllegalStateException(
+      throw new SubagentBudgetExceededException(
+          "SUBAGENT_TREE_TURN_BUDGET_EXHAUSTED",
           "Subagent total-tree turn budget exceeded: "
               + (treeBudget.turns() + request.maxTurns())
               + "/"
               + MAX_TURNS_PER_TREE);
     }
     if (treeBudget.costUsd() + request.maxCostUsd() > MAX_COST_USD_PER_TREE) {
-      throw new IllegalStateException(
+      throw new SubagentBudgetExceededException(
+          "SUBAGENT_TREE_COST_BUDGET_EXHAUSTED",
           "Subagent total-tree cost budget exceeded: "
               + formatBudget(treeBudget.costUsd() + request.maxCostUsd())
               + "/"
