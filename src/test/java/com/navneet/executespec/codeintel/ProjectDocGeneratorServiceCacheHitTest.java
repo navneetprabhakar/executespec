@@ -172,4 +172,17 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
             any(), any(), any(), any());
   }
+
+  @Test
+  void sourceBundleCapStopsAtCompleteLineAndLabelsOmittedEvidence() {
+    String source = "header\n" + "record\n".repeat(20_000);
+
+    String capped = ProjectDocGeneratorService.capSourceBundle(source);
+
+    assertThat(capped).hasSizeLessThanOrEqualTo(60_000 + 120);
+    assertThat(capped).contains("additional repository evidence omitted");
+    String evidence = capped.substring(0, capped.indexOf("\n\n[truncated"));
+    assertThat(evidence).doesNotEndWith("recor");
+    assertThat(evidence).endsWith("\n");
+  }
 }

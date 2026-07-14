@@ -392,11 +392,22 @@ public class ProjectDocGeneratorService {
               });
     }
 
-    // Cap to ~60k chars to avoid blowing context budgets on giant projects.
-    if (sb.length() > 60_000) {
-      return sb.substring(0, 60_000) + "\n\n[truncated at 60k chars]\n";
-    }
-    return sb.toString();
+    return capSourceBundle(sb.toString());
+  }
+
+  /**
+   * Caps the document source at a line boundary so a large-repository bundle never ends in the
+   * middle of a path, code-map record, or environment-variable row. The explicit marker tells the
+   * model that evidence is incomplete instead of making the cut look like a complete source file.
+   */
+  static String capSourceBundle(String source) {
+    if (source == null || source.length() <= 60_000) return source;
+    int cut = source.lastIndexOf('\n', 60_000);
+    if (cut < 1) cut = 60_000;
+    else cut++;
+    return source.substring(0, cut)
+        + "\n\n"
+        + "[truncated at the last complete source line; additional repository evidence omitted]\n";
   }
 
   private LlmProvider resolveProvider(Project project) {
