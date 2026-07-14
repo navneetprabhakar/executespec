@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -119,6 +121,24 @@ class LlmRouterTest {
         .messages(List.of(new UserMessage("hi")))
         .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/router-test")))
         .build();
+  }
+
+  private static RunKeyContext deepSeekFailoverKeys() {
+    return new RunKeyContext(
+        null,
+        null,
+        null,
+        "openrouter-key",
+        "deepseek-key",
+        "fireworks-key",
+        RunKeyContext.Source.PLATFORM,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.PLATFORM,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.USER,
+        "u1",
+        "o1");
   }
 
   @Test
@@ -404,6 +424,84 @@ class LlmRouterTest {
             any(),
             any(),
             eq(RunKeyContext.Source.PLATFORM));
+  }
+
+  @Test
+  void deepSeekFailureFallsBackToOpenRouterBeforeFireworks() {
+    build();
+    configureWireProviderUrls();
+    when(keyStore.get("run-1")).thenReturn(deepSeekFailoverKeys());
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(eq("deepseek-v4-pro-native"), eq("deepseek")))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "deepseek-v4-pro"},
+                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+    AtomicInteger nativeFailures = new AtomicInteger();
+    when(openai.call(any()))
+        .thenAnswer(
+            invocation -> {
+              OpenAiNativeToolClient.OpenAiToolCallRequest request = invocation.getArgument(0);
+              if (request.baseUrl() != null && request.baseUrl().contains("deepseek")) {
+                nativeFailures.incrementAndGet();
+                throw new RuntimeException("503 native unavailable");
+              }
+              return ok();
+            });
+
+    assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
+    assertThat(nativeFailures).hasValue(4);
+    verify(openai, times(1))
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("deepseek/deepseek-v4-pro")
+                        && request.baseUrl().contains("openrouter")));
+    verify(openai, never())
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                        && request.baseUrl().contains("fireworks")));
+  }
+
+  @Test
+  void deepSeekFailureReachesFireworksOnlyAfterOpenRouterFails() {
+    build();
+    configureWireProviderUrls();
+    when(keyStore.get("run-1")).thenReturn(deepSeekFailoverKeys());
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(eq("deepseek-v4-pro-native"), eq("deepseek")))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "deepseek-v4-pro"},
+                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+    when(openai.call(any()))
+        .thenAnswer(
+            invocation -> {
+              OpenAiNativeToolClient.OpenAiToolCallRequest request = invocation.getArgument(0);
+              if (request.baseUrl() != null
+                  && (request.baseUrl().contains("deepseek")
+                      || request.baseUrl().contains("openrouter"))) {
+                throw new RuntimeException("503 provider unavailable");
+              }
+              return ok();
+            });
+
+    assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
+    verify(openai, times(1))
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                        && request.baseUrl().contains("fireworks")));
+  }
+
+  private void configureWireProviderUrls() {
+    ReflectionTestUtils.setField(router, "deepSeekBaseUrl", "https://api.deepseek.com");
+    ReflectionTestUtils.setField(router, "openRouterBaseUrl", "https://openrouter.ai/api/v1");
+    ReflectionTestUtils.setField(
+        router, "fireworksBaseUrl", "https://api.fireworks.ai/inference/v1");
   }
 
   @Test
