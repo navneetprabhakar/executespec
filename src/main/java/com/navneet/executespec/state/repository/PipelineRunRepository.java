@@ -37,6 +37,42 @@ public interface PipelineRunRepository
   void updateStatusAndClearGate(@Param("runId") String runId, @Param("status") String status);
 
   /**
+   * Atomically claims a terminal transition for the active pipeline thread.
+   *
+   * <p>Cancellation can race the reviewer/validation thread: a read-then-save terminal write can
+   * otherwise overwrite the user's {@code CANCELLED} state with a late {@code COMPLETE}. The
+   * conditional update makes the terminal transition a one-writer claim; once it succeeds,
+   * cancellation observes a terminal status and cannot replace it, and once cancellation wins the
+   * update returns zero.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "
+          + "r.completedAt = :completedAt, r.statusReason = :statusReason, "
+          + "r.failureReason = :failureReason "
+          + "WHERE r.runId = :runId "
+          + "AND r.status NOT IN ('CANCELLED', 'PAUSED', 'COMPLETE', 'FAILED', 'PARTIAL')")
+  int claimTerminalTransitionWithReasons(
+      @Param("runId") String runId,
+      @Param("status") String status,
+      @Param("statusReason") String statusReason,
+      @Param("failureReason") String failureReason,
+      @Param("completedAt") Instant completedAt);
+
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "
+          + "r.completedAt = :completedAt "
+          + "WHERE r.runId = :runId "
+          + "AND r.status NOT IN ('CANCELLED', 'PAUSED', 'COMPLETE', 'FAILED', 'PARTIAL')")
+  int claimTerminalTransitionPreservingReasons(
+      @Param("runId") String runId,
+      @Param("status") String status,
+      @Param("completedAt") Instant completedAt);
+
+  /**
    * Atomic execution mode update — avoids read-modify-write race with clearGateSync/markApproved.
    */
   @Modifying
