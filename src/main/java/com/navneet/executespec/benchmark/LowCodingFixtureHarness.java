@@ -49,7 +49,8 @@ public final class LowCodingFixtureHarness {
       int iterations,
       int toolCalls,
       boolean evaluatorPassed,
-      String evaluatorReason) {}
+      String evaluatorReason,
+      String finalSource) {}
 
   /** Create the fixed repository-local fixture and return its root. */
   public static Path prepare(Path root) throws IOException {
@@ -107,7 +108,8 @@ public final class LowCodingFixtureHarness {
         result.iterations(),
         result.toolCallsDispatched(),
         passed,
-        reason);
+        reason,
+        source);
   }
 
   public static Map<String, Object> flags() {
