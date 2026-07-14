@@ -284,10 +284,10 @@ public class ModelRegistry {
   /**
    * Resolve the ordered recovery chain for a concrete primary provider.
    *
-   * <p>Most providers continue to use the tier fallback chain. DeepSeek is intentionally
-   * different: its recovery order is native DeepSeek, then OpenRouter, then Fireworks. Keeping
-   * this provider-specific mapping here prevents the generic tier chain from silently routing a
-   * native DeepSeek failure to an unrelated Anthropic/OpenAI model.
+   * <p>Most providers continue to use the tier fallback chain. DeepSeek is intentionally different:
+   * its recovery order is native DeepSeek, then OpenRouter, then Fireworks. Keeping this
+   * provider-specific mapping here prevents the generic tier chain from silently routing a native
+   * DeepSeek failure to an unrelated Anthropic/OpenAI model.
    */
   public List<String[]> fallbackChainFor(String modelName, String primaryProvider) {
     if ("deepseek".equalsIgnoreCase(primaryProvider)) {
@@ -297,8 +297,7 @@ public class ModelRegistry {
       String fireworksModel = providerModel("fireworks", tier);
       if (openRouterModel == null || fireworksModel == null) return Collections.emptyList();
       return List.of(
-          new String[] {"openrouter", openRouterModel},
-          new String[] {"fireworks", fireworksModel});
+          new String[] {"openrouter", openRouterModel}, new String[] {"fireworks", fireworksModel});
     }
     return fallbackChainFor(modelName);
   }

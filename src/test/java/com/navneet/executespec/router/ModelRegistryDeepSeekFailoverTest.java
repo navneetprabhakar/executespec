@@ -20,9 +20,11 @@ class ModelRegistryDeepSeekFailoverTest {
     ModelRegistry registry = new ModelRegistry(props);
 
     assertThat(registry.fallbackChainFor("deepseek-v4-pro-native", "deepseek"))
-        .containsExactly(new String[] {"openrouter", "or-pro"}, new String[] {"fireworks", "fw-pro"});
+        .containsExactly(
+            new String[] {"openrouter", "or-pro"}, new String[] {"fireworks", "fw-pro"});
     assertThat(registry.fallbackChainFor("deepseek-v4-flash-native", "deepseek"))
-        .containsExactly(new String[] {"openrouter", "or-flash"}, new String[] {"fireworks", "fw-flash"});
+        .containsExactly(
+            new String[] {"openrouter", "or-flash"}, new String[] {"fireworks", "fw-flash"});
   }
 
   @Test
@@ -30,10 +32,7 @@ class ModelRegistryDeepSeekFailoverTest {
     ModelMatrixProperties props = new ModelMatrixProperties();
     props.setModels(Map.of("model", model("CAPABLE")));
     props.setFallbackChains(
-        Map.of(
-            "CAPABLE",
-            List.of(
-                fallback("anthropic", "claude"), fallback("openai", "gpt"))));
+        Map.of("CAPABLE", List.of(fallback("anthropic", "claude"), fallback("openai", "gpt"))));
 
     ModelRegistry registry = new ModelRegistry(props);
 
