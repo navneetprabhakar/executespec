@@ -68,10 +68,10 @@ being retained under compatibility aliases.
 | Silent Web sandbox-session creation failures | DONE — New sandbox actions now route rejected session creation through the visible agent error surface |
 | Console decisions outage shown as a healthy empty queue | DONE — decisions now render a retryable alert and suppress the empty state until data reload succeeds |
 | Silent Web artifact clipboard/preview failures | DONE — copy and preview actions now expose actionable alerts when browser permissions or popup policy reject them |
-| CLI Ink implementation and Ink/React dependencies | After OpenTUI transcript vertical slice |
-| CLI split-footer implementation | After OpenTUI transcript vertical slice |
-| `app-tui` route shell, persistent Inspector, Launcher routes and route commands | Before CLI 1.0 visual gate |
-| `opentuiPreview.ts` and automatic separate-terminal launcher behavior | Before CLI 1.0 |
+| CLI Ink implementation and Ink/React dependencies | DONE — CLI 1.0 has no Ink/React runtime dependency; native OpenTUI is the rich renderer and readline is the plain/accessibility path |
+| CLI split-footer implementation | DONE — the former split-footer renderer is absent; footer/status composition is owned by the OpenTUI app frame |
+| `app-tui` route shell, persistent Inspector, Launcher routes and route commands | RESOLVED — OpenTUI now has a transcript-first session with semantic drawers; `/route` aliases remain parser-only compatibility and are not in the native palette |
+| `opentuiPreview.ts` and automatic separate-terminal launcher behavior | PARTIAL — preview is a deterministic QA utility and `executespec app` is an explicit opt-in launcher; neither is the default chat path. Remove only after a separately approved launcher deprecation decision |
 | Model-visible snake/camel tool aliases and obsolete stubs | After protocol tool-name negotiation |
 | Implicit natural-language fast edit | Replace with explicit action or command |
 | Metadata-only image semantics and tests | When real attachment contract lands |
