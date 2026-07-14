@@ -281,6 +281,39 @@ public class ModelRegistry {
     return fallbackChainForTier(tier);
   }
 
+  /**
+   * Resolve the ordered recovery chain for a concrete primary provider.
+   *
+   * <p>Most providers continue to use the tier fallback chain. DeepSeek is intentionally
+   * different: its recovery order is native DeepSeek, then OpenRouter, then Fireworks. Keeping
+   * this provider-specific mapping here prevents the generic tier chain from silently routing a
+   * native DeepSeek failure to an unrelated Anthropic/OpenAI model.
+   */
+  public List<String[]> fallbackChainFor(String modelName, String primaryProvider) {
+    if ("deepseek".equalsIgnoreCase(primaryProvider)) {
+      boolean flash = modelName != null && modelName.toLowerCase().contains("flash");
+      String tier = flash ? "lightweight" : "workhorse";
+      String openRouterModel = providerModel("openrouter", tier);
+      String fireworksModel = providerModel("fireworks", tier);
+      if (openRouterModel == null || fireworksModel == null) return Collections.emptyList();
+      return List.of(
+          new String[] {"openrouter", openRouterModel},
+          new String[] {"fireworks", fireworksModel});
+    }
+    return fallbackChainFor(modelName);
+  }
+
+  private String providerModel(String provider, String tier) {
+    if (matrixProps.getProviders() == null) return null;
+    ModelMatrixProperties.ProviderModels models = matrixProps.getProviders().get(provider);
+    if (models == null) return null;
+    return switch (tier) {
+      case "planning" -> models.getPlanning();
+      case "lightweight" -> models.getLightweight();
+      default -> models.getWorkhorse();
+    };
+  }
+
   /** Returns the fallback chain for a given tier name (ARCHITECT, CAPABLE, UTILITY). */
   public List<String[]> fallbackChainForTier(String tier) {
     Map<String, List<ModelMatrixProperties.FallbackEntry>> chains = getChains();
