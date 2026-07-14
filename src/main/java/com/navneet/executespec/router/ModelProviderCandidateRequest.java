@@ -24,6 +24,28 @@ public record ModelProviderCandidateRequest(
     List<String> providerPreferenceOrder,
     long requiredContextTokens) {
 
+  /** Compatibility constructor for callers that do not yet project a context budget. */
+  public ModelProviderCandidateRequest(
+      String taskCategory,
+      String taskComplexity,
+      double requiredQualityThreshold,
+      List<String> providerAllowList,
+      List<String> modelAllowList,
+      List<ModelProviderCapabilitySignal> externalSignals,
+      Map<String, Boolean> providerAvailability,
+      List<String> providerPreferenceOrder) {
+    this(
+        taskCategory,
+        taskComplexity,
+        requiredQualityThreshold,
+        providerAllowList,
+        modelAllowList,
+        externalSignals,
+        providerAvailability,
+        providerPreferenceOrder,
+        0L);
+  }
+
   public ModelProviderCandidateRequest {
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
     taskComplexity =
