@@ -241,6 +241,18 @@ public class ModelProviderCandidateService {
             .findFirst()
             .orElse(localLatency > 0 ? localLatency * 2 : UNKNOWN_LATENCY_MS);
 
+    long requiredContextTokens = request.requiredContextTokens();
+    int contextWindow = modelRegistry.contextLimitFor(canonicalModel);
+    boolean contextFits = requiredContextTokens <= 0 || requiredContextTokens <= contextWindow;
+    if (!contextFits) {
+      reasons.add(
+          "required context budget "
+              + requiredContextTokens
+              + " exceeds model window "
+              + contextWindow
+              + "; candidate rejected before quality ranking");
+    }
+
     return ModelProviderCapabilitySignal.builder()
         .provider(provider)
         .model(canonicalModel)
@@ -265,6 +277,7 @@ public class ModelProviderCandidateService {
         .requiredQualityThreshold(request.requiredQualityThreshold())
         .fallbackQualityScore(fallbackQualityScore(config))
         .reasons(reasons)
+        .contextFitsRequestedBudget(contextFits)
         .build();
   }
 

@@ -41,7 +41,7 @@ public class ModelProviderRankingPolicy {
       if (candidate == null) {
         continue;
       }
-      if (candidate.meetsQualityThreshold()) {
+      if (candidate.contextFitsRequestedBudget() && candidate.meetsQualityThreshold()) {
         eligible.add(candidate);
       } else {
         rejected.add(candidate);
@@ -72,6 +72,14 @@ public class ModelProviderRankingPolicy {
             qualityTieBand));
     if (!rejected.isEmpty()) {
       reasons.add(rejected.size() + " candidate(s) rejected below quality threshold");
+      long contextRejected =
+          rejected.stream().filter(candidate -> !candidate.contextFitsRequestedBudget()).count();
+      if (contextRejected > 0) {
+        reasons.add(
+            contextRejected
+                + " candidate(s) rejected because the projected context budget does not fit the"
+                + " model window");
+      }
     }
     return new ModelProviderRankingDecision(
         java.util.Optional.of(selected), eligible, rejected, reasons);
