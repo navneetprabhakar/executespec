@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
+import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
+
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -103,6 +105,25 @@ public class GlobalExceptionAdvice {
                 "not_found",
                 "message",
                 "No endpoint at /" + (ex.getResourcePath() == null ? "" : ex.getResourcePath())));
+  }
+
+  /** Bounded subagent budgets are client-correctable, not an opaque server failure. */
+  @ExceptionHandler(SubagentBudgetExceededException.class)
+  public ResponseEntity<Map<String, Object>> onSubagentBudgetExceeded(
+      SubagentBudgetExceededException ex) {
+    return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+        .body(
+            Map.of(
+                "timestamp",
+                Instant.now().toString(),
+                "status",
+                422,
+                "error",
+                "subagent-budget-exhausted",
+                "errorCode",
+                ex.errorCode(),
+                "message",
+                ex.getMessage()));
   }
 
   /** Last-chance handler. Any uncaught Throwable becomes a structured 500 with a correlation id. */
