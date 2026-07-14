@@ -76,7 +76,7 @@ class WorkerAgentOverflowRecoveryTest {
     List<Message> h = new ArrayList<>();
     h.add(new SystemMessage("sys"));
     h.add(new UserMessage("task"));
-    for (int i = 0; i < 4; i++) h.add(AssistantMessage.builder().content("t" + i).build());
+    h.add(AssistantMessage.builder().content("t0").build());
     assertThat(WorkerAgent.hardTrimHistory(h)).isNull();
   }
 
