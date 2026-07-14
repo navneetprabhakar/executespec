@@ -25,6 +25,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -66,6 +67,7 @@ public class ProjectDocGeneratorService {
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
+  @Autowired
   public ProjectDocGeneratorService(
       ProjectArchitectureService architectureService,
       ProjectWorkspaceService workspace,
