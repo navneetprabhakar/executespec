@@ -1168,6 +1168,15 @@ to boot — skip it for those.""";
         reason,
         outcome.smokeTestOutput());
 
+    // A failed/partial primary attempt is terminal for ordinary stale-worker fencing, but it is
+    // deliberately not terminal for this executor's selected continuation rerun. Clear the
+    // terminal marker under the row lock before executeOne() publishes WORKING; otherwise the
+    // retry runs in memory while persistTaskStatus() rejects both its WORKING and COMPLETE writes
+    // as a "terminal overwrite". That left the database stuck at FAILED/PARTIAL even when the
+    // handoff produced a passing result. This reset is reached only after reserveContinuationAction
+    // succeeds, so an exhausted/blocked action cannot reopen a task.
+    prepareTaskForContinuation(runId, task.id());
+
     // Preserve the worker's latest investigation when handing the same task to a different
     // provider/model. The workspace is shared, but starting with a fresh conversation makes the
     // replacement model repeat repository exploration and can undo the value of the escalation.
@@ -1183,6 +1192,28 @@ to boot — skip it for those.""";
             new ProviderModelOverride(
                 candidate.provider(), candidate.model(), decision.decision()));
     return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+  }
+
+  private void prepareTaskForContinuation(String runId, String taskIdShort) {
+    if (taskRepo == null || runId == null || runId.length() < 8 || taskIdShort == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    // This method is called from the long-running executor thread, outside the short persistence
+    // transaction used by persistTaskStatus. The subsequent saveAndFlush is the atomic terminal
+    // reset for this selected action; recovery-attempt fencing still protects a stale JVM.
+    var existing = taskRepo.findById(key);
+    if (existing.isEmpty()) {
+      log.warn("prepareTaskForContinuation: row not found id={}", key);
+      return;
+    }
+    var task = existing.get();
+    task.setStatus("PENDING");
+    task.setCompletedAt(null);
+    task.setDurationMs(null);
+    task.setLastActivityAt(java.time.Instant.now());
+    taskRepo.saveAndFlush(task);
+    log.info("prepareTaskForContinuation: reopened id={} for selected handoff rerun", key);
   }
 
   /**
