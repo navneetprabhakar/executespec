@@ -15,6 +15,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,7 @@ public class ProjectBriefService {
   private final ModelResolver modelResolver;
   private final ProjectProviderResolver projectProviderResolver;
 
+  @Autowired
   public ProjectBriefService(
       ProjectWorkspaceService workspace,
       LlmRouter llmRouter,
