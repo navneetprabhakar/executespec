@@ -2,21 +2,21 @@
   "schemaVersion": 1,
   "type": "hero-recording-provenance",
   "recordedAgainst": {
-    "backendCommit": "7536f6828db23e7c5f466e488af24de71ff33fe0",
-    "cliCommit": "06e543804095b1c7c881c72f971d877d8c933c93",
-    "webFrontendSha": "f2df3a883"
+    "backendCommit": "809a9ff6cb44d1576e725f8d9229f7c525ee463f",
+    "cliCommit": "65fbbf9d239d2b1166d452dda73f1912537665e3",
+    "webFrontendSha": "809a9ff6cb44d1576e725f8d9229f7c525ee463f"
   },
   "currentCandidate": {
-    "backendCommit": "66b1e64efab561dc1d85155529170beb5b0c3d4b",
-    "backendTree": "69e5ea3bfedf82b9ab58c1a5f0c759704c74e684",
-    "cliCommit": "20008da81715c6a829dccbe6ca323ef92e7d24c2",
-    "cliTree": "dc1d0067bc4a006255139ef2d3df8e63dac0da53",
-    "webFrontendSha": "f2df3a883"
+    "backendCommit": "809a9ff6cb44d1576e725f8d9229f7c525ee463f",
+    "backendTree": "0106b7fe8b3c4c373df15f7d354879a50aeab11c",
+    "cliCommit": "65fbbf9d239d2b1166d452dda73f1912537665e3",
+    "cliTree": "9733b26def341561b3bf47fee2d7ea94e6f3d455",
+    "webFrontendSha": "809a9ff6cb44d1576e725f8d9229f7c525ee463f"
   },
-  "currentTupleMatch": false,
+  "currentTupleMatch": true,
   "asset": "website/media/hero.webm",
-  "sha256": "7f53c9376039f9cfb3c5301ea35fa1e7c825c43379f89a161afd7811c9d8e200",
-  "durationSeconds": 60.2,
+  "sha256": "387e7e1deb82457938cd4ad3822db83528d25a285c91a80f109f452022efaa47",
+  "durationSeconds": 54.0,
   "scenes": ["agent", "plan-gate", "working-task", "verdict", "code-diff", "terminal-outcome"],
   "fixtureIds": {
     "gateRunId": "web-qa-1bcca9f9-15ba-40b8-a18c-00814c633b21",
@@ -25,5 +25,5 @@
   "providerCalls": 0,
   "externalSpendUsd": 0,
   "independentHumanReview": "PENDING",
-  "claim": "Provider-free illustrative hero recording with complete UI workflow scenes. It is not a current-source release capture, live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
+  "claim": "Provider-free synthetic hero recording regenerated against the current tuple. It is not a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
 }
