@@ -5,6 +5,7 @@ import java.util.List;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.Message;
@@ -86,7 +87,7 @@ public class RepoArchitectureGenerator {
       throw new IllegalArgumentException("code map is empty for " + repoFullName);
     }
 
-    LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
+    LlmProvider effective = provider != null ? provider : ProjectProviderResolver.CANONICAL_DEFAULT;
     ResolvedModel resolved = modelResolver.resolve("RepoArchitectureGenerator", effective);
 
     String userPayload = "Repository: " + repoFullName + "\n\n" + "Code map:\n\n" + codeMapMarkdown;

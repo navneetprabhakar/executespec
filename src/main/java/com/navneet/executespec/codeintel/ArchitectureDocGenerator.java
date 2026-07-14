@@ -8,6 +8,7 @@ import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.Message;
@@ -99,7 +100,7 @@ public class ArchitectureDocGenerator {
           "combined arch needs at least one per-repo arch doc; got 0");
     }
 
-    LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
+    LlmProvider effective = provider != null ? provider : ProjectProviderResolver.CANONICAL_DEFAULT;
     ResolvedModel resolved = modelResolver.resolve("ArchitectureDocGenerator", effective);
 
     String userPayload = buildPayload(projectId, repoArchDocs, repoFullNames);
