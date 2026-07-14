@@ -49,7 +49,7 @@ class RecoveryCheckpointLeaseTest {
   }
 
   @Test
-  void stalePeerWithSamePlanCanTransferOwnership() {
+  void stalePeerWithSamePlanCanTransferOwnership() throws Exception {
     Instant original = Instant.parse("2026-07-12T10:00:00Z");
     assertThat(
             RecoveryCheckpointLease.acquire(workspace, "run-1", "instance-a", "plan-a", original)
@@ -65,6 +65,35 @@ class RecoveryCheckpointLeaseTest {
             original.plus(RecoveryCheckpointLease.FRESH_OWNER_WINDOW).plusSeconds(1));
 
     assertThat(result.acquired()).isTrue();
+    String lease = Files.readString(workspace.resolve(".agent-context/recovery-lease.json"));
+    assertThat(lease).contains("\"takeoverCount\":1");
+    assertThat(lease).contains("\"previousInstanceId\":\"instance-a\"");
+    assertThat(lease).contains("\"previousClaimedAt\":\"2026-07-12T10:00:00Z\"");
+    assertThat(lease).contains("\"takeoverReason\":\"STALE_OWNER\"");
+  }
+
+  @Test
+  void repeatedStaleTakeoversPreserveLineageCount() throws Exception {
+    Instant first = Instant.parse("2026-07-12T10:00:00Z");
+    assertThat(
+            RecoveryCheckpointLease.acquire(workspace, "run-1", "instance-a", "plan-a", first)
+                .acquired())
+        .isTrue();
+    Instant second = first.plus(RecoveryCheckpointLease.FRESH_OWNER_WINDOW).plusSeconds(1);
+    assertThat(
+            RecoveryCheckpointLease.acquire(workspace, "run-1", "instance-b", "plan-a", second)
+                .acquired())
+        .isTrue();
+    Instant third = second.plus(RecoveryCheckpointLease.FRESH_OWNER_WINDOW).plusSeconds(1);
+    assertThat(
+            RecoveryCheckpointLease.acquire(workspace, "run-1", "instance-c", "plan-a", third)
+                .acquired())
+        .isTrue();
+
+    String lease = Files.readString(workspace.resolve(".agent-context/recovery-lease.json"));
+    assertThat(lease).contains("\"instanceId\":\"instance-c\"");
+    assertThat(lease).contains("\"takeoverCount\":2");
+    assertThat(lease).contains("\"previousInstanceId\":\"instance-b\"");
   }
 
   @Test
