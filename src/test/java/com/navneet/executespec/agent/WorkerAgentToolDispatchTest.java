@@ -1,5 +1,6 @@
 package com.navneet.executespec.agent;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,6 +37,7 @@ import com.navneet.executespec.tool.WorkerHistoryCompactor;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -48,6 +50,8 @@ import org.springframework.ai.chat.model.Generation;
  * the loop survives a malformed model response and reaches a clean terminal state.
  */
 class WorkerAgentToolDispatchTest {
+
+  private LlmRouter lastRouter;
 
   private static AssistantMessage.ToolCall toolCall(String name, String args) {
     return new AssistantMessage.ToolCall("call_" + UUID.randomUUID(), "function", name, args);
@@ -99,7 +103,17 @@ class WorkerAgentToolDispatchTest {
       String unknownTool,
       SseBroadcaster broadcaster,
       WorkerHistoryCompactor historyCompactor) {
+    return newWorker(seq, unknownTool, broadcaster, historyCompactor, List.of());
+  }
+
+  private WorkerAgent newWorker(
+      List<ChatResponse> seq,
+      String unknownTool,
+      SseBroadcaster broadcaster,
+      WorkerHistoryCompactor historyCompactor,
+      List<org.springframework.ai.tool.ToolCallback> boundTools) {
     LlmRouter router = mock(LlmRouter.class);
+    lastRouter = router;
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
     Metrics metrics = mock(Metrics.class);
@@ -118,7 +132,10 @@ class WorkerAgentToolDispatchTest {
     if (unknownTool != null) {
       lenient().when(registry.find(eq(unknownTool))).thenReturn(null);
     }
-    lenient().when(registry.bindForWorker(any())).thenReturn(List.of());
+    lenient().when(registry.bindForWorker(any())).thenReturn(boundTools);
+    lenient()
+        .when(registry.bindForWorker(any(ExecutionContext.class), anyString(), anyString()))
+        .thenReturn(boundTools);
 
     ChatResponse first = seq.get(0);
     ChatResponse[] rest = seq.subList(1, seq.size()).toArray(new ChatResponse[0]);
@@ -210,6 +227,54 @@ class WorkerAgentToolDispatchTest {
             eq("do thing"),
             eq(4096),
             anyList());
+  }
+
+  @Test
+  @DisplayName("headroom compactor and router receive the identical bound tool list")
+  void workerKeepsHeadroomToolsAlignedWithRouterDispatch() {
+    WorkerHistoryCompactor historyCompactor = mock(WorkerHistoryCompactor.class);
+    lenient()
+        .when(
+            historyCompactor.compactIfNeeded(
+                anyList(),
+                anyString(),
+                anyString(),
+                any(ExecutionContext.class),
+                anyLong(),
+                anyString(),
+                any(),
+                anyList()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    List<org.springframework.ai.tool.ToolCallback> boundTools =
+        List.of(
+            mock(org.springframework.ai.tool.ToolCallback.class),
+            mock(org.springframework.ai.tool.ToolCallback.class));
+    WorkerAgent worker =
+        newWorker(
+            List.of(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}"))),
+            null,
+            mock(SseBroadcaster.class),
+            historyCompactor,
+            boundTools);
+
+    WorkerResult result = worker.run(req());
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    ArgumentCaptor<List> compactorTools = ArgumentCaptor.forClass(List.class);
+    verify(historyCompactor)
+        .compactIfNeeded(
+            anyList(),
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            any(ExecutionContext.class),
+            anyLong(),
+            eq("do thing"),
+            eq(4096),
+            compactorTools.capture());
+    ArgumentCaptor<LlmRequest> routerRequest = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(lastRouter).call(routerRequest.capture());
+    assertThat(compactorTools.getValue()).isSameAs(routerRequest.getValue().toolsOverride());
+    assertThat(routerRequest.getValue().toolsOverride()).containsExactlyElementsOf(boundTools);
   }
 
   @Test
