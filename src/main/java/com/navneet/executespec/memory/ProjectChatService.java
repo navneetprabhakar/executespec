@@ -16,6 +16,7 @@ import com.navneet.executespec.memory.repository.ProjectChatMessageRepository;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -57,6 +58,7 @@ public class ProjectChatService {
   private final ModelResolver modelResolver;
   private final LlmRouter router;
   private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
+  private final ProjectProviderResolver projectProviderResolver;
 
   public List<ProjectChatMessage> history(String projectId) {
     return chatRepo.findByProjectIdOrderByCreatedAtAsc(projectId);
@@ -138,8 +140,7 @@ public class ProjectChatService {
             + "- Begin with a single line marker: '[Summary of earlier conversation]' so the "
             + "  user can see at a glance which message is the compaction.";
 
-    LlmProvider provider =
-        project.getAiProvider() != null ? project.getAiProvider() : LlmProvider.OPENAI;
+    LlmProvider provider = projectProviderResolver.resolve(project);
 
     String summary;
     try {
@@ -251,8 +252,7 @@ public class ProjectChatService {
             + "commentary.";
 
     try {
-      LlmProvider provider =
-          project.getAiProvider() != null ? project.getAiProvider() : LlmProvider.OPENAI;
+      LlmProvider provider = projectProviderResolver.resolve(project);
       ResolvedModel resolved =
           modelResolver.resolve("ProjectChatCompiler", provider, AgentTier.PLANNING);
       ExecutionContext ctx =

@@ -19,6 +19,9 @@ attribution.
 project setting and legacy account preference before the canonical Anthropic fallback. It no
 longer hardcodes OpenAI for compaction.
 
+Project chat compaction and spec compilation use the same resolver, so all project-chat phases keep
+the selected provider instead of falling back independently to OpenAI.
+
 ## Persistence
 
 `ProjectRunLedger` stores one idempotent digest per run. `MemoryCompactionService` only marks
