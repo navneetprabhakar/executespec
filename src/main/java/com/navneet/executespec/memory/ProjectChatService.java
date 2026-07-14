@@ -363,6 +363,11 @@ public class ProjectChatService {
     int totalTokensIn = 0, totalTokensOut = 0;
     String terminationReason = "ok";
     Map<String, Integer> toolCallCounts = new HashMap<>();
+    // Keep the first result for an exact call signature. A provider can emit the same call
+    // twice in one response (or re-emit it on the next round); dispatching it again is both
+    // wasteful for reads and unsafe for project actions. Reusing the bounded result also gives
+    // the model concrete evidence instead of hiding a duplicate behind a generic error.
+    Map<String, String> toolResultsBySignature = new HashMap<>();
     boolean forceFinalAnswer = false;
 
     try {
@@ -437,6 +442,16 @@ public class ProjectChatService {
 
         List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
         for (AssistantMessage.ToolCall tc : calls) {
+          String signature = toolCallSignature(tc);
+          String previousResult = toolResultsBySignature.get(signature);
+          if (previousResult != null) {
+            toolResponses.add(
+                new ToolResponseMessage.ToolResponse(
+                    tc.id() == null ? "tc-" + System.nanoTime() : tc.id(),
+                    tc.name(),
+                    previousResult));
+            continue;
+          }
           ToolCallback callback = findCallback(tools, tc.name());
           String envelope;
           if (callback == null) {
@@ -466,6 +481,7 @@ public class ProjectChatService {
                       + "\"}";
             }
           }
+          toolResultsBySignature.put(signature, envelope);
           toolResponses.add(
               new ToolResponseMessage.ToolResponse(
                   tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
@@ -548,11 +564,15 @@ public class ProjectChatService {
       Map<String, Integer> toolCallCounts, List<AssistantMessage.ToolCall> calls) {
     boolean allCallsRepeated = !calls.isEmpty();
     for (AssistantMessage.ToolCall tc : calls) {
-      String signature = (tc.name() == null ? "" : tc.name()) + "\u0000" + tc.arguments();
+      String signature = toolCallSignature(tc);
       int count = toolCallCounts.merge(signature, 1, Integer::sum);
       allCallsRepeated &= count >= 2;
     }
     return allCallsRepeated;
+  }
+
+  private static String toolCallSignature(AssistantMessage.ToolCall tc) {
+    return (tc.name() == null ? "" : tc.name()) + "\u0000" + tc.arguments();
   }
 
   private List<Message> buildMessages(Project project) {
