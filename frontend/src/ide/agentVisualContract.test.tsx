@@ -3,6 +3,7 @@ import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from './agentPanels';
+import * as api from '@/lib/api';
 
 vi.mock('@/stores/useAuthStore', () => {
   const state = {user: {globalRole: 'DEVELOPER', orgRole: 'DEVELOPER'}};
@@ -189,6 +190,34 @@ describe('protected transcript visual contract', () => {
     expect(evidence).not.toBeNull();
     expect(evidence?.querySelector('summary')?.textContent).toContain('Verification evidence');
     expect(evidence?.querySelector('p')?.textContent).toContain('Build passed');
+  });
+
+  it('exposes the inline diff as an accessible expandable region', async () => {
+    vi.spyOn(api, 'getFilesWithStatus').mockResolvedValue([]);
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[]}
+        hasNewActivity={false}
+        runStreamStatus='CLOSED'
+        runCard={{...activeRun, status: 'COMPLETE', completedAt: '2026-07-10T00:10:00Z'}}
+      />,
+    );
+
+    const toggle = rendered.querySelector<HTMLButtonElement>('.agent-inline-diff > button');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    const panelId = toggle?.getAttribute('aria-controls');
+    expect(panelId).toBeTruthy();
+
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    const panel = rendered.querySelector(`#${panelId}`);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(panel?.getAttribute('role')).toBe('region');
+    expect(panel?.getAttribute('aria-labelledby')).toBe(`${panelId}-heading`);
   });
 
   it('keeps approval actions explicit for narrow transcript layouts', () => {
