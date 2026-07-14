@@ -7,6 +7,27 @@
 > Method: each prompt file was read alongside the code that assembles it (variable substitution,
 > `{{include:...}}` resolution, tool bindings, output parsers). Findings are contract-drift-first:
 > almost every HIGH item is a seam between a prompt and its caller.
+
+## Current-status revalidation (2026-07-15)
+
+This document is a historical audit snapshot, not a statement that every finding still exists in
+the current release. The following items were rechecked against backend tuple `37d72b311`:
+
+| Finding | Current status | Evidence |
+|---|---|---|
+| H1 planner classification split-brain | **RESOLVED** | `PlannerRequest.promptClassification()` / `plannerMaxTasks()` prefer `PlanStrategy`; `OutlinePlannerAgent` passes those values and `PlannerOutputUtils` caps with the strategy when present. |
+| H2 orphan project-quality fragments | **RESOLVED** | `SequentialExecutor.loadProjectTypeFragments()` selects and injects the project-type fragments at worker prompt composition; `MultiRepoWorkerPromptTest` covers the selection boundary. |
+| H3 test-planner → test-worker methods | **RESOLVED** | `TestWorkerAgent.plannedTestMethodsJson()` reads `TestPlan.planJson`; retry prompt preserves `apiProbeResults`. |
+| H4 validation-report closing claims | **RESOLVED** | `validation-report.txt` makes claims conditional on checks/`[AUTO-FIXED]`; `ValidationReportGenerator.buildReviewSection()` records only checks actually run and passed. |
+| H5 PR-review phantom `readFile` | **RESOLVED** | `pr-review-agent.md` limits the model to the supplied diff and `submitReview`; no unbound `readFile` instruction remains. |
+| H6 execution-planner tool/dependency contract | **RESOLVED** | `execution_planner.txt` requires a JSON object and explicitly mirrors `dependsOn` into `dependencyEdges`; caller parses text through `LlmRouter.callTextStrict`. |
+| H7 compactor preservation/cap semantics | **PARTIAL** | Length-truncated responses fail closed and raw output is retained; `readFile` remains compactable, so byte-exact edit safety still needs a dedicated gate before enabling compaction. |
+| H8–H12 injection, context fallback, API-test, report join, and ledger stat | **RESOLVED** | Current PR/code-review trust delimiters, ContextAgent rejected sidecar, API prompt fence handling, class+method join, and bounded git `diffStat()` were rechecked in source. |
+| H13 classifier/planner bands | **RESOLVED** | `classifier.md`, `PlanStrategy`, and `SmartClassifierAgent.defaultTaskCount()` use the five-value strategy taxonomy and caps. |
+| H14–H15 routing-eval and code-review schema | **NOT REVALIDATED** | These evaluation-only prompt contracts were not used by the customer run path in this audit; retain as follow-up before promoting routing evals. |
+
+Earlier sections remain useful as the original evidence and remediation rationale. Do not use their
+unqualified “HIGH”/“MEDIUM” labels as current release status without consulting this table.
 >
 > Status legend: **HIGH** = likely causing failures / silent quality loss today. **MEDIUM** =
 > quality/consistency risk. **LOW** = polish. Each item lists evidence + the concrete fix.
