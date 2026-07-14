@@ -52,6 +52,15 @@ class RunJournalStoreTest {
   }
 
   @Test
+  void rejectsLegacyBareArrayWhenReloadIsBoundToRunIdentity() throws Exception {
+    Path path = RunJournalStore.path(workspace);
+    Files.createDirectories(path.getParent());
+    Files.writeString(path, "[\"legacy task\"]");
+
+    assertThat(RunJournalStore.load(workspace, "run-a")).isEmpty();
+  }
+
+  @Test
   void rejectsUnknownEnvelopeSchemaInsteadOfTreatingItAsJournal() throws Exception {
     Path path = RunJournalStore.path(workspace);
     Files.createDirectories(path.getParent());

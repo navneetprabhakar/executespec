@@ -53,6 +53,9 @@ public final class RunJournalStore {
       // task context. New writes use an envelope, which gives recovery a schema/version boundary
       // instead of treating any JSON array as a trusted journal.
       if (root.isArray()) {
+        // Legacy arrays have no run identity. They remain readable for the unscoped compatibility
+        // path, but must not be reused during restart recovery for a specific run.
+        if (expectedRunId != null && !expectedRunId.isBlank()) return List.of();
         return sanitize(MAPPER.convertValue(root, STRING_LIST));
       }
       if (!root.isObject() || root.path("schemaVersion").asInt(-1) != SCHEMA_VERSION) {
