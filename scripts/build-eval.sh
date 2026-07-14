@@ -38,6 +38,12 @@ CASES_DIR="${SCRIPT_DIR}/build-eval-cases"
 OUT_DIR="${SCRIPT_DIR}/build-eval-results"
 WORKSPACE_ROOT="${ROOT_DIR}/workspace"
 mkdir -p "$OUT_DIR"
+# Keep a self-contained archive for every completed BUILD run.  The held-out evaluator must not
+# depend on this VM's ephemeral workspace (or on a later GCS cleanup window).
+ARTIFACT_DIR="${OUT_DIR}/artifacts"
+mkdir -p "$ARTIFACT_DIR/workspaces"
+# One manifest per invocation; archives themselves remain content-addressable by run ID.
+: > "${ARTIFACT_DIR}/completed-runs.jsonl"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-revalidate-ent@test.local}"
@@ -57,6 +63,33 @@ while [[ $# -gt 0 ]]; do
 done
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+
+safe_extract_zip() {
+  local archive="$1" destination="$2"
+  python3 "${SCRIPT_DIR}/build-eval-safe-extract.py" "$archive" "$destination"
+}
+
+# Download the server's canonical workspace export.  This follows either the local ZIP response
+# or the short-lived GCS signed redirect, and validates the archive before it is retained.
+download_workspace_archive() {
+  local run_id="$1" archive="${ARTIFACT_DIR}/workspace-${run_id}.zip"
+  [[ -s "$archive" ]] && { unzip -tqq "$archive" >/dev/null 2>&1; return $?; }
+  local partial="${archive}.part"
+  rm -f "$partial"
+  if ! curl --fail --silent --show-error --location --max-time 300 \
+      -H "Authorization: Bearer ${TOKEN}" \
+      "$BASE_URL/api/runs/${run_id}/download?format=zip" -o "$partial"; then
+    rm -f "$partial"
+    return 1
+  fi
+  if ! unzip -tqq "$partial" >/dev/null 2>&1; then
+    log "  $run_id archive failed ZIP validation"
+    rm -f "$partial"
+    return 1
+  fi
+  mv "$partial" "$archive"
+  return 0
+}
 
 api_provider() { case "$1" in gemini) echo GOOGLE ;; *) echo "$1" | tr '[:lower:]' '[:upper:]' ;; esac; }
 
@@ -100,9 +133,36 @@ run_case() {
     return 0
   fi
 
-  # Locate the generated workspace + run OUR held-out acceptance tests against it.
+  # Locate the generated workspace + retain a canonical archive for an independent evaluator.
   local ws="${WORKSPACE_ROOT}/${run_id}"
-  if [[ ! -d "$ws" ]]; then log "  $id workspace gone — score 0"; echo "$id,$band,NO_WORKSPACE,0,0"; return 0; fi
+  local artifact_source="local"
+  local archive="${ARTIFACT_DIR}/workspace-${run_id}.zip"
+  if [[ -d "$ws" ]]; then
+    # Archive generation is best-effort for a still-local workspace: scoring can proceed even if
+    # GCS/HTTP is unavailable, while the manifest records that independent replay is unavailable.
+    if download_workspace_archive "$run_id"; then
+      log "  $id retained evaluator archive: $archive"
+    else
+      log "  $id archive retention unavailable; scoring local workspace"
+      archive=""
+    fi
+  else
+    # A cleaned VM workspace is recoverable when the server has a GCS archive.  Materialize it in
+    # the eval output directory so acceptance tests and a later evaluator use the same bytes.
+    artifact_source="archive"
+    ws="${ARTIFACT_DIR}/workspaces/${run_id}"
+    if ! download_workspace_archive "$run_id"; then
+      log "  $id workspace and server archive unavailable — score 0"
+      echo "$id,$band,NO_ARTIFACT,0,0"
+      return 0
+    fi
+    if ! safe_extract_zip "$archive" "$ws"; then
+      log "  $id retained archive failed safe extraction — score 0"
+      echo "$id,$band,INVALID_ARTIFACT,0,0"
+      return 0
+    fi
+    log "  $id materialized evaluator workspace from archive: $ws"
+  fi
 
   # acceptance/run.sh receives the generated workspace dir as $1 and must exit 0 only when every
   # hidden acceptance test passes. It prints "PASS n/m" on stdout. Authored by us, never seen by the
@@ -114,6 +174,13 @@ run_case() {
   passed="$(echo "$result" | grep -oE 'PASS [0-9]+/[0-9]+' | grep -oE '[0-9]+' | head -1 || echo 0)"
   total="$(echo "$result"  | grep -oE 'PASS [0-9]+/[0-9]+' | grep -oE '[0-9]+' | tail -1 || echo 0)"
   log "  $id acceptance: ${passed}/${total} held-out tests passed"
+  # A small sidecar is intentionally plain JSONL: external adjudicators can consume one completed
+  # run without parsing the CSV or depending on the source VM.  Never include credentials/tokens.
+  local sha=""
+  [[ -n "$archive" ]] && sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
+  printf '{"case":"%s","runId":"%s","status":"%s","artifactSource":"%s","archive":"%s","archiveSha256":"%s","heldOutPassed":%s,"heldOutTotal":%s}\n' \
+    "$id" "$run_id" "$status" "$artifact_source" "$archive" "$sha" "$passed" "$total" \
+    >> "${ARTIFACT_DIR}/completed-runs.jsonl"
   echo "$id,$band,$status,$passed,$total"
 }
 
