@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -839,6 +840,17 @@ to boot — skip it for those.""";
     return null;
   }
 
+  /** Conservative, provider-neutral task prompt budget used before model selection. */
+  private static long requiredContextTokens(PlannedTask task) {
+    if (task == null) return 0L;
+    return ContextPlanner.estimateTextTokens(
+        task.id(),
+        task.title(),
+        task.description(),
+        String.join("\n", task.touchesFiles()),
+        String.join("\n", task.hardConstraints()));
+  }
+
   private void emitTaskWavePlan(String runId, Plan plan) {
     if (plan == null || plan.tasks().isEmpty()) {
       return;
@@ -1588,6 +1600,7 @@ to boot — skip it for those.""";
               .taskComplexity(
                   task == null || task.complexity() == null ? "UNKNOWN" : task.complexity().name())
               .requiredQualityThreshold(requiredGoalQualityThreshold(category))
+              .requiredContextTokens(requiredContextTokens(task))
               .providerAvailability(providerAvailability(req.runContext().runId()))
               .providerPreferenceOrder(providerPreferenceOrder(currentProvider))
               .build());
@@ -2744,6 +2757,7 @@ to boot — skip it for those.""";
                   .requiredQualityThreshold(requiredQualityThreshold)
                   .providerAvailability(providerAvailability(runId))
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
+                  .requiredContextTokens(requiredContextTokens(task))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .providerBehaviorPoor(providerBehaviorPoor)
                   .routePinned(routePinned)

@@ -54,6 +54,25 @@ class GoalContinuationAdvisorTest {
   }
 
   @Test
+  void forwardsProjectedContextBudgetToCandidateSelection() {
+    when(candidateService.buildCandidates(any())).thenReturn(List.of());
+
+    advisor.advise(
+        GoalContinuationAdvisorRequest.builder()
+            .goalDecision(progressing())
+            .currentProvider("anthropic")
+            .currentModel("sonnet")
+            .taskCategory("BUG_FIX")
+            .requiredContextTokens(12_345L)
+            .build());
+
+    ArgumentCaptor<ModelProviderCandidateRequest> captor =
+        ArgumentCaptor.forClass(ModelProviderCandidateRequest.class);
+    verify(candidateService).buildCandidates(captor.capture());
+    assertThat(captor.getValue().requiredContextTokens()).isEqualTo(12_345L);
+  }
+
+  @Test
   void recommendsProviderChangeWhenProviderBehaviorIsPoorAndAlternateClearsThreshold() {
     when(candidateService.buildCandidates(any()))
         .thenReturn(

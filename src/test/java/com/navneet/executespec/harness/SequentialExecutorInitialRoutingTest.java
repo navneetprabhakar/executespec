@@ -128,6 +128,7 @@ class SequentialExecutorInitialRoutingTest {
     assertThat(captor.getValue().taskCategory()).isEqualTo("BUG_FIX");
     assertThat(captor.getValue().providerAvailability()).containsEntry("anthropic", true);
     assertThat(captor.getValue().providerPreferenceOrder()).contains("openai");
+    assertThat(captor.getValue().requiredContextTokens()).isGreaterThan(0L);
   }
 
   @Test

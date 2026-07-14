@@ -263,6 +263,25 @@ public class ContextPlanner {
         + (long) messageCount * MESSAGE_OVERHEAD_TOKENS;
   }
 
+  /**
+   * Deterministically estimates the input budget for routing-time task admission. This is
+   * intentionally conservative and provider-neutral: the actual worker request will still use
+   * {@link #estimateInputTokens(List, List)} once the full prompt and tool schemas are available.
+   */
+  public static long estimateTextTokens(String... values) {
+    long chars = 0;
+    int valueCount = 0;
+    if (values != null) {
+      for (String value : values) {
+        if (value == null || value.isBlank()) continue;
+        chars += value.length();
+        valueCount++;
+      }
+    }
+    return divideCeil(chars, CHARS_PER_TOKEN_ESTIMATE)
+        + (long) valueCount * MESSAGE_OVERHEAD_TOKENS;
+  }
+
   private static int length(String value) {
     return value == null ? 0 : value.length();
   }
