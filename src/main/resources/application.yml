@@ -1,6 +1,7 @@
 spring:
   application:
     name: executespec
+
   data:
     redis:
       host: localhost
@@ -1284,3 +1285,23 @@ management:
   zipkin:
     tracing:
       enabled: false
+
+---
+# Operator-only benchmark controls are declared in the base configuration as well as the
+# dedicated benchmark profile. This keeps local/dev benchmark smokes deterministic when the
+# operator enables the harness without activating the benchmark profile. Production remains
+# disabled by default and retains the historical /var path unless an explicit override is set.
+swebench:
+  enabled: ${SWEBENCH_ENABLED:false}
+  bootstrap: ${SWEBENCH_BOOTSTRAP:false}
+  suite: ${SWEBENCH_SUITE:swe-bench}
+  output-base: ${SWEBENCH_OUTPUT_BASE:/var/swebench/runs}
+  instances-file: ${SWEBENCH_INSTANCES_FILE:/Users/navneetprabhakar/swebench-bench/swebench_lite_dev.json}
+  image-template: ${SWEBENCH_IMAGE_TEMPLATE:docker.io/swebench/sweb.eval.x86_64.%s:latest}
+  pro-image-repository: ${SWEBENCH_PRO_IMAGE_REPOSITORY:jefzda/sweap-images}
+  prediction-prefix: ${SWEBENCH_PREDICTION_PREFIX:executespec}
+  default-provider: ${SWEBENCH_DEFAULT_PROVIDER:deepseek}
+  task-wall-timeout-minutes: ${SWEBENCH_TASK_WALL_TIMEOUT_MINUTES:60}
+  hard-cap-usd: ${SWEBENCH_HARD_CAP_USD:8.0}
+  max-concurrent-runs: ${SWEBENCH_MAX_CONCURRENT_RUNS:1}
+  submit-queue-wait-seconds: ${SWEBENCH_SUBMIT_QUEUE_WAIT_SECONDS:180}
