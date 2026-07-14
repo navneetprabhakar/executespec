@@ -112,6 +112,12 @@ public class SwebenchProperties {
    */
   private int submitQueueWaitSeconds = 180;
 
+  /** Maximum seconds allowed for the local Docker image-presence probe. */
+  private int imageInspectTimeoutSeconds = 30;
+
+  /** Maximum seconds allowed for a Docker registry pull (large images can take many minutes). */
+  private int imagePullTimeoutSeconds = 1800;
+
   /**
    * Docker image template — substituted with the instance ID's underscore-separated form (matches
    * SWE-bench's published image naming convention). Example: {@code sqlfluff__sqlfluff-1625} →

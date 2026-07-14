@@ -285,10 +285,16 @@ public class BenchmarkGenerationService {
       String runId,
       SwebenchInstanceLoader.SwebenchInstance instance) {
     String workdir = workdirFor(instance);
-    boolean present = run("docker image inspect " + image, 30).exit() == 0;
-    if (!present && run("docker pull " + image, 1800).exit() != 0) {
-      throw new ResponseStatusException(
-          HttpStatus.INTERNAL_SERVER_ERROR, "docker pull failed for " + image);
+    ShellResult inspect =
+        run("docker image inspect " + image, props.getImageInspectTimeoutSeconds());
+    boolean present = inspect.exit() == 0;
+    if (!present) {
+      ShellResult pull = run("docker pull " + image, props.getImagePullTimeoutSeconds());
+      if (pull.exit() != 0) {
+        throw new ResponseStatusException(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            dockerImageFailure("pull", image, pull, props.getImagePullTimeoutSeconds()));
+      }
     }
     String tempName = "bench-gen-prep-" + UUID.randomUUID().toString().substring(0, 8);
     if (run("docker create --name " + tempName + " " + image + " sleep 1", 60).exit() != 0) {
@@ -332,6 +338,23 @@ public class BenchmarkGenerationService {
     }
     containerStore.put(runId, cid, workdir);
     log.info("benchmark-gen container {} ({}) ready for {} ({})", containerName, cid, runId, image);
+  }
+
+  static String dockerImageFailure(
+      String operation, String image, ShellResult result, int timeout) {
+    String detail = result.output() == null ? "" : result.output().trim().replaceAll("\\s+", " ");
+    if (detail.length() > 600) detail = detail.substring(0, 600) + "…";
+    String reason = result.exit() == -1 ? "timed out" : "exit=" + result.exit();
+    return "docker image "
+        + operation
+        + " failed for "
+        + image
+        + " ("
+        + reason
+        + ", timeout="
+        + timeout
+        + "s)"
+        + (detail.isBlank() ? "" : ": " + detail);
   }
 
   /** Capture the agent's {@code git diff} against the base commit, excluding run-infra noise. */
@@ -564,7 +587,7 @@ public class BenchmarkGenerationService {
     return (instance.isSweBenchPro() || props.isSweBenchPro()) ? "/app" : "/testbed";
   }
 
-  private record ShellResult(int exit, String output) {}
+  record ShellResult(int exit, String output) {}
 
   private ShellResult run(String command, int timeoutSec) {
     try {
