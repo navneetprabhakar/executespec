@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "type": "hero-recording-provenance",
   "recordedAgainst": {
-    "backendCommit": "809a9ff6cb44d1576e725f8d9229f7c525ee463f",
+    "backendCommit": "5aa65033300a5d304f523fcdf6c79690680a93f7",
     "cliCommit": "65fbbf9d239d2b1166d452dda73f1912537665e3",
-    "webFrontendSha": "809a9ff6cb44d1576e725f8d9229f7c525ee463f"
+    "webFrontendSha": "5aa65033300a5d304f523fcdf6c79690680a93f7"
   },
   "currentCandidate": {
-    "backendCommit": "809a9ff6cb44d1576e725f8d9229f7c525ee463f",
-    "backendTree": "0106b7fe8b3c4c373df15f7d354879a50aeab11c",
+    "backendCommit": "5aa65033300a5d304f523fcdf6c79690680a93f7",
+    "backendTree": "d69c299bb9c7aaebc6db7bfcfe9aef72e8ddbade",
     "cliCommit": "65fbbf9d239d2b1166d452dda73f1912537665e3",
     "cliTree": "9733b26def341561b3bf47fee2d7ea94e6f3d455",
-    "webFrontendSha": "809a9ff6cb44d1576e725f8d9229f7c525ee463f"
+    "webFrontendSha": "5aa65033300a5d304f523fcdf6c79690680a93f7"
   },
   "currentTupleMatch": true,
   "asset": "website/media/hero.webm",
