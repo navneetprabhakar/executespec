@@ -130,6 +130,33 @@ class WebQaFixtureControllerTest {
   }
 
   @Test
+  void recoveryArmLeavesWorkingRunWithTerminalTaskEvidenceForBootSalvage() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("web-qa-recovery")
+            .createdByUserId("user-1")
+            .status("AWAITING_APPROVAL")
+            .build();
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    when(runs.findById("web-qa-recovery")).thenReturn(java.util.Optional.of(run));
+    AgentTask task =
+        AgentTask.builder().taskId("task-1").runId("web-qa-recovery").status("PENDING").build();
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    when(tasks.findByRunId("web-qa-recovery")).thenReturn(List.of(task));
+    WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class), tasks);
+
+    assertThat(
+            controller.advance(
+                "web-qa-recovery", new WebQaFixtureController.AdvanceRequest("RECOVERY"), user()))
+        .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
+        .isEqualTo("WORKING");
+    assertThat(run.getCompletedAt()).isNull();
+    assertThat(task.getStatus()).isEqualTo("COMPLETE");
+    verify(runs).save(run);
+    verify(tasks).save(task);
+  }
+
+  @Test
   void advanceRejectsNonFixtureAndInvalidTransition() {
     PipelineRun run =
         PipelineRun.builder()

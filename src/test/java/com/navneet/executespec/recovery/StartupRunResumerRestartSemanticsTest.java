@@ -8,16 +8,20 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Characterization tests for what a JVM restart does and does not recover.
@@ -86,5 +90,38 @@ class StartupRunResumerRestartSemanticsTest {
 
     verify(runRepo, never()).save(any(PipelineRun.class));
     verify(taskRepo, never()).findByRunId(RUN_ID);
+  }
+
+  @Test
+  void interruptedPostExecutorPhase_isSalvagedWithoutProviderDispatch() throws Exception {
+    Path workspaceRoot = Files.createTempDirectory("executespec-restart-");
+    Files.createDirectories(workspaceRoot.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("WORKING")
+            .harnessVersion("v2")
+            .workspacePath(workspaceRoot.resolve(RUN_ID).toString())
+            .build();
+    AgentTask task =
+        AgentTask.builder().taskId(RUN_ID + "-task").runId(RUN_ID).status("COMPLETE").build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+    when(taskRepo.findByRunId(RUN_ID)).thenReturn(List.of(task));
+
+    StartupRunResumer resumer =
+        new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider);
+    ReflectionTestUtils.setField(resumer, "workspaceRoot", workspaceRoot.toString());
+    resumer.scanAndRecover();
+
+    assertThat(run.getStatus()).isEqualTo("COMPLETE");
+    assertThat(run.getStatusReason()).isEqualTo("REVIEWER_INTERRUPTED_CODE_PRESERVED");
+    verify(runRepo).save(run);
+    verify(lifecycleProvider, never()).getObject();
+    verify(broadcaster).complete(RUN_ID);
   }
 }
