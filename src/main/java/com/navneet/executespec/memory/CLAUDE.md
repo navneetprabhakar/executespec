@@ -22,6 +22,10 @@ longer hardcodes OpenAI for compaction.
 Project chat compaction and spec compilation use the same resolver, so all project-chat phases keep
 the selected provider instead of falling back independently to OpenAI.
 
+Project chat also tracks tool name+arguments per turn. If a provider repeats every read call, the
+loop gives it one final no-tools answer turn instead of spending the remaining round budget on
+duplicate reads; this is especially important for Gemini project-chat tool selection.
+
 ## Persistence
 
 `ProjectRunLedger` stores one idempotent digest per run. `MemoryCompactionService` only marks
