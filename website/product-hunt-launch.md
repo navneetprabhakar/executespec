@@ -97,7 +97,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
 2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
-3. ⚠️ **Illustrative demo video** — `website/media/hero.webm` is a 60.2-second provider-free synthetic fixture recording (SHA-256 `7f53c9376039f9cfb3c5301ea35fa1e7c825c43379f89a161afd7811c9d8e200`). Its provenance is recorded in `docs/evidence/current-tuple-hero-recording-2026-07-13.json`; independent human review remains pending. Keep it labeled illustrative and do not present it as a live customer run, current-source release capture, benchmark, or SOTA result until a fresh capture is sealed and reviewed.
+3. ⚠️ **Illustrative demo video** — `website/media/hero.webm` is a 54-second provider-free synthetic fixture recording (SHA-256 `387e7e1deb82457938cd4ad3822db83528d25a285c91a80f109f452022efaa47`) regenerated against the current release tuple. Its provenance is recorded in `docs/evidence/current-tuple-hero-recording-2026-07-13.json`; independent human review remains pending. Keep it labeled illustrative and do not present it as a live customer run, benchmark, or SOTA result.
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 
@@ -164,14 +164,14 @@ Carousel: 1 "The problem" (AI PRs nobody trusts) · 2 "Plan gate with price" · 
 | Free sign-ups | 200 | 600 | 2,000 |
 | Pro conversions | 10 (5%) | 40 | 150 |
 | Team seats | 2 | 8 | 30 |
-| $ MRR added | $368 | $1,472 | $5,520 |
+| $ MRR added | $300 | $1,200 | $4,500 |
 
-_MRR model: Pro = $29 × count (founder-50 halves the first 100), Team = $39 × seats. Track via the in-app 6-stage activation funnel (SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED)._
+_MRR model: Pro = $20 × count, Team = $50 × seats (two-seat minimum). Track via the in-app 6-stage activation funnel (SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED)._
 
 ## 10 · Post-launch follow-ups (P1)
 
 1. **Stripe top-up flow** — `BillingController.purchaseTopup` routes only to Razorpay today; Stripe path needs the checkout-URL variant + webhook handler + `TopupPackage.stripePriceId`.
 2. **Country-aware gateway routing** — route `country == "IN"` → Razorpay, else Stripe (today it's the `defaultGateway` string).
 3. **Stripe refund path** — `BillingService.issueProratedRefund` TODO; upgrades on Stripe currently skip the prorated refund silently.
-4. **TEAM yearly plans** — V165 deactivated the $49-era yearly rows and no $39-based replacement landed; decide + seed if annual Team demand shows up.
+4. **TEAM yearly plans** — annual Team pricing is not currently offered; decide + seed it only if annual demand shows up.
 5. **Benchmark re-run** — publish the rebuilt-harness SWE-bench numbers (with the honest small-N framing) once they land; until then the proof asset is the verified-report gallery.
