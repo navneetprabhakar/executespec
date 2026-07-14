@@ -3,7 +3,9 @@ package com.navneet.executespec.memory;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
@@ -360,6 +362,8 @@ public class ProjectChatService {
     StringBuilder finalText = new StringBuilder();
     int totalTokensIn = 0, totalTokensOut = 0;
     String terminationReason = "ok";
+    Map<String, Integer> toolCallCounts = new HashMap<>();
+    boolean forceFinalAnswer = false;
 
     try {
       for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -374,7 +378,11 @@ public class ProjectChatService {
                     .stepId("project-chat.round-" + (round + 1))
                     .temperature(0.3)
                     .maxTokens(2048)
-                    .toolsOverride(tools)
+                    // If a provider repeats the same read call, give it one final answer turn
+                    // without tools. Gemini in particular may otherwise keep re-reading the
+                    // same project context until MAX_TOOL_ROUNDS, burning tokens without a
+                    // user-visible answer.
+                    .toolsOverride(forceFinalAnswer ? List.of() : tools)
                     .build());
 
         Usage usage = resp.getMetadata() != null ? resp.getMetadata().getUsage() : null;
@@ -407,6 +415,19 @@ public class ProjectChatService {
 
         // No tool calls → final answer reached, exit the loop.
         if (calls.isEmpty()) {
+          break;
+        }
+
+        if (forceFinalAnswer) {
+          terminationReason = "repeated-tool-loop";
+          log.warn(
+              "Project chat provider continued calling tools after duplicate-loop guard for project"
+                  + " {}",
+              projectId);
+          if (finalText.length() > 0) finalText.append("\n\n");
+          finalText.append(
+              "_(I gathered the available project data, but the model kept repeating a read"
+                  + " operation. Please ask again if you need a different view.)_");
           break;
         }
 
@@ -450,6 +471,20 @@ public class ProjectChatService {
                   tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
         }
         conversation.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+        boolean allCallsRepeated = registerToolCallsAndDetectRepeat(toolCallCounts, calls);
+        if (allCallsRepeated) {
+          forceFinalAnswer = true;
+          conversation.add(
+              new UserMessage(
+                  "The same read tool call was repeated. Do not call any more tools. "
+                      + "Answer the original request using the tool results already provided; "
+                      + "if something is unavailable, say so plainly."));
+          log.warn(
+              "Project chat duplicate-tool guard activated for project {} after round {}",
+              projectId,
+              round + 1);
+        }
 
         if (round == MAX_TOOL_ROUNDS - 1) {
           terminationReason = "max-rounds";
@@ -508,6 +543,18 @@ public class ProjectChatService {
     return null;
   }
 
+  /** Returns true when every call in this turn has already been made with the same arguments. */
+  static boolean registerToolCallsAndDetectRepeat(
+      Map<String, Integer> toolCallCounts, List<AssistantMessage.ToolCall> calls) {
+    boolean allCallsRepeated = !calls.isEmpty();
+    for (AssistantMessage.ToolCall tc : calls) {
+      String signature = (tc.name() == null ? "" : tc.name()) + "\u0000" + tc.arguments();
+      int count = toolCallCounts.merge(signature, 1, Integer::sum);
+      allCallsRepeated &= count >= 2;
+    }
+    return allCallsRepeated;
+  }
+
   private List<Message> buildMessages(Project project) {
     StringBuilder sys = new StringBuilder();
     sys.append("You are the ExecuteSpec project assistant. Answer the user's questions ")
@@ -560,6 +607,9 @@ public class ProjectChatService {
         .append("user knows where to look in the dashboard. After a read tool, summarise the ")
         .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")
         .append("ok=false, surface the message field and suggest the next step.\n\n")
+        .append("Never repeat the same read tool with the same arguments after it has returned. ")
+        .append("Use the result already provided and answer the user; if it is insufficient, say ")
+        .append("what is missing instead of looping.\n\n")
         .append("Settings (GitHub PAT, AI provider keys, billing) are deliberately NOT exposed ")
         .append(
             "as tools. If the user asks you to update those, point them to /settings/manage.\n\n")

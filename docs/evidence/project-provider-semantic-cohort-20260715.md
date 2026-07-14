@@ -65,10 +65,11 @@ transport/access contracts only; they do not prove provider-backed generation.
 2. Anthropic completed the bounded project-chat task cleanly.
 3. OpenAI's fallback path is operational, but OpenAI quality remains unverified until
    its upstream quota is restored.
-4. Gemini's project-chat tool loop is a concrete quality/efficiency gap: its model
-   selected read tools repeatedly instead of producing a final answer. Add a
-   provider-specific loop guard or prompt/tool-choice policy and rerun a k>=3 cohort
-   before enabling Gemini as a preferred project-chat route.
+4. Gemini's project-chat tool loop was a concrete quality/efficiency gap: its model
+   selected read tools repeatedly instead of producing a final answer. The current
+   source now has a provider-agnostic duplicate-tool guard plus a forced no-tools
+   finalization turn; the regression below completed successfully. A k>=3 cohort is
+   still required before enabling Gemini as a preferred project-chat route.
 5. Architecture/doc generation and edit/test/repair were intentionally not live-run
    here: the fixture repositories are `BOOTSTRAP_FAILED`, and starting those paths
    would clone/build external repos and exceed this bounded diagnostic's evidence
