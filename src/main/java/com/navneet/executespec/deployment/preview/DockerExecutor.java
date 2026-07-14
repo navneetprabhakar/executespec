@@ -1,13 +1,12 @@
 package com.navneet.executespec.deployment.preview;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Component;
@@ -200,48 +199,45 @@ public class DockerExecutor {
       }
 
       Process process = pb.start();
+      ByteArrayOutputStream captured = new ByteArrayOutputStream();
+      Thread outputReader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try (InputStream is = process.getInputStream()) {
+                      is.transferTo(captured);
+                    } catch (IOException e) {
+                      log.debug("Process output read failed: {}", e.getMessage());
+                    }
+                  });
 
-      // Drain output concurrently. Reading the pipe before waitFor can deadlock when a command
-      // stays silent (or fills the pipe) past the process timeout; Docker availability checks then
-      // hang instead of failing closed. The bounded read also prevents untrusted build output from
-      // growing without limit.
-      CompletableFuture<String> outputFuture =
-          CompletableFuture.supplyAsync(
-              () -> {
-                try (InputStream is = process.getInputStream()) {
-                  return new String(is.readNBytes(MAX_OUTPUT_BYTES));
-                } catch (IOException e) {
-                  return "";
-                }
-              });
+      // Start the timeout while the child is running. Reading stdout synchronously before
+      // waitFor() lets a stalled Docker daemon defeat the timeout by keeping its pipe open.
       boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       if (!finished) {
         process.destroyForcibly();
-        try {
-          process.getInputStream().close();
-        } catch (IOException ignored) {
-          // The process has already been force-killed; preserve the timeout result.
-        }
-        return new ProcessResult(-1, output(outputFuture), true);
+        process.waitFor(1, TimeUnit.SECONDS);
       }
 
-      return new ProcessResult(process.exitValue(), output(outputFuture), false);
+      outputReader.join(TimeUnit.SECONDS.toMillis(1));
+      byte[] bytes = captured.toByteArray();
+      String output =
+          new String(
+              bytes,
+              0,
+              Math.min(bytes.length, MAX_OUTPUT_BYTES),
+              java.nio.charset.StandardCharsets.UTF_8);
+
+      if (!finished) {
+        return new ProcessResult(-1, output, true);
+      }
+
+      return new ProcessResult(process.exitValue(), output, false);
     } catch (IOException | InterruptedException e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
       throw new PreviewException("Process execution failed: " + String.join(" ", command), e);
-    }
-  }
-
-  private String output(CompletableFuture<String> outputFuture) {
-    try {
-      return outputFuture.get(1, TimeUnit.SECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return "";
-    } catch (ExecutionException | java.util.concurrent.TimeoutException e) {
-      return "";
     }
   }
 
