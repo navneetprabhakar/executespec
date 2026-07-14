@@ -1725,6 +1725,7 @@ to boot — skip it for those.""";
             req.plan() == null ? null : req.plan().projectType(),
             req.workspaceSummary(),
             requestedProvider,
+            requestedModel,
             req.localHandsMode());
     String orientation =
         (featureFlagService != null
@@ -4564,7 +4565,7 @@ to boot — skip it for those.""";
       String workspaceSummary,
       String provider) {
     return composeSystemPrompt(
-        task, designBlock, refDocs, projectType, workspaceSummary, provider, false);
+        task, designBlock, refDocs, projectType, workspaceSummary, provider, null, false);
   }
 
   String composeSystemPrompt(
@@ -4574,6 +4575,25 @@ to boot — skip it for those.""";
       String projectType,
       String workspaceSummary,
       String provider,
+      Boolean localHandsMode) {
+    return composeSystemPrompt(
+        task, designBlock, refDocs, projectType, workspaceSummary, provider, null, localHandsMode);
+  }
+
+  /**
+   * Compose a worker prompt with optional provider-and-model-specific tuning. Model overlays are
+   * additive and fail closed when no matching classpath resource exists; provider fragments remain
+   * the compatibility fallback. Keeping the model as an explicit input prevents a provider-level
+   * prompt from being applied blindly to materially different models.
+   */
+  String composeSystemPrompt(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary,
+      String provider,
+      String model,
       Boolean localHandsMode) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
 
@@ -4591,6 +4611,10 @@ to boot — skip it for those.""";
       String providerFragment = loadProviderFragment(provider);
       if (!providerFragment.isBlank()) {
         sb.append("\n\n").append(providerFragment);
+      }
+      String modelFragment = loadModelFragment(provider, model);
+      if (!modelFragment.isBlank()) {
+        sb.append("\n\n").append(modelFragment);
       }
     }
 
@@ -4813,6 +4837,22 @@ to boot — skip it for those.""";
     String key = provider.trim().toLowerCase();
     if (!PromptResourceReader.isSafeSegment(key)) return "";
     return PromptResourceReader.readOptional("prompts/fragments/provider/" + key, "build");
+  }
+
+  /** Load an optional model-specific BUILD fragment under model/{provider}/{model}/build.md. */
+  String loadModelFragment(String provider, String model) {
+    String providerKey = promptKey(provider);
+    String modelKey = promptKey(model);
+    if (providerKey.isBlank() || modelKey.isBlank()) return "";
+    return PromptResourceReader.readOptional(
+        "prompts/fragments/model/" + providerKey + "/" + modelKey, "build");
+  }
+
+  private static String promptKey(String value) {
+    if (value == null || value.isBlank()) return "";
+    String key = value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
+    key = key.replaceAll("^-+|-+$", "");
+    return PromptResourceReader.isSafeSegment(key) ? key : "";
   }
 
   String loadProjectTypeFragments(String projectType) {
