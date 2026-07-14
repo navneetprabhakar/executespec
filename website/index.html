@@ -1420,13 +1420,13 @@
                 <div class='num'>03 · VERIFY</div>
                 <div class='icon-bg'>🔍</div>
                 <h3>Tests + reviewer + build</h3>
-                <p>Smoke test after every task. Final reviewer pass (general + wiring) on the whole change, plus a fix-the-build pass if needed. Additive verified score (0–100).</p>
+                <p>Smoke test after every task. Final reviewer pass (general + wiring) on the whole change, plus a fix-the-build pass if needed. Internal verification summary (0–100) with the underlying evidence visible.</p>
             </div>
             <div class='pipe-card s4'>
                 <div class='num'>04 · SHIP</div>
                 <div class='icon-bg'>🚀</div>
                 <h3>PR with a verdict</h3>
-                <p>A real PR on your repo, opened from your connected GitHub account, with the verified score attached. CI runs your gates too. You merge.</p>
+                <p>A real PR on your repo, opened from your connected GitHub account, with the internal verification summary and evidence attached. CI runs your gates too. You merge.</p>
             </div>
         </div>
     </div>
@@ -1708,7 +1708,7 @@
             <details class='faq-item'>
                 <summary>What's the verified score?</summary>
                 <div class='answer'>
-                    A deterministic 0–100 score attached to every PR, computed from real signals — not the model grading itself. It's an additive weighted score across five slots: <span class='mono' style='font-size: 13px;'>code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5)</span>, averaged over whichever slots actually fired. Tests come from running your own test suite in the workspace; build and reviewer from the real passes. The verdict pill (Ready / Needs review / Failed / Blocked) is derived from the score.
+                    The 0–100 verified score is an internal evidence summary, not independent proof of correctness or mergeability. It combines real signals — not the model grading itself — across five slots: <span class='mono' style='font-size: 13px;'>code delivered (30) + build (25) + tests (20) + reviewer (20) + criticals (5)</span>, averaged over whichever slots actually fired. Tests come from running your own test suite in the workspace; build and reviewer from the real passes. The verdict pill (Ready / Needs review / Failed / Blocked) is derived from the summary and should be reviewed alongside the evidence ledger.
                 </div>
             </details>
             <details class='faq-item'>
