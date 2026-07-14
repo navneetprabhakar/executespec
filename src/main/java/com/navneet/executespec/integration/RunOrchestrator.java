@@ -2,7 +2,6 @@ package com.navneet.executespec.integration;
 
 import static com.navneet.executespec.integration.RunPipelineSupport.computeRepoCountForEstimate;
 import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
-import static com.navneet.executespec.integration.RunPipelineSupport.isTerminal;
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
@@ -2769,6 +2768,20 @@ public class RunOrchestrator implements RunControlPort {
         cost.inputTokens(),
         cost.outputTokens(),
         String.format("%.4f", cost.costUsd()));
+    // Claim the terminal transition before loading and enriching the entity. Cancellation may race
+    // this reviewer/validation thread; a read-then-save below is not a compare-and-set and can
+    // overwrite a user CANCELLED state after the cancel endpoint has already emitted its terminal
+    // event. Once this claim succeeds, cancel() observes a terminal status and returns false;
+    // when cancellation wins, the claim returns zero and this method must preserve that status.
+    int terminalClaim =
+        statusReason == null && !"FAILED".equals(finalStatus)
+            ? runRepo.claimTerminalTransitionPreservingReasons(runId, finalStatus, Instant.now())
+            : runRepo.claimTerminalTransitionWithReasons(
+                runId,
+                finalStatus,
+                statusReason,
+                "FAILED".equals(finalStatus) ? note : null,
+                Instant.now());
     runRepo
         .findById(runId)
         .ifPresent(
@@ -2778,28 +2791,18 @@ public class RunOrchestrator implements RunControlPort {
               // without this guard the late write clobbers the user-initiated status
               // (e.g. clinic run 6d23d5b5 showed PARTIAL despite a successful cancel).
               String currentStatus = r.getStatus();
-              if (!"CANCELLED".equals(currentStatus) && !"PAUSED".equals(currentStatus)) {
-                r.setStatus(finalStatus);
+              if (terminalClaim > 0) {
                 persistedStatus[0] = finalStatus;
               } else {
                 persistedStatus[0] = currentStatus;
               }
-              if (!"PAUSED".equals(persistedStatus[0])) {
-                r.setCompletedAt(Instant.now());
-              }
-              if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
-                r.setFailureReason(note);
-              }
-              // v2.5.10 — persist status_reason so /api/runs/{id} surfaces it and the
-              // UI's status badge + tooltip can explain "PARTIAL because X".
-              // Only write if non-null: legacy callers still reach here without a
-              // reason and we don't want to clobber a previously-set value.
-              if (statusReason != null
-                  && !isTerminal(currentStatus)
-                  && !"PAUSED".equals(currentStatus)) {
-                r.setStatusReason(statusReason);
-              }
               persistedReason[0] = r.getStatusReason();
+              // A lost terminal claim means cancellation or another terminal writer won. Do not
+              // save the entity at all: even cost/token enrichment must not reintroduce the stale
+              // status from this thread's persistence context.
+              if (terminalClaim == 0) {
+                return;
+              }
               // Only overwrite actualCostUsd with a positive tracker reading; an empty
               // snapshot (e.g. tracker evicted across a deploy boundary) must not
               // clobber a previously-persisted cost.
