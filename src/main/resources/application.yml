@@ -858,6 +858,9 @@ model-matrix:
     openai:
       - gemini
       - anthropic
+    deepseek:
+      - openrouter
+      - fireworks
 
 durability:
   task-checkpoint:

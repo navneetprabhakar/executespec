@@ -130,8 +130,8 @@ public class LlmRouter {
    * exhausted, fail over to the next provider(s) in the model's YAML failover chain. Gated by this
    * flag (graduated ON by V266; operators may disable it for incident response). BYOK-safe: a run
    * already using a customer key for the primary only fails over to a provider the customer ALSO
-   * has a key for (never silently crosses to a platform key), and the enterprise-BYOK providers
-   * (deepseek / openrouter) are never failover targets.
+   * has a key for (never silently crosses to a platform key). DeepSeek's recovery path is native
+   * DeepSeek -> OpenRouter -> Fireworks, subject to key and policy availability.
    */
   static final String FAILOVER_FLAG = "router.failover.enabled";
 
@@ -271,12 +271,6 @@ public class LlmRouter {
             .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
-
-  /**
-   * Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose).
-   */
-  private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS =
-      Set.of("deepseek", "openrouter", "fireworks");
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -503,7 +497,7 @@ public class LlmRouter {
    * <p>BYOK rule (the discussed mechanism): if the primary call used a customer key ({@code source
    * != PLATFORM}) we only fail over to a provider the customer ALSO keyed — never silently fall to
    * a platform key for a BYOK run. Platform-key runs (FREE/PRO on system keys) may fail over
-   * freely. {@code deepseek}/{@code openrouter} are never targets.
+   * freely. The configured DeepSeek chain is native -> OpenRouter -> Fireworks.
    */
   private ChatResponse maybeFailover(
       LlmRequest request,
@@ -524,8 +518,6 @@ public class LlmRouter {
       String altModel = entry[1];
       if (altProvider.isEmpty() || altModel == null) continue;
       if (altProvider.equals(primaryProvider)) continue;
-      if (FAILOVER_EXCLUDED_PROVIDERS.contains(altProvider)) continue;
-
       String altKey = (keys == null) ? null : keys.keyFor(altProvider);
       // Don't cross a BYOK run onto a platform key for a provider it never keyed.
       if (primaryUsedCustomerKey && altKey == null) {
