@@ -98,7 +98,8 @@ class ModelProviderCandidateServiceTest {
     ModelProviderScore mini = find(candidates, "openai", "gpt-5.4-mini");
     assertThat(sonnet.contextFitsRequestedBudget()).isFalse();
     assertThat(sonnet.reasons())
-        .anySatisfy(reason -> assertThat(reason).contains("candidate rejected before quality ranking"));
+        .anySatisfy(
+            reason -> assertThat(reason).contains("candidate rejected before quality ranking"));
     assertThat(mini.contextFitsRequestedBudget()).isFalse();
   }
 
