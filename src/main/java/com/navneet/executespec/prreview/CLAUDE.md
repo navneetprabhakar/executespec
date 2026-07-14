@@ -76,3 +76,7 @@ rows are re-queued.
   + `github_review_id` columns are already on the entity for this.
 - Webhook-triggered auto-review on PR open — separate feature per user direction;
   PR review will be available manually-only until then.
+
+Provider selection follows the owning project's `ProjectProviderResolver` policy (project setting,
+then legacy creator preference, then Anthropic). The review path no longer hardcodes Anthropic, so
+explicit project-level Anthropic/OpenAI/DeepSeek routing remains auditable.

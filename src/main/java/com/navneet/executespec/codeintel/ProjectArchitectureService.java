@@ -20,6 +20,7 @@ import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ProjectProviderResolver;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class ProjectArchitectureService {
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepoRepository repoRepo;
   private final ProjectRepository projectRepository;
+  private final ProjectProviderResolver projectProviderResolver;
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectArchitectureDocRepository archDocRepo;
   private final RepoArchitectureDocRepository repoArchRepo;
@@ -151,13 +153,7 @@ public class ProjectArchitectureService {
           "Project has no linked repos — link repos before generating architecture");
     }
 
-    LlmProvider provider =
-        providerOverride != null
-            ? providerOverride
-            : projectRepository
-                .findById(projectId)
-                .map(Project::getAiProvider)
-                .orElse(LlmProvider.OPENAI);
+    LlmProvider provider = projectProviderResolver.resolve(projectId, providerOverride);
 
     boolean hasOverride = branchOverride != null && !branchOverride.isBlank();
     List<ProjectCodeMap> codeMaps = new ArrayList<>();
@@ -544,11 +540,7 @@ public class ProjectArchitectureService {
       workspace.writeAndCommit(
           projectId, "architecture.md", archMarkdown, "architecture: combined regenerated");
 
-      LlmProvider provider =
-          projectRepository
-              .findById(projectId)
-              .map(Project::getAiProvider)
-              .orElse(LlmProvider.OPENAI);
+      LlmProvider provider = projectProviderResolver.resolve(projectId);
       String summary = briefService.summarise(projectId, archMarkdown, provider);
       if (summary != null && !summary.isBlank()) {
         workspace.writeAndCommit(projectId, "summary.md", summary, "summary: regenerated");
@@ -731,11 +723,7 @@ public class ProjectArchitectureService {
           HttpStatus.BAD_REQUEST, "repo " + repoId + " is not linked to project " + projectId);
     }
 
-    LlmProvider provider =
-        projectRepository
-            .findById(projectId)
-            .map(Project::getAiProvider)
-            .orElse(LlmProvider.OPENAI);
+    LlmProvider provider = projectProviderResolver.resolve(projectId);
 
     ProjectCodeMap cm = ensureCodeMap(projectId, repo, repo.getDefaultBranch(), patOverride);
     RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);

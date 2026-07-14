@@ -8,6 +8,7 @@ import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -16,7 +17,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -24,7 +24,6 @@ import lombok.extern.slf4j.Slf4j;
  * summarises the architecture doc into a 2-4 sentence {@code summary.md}.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class ProjectBriefService {
 
@@ -43,6 +42,24 @@ public class ProjectBriefService {
   private final ProjectWorkspaceService workspace;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
+  private final ProjectProviderResolver projectProviderResolver;
+
+  public ProjectBriefService(
+      ProjectWorkspaceService workspace,
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      ProjectProviderResolver projectProviderResolver) {
+    this.workspace = workspace;
+    this.llmRouter = llmRouter;
+    this.modelResolver = modelResolver;
+    this.projectProviderResolver = projectProviderResolver;
+  }
+
+  /** Compatibility constructor for callers that already pass an explicit provider. */
+  public ProjectBriefService(
+      ProjectWorkspaceService workspace, LlmRouter llmRouter, ModelResolver modelResolver) {
+    this(workspace, llmRouter, modelResolver, null);
+  }
 
   /**
    * Returns a compact block ready to paste into a planner system prompt: summary + top-level arch
@@ -80,7 +97,12 @@ public class ProjectBriefService {
   public String summarise(String projectId, String archMarkdown, LlmProvider provider) {
     if (archMarkdown == null || archMarkdown.isBlank()) return "";
     try {
-      LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
+      LlmProvider effective =
+          provider != null
+              ? provider
+              : projectProviderResolver == null
+                  ? ProjectProviderResolver.CANONICAL_DEFAULT
+                  : projectProviderResolver.resolve(projectId);
       ResolvedModel resolved = modelResolver.resolve("ProjectBriefService", effective);
       Prompt prompt =
           new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(archMarkdown)));

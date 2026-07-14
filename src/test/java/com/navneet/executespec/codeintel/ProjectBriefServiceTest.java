@@ -61,7 +61,7 @@ class ProjectBriefServiceTest {
     ProjectWorkspaceService workspace = mock(ProjectWorkspaceService.class);
     LlmRouter llmRouter = mock(LlmRouter.class);
     ModelResolver modelResolver = mock(ModelResolver.class);
-    when(modelResolver.resolve("ProjectBriefService", LlmProvider.OPENAI))
+    when(modelResolver.resolve("ProjectBriefService", LlmProvider.ANTHROPIC))
         .thenThrow(new IllegalStateException("transport disabled"));
 
     ProjectBriefService service = new ProjectBriefService(workspace, llmRouter, modelResolver);

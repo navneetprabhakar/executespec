@@ -20,6 +20,7 @@ import com.navneet.executespec.prreview.entity.PrReviewComment;
 import com.navneet.executespec.prreview.repository.PrReviewCommentRepository;
 import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -63,6 +64,7 @@ public class PrReviewService {
   private final SseBroadcaster broadcaster;
   private final AppUserRepository userRepo;
   private final TierConfigRepository tierConfigRepo;
+  private final ProjectProviderResolver projectProviderResolver;
 
   /**
    * Dedicated executor for PR-review dispatch — sized {@code clamp(4, 12, cores × 2)}. Scoped
@@ -254,7 +256,7 @@ public class PrReviewService {
       log.warn("PrReview row {} vanished mid-dispatch", reviewId);
       return;
     }
-    String aiProvider = "anthropic"; // default for now; PROJECT-aware override in slice 3
+    String aiProvider = projectProviderResolver.resolve(projectId).name().toLowerCase();
     PrReviewAgent.AgentRequest agentReq =
         PrReviewAgent.AgentRequest.builder()
             .prReviewId(reviewId.toString())

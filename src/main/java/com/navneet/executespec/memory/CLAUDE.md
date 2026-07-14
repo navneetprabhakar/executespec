@@ -15,6 +15,10 @@ all transport failures, while canonical retry/failover and managed-AI accounting
 in the router. The call uses an explicit empty tool set and stable `run-ledger` / `generate`
 attribution.
 
+`MemoryCompactionService` resolves its provider through `ProjectProviderResolver`, preserving the
+project setting and legacy account preference before the canonical Anthropic fallback. It no
+longer hardcodes OpenAI for compaction.
+
 ## Persistence
 
 `ProjectRunLedger` stores one idempotent digest per run. `MemoryCompactionService` only marks
