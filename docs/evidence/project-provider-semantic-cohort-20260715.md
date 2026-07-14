@@ -74,3 +74,22 @@ transport/access contracts only; they do not prove provider-backed generation.
    would clone/build external repos and exceed this bounded diagnostic's evidence
    value. They remain release blockers for broad project/provider quality claims.
 
+## Gemini duplicate-loop regression (current source)
+
+After the duplicate-tool guard was added to `ProjectChatService`, the same read-only
+prompt was run once against a freshly packaged current source on isolated port `8192`.
+The project provider was set to Gemini for the request and restored to Anthropic
+afterwards; chat history was cleared.
+
+- HTTP 200; assistant returned a complete summary and both linked repositories.
+- `terminationReason=ok`; the guard activated after round 4, then the no-tools final
+  answer turn completed instead of allowing another read loop.
+- 33,855 input / 249 output tokens in the service response; five provider calls in
+  total (four tool rounds plus the forced final answer); tracker cost `$0.034176`.
+- No provider other than Gemini was called for this regression, and the isolated
+  JVM was stopped after capture.
+
+This demonstrates a concrete improvement over the earlier Gemini run, which reached
+`max-rounds` after six repeated read-tool rounds. It does not establish broad Gemini
+quality: the input remained large because the tool-loop transcript is retained, and
+only one regression task was run.
