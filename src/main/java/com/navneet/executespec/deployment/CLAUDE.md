@@ -1,6 +1,6 @@
 # `deployment/` — Preview + deploy
 
-> Last reviewed: 2026-05-12 (1.0.0-M1).
+> Last reviewed: 2026-07-15 (2.0.0 release preparation).
 
 Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
 
@@ -81,6 +81,9 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
   `DockerExecutor` drains subprocess output concurrently and bounds it to 1 MiB so a silent or
   pipe-filling Docker command cannot block before its timeout is applied.
 - Stdout/stderr read in parallel (CompletableFuture) to prevent pipe buffer deadlock
+- DockerExecutor integration tests are tagged `integration`; the default unit gate excludes them so
+  an installed-but-unresponsive Docker daemon cannot hang release verification. Run with the
+  integration profile on a Docker-capable runner.
 - Virtual threads wrapped with `ContextSnapshotFactory.captureAll().wrap()` for trace propagation
 - ACTIVE_PREVIEWS gauge decremented on ALL terminal states (FAILED, TIMED_OUT, STOPPED)
 - Cloud Run resources (service + AR image) cleaned up on preview failure
