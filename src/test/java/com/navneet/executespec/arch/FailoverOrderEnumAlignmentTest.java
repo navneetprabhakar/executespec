@@ -60,6 +60,17 @@ class FailoverOrderEnumAlignmentTest {
   }
 
   @Test
+  void deepSeekRecoveryOrderIsNativeThenOpenRouterThenFireworks() throws Exception {
+    Map<String, Object> root = loadApplicationYaml();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> modelMatrix = (Map<String, Object>) root.get("model-matrix");
+    @SuppressWarnings("unchecked")
+    Map<String, List<String>> failoverOrder =
+        (Map<String, List<String>>) modelMatrix.get("failover-order");
+    assertEquals(List.of("openrouter", "fireworks"), failoverOrder.get("deepseek"));
+  }
+
+  @Test
   void allModelMatrixProviderKeysMatchLlmProviderEnum() throws Exception {
     Map<String, Object> root = loadApplicationYaml();
 
