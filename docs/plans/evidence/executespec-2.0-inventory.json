@@ -3,24 +3,24 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "55ccaf15bd1239d1b96c4116f7bc44ad50855c2a",
+      "sha": "40b2718dc36fc26459632d8a5772d451bf2127e5",
       "branch": "codex/executespec-2.0",
       "trackedFiles": 2739,
-      "worktreeFingerprint": "344a5eee2798482681fbd0cd0f2abdc9bb1768dddacfe4350474a5e6b5ceb823"
+      "worktreeFingerprint": "f12cccf83accae537b9ff8d1bc4531c076dd33a3917b54117bece32d5d0a1cd6"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "e2c1d197b1460389621508e6e8181e8dcc649806",
+      "sha": "dce66737e09ca8d083aad30e0794ecaaa59d4587",
       "branch": "codex/cli-1.0",
       "trackedFiles": 320,
-      "worktreeFingerprint": "c4368707f2d543a1a96b07c77d534b47a356fcd6a57d7f816ee5f1e9a43780c2"
+      "worktreeFingerprint": "7b20f012b29f368477ac32e177d3ae79675c28f2fc297effc0ea099e6f90f9a3"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "a280a7e953946628623884df14d5f5e16a056f74",
+      "sha": "44ae48bf4e95f593123f9c1986421f020d0e4ed7",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 1175,
-      "worktreeFingerprint": "a7438aa8467a237935c4ffe2653c25bd210ed9f2504df3fd6ab3031bbd926100"
+      "trackedFiles": 1176,
+      "worktreeFingerprint": "b22a1bb31a374a35d28c088189da1a12c9abf79a94d321aad52e7eaf36463f44"
     }
   },
   "backend": {
@@ -349,7 +349,7 @@
   },
   "cli": {
     "sourceFiles": 117,
-    "lines": 45578,
+    "lines": 45617,
     "testFiles": 120,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
