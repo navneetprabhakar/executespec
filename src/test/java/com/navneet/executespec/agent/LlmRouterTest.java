@@ -435,19 +435,6 @@ class LlmRouterTest {
   }
 
   @Test
-  void excluded_providers_are_never_failover_targets() {
-    build();
-    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    // Only deepseek as an alternate -> excluded -> no failover target -> rethrow primary.
-    when(registry.fallbackChainFor(anyString()))
-        .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"deepseek", "ds-x"}));
-    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
-        .isInstanceOf(RuntimeException.class);
-    verify(gemini, never()).call(any());
-  }
-
-  @Test
   @SuppressWarnings("unchecked")
   void openRouterRequestsLatencySortedProviderRouting() {
     build();

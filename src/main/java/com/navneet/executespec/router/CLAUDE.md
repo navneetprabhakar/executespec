@@ -48,7 +48,7 @@ from silently choosing different provider defaults.
 
 ## Provider failover
 
-Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. `OPENROUTER`, `DEEPSEEK`, and `FIREWORKS` are intentionally NOT in any failover chain — they are explicit BYOK / operator routes that the operator/admin opted into, and silently switching off them would defeat the cost / data-residency / latency reason they picked them.
+Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`, and `deepseek → openrouter → fireworks`. Native DeepSeek is always the first hop; OpenRouter and Fireworks are recovery hops only. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. BYOK runs cross only to providers for which the same customer/org has a key.
 
 All text-only callers now use `LlmRouter.callText` (or `callTextStrict` when cross-provider failover is prohibited), with an explicit empty tool set so metadata calls do not bind worker tools. The former compatibility router was removed in ExecuteSpec 2.0; there is one provider transport, one retry/failover policy, and one usage ledger.
 
