@@ -68,7 +68,7 @@ transport/access contracts only; they do not prove provider-backed generation.
 4. Gemini's project-chat tool loop was a concrete quality/efficiency gap: its model
    selected read tools repeatedly instead of producing a final answer. The current
    source now has a provider-agnostic duplicate-tool guard, per-turn exact-call result
-   reuse (so repeated reads/actions are not dispatched twice), plus a forced no-tools
+   reuse for read/search calls (so repeated reads are not dispatched twice), plus a forced no-tools
    finalization turn; the regression below completed successfully. A k>=3 cohort is
    still required before enabling Gemini as a preferred project-chat route.
 5. Architecture/doc generation and edit/test/repair were intentionally not live-run
