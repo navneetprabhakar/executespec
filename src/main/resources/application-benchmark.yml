@@ -182,3 +182,5 @@ swebench:
   hard-cap-usd: ${SWEBENCH_HARD_CAP_USD:8.0}
   max-concurrent-runs: ${SWEBENCH_MAX_CONCURRENT_RUNS:1}
   submit-queue-wait-seconds: ${SWEBENCH_SUBMIT_QUEUE_WAIT_SECONDS:180}
+  image-inspect-timeout-seconds: ${SWEBENCH_IMAGE_INSPECT_TIMEOUT_SECONDS:30}
+  image-pull-timeout-seconds: ${SWEBENCH_IMAGE_PULL_TIMEOUT_SECONDS:1800}
