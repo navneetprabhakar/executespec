@@ -285,6 +285,13 @@ public class RepositorySearchService {
 
     private synchronized List<String> lines(Path file, String knownContentHash) {
       try {
+        // A workspace can be mutated between inventory discovery and decoding. Re-check symlink
+        // targets at the read boundary so a newly introduced link cannot make a search disclose
+        // content outside the workspace that was originally canonicalized.
+        if (Files.isSymbolicLink(file) && !file.toRealPath().startsWith(root)) {
+          snapshots.remove(file);
+          return null;
+        }
         // Metadata is only a useful fast path when the filesystem guarantees a reliable
         // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
         // size and mtime, so compare a streaming content digest before reusing the decoded lines.
@@ -372,6 +379,7 @@ public class RepositorySearchService {
         if (!file.startsWith(root)
             || !file.startsWith(searchRoot)
             || !Files.isRegularFile(file)
+            || (Files.isSymbolicLink(file) && !isInsideRealWorkspace(root, file))
             || isIgnoredDirectory(file, root)
             || isBinaryName(file)) continue;
         files.add(file);
@@ -390,6 +398,14 @@ public class RepositorySearchService {
       if (IGNORED_DIRS.contains(part.toString())) return true;
     }
     return false;
+  }
+
+  private static boolean isInsideRealWorkspace(Path root, Path file) {
+    try {
+      return file.toRealPath().startsWith(root);
+    } catch (IOException e) {
+      return false;
+    }
   }
 
   private static boolean isBinaryName(Path path) {
@@ -636,7 +652,9 @@ public class RepositorySearchService {
     try {
       Path root = workspace.toRealPath();
       Path file = root.resolve(citation.path()).normalize();
-      if (!file.startsWith(root) || !Files.isRegularFile(file)) return false;
+      if (!file.startsWith(root)
+          || !Files.isRegularFile(file)
+          || !isInsideRealWorkspace(root, file)) return false;
       List<Path> files = inventory(root, root);
       if (!result.inventoryFingerprint().equals(fingerprint(files))) return false;
       List<String> lines = Files.readAllLines(file);

@@ -306,6 +306,12 @@ public class SearchFilesTool implements Tool {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
+            // walkFileTree does not follow directory links, but a symlink visited as a file would
+            // otherwise be opened by readAllLines. Keep the compatibility fallback subject to the
+            // same workspace-realpath boundary as the structured search implementation.
+            if (Files.isSymbolicLink(file) && !isInsideRealWorkspace(workspaceReal, file)) {
+              return FileVisitResult.CONTINUE;
+            }
             if (fileMatcher != null && !fileMatcher.matches(file.getFileName())) {
               return FileVisitResult.CONTINUE;
             }
@@ -423,6 +429,14 @@ public class SearchFilesTool implements Tool {
 
   private static String clampLine(String line) {
     return line.length() > MAX_LINE_LEN ? line.substring(0, MAX_LINE_LEN) + "..." : line;
+  }
+
+  private static boolean isInsideRealWorkspace(Path workspaceReal, Path file) {
+    try {
+      return file.toRealPath().startsWith(workspaceReal);
+    } catch (IOException e) {
+      return false;
+    }
   }
 
   /** Lazily probes {@code rg --version} once per JVM; caches the result. */

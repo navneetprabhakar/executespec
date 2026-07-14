@@ -72,6 +72,29 @@ class RepositorySearchServiceTest {
   }
 
   @Test
+  void excludesSymlinkedFilesThatResolveOutsideWorkspace() throws Exception {
+    Path outside = Files.createTempDirectory("repository-search-outside");
+    Files.writeString(outside.resolve("secret.txt"), "needle\n");
+    Path link = root.resolve("linked.txt");
+    try {
+      Files.createSymbolicLink(link, outside.resolve("secret.txt"));
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException e) {
+      // Some CI filesystems disable symlink creation; the deterministic contract is covered on
+      // platforms that support the filesystem primitive.
+      return;
+    }
+
+    var result =
+        new RepositorySearchService()
+            .search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    "needle", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
+
+    assertThat(result.hits()).isEmpty();
+  }
+
+  @Test
   void refreshesCachedLinesWhenAWorkingTreeFileChanges() throws Exception {
     Path file = root.resolve("src.txt");
     Files.writeString(file, "before\n");
