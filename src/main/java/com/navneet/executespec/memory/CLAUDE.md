@@ -25,6 +25,9 @@ the selected provider instead of falling back independently to OpenAI.
 Project chat also tracks tool name+arguments per turn. If a provider repeats every read call, the
 loop gives it one final no-tools answer turn instead of spending the remaining round budget on
 duplicate reads; this is especially important for Gemini project-chat tool selection.
+Exact duplicate calls are also served from the first bounded envelope instead of being dispatched
+again. This protects project actions from duplicate side effects and avoids paying for repeated
+read/search calls while preserving the original result for the model to use.
 
 ## Persistence
 
