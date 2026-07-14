@@ -155,11 +155,6 @@ final class RunPipelineSupport {
     return s.length() > 500 ? s.substring(0, 500) + "..." : s;
   }
 
-  @SuppressWarnings("unused")
-  public static String readWorkspaceFromLog(IOException ignored) {
-    return null;
-  }
-
   /**
    * Walks the run workspace and returns relative paths of all non-hidden, non-build files. Used to
    * populate {@link com.navneet.executespec.agent.model.WorkerReport#getFilesCreated()} so the
