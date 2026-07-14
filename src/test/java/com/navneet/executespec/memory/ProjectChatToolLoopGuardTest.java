@@ -21,8 +21,7 @@ class ProjectChatToolLoopGuardTest {
         new AssistantMessage.ToolCall("2", "function", "get_project_memory", "{}");
 
     assertFalse(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first)));
-    assertFalse(
-        ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first, second)));
+    assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first, second)));
     assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first)));
     assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(second)));
     assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first)));

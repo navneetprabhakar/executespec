@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
@@ -307,6 +308,18 @@ public class ProjectChatService {
   /** Hard cap on tool-execution rounds per chat turn. */
   private static final int MAX_TOOL_ROUNDS = 6;
 
+  private static final Set<String> REPEAT_GUARD_READ_TOOLS =
+      Set.of(
+          "list_repos",
+          "list_recent_runs",
+          "list_pull_requests",
+          "get_project_memory",
+          "get_latest_architecture",
+          "get_tech_debt_summary",
+          "search_repo_files",
+          "search_code",
+          "search_project_docs");
+
   /**
    * V169 (2026-05-02) — chat with project-action tools enabled. The caller's GitHub PAT is threaded
    * into tools that hit private repos (regenerate_architecture). When {@code callerPat} is null,
@@ -444,7 +457,7 @@ public class ProjectChatService {
         for (AssistantMessage.ToolCall tc : calls) {
           String signature = toolCallSignature(tc);
           String previousResult = toolResultsBySignature.get(signature);
-          if (previousResult != null) {
+          if (previousResult != null && REPEAT_GUARD_READ_TOOLS.contains(tc.name())) {
             toolResponses.add(
                 new ToolResponseMessage.ToolResponse(
                     tc.id() == null ? "tc-" + System.nanoTime() : tc.id(),
@@ -481,7 +494,9 @@ public class ProjectChatService {
                       + "\"}";
             }
           }
-          toolResultsBySignature.put(signature, envelope);
+          if (REPEAT_GUARD_READ_TOOLS.contains(tc.name())) {
+            toolResultsBySignature.put(signature, envelope);
+          }
           toolResponses.add(
               new ToolResponseMessage.ToolResponse(
                   tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
@@ -559,16 +574,16 @@ public class ProjectChatService {
     return null;
   }
 
-  /** Returns true when every call in this turn has already been made with the same arguments. */
+  /** Returns true when a read call has already been made with the same arguments. */
   static boolean registerToolCallsAndDetectRepeat(
       Map<String, Integer> toolCallCounts, List<AssistantMessage.ToolCall> calls) {
-    boolean allCallsRepeated = !calls.isEmpty();
+    boolean repeatedRead = false;
     for (AssistantMessage.ToolCall tc : calls) {
       String signature = toolCallSignature(tc);
       int count = toolCallCounts.merge(signature, 1, Integer::sum);
-      allCallsRepeated &= count >= 2;
+      repeatedRead |= count >= 2 && REPEAT_GUARD_READ_TOOLS.contains(tc.name());
     }
-    return allCallsRepeated;
+    return repeatedRead;
   }
 
   private static String toolCallSignature(AssistantMessage.ToolCall tc) {
