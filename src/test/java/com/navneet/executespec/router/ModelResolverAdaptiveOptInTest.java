@@ -137,6 +137,36 @@ class ModelResolverAdaptiveOptInTest {
   }
 
   @Test
+  void deepSeekKeepsNativePrimaryEvenWhenAdaptiveRoutingPrefersFireworks() {
+    ModelMatrixProperties.ProviderModels nativeDeepSeek = new ModelMatrixProperties.ProviderModels();
+    nativeDeepSeek.setPlanning("deepseek-v4-pro-native");
+    nativeDeepSeek.setWorkhorse("deepseek-v4-pro-native");
+    nativeDeepSeek.setLightweight("deepseek-v4-flash-native");
+    ModelMatrixProperties.ProviderModels fireworks = new ModelMatrixProperties.ProviderModels();
+    fireworks.setPlanning("deepseek-v4-pro-fw");
+    fireworks.setWorkhorse("deepseek-v4-pro-fw");
+    fireworks.setLightweight("deepseek-v4-flash-fw");
+    matrixProps.setAgentTierMap(Map.of("Worker", AgentTier.WORKHORSE));
+    matrixProps.setProviders(Map.of("deepseek", nativeDeepSeek, "fireworks", fireworks));
+    matrixProps.setFailoverOrder(Map.of("deepseek", java.util.List.of("openrouter", "fireworks")));
+
+    ModelResolver r = new ModelResolver(
+        matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry(), featureFlagService);
+    when(healthTracker.isHealthy(LlmProvider.DEEPSEEK)).thenReturn(true);
+    when(healthTracker.isHealthy(LlmProvider.FIREWORKS)).thenReturn(true);
+    when(featureFlagService.isEnabled(ModelResolver.FLAG_ADAPTIVE_ROUTING)).thenReturn(true);
+    when(perfTracker.isMateriallyBetter(anyString(), anyString(), anyString(), anyString()))
+        .thenReturn(true);
+
+    ResolvedModel resolved = r.resolve("Worker", LlmProvider.DEEPSEEK);
+
+    assertThat(resolved.getActualProvider()).isEqualTo(LlmProvider.DEEPSEEK);
+    assertThat(resolved.getModel()).isEqualTo("deepseek-v4-pro-native");
+    verify(perfTracker, never())
+        .isMateriallyBetter(anyString(), anyString(), anyString(), anyString());
+  }
+
+  @Test
   void flag_constant_name_is_stable_for_admin_endpoint() {
     // The ops UI / admin endpoint uses this constant string to flip the flag.
     // If a future commit accidentally renames it, /api/feature-flags/{key} URLs
