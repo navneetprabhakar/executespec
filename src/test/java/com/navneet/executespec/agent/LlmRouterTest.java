@@ -211,6 +211,28 @@ class LlmRouterTest {
   }
 
   @Test
+  void textSeamUsesYamlOutputCapWhenCallerOmitsMaxTokens() {
+    build();
+    when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(4096);
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-4-6",
+        List.of(new UserMessage("doc generation")),
+        "run-doc",
+        "ProjectDocGeneratorService",
+        "generate");
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getMaxTokens()).isEqualTo(4096);
+  }
+
+  @Test
   void managedAiAuthorizationCanStepDownModelBeforeDispatchAndDebitAdjustedModel() {
     build();
     when(managedAiUsageService.authorizeCall(

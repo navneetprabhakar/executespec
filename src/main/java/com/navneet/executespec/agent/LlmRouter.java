@@ -243,6 +243,15 @@ public class LlmRouter {
             : runId;
     String taskId =
         (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
+    // Anthropic's current API requires an explicit max_tokens field even for text-only calls.
+    // Resolve the model's YAML output cap here so compatibility callers cannot accidentally emit
+    // an invalid request when they omit the optional argument. Mock/unknown registries return 0;
+    // preserve the transport default in that case.
+    Integer effectiveMaxTokens = maxTokens;
+    if (effectiveMaxTokens == null && modelRegistry != null) {
+      int configuredMaxTokens = modelRegistry.maxOutputForModel(model);
+      if (configuredMaxTokens > 0) effectiveMaxTokens = configuredMaxTokens;
+    }
     return call(
         LlmRequest.builder()
             .provider(provider)
@@ -258,7 +267,7 @@ public class LlmRouter {
             .toolsOverride(List.of())
             .agentRole(agentRole)
             .stepId(stepId)
-            .maxTokens(maxTokens)
+            .maxTokens(effectiveMaxTokens)
             .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
