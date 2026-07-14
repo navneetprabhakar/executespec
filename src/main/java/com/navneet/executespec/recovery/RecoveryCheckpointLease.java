@@ -50,8 +50,9 @@ public final class RecoveryCheckpointLease {
     String planSha = sha256(planJson == null ? "" : planJson);
     try {
       Files.createDirectories(dir);
+      JsonNode current = null;
+      boolean staleTakeover = false;
       if (Files.isRegularFile(target)) {
-        JsonNode current;
         try {
           current = MAPPER.readTree(Files.readString(target));
         } catch (Exception malformed) {
@@ -72,6 +73,7 @@ public final class RecoveryCheckpointLease {
             && claimedAt.isAfter(now.minus(FRESH_OWNER_WINDOW))) {
           return AcquireResult.refused("FRESH_CHECKPOINT_OWNER");
         }
+        staleTakeover = !owner.isBlank() && !owner.equals(instanceId);
       }
       ObjectNode lease = MAPPER.createObjectNode();
       lease.put("schemaVersion", SCHEMA_VERSION);
@@ -79,6 +81,14 @@ public final class RecoveryCheckpointLease {
       lease.put("instanceId", instanceId);
       lease.put("planSha256", planSha);
       lease.put("claimedAt", now.toString());
+      int takeoverCount = current == null ? 0 : Math.max(0, current.path("takeoverCount").asInt(0));
+      lease.put("takeoverCount", staleTakeover ? takeoverCount + 1 : takeoverCount);
+      if (staleTakeover) {
+        lease.put("previousInstanceId", current.path("instanceId").asText(""));
+        String previousClaimedAt = current.path("claimedAt").asText("");
+        lease.put("previousClaimedAt", previousClaimedAt);
+        lease.put("takeoverReason", "STALE_OWNER");
+      }
       Path temp = dir.resolve(FILE_NAME + ".tmp-" + instanceId.replaceAll("[^A-Za-z0-9_.-]", "_"));
       Files.writeString(
           temp,
