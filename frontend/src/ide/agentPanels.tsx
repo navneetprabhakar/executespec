@@ -997,6 +997,8 @@ function SandboxRunCard({
  * for the existing PR/push workflow.
  */
 function InlineRunDiff({runId}: {runId: string}) {
+  const panelId = `agent-inline-diff-${runId}`;
+  const headingId = `${panelId}-heading`;
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState<api.FileWithStatus[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -1053,17 +1055,30 @@ function InlineRunDiff({runId}: {runId: string}) {
 
   return (
     <div className='agent-inline-diff' data-agent-region='inline-diff'>
-      <button className='ide-btn ghost' type='button' onClick={() => void toggle()}>
+      <button
+        className='ide-btn ghost'
+        type='button'
+        onClick={() => void toggle()}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+      >
         {expanded ? 'Hide inline diff' : 'Inspect changed files'}
       </button>
       {expanded && (
-        <div className='agent-inline-diff-panel'>
+        <div
+          className='agent-inline-diff-panel'
+          id={panelId}
+          role='region'
+          aria-labelledby={headingId}
+        >
           <div className='agent-inline-diff-head'>
-            <strong>Read-only diff</strong>
+            <strong id={headingId}>Read-only diff</strong>
             <span>20 files · 2,500 lines max</span>
           </div>
           {status === 'loading' && (
-            <div className='agent-inline-diff-note'>Loading changed files…</div>
+            <div className='agent-inline-diff-note' role='status' aria-live='polite'>
+              Loading changed files…
+            </div>
           )}
           {files.length > 0 && (
             <div className='agent-inline-diff-grid'>
@@ -1095,7 +1110,11 @@ function InlineRunDiff({runId}: {runId: string}) {
               </div>
             </div>
           )}
-          {message && <div className='agent-inline-diff-note'>{message}</div>}
+          {message && (
+            <div className='agent-inline-diff-note' role='status' aria-live='polite'>
+              {message}
+            </div>
+          )}
           <div className='agent-inline-diff-foot'>
             Read-only preview. Revert/apply is not available in the web agent.
           </div>
