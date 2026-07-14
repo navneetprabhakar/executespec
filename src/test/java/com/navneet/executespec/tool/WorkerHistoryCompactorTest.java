@@ -138,6 +138,25 @@ class WorkerHistoryCompactorTest {
             router, modelResolver, promptAssembler, featureFlagService, null, contextPlanner);
     stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku");
     List<Message> history = longHistory();
+    // The emergency path is intended for a genuinely oversized transcript.  Make the window
+    // aware tail budget observable rather than relying on the small fixture used by the normal
+    // trigger tests (which already fits inside a 64k window).
+    for (int i = 0; i < 40; i++) {
+      history.add(
+          AssistantMessage.builder()
+              .content("large turn " + i + " " + "x".repeat(3_000))
+              .toolCalls(
+                  List.of(
+                      new AssistantMessage.ToolCall("large-id" + i, "function", "readFile", "{}")))
+              .build());
+      history.add(
+          ToolResponseMessage.builder()
+              .responses(
+                  List.of(
+                      new ToolResponseMessage.ToolResponse(
+                          "large-id" + i, "readFile", "y".repeat(3_000))))
+              .build());
+    }
 
     List<Message> out =
         compactor.compactIfNeeded(
@@ -266,6 +285,30 @@ class WorkerHistoryCompactorTest {
     List<Message> h = longHistory();
     List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
     assertThat(out).isSameAs(h);
+  }
+
+  @Test
+  @DisplayName("overflow recovery bypasses the feature flag and static trigger")
+  void compactNow_isEmergencyPathIndependentOfFlagAndTrigger() {
+    // The provider can reject a request even when normal compaction is disabled or the last
+    // reported usage was unavailable.  The emergency path must still compact before WorkerAgent
+    // falls back to hardTrimHistory, otherwise a recoverable overflow becomes a terminal ERROR.
+    var modelRegistry = Mockito.mock(com.navneet.executespec.router.ModelRegistry.class);
+    compactor =
+        new WorkerHistoryCompactor(
+            router, modelResolver, promptAssembler, featureFlagService, modelRegistry, null);
+    stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001");
+
+    List<Message> history = longHistory();
+    List<Message> out = compactor.compactNow(history, "anthropic", "claude-test", CTX, "goal");
+
+    assertThat(out).isNotSameAs(history);
+    assertThat(out).hasSizeLessThan(history.size());
+    assertThat(out.get(0)).isInstanceOf(SystemMessage.class);
+    assertThat(out.get(1)).isInstanceOf(UserMessage.class);
+    assertThat(out.get(2)).isInstanceOf(AssistantMessage.class);
+    verify(router).call(any(LlmRequest.class));
+    verify(featureFlagService, never()).isEnabled(WorkerHistoryCompactor.FLAG_ENABLED);
   }
 
   @Test
