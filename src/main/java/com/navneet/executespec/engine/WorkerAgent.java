@@ -2532,16 +2532,33 @@ public class WorkerAgent {
    * than losing the run.
    */
   static List<Message> hardTrimHistory(List<Message> history) {
-    if (history == null || history.size() < 12) return null;
+    // A count-only guard leaves a recoverable overflow fatal when one tool result (or a resumed
+    // short transcript) is huge.  Keep the minimum role envelope, then bound an oversized tool
+    // result if there is no complete turn boundary to drop.
+    if (history == null || history.size() < 4) return null;
+    if (history.size() < 8
+        && history.stream().noneMatch(message -> message instanceof ToolResponseMessage)) {
+      return null;
+    }
     final int n = history.size();
     int cut = -1;
-    for (int i = n - 8; i >= 3; i--) {
+    for (int i = Math.max(3, n - 8); i >= 3; i--) {
       if (history.get(i) instanceof AssistantMessage) {
         cut = i;
         break;
       }
     }
-    if (cut <= 2) return null;
+    // Malformed/resumed histories may have a non-assistant tail. Search older boundaries before
+    // giving up; the retained suffix still starts at a complete assistant/tool turn.
+    if (cut < 0) {
+      for (int i = Math.min(n - 1, n - 9); i >= 3; i--) {
+        if (history.get(i) instanceof AssistantMessage) {
+          cut = i;
+          break;
+        }
+      }
+    }
+    if (cut < 0) return truncateOversizedToolResponses(history);
     List<Message> out = new ArrayList<>(n - cut + 2);
     out.add(history.get(0)); // system
     String task =
@@ -2559,13 +2576,51 @@ public class WorkerAgent {
   }
 
   /**
+   * Bounds a huge tool envelope when a short transcript has no safe assistant boundary to drop.
+   * Tool calls remain paired with their response; the next worker turn can reload the full output
+   * from the tool-output spill file when the envelope carries one.
+   */
+  private static List<Message> truncateOversizedToolResponses(List<Message> history) {
+    final int maxResponseChars = 8_000;
+    List<Message> out = new ArrayList<>(history.size());
+    boolean changed = false;
+    for (Message message : history) {
+      if (!(message instanceof ToolResponseMessage responses)
+          || responses.getResponses() == null
+          || responses.getResponses().isEmpty()) {
+        out.add(message);
+        continue;
+      }
+      List<ToolResponseMessage.ToolResponse> bounded = new ArrayList<>();
+      boolean responseChanged = false;
+      for (ToolResponseMessage.ToolResponse response : responses.getResponses()) {
+        String data = response.responseData();
+        if (data != null && data.length() > maxResponseChars) {
+          data = data.substring(0, maxResponseChars) + "\n[context overflow trim]";
+          responseChanged = true;
+        }
+        bounded.add(new ToolResponseMessage.ToolResponse(response.id(), response.name(), data));
+      }
+      if (responseChanged) {
+        out.add(ToolResponseMessage.builder().responses(bounded).build());
+        changed = true;
+      } else {
+        out.add(message);
+      }
+    }
+    return changed ? out : null;
+  }
+
+  /**
    * progress-v2 — stable identity of a tool call for novelty + repetition tracking: name +
    * whitespace-normalized raw arguments. Trailing/duplicate whitespace differences do not make a
    * call "new"; any real argument change does.
    */
   public static String callSignature(AssistantMessage.ToolCall tc) {
     String args = tc.arguments() == null ? "" : tc.arguments().replaceAll("\\s+", " ").trim();
-    return tc.name() + "\u0000" + args;
+    // Keep the signature safe for text logs, JSON, and persisted evidence; a NUL separator can
+    // silently truncate files and makes the source itself binary-hostile.
+    return tc.name() + "|" + args;
   }
 
   /**
