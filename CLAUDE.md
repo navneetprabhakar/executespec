@@ -174,7 +174,10 @@ Production Flyway is strict: `application-prod.yml` disables automatic baselinin
 - Token-cost control: `readFile` full reads cap at 60KB/2000 lines with **head-first** truncation at a line boundary (output is byte-exact from line 1 so `editFile` can match it; range reads untruncated) — RL-2026-05-062 replaced the old 5KB head+tail-with-a-hole that made `editFile` unable to match any region the model never saw. `shell` / `buildProject` 6k chars inline (`ToolOutput.budget` — full log spilled to disk + a `readFile` path). NOTE: the V2 worker keeps its FULL conversation history (no sliding window); `ToolOutputCompactor` + `WorkerHistoryCompactor` (default OFF, `worker.tool-compactor.enabled` / `worker.history-compaction.enabled`) are the context-compaction levers. The "first 2 + last 18" sliding window applies only to legacy `FallbackLlmRouter` non-tool agents.
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21` before any Maven command on macOS dev.
 - Payment-webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`).
-- Feature flags via `FeatureFlagService.isEnabled()` — never hardcode toggles.
+- Feature flags via `FeatureFlagService.isEnabled()` — never hardcode toggles. Admin updates write
+  through the local cache immediately and publish Redis invalidation only after the database
+  transaction commits; publishing inside the transaction can let a subscriber reload stale state
+  and undo the update.
 - Structured logging with traceId / spanId via Micrometer context propagation (MDC auto-populated).
 - Async work: wrap `Thread.ofVirtual().start()` runnables in `ContextSnapshotFactory.captureAll().wrap(runnable)` so traceId + RequestAttributes survive thread boundaries.
 
