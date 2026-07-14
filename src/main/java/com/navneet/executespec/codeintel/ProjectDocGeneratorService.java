@@ -17,6 +17,7 @@ import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -27,7 +28,6 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -49,7 +49,6 @@ import lombok.extern.slf4j.Slf4j;
  * throw so the UI can prompt the user to run it first.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class ProjectDocGeneratorService {
 
@@ -62,9 +61,63 @@ public class ProjectDocGeneratorService {
   private final ProjectRepoRepository repoRepo;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
+  private final ProjectProviderResolver projectProviderResolver;
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
+
+  public ProjectDocGeneratorService(
+      ProjectArchitectureService architectureService,
+      ProjectWorkspaceService workspace,
+      ProjectGeneratedDocRepository docRepo,
+      VersionRetentionService versionRetention,
+      ProjectRepository projectRepo,
+      ProjectRepoLinkRepository linkRepo,
+      ProjectRepoRepository repoRepo,
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      ProjectProviderResolver projectProviderResolver) {
+    this.architectureService = architectureService;
+    this.workspace = workspace;
+    this.docRepo = docRepo;
+    this.versionRetention = versionRetention;
+    this.projectRepo = projectRepo;
+    this.linkRepo = linkRepo;
+    this.repoRepo = repoRepo;
+    this.llmRouter = llmRouter;
+    this.modelResolver = modelResolver;
+    this.costTracker = costTracker;
+    this.projectProviderResolver = projectProviderResolver;
+  }
+
+  /**
+   * Compatibility constructor for package tests and older callers; provider policy is canonical.
+   */
+  public ProjectDocGeneratorService(
+      ProjectArchitectureService architectureService,
+      ProjectWorkspaceService workspace,
+      ProjectGeneratedDocRepository docRepo,
+      VersionRetentionService versionRetention,
+      ProjectRepository projectRepo,
+      ProjectRepoLinkRepository linkRepo,
+      ProjectRepoRepository repoRepo,
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      com.navneet.executespec.cost.RunCostTracker costTracker) {
+    this(
+        architectureService,
+        workspace,
+        docRepo,
+        versionRetention,
+        projectRepo,
+        linkRepo,
+        repoRepo,
+        llmRouter,
+        modelResolver,
+        costTracker,
+        null);
+  }
 
   private static final String EXPLANATION_SYSTEM =
       """
@@ -345,8 +398,11 @@ public class ProjectDocGeneratorService {
   }
 
   private LlmProvider resolveProvider(Project project) {
-    LlmProvider p = project.getAiProvider();
-    return p != null ? p : LlmProvider.OPENAI;
+    return projectProviderResolver == null
+        ? (project != null && project.getAiProvider() != null
+            ? project.getAiProvider()
+            : ProjectProviderResolver.CANONICAL_DEFAULT)
+        : projectProviderResolver.resolve(project);
   }
 
   private static String nullToDash(String s) {

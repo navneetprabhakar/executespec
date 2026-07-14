@@ -46,15 +46,15 @@ class MemoryCompactionServiceTest {
                     .build()));
     when(snapshotRepo.findTopByProjectIdOrderByVersionDesc("project-1"))
         .thenReturn(Optional.empty());
-    when(modelResolver.resolve("RunLedgerAgent", LlmProvider.OPENAI))
+    when(modelResolver.resolve("RunLedgerAgent", LlmProvider.ANTHROPIC))
         .thenReturn(
             ResolvedModel.builder()
-                .actualProvider(LlmProvider.OPENAI)
-                .model("gpt-5.4-mini")
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-haiku-4-5-20251001")
                 .build());
     when(llmRouter.callText(
-            eq("openai"),
-            eq("gpt-5.4-mini"),
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
             anyList(),
             eq("compact-project-1"),
             eq("memory-compaction"),
@@ -68,8 +68,8 @@ class MemoryCompactionServiceTest {
     assertThat(service.compactNow("project-1", "org-1")).isEqualTo(1);
     verify(llmRouter)
         .callText(
-            eq("openai"),
-            eq("gpt-5.4-mini"),
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
             anyList(),
             eq("compact-project-1"),
             eq("memory-compaction"),

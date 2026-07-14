@@ -41,6 +41,11 @@ User-selected provider routing with YAML as the single source of truth and a Red
 
 Default provider: **Anthropic** (changed from OpenAI in 1.0.0-M1). Users can still set a project default, but cross-surface client defaults now live on `app_user.preferred_ai_provider` (V242). Web, CLI, and VS Code write `GET/PUT /api/auth/me/provider-preference`; explicit request input wins and is remembered, omitted input resolves through the account preference before falling back to project/YAML defaults.
 
+Project-scoped metadata features use `ProjectProviderResolver`: a persisted project provider wins,
+legacy null project providers consult the creating account preference, and the canonical fallback is
+Anthropic. This keeps architecture, generated-doc, brief, memory-compaction, and PR-review calls
+from silently choosing different provider defaults.
+
 ## Provider failover
 
 Per `application.yml failover-order:`, when a provider fails the router walks the chain: `anthropic → openai → gemini`, `gemini → openai → anthropic`, `openai → gemini → anthropic`. `FailoverOrderEnumAlignmentTest` pins every failover-order entry and every `model-matrix.providers` key to a valid `LlmProvider` enum constant. `OPENROUTER`, `DEEPSEEK`, and `FIREWORKS` are intentionally NOT in any failover chain — they are explicit BYOK / operator routes that the operator/admin opted into, and silently switching off them would defeat the cost / data-residency / latency reason they picked them.
