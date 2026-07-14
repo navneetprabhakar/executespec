@@ -101,3 +101,9 @@ Model-specific tuning is an optional, fail-closed overlay: `model-matrix.capabil
 
 - `SequentialExecutor`: run journal (`execution.run-journal.enabled`) — per-task outcome one-liners accumulated every run and atomically retained in `<workspace>/.agent-context/run-journal.json` (latest 20 bounded entries); when ON, `journalBlock` (plan outline + last 5 entries) is injected into subsequent task prompts (pinned by `SequentialExecutorRunJournalTest`). On restart the journal is reloaded for prompt continuity, but remains advisory context rather than task-state proof. Repo-orientation block injected via `RepoOrientationService` (`worker.localization.enabled`). `executeOne` canonical overload is now 7-arg (… resumeFrom, providerModelOverride, runJournal).
 - Bounded re-plan (CoherencePlannerAgent once/run on structural failure) is a designed follow-up — see HARNESS-RESOLUTION-LOG §task 12.
+### Selected handoff persistence
+
+When a selected continuation rerun is authorized, the executor reopens the primary terminal task
+row to `PENDING` before publishing the rerun's `WORKING` and terminal result. This keeps stale-worker
+fencing from discarding the handoff's durable outcome; recovery-attempt fencing still protects
+cross-JVM stale writers.
