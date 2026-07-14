@@ -85,6 +85,24 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
+  void marksModelsWithInsufficientContextAsIneligible() {
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .requiredContextTokens(300_000L)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore mini = find(candidates, "openai", "gpt-5.4-mini");
+    assertThat(sonnet.contextFitsRequestedBudget()).isFalse();
+    assertThat(sonnet.reasons())
+        .anySatisfy(reason -> assertThat(reason).contains("candidate rejected before quality ranking"));
+    assertThat(mini.contextFitsRequestedBudget()).isFalse();
+  }
+
+  @Test
   void evaluatesIndependentCandidatesInBoundedParallelBatchWithDeterministicOrder() {
     ReflectionTestUtils.setField(service, "parallelProviderEvaluationEnabled", true);
     ReflectionTestUtils.setField(service, "maxParallelTasks", 2);
