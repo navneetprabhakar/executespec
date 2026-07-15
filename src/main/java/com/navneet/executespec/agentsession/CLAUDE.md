@@ -30,6 +30,9 @@ turns separately from runs.
   here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
+- `DELETE /api/agent/sessions/{sessionId}/history` is the canonical explicit transcript reset for
+  Web, CLI, and VS Code. It verifies session ownership, deletes durable events and turns while
+  retaining the session shell and immutable usage ledger, and is idempotent when repeated.
 - Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
   (bounded read-only role-contract execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
   (side-effect-free deterministic parent-coordinator decision),
@@ -149,6 +152,7 @@ turns separately from runs.
 | `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. Confirmed submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override.                              |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
+| `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
 | `AgentSessionService.java`                 | Session access checks, high-level orchestration, and API-facing service delegation.                                                                                                                                 |
 | `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, stored trace hydration, and latest linked-run summary hydration for reloadable operator UIs.       |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |

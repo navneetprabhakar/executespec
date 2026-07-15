@@ -54,6 +54,7 @@ public class AgentSessionController {
   private final AgentActionCatalog actionCatalog;
   private final AgentStreamTurnRunner streamTurnRunner;
   private final AgentAttachmentService attachmentService;
+  private final AgentSessionHistoryService historyService;
   private final SubagentExecutionService subagentExecutionService;
   private final ImplementerMutationService implementerMutationService;
   private final ImplementerExecutionService implementerExecutionService;
@@ -71,6 +72,7 @@ public class AgentSessionController {
         attachmentService,
         subagentExecutionService,
         null,
+        null,
         null);
   }
 
@@ -81,6 +83,7 @@ public class AgentSessionController {
       AgentStreamTurnRunner streamTurnRunner,
       AgentAttachmentService attachmentService,
       SubagentExecutionService subagentExecutionService,
+      AgentSessionHistoryService historyService,
       ImplementerMutationService implementerMutationService,
       ImplementerExecutionService implementerExecutionService) {
     this.sessionService = sessionService;
@@ -88,6 +91,7 @@ public class AgentSessionController {
     this.streamTurnRunner = streamTurnRunner;
     this.attachmentService = attachmentService;
     this.subagentExecutionService = subagentExecutionService;
+    this.historyService = historyService;
     this.implementerMutationService = implementerMutationService;
     this.implementerExecutionService = implementerExecutionService;
   }
@@ -289,6 +293,16 @@ public class AgentSessionController {
   public AgentSessionResponse session(
       @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
     return sessionService.getSession(sessionId, user);
+  }
+
+  /** Clear the durable server transcript while retaining the session identity and usage ledger. */
+  @org.springframework.web.bind.annotation.DeleteMapping("/sessions/{sessionId}/history")
+  public AgentSessionHistoryService.HistoryClearedResponse clearHistory(
+      @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
+    if (historyService == null) {
+      throw new IllegalStateException("agent session history service unavailable");
+    }
+    return historyService.clear(sessionId, user);
   }
 
   @GetMapping("/sessions/{sessionId}/events")

@@ -499,10 +499,8 @@ export default function IdeRunResult() {
       return true;
     }
     if (cmd === '/clear') {
-      const created = await api.createAgentSession(
-        webAgentSessionRequest({projectId: run?.projectId, runId}),
-      );
-      setRunAgentSessionId(created.id);
+      const session = await ensureRunAgentSession();
+      await api.clearAgentSessionHistory(session.id);
       setChat([]);
       return true;
     }
