@@ -28,6 +28,11 @@ export function useSse(runId: string | null) {
     // so far — otherwise the live log appears to vanish when a run completes.
     const prevRunId = useSseStore.getState().currentRunId;
     const isNewRun = prevRunId !== runId;
+    // A token request can outlive this effect (for example when navigating from a live
+    // run to another route). Keep a generation-local guard so a late response cannot
+    // resurrect an EventSource for an unmounted run or schedule reconnects into a new
+    // run's store state.
+    let active = true;
     if (isNewRun) clearEntries();
     setRunId(runId);
     attemptRef.current = 0;
@@ -56,6 +61,7 @@ export function useSse(runId: string | null) {
     }
 
     async function connect() {
+      if (!active) return;
       esRef.current?.close();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
 
@@ -66,8 +72,10 @@ export function useSse(runId: string | null) {
         const {token: sseToken} = await getSseToken(runId!);
         sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
       } catch {
+        if (!active) return;
         console.warn('Failed to obtain scoped SSE token, connecting without auth');
       }
+      if (!active) return;
       if (lastEventIdRef.current) {
         sseUrl += `${sseUrl.includes('?') ? '&' : '?'}lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
       }
@@ -75,6 +83,7 @@ export function useSse(runId: string | null) {
       esRef.current = es;
 
       es.onopen = () => {
+        if (!active) return;
         setStatus('CONNECTED');
         const wasReconnect = attemptRef.current > 0;
         attemptRef.current = 0;
@@ -84,6 +93,7 @@ export function useSse(runId: string | null) {
       };
 
       es.onmessage = (ev) => {
+        if (!active) return;
         try {
           if (ev.lastEventId) lastEventIdRef.current = ev.lastEventId;
           const data = JSON.parse(ev.data);
@@ -161,18 +171,22 @@ export function useSse(runId: string | null) {
       };
 
       es.onerror = () => {
+        if (!active) return;
         es.close();
         esRef.current = null;
         setStatus('RECONNECTING');
         const delay = BACKOFF[Math.min(attemptRef.current, BACKOFF.length - 1)];
         attemptRef.current++;
-        timeoutRef.current = setTimeout(connect, delay);
+        timeoutRef.current = setTimeout(() => {
+          if (active) void connect();
+        }, delay);
       };
     }
 
     connect();
 
     return () => {
+      active = false;
       esRef.current?.close();
       clearTimeout(timeoutRef.current);
       setStatus('DISCONNECTED');
