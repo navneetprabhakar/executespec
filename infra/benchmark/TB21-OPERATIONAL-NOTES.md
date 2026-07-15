@@ -55,6 +55,11 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
 - The in-app benchmark bridge records one `TASK_SCORED` event per Harbor trial.
 - `/benchmark` is the operator view for score, cost, tokens, and per-task pass/fail status.
 - Harbor trial `result.json` and `reward.txt` remain the authoritative raw scoring artifacts.
+- The bridge also inspects each trial's sibling `exception.txt` before trusting the reward. Harbor
+  can write `AgentTimeoutError` there while leaving a stale or even positive verifier reward in
+  `result.json`; those trials are posted as `TIMEOUT`, not `PASSED`, and must be excluded from
+  model-quality denominators. Final reports must reconcile `result.json`, `exception.txt`, and
+  the ExecuteSpec run id rather than relying on the aggregate Harbor mean alone.
 
 ### Docker image preflight and contaminated-run guard
 
