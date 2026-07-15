@@ -43,13 +43,12 @@ def _first_text(*vals):
     return None
 
 
-def _classify_trial(result, reward):
+def _classify_trial(result, reward, exception_text=None):
     """Return (outcome, reason) independent of reward math."""
-    if reward > 0:
-        return "PASSED", None
-    setup_failure = _setup_failure_reason(result)
-    if setup_failure:
-        return "INFRA_SETUP_FAILED", setup_failure
+    # Harbor writes AgentTimeoutError (and some cancellation/setup traces) to a
+    # sibling exception.txt while leaving result.json with null agent/verifier
+    # fields.  Inspect that file before trusting reward: a timed-out trial can
+    # otherwise carry a misleading verifier reward=1 and be posted as PASSED.
     ar = result.get("agent_result") or {}
     vr = result.get("verifier_result") or {}
     status = _first_text(
@@ -72,10 +71,16 @@ def _classify_trial(result, reward):
         vr.get("exception"),
         vr.get("failure_reason"),
         vr.get("message"),
+        exception_text,
     )
-    hay = " ".join(x for x in (status, reason) if x).lower()
-    if "timeout" in hay or "timed out" in hay:
-        return "TIMEOUT", reason or status
+    hay = " ".join(x for x in (status, reason, exception_text) if x).lower()
+    if "timeout" in hay or "timed out" in hay or "cancellederror" in hay:
+        return "TIMEOUT", reason or status or "Harbor trial timed out or was cancelled"
+    if reward > 0:
+        return "PASSED", None
+    setup_failure = _setup_failure_reason(result)
+    if setup_failure:
+        return "INFRA_SETUP_FAILED", setup_failure
     if any(w in hay for w in ("container", "docker", "harbor", "bridge", "tool")):
         return "INFRA_FAILED", reason or status
     if any(w in hay for w in ("verifier", "verify", "reward")):
@@ -142,7 +147,14 @@ def _scan(job_dir):
         except Exception:  # noqa: BLE001
             rew = 0
         meta = ar.get("metadata") or {}
-        outcome, reason = _classify_trial(d, rew)
+        exception_file = os.path.join(os.path.dirname(f), "exception.txt")
+        exception_text = None
+        try:
+            with open(exception_file, encoding="utf-8") as exception_handle:
+                exception_text = exception_handle.read(12000)
+        except OSError:
+            pass
+        outcome, reason = _classify_trial(d, rew, exception_text)
         out[trial] = {
             "task": task,
             "reward": rew,
