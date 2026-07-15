@@ -320,6 +320,49 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
+  void canonicalizesModelAliasesBeforeWeightingBenchmarkRuns() {
+    when(modelRegistry.canonicalize("legacy-sonnet")).thenReturn("claude-sonnet-4-6");
+    when(modelRegistry.canonicalize("claude-sonnet-4-6")).thenReturn("claude-sonnet-4-6");
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-alias-small")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-a")
+                    .provider("anthropic")
+                    .model("legacy-sonnet")
+                    .totalTasks(20)
+                    .resolvedTasks(20)
+                    .status("DONE")
+                    .build(),
+                BenchmarkRun.builder()
+                    .id("bench-canonical-large")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-b")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(100)
+                    .resolvedTasks(50)
+                    .status("DONE")
+                    .build()));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(50.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    // 70/120, not the incorrect equal-run average (100% + 50%) / 2 = 75%.
+    assertThat(sonnet.qualityScore()).isCloseTo(58.3333, within(0.0001));
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
+  }
+
+  @Test
   void keepsIncompatiblePersistedBenchmarkRunsVisibleButNotAsQualityPriors() {
     when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
         .thenReturn(

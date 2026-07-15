@@ -350,7 +350,8 @@ public class ModelProviderCandidateService {
         if (enoughSample && compatibleTaskCategory) {
           eligible
               .computeIfAbsent(
-                  new BenchmarkAggregateKey(run.getProvider(), run.getModel(), taskCategory),
+                  new BenchmarkAggregateKey(
+                      run.getProvider(), canonicalBenchmarkModel(run.getModel()), taskCategory),
                   ignored -> new ArrayList<>())
               .add(run);
         } else {
@@ -378,6 +379,7 @@ public class ModelProviderCandidateService {
   private static ModelProviderCapabilitySignal benchmarkAggregateSignal(
       List<BenchmarkRun> runs, String taskCategory, int minSampleTasks) {
     BenchmarkRun first = runs.getFirst();
+    String canonicalModel = first.getModel();
     long totalTasks = runs.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
     long resolvedTasks = runs.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
     double resolvedRate = totalTasks <= 0 ? 0.0 : (resolvedTasks * 100.0) / totalTasks;
@@ -406,7 +408,7 @@ public class ModelProviderCandidateService {
     }
     return ModelProviderCapabilitySignal.builder()
         .provider(first.getProvider())
-        .model(first.getModel())
+        .model(canonicalModel)
         .taskCategory(taskCategory)
         .benchmarkQualityScore(resolvedRate)
         .reasons(List.of(reason))
@@ -414,6 +416,17 @@ public class ModelProviderCandidateService {
   }
 
   private record BenchmarkAggregateKey(String provider, String model, String taskCategory) {}
+
+  /**
+   * Canonicalise benchmark route identities before aggregation. Benchmark producers are allowed to
+   * emit legacy aliases (for example a tier label rather than the registered model id). If aliases
+   * are grouped separately, the later candidate average gives a tiny run the same weight as a large
+   * run and can materially distort the quality prior. The candidate service owns the registry, so
+   * normalize once at ingestion while preserving the original run text in reasons.
+   */
+  private String canonicalBenchmarkModel(String model) {
+    return modelRegistry.canonicalize(model);
+  }
 
   private static ModelProviderCapabilitySignal benchmarkSignal(
       BenchmarkRun run, String taskCategory, int minSampleTasks) {
