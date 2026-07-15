@@ -1662,30 +1662,6 @@ public class ValidationReportService {
         testCoverageLevel, filesGenerated, endpointCoveragePercent, gamingGuards, null);
   }
 
-  /* Legacy implementation retained below for forensic comparison; the calculator is canonical. */
-  private int computeVerifiedScoreAdditiveRemoved(
-      Boolean finalBuildPassed,
-      int testsPassed,
-      int testsTotal,
-      String reviewerVerdictName,
-      int unfixedCriticalCount,
-      String testCoverageLevel,
-      int filesGenerated,
-      Integer endpointCoveragePercent,
-      boolean gamingGuards) {
-    return computeVerifiedScoreAdditive(
-        finalBuildPassed,
-        testsPassed,
-        testsTotal,
-        reviewerVerdictName,
-        unfixedCriticalCount,
-        testCoverageLevel,
-        filesGenerated,
-        endpointCoveragePercent,
-        gamingGuards,
-        null);
-  }
-
   /**
    * RL-2026-05-066 (verifyBoot) — boot-aware additive scorer. Identical to the 9-arg form except
    * the BUILD slot reads {@code bootVerification} when present (see {@link #bootSlotScore}): a
