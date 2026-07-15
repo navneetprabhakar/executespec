@@ -134,9 +134,9 @@ execution:
     max-reruns-per-task: 1
 
 terminal-bench:
-  # Internal TB 2.1 runs use Harbor agent timeout 1350s. Keep the ExecuteSpec worker
-  # below that outer cap while leaving enough room for long productive terminal tasks.
-  worker-wall-clock-seconds: 1260
+  # Internal TB 2.1 runs use Harbor agent timeout 1500s. Keep the ExecuteSpec worker
+  # below that outer cap while leaving a 90s buffer for the terminal finalizer.
+  worker-wall-clock-seconds: 1410
 
 test-generation:
   # HTTP test generation is post-run work. It must not hold terminal completion open forever.

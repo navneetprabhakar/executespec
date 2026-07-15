@@ -133,10 +133,11 @@ Target:
 - Keep ExecuteSpec TB worker wall-clock lower than Harbor's agent timeout.
 - `infra/benchmark/scripts/run-tb.sh` now emits Harbor `agents[].override_timeout_sec`
   and `agents[].max_timeout_sec`.
-- Default `HARBOR_AGENT_TIMEOUT_SEC=1350`.
+- Default `HARBOR_AGENT_TIMEOUT_SEC=1500` for new cohorts. Historical runs retain their recorded
+  1350s setting in their evidence artifacts.
 - ExecuteSpec TB worker wall-clock is configurable via
   `terminal-bench.worker-wall-clock-seconds`; default is now `1260s`, leaving a
-  90s buffer under Harbor's `1350s` cap for one slow in-flight LLM/tool turn plus
+  90s buffer under Harbor's `1500s` cap for one slow in-flight LLM/tool turn plus
   the terminal finalizer.
 - Harbor has no true live pause for an in-flight trial. To preserve benchmark
   progress when changing server values, stop the Harbor launcher/bridge, keep the
