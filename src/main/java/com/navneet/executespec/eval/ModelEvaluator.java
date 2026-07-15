@@ -13,12 +13,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.navneet.executespec.agent.CostEstimator;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.ModelMatrixProperties;
 
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ModelEvaluator {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final CostEstimator costEstimator;
   private final EvalScorer scorer;
   private final EvalTestCaseRegistry testCaseRegistry;
@@ -264,22 +264,26 @@ public class ModelEvaluator {
   }
 
   private EvalResult runSingleTest(String provider, String model, EvalTestCase testCase) {
-    Prompt prompt = new Prompt(List.of(new UserMessage(testCase.userPrompt())));
-
     long startMs = System.currentTimeMillis();
     String responseText;
     long inputTokens = 0;
     long outputTokens = 0;
 
     try {
-      FallbackLlmRouter.LlmResponse llmResponse =
-          fallbackLlmRouter.callDirect(provider, model, prompt);
+      ChatResponse llmResponse =
+          llmRouter.callText(
+              provider,
+              model,
+              List.of(new UserMessage(testCase.userPrompt())),
+              "eval-" + testCase.id(),
+              "ModelEvaluator",
+              "evaluate");
       long latencyMs = System.currentTimeMillis() - startMs;
 
-      responseText = llmResponse.response().getResult().getOutput().getText();
+      responseText = llmResponse.getResult().getOutput().getText();
 
       try {
-        var usage = llmResponse.response().getMetadata().getUsage();
+        var usage = llmResponse.getMetadata().getUsage();
         inputTokens = usage.getPromptTokens();
         outputTokens = usage.getCompletionTokens();
       } catch (Exception e) {

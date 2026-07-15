@@ -35,7 +35,8 @@ public record TierEvalResult(
     int iterationsUsed,
     int correctnessScore,
     TierEvalFailureMode failureMode,
-    String detail) {
+    String detail,
+    String promptFingerprint) {
 
   public double cacheHitRatio() {
     long total = inputTokens + cacheReadTokens;

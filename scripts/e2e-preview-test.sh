@@ -14,7 +14,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-Admin@123}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 POLL_INTERVAL=10
 RUN_TIMEOUT=600        # 10 minutes max per run
 PREVIEW_WAIT=60        # extra seconds to wait for preview after COMPLETE

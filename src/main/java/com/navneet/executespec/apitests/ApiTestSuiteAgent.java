@@ -9,8 +9,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.navneet.executespec.agent.AnthropicModelOptions;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -20,9 +19,6 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.FileSystemTool;
 import com.navneet.executespec.tool.GitTool;
 
-import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -54,7 +50,7 @@ public class ApiTestSuiteAgent {
 
   private final FileSystemTool fsTool;
   private final GitTool gitTool;
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final SseBroadcaster broadcaster;
   private final StateStore stateStore;
@@ -117,33 +113,22 @@ public class ApiTestSuiteAgent {
     // Call LLM
     String system = promptResource.getContentAsString(StandardCharsets.UTF_8);
     ResolvedModel resolved = modelResolver.resolve("ApiTestSuiteAgent", run.getAiProviderEnum());
-    AnthropicCacheOptions cacheOpts =
-        AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
-    var optsBuilder =
-        AnthropicChatOptions.builder().model(resolved.getModel()).cacheOptions(cacheOpts);
-    if (!AnthropicModelOptions.shouldOmitTemperature(resolved.getModel())) {
-      optsBuilder.temperature(0.0);
-    }
-    AnthropicChatOptions opts = optsBuilder.build();
     Prompt prompt =
         new Prompt(
             List.of(
                 new SystemMessage(system),
                 new UserMessage(
                     "Generate OpenAPI 3.0 YAML for these backend API source files:\n\n"
-                        + controllerContent)),
-            opts);
+                        + controllerContent)));
 
     var llmResponse =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            prompt.getInstructions(),
             runId,
-            "api-test-suite",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "ApiTestSuiteAgent",
+            "api-spec.generate");
 
     // Track tokens for billing accuracy
     try {

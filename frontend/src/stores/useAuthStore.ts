@@ -1,7 +1,6 @@
 import {create} from 'zustand';
 import * as api from '@/lib/api';
 import type {TierPermissions} from '@/hooks/useTierPermissions';
-import {useUiStore} from './useUiStore';
 
 interface AuthStore {
   user: api.AuthUser | null;
@@ -103,9 +102,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         api.updateViewMode('pro').catch(() => {});
       }
       set({user, isAuthenticated: true});
-      if (user.viewMode === 'pro' || user.viewMode === 'project') {
-        useUiStore.getState().setViewMode(user.viewMode);
-      }
       // Load tier permissions
       api
         .getMyPermissions()

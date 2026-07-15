@@ -195,8 +195,8 @@ export function IdeProjectChat() {
     setErr('');
     try {
       await api.clearProjectChat(projectId);
-      const created = await api.createAgentSession(webAgentSessionRequest({projectId}));
-      setAgentSessionId(created.id);
+      const session = await ensureProjectAgentSession();
+      await api.clearAgentSessionHistory(session.id);
       setMsgs([]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Clear failed.');

@@ -26,7 +26,7 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 | File | Purpose |
 |------|---------|
 | `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
-| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. `extractDeliverablePaths` checks absolute `/app/…\.ext` paths, output-verb absolute paths including extensionless executables (for example `Build /app/solver`), and relatively named `name.ext` outputs introduced by an output verb, prepended `/app/`. Extensionless `/app/foo` inputs are still ignored unless the same clause says to write/create/build/save them. The shared worker's verified-pass guard snapshots extracted deliverables after a conservative passing verifier-shaped command, refuses later risky edits/reruns, and force-completes text-only follow-ups. Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
+| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. It appends `prompts/fragments/provider/<provider>/terminal.md` by default for the operator-only benchmark lane (the dedicated `terminal-bench.provider-prompt-tuning.enabled` flag or `ES_TB_PROVIDER_PROMPT_TUNING=false` disables it); BUILD/PATCH keep their existing `worker.provider-prompt-tuning.enabled` flag and default. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. `extractDeliverablePaths` checks absolute `/app/…\.ext` paths, output-verb absolute paths including extensionless executables (for example `Build /app/solver`), and relatively named `name.ext` outputs introduced by an output verb, prepended `/app/`. Extensionless `/app/foo` inputs are still ignored unless the same clause says to write/create/build/save them. The shared worker's verified-pass guard snapshots extracted deliverables after a conservative passing verifier-shaped command, refuses later risky edits/reruns, and force-completes text-only follow-ups. Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
 
@@ -88,8 +88,8 @@ worker treats failed tests as successful verification and benchmark failure anal
   the force threshold (currently iteration 64) even if shell calls keep resetting the progress
   counter. Wall-clock-exceeded terminal runs also get one restricted finalizer attempt before they
   fail. The server-side TB worker wall clock is configurable through
-  `terminal-bench.worker-wall-clock-seconds` and defaults to **1260s**, intentionally below Harbor's
-  1350s agent timeout with buffer for one slow in-flight tool/LLM turn plus the terminal finalizer,
+  `terminal-bench.worker-wall-clock-seconds` and defaults to **1410s**, intentionally below Harbor's
+  1500s agent timeout with a 90s buffer for one slow in-flight tool/LLM turn plus the terminal finalizer,
   so long runs fail cleanly through ExecuteSpec instead of surfacing as Harbor `AgentTimeoutError` +
   orphaned backend work. After the normal one-shot text-only nudge, a second text-only terminal response also
   runs the forced terminal finalizer so the model must emit `completeTask` or write/edit the exact
@@ -133,12 +133,12 @@ export ES_MAX_ITERS=120
 Current internal TB 2.1 benchmark is a **one-pass, non-submission** matrix: DeepSeek V4 Pro native,
 DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, and GLM 5.2 via OpenRouter. Use
 `infra/benchmark/scripts/run-tb-internal-once-matrix.sh`; it enforces `K=1`, `BRIDGE=on`, and
-`SUBMIT_TB=off`. Gemini, GPT, and Sarvam are intentionally out of scope for this internal pass.
+`SUBMIT_TB=off`. Gemini and GPT are intentionally out of scope for this internal pass.
 
 ## Iteration policy
 
 - Test Terminal-Bench 2.1 internal comparisons with the locked five-model matrix only. Do not add
-  Gemini, GPT, Sarvam, or frontier routes without a fresh explicit benchmark scope.
+  Gemini, GPT, or frontier routes without a fresh explicit benchmark scope.
 - Use small comparable slices first (`es-tb-base20.yaml` before wider sets). Keep job names unique or
   archive the prior `/tmp/es-tb-jobs/<job_name>` directory before rerunning.
 - After every run, inspect failures task-by-task and classify them as prompt, tool protocol,

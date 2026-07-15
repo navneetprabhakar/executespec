@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
@@ -46,11 +47,6 @@ const costOf = (r: unknown) =>
   (r as {actualCostUsd?: number; actualCost?: number; totalCost?: number}).actualCostUsd ??
   (r as {actualCost?: number}).actualCost ??
   (r as {totalCost?: number}).totalCost;
-// C5 — canonical verdict bands for the row score badge (≥85 shippable / ≥70
-// needs review / <70 failed), matching VerdictPill / ScoreRing.
-const scoreBand = (sc: number): 'ok' | 'warn' | 'bad' =>
-  sc >= 85 ? 'ok' : sc >= 70 ? 'warn' : 'bad';
-
 // Project workbench IA. Keep every deep link alive, but stop presenting ten
 // routes as equal peers. Primary tabs are the frequent workflow surfaces;
 // secondary operational surfaces live under project Setup.
@@ -64,7 +60,7 @@ const PRIMARY_TABS: ProjectTab[] = [
   {label: 'Overview', seg: '/pulse'},
   {label: 'Work', seg: '/runs', count: 'runs'},
   {label: 'Code', seg: '/code'},
-  {label: 'Chat', seg: '/chat'},
+  {label: 'Chat', seg: '/agent'},
   {label: 'Settings', seg: '/settings'},
 ];
 const SECONDARY_TABS: ProjectTab[] = [
@@ -338,7 +334,10 @@ export function IdeProjectPulse() {
       ) : (
         <>
           <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8}}>
-            <Metric label='Avg score' value={avgScore != null ? `${Math.round(avgScore)}%` : '—'} />
+            <Metric
+              label='Avg score · internal'
+              value={avgScore != null ? `${Math.round(avgScore)}% · review evidence` : '—'}
+            />
             <Metric label='Avg work time' value={runTime} />
             {isSuperAdmin && (
               <Metric
@@ -492,7 +491,7 @@ export function IdeProjectPulse() {
                     </span>
                     {/* C5 — score badge (verdict-banded) + muted cost, null-guarded. */}
                     {typeof sc === 'number' ? (
-                      <IdeBadge kind={scoreBand(sc)}>{Math.round(sc)}</IdeBadge>
+                      <ScoreBadge score={sc} compact />
                     ) : (
                       <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
                         {live ? 'live' : '—'}
@@ -532,8 +531,9 @@ function RunDetailPanel({
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState('');
-  const score =
-    scoreOf(run) ?? (run as unknown as {accuracyScore?: number}).accuracyScore ?? undefined;
+  // Legacy accuracyScore is an LLM assessment, not the verified score. Never
+  // present it as the headline correctness metric in the project surface.
+  const score = scoreOf(run);
   const verdict =
     score == null ? '—' : score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;
@@ -565,7 +565,11 @@ function RunDetailPanel({
     <div className='ide-card'>
       <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
         <div style={{fontSize: 28, fontWeight: 800, color: 'var(--ide-fg-bright)'}}>
-          {score != null ? `${Math.round(score)}%` : '—'}
+          {score != null ? (
+            <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
+          ) : (
+            '—'
+          )}
         </div>
         <div>
           <IdeBadge kind={statusKind(run.status)}>{verdict}</IdeBadge>
@@ -956,7 +960,7 @@ export function IdeProjectRuns() {
                         }}
                       >
                         {typeof sc === 'number' ? (
-                          <IdeBadge kind={scoreBand(sc)}>{Math.round(sc)}</IdeBadge>
+                          <ScoreBadge score={sc} compact />
                         ) : live ? (
                           <span>live</span>
                         ) : null}

@@ -33,8 +33,13 @@ class AgentRecordedTurnService {
             session.getProjectId(),
             request == null ? null : request.repoContext(),
             request == null ? null : request.clientCapabilities());
-    OrchestratorDecision orchestratorDecision = intentService.decide(intentRequest);
-    IntentDecision decision = intentService.interpret(intentRequest);
+    OrchestratorDecision orchestratorDecision =
+        intentService.decide(
+            intentRequest, session.getDefaultProvider(), session.getDefaultModel());
+    // The orchestrator decision is canonical for this turn. Re-running the classifier through
+    // the legacy adapter would spend a second model call and could produce a different route,
+    // causing the persisted transcript and returned decision to disagree.
+    IntentDecision decision = AgentIntentLegacyAdapter.toLegacy(orchestratorDecision);
 
     AgentTurn turn =
         turnRecorder.record(
@@ -55,7 +60,9 @@ class AgentRecordedTurnService {
     }
     sessionRepo.save(session);
 
-    eventRecorder.append(sessionId, turn.getId(), "INTENT", orchestratorDecision);
+    // Reuse the persisted turn id as the compatibility action id so Web and CLI replay clients
+    // can correlate the intent event without depending on client-local state.
+    eventRecorder.append(sessionId, turn.getId(), turn.getId(), "INTENT", orchestratorDecision);
 
     return new TurnResponse(
         turn.getId(),

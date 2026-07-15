@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "2026-07-15",
+  "type": "web-live-recovery-smoke",
+  "backend": "http://localhost:8092",
+  "frontend": "http://localhost:5174",
+  "gateRunId": "web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "sseRequests": [
+    {
+      "at": "2026-07-14T19:45:52.607Z",
+      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events",
+      "aborted": true
+    },
+    {
+      "at": "2026-07-14T19:45:52.617Z",
+      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events",
+      "aborted": false
+    },
+    {
+      "at": "2026-07-14T19:45:53.622Z",
+      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events?lastEventId=8",
+      "aborted": false
+    }
+  ],
+  "statuses": [
+    {
+      "label": "initial gate",
+      "hasGate": true,
+      "hasReconnect": false
+    },
+    {
+      "label": "after forced SSE drop",
+      "hasReconnect": false,
+      "streamRequests": 3,
+      "replayCursorSeen": true
+    },
+    {
+      "label": "reconnected terminal state",
+      "hasComplete": true,
+      "hasReconnectingCopy": false
+    }
+  ],
+  "errors": [
+    "error:Failed to load resource: net::ERR_FAILED"
+  ],
+  "unexpectedErrors": [],
+  "screenshot": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-live-recovery-results/mobile-reconnect-complete.png",
+  "result": "PASS"
+}

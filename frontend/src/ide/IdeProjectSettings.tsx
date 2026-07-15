@@ -18,8 +18,6 @@ import {
   projectSettingsFormFromProject,
 } from '@/ide/projectSettingsUtils';
 
-const token = () => localStorage.getItem('access_token') ?? '';
-
 type SettingsSub = 'settings' | 'documents' | 'memory';
 
 export function IdeProjectSettings() {
@@ -102,19 +100,14 @@ export function IdeProjectSettings() {
     setErr('');
     setMsg('');
     try {
-      const r = await fetch(`/api/projects/${projectId}/settings`, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token()}`},
-        body: JSON.stringify({
-          name: name.trim() || undefined,
-          description: description.trim() || undefined,
-          targetBranch: targetBranch.trim() || undefined,
-          branchNamingPattern: branchNaming.trim() || undefined,
-          githubOwner: githubOwner.trim() || undefined,
-          aiProvider: provider,
-        }),
+      await api.updateProjectSettings(projectId, {
+        name: name.trim() || undefined,
+        description: description.trim() || undefined,
+        targetBranch: targetBranch.trim() || undefined,
+        branchNamingPattern: branchNaming.trim() || undefined,
+        githubOwner: githubOwner.trim() || undefined,
+        aiProvider: provider,
       });
-      if (!r.ok) throw new Error(`Save failed (${r.status}).`);
       setMsg('Settings saved.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Save failed.');

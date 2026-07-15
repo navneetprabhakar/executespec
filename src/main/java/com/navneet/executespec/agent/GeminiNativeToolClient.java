@@ -310,7 +310,17 @@ public class GeminiNativeToolClient {
         ObjectNode turn = contents.addObject();
         turn.put("role", "user");
         ArrayNode parts = turn.putArray("parts");
-        parts.addObject().put("text", um.getText());
+        if (um.getText() != null && !um.getText().isBlank()) {
+          parts.addObject().put("text", um.getText());
+        }
+        if (um.getMedia() != null) {
+          for (var media : um.getMedia()) {
+            ObjectNode inline = parts.addObject().putObject("inlineData");
+            inline.put("mimeType", media.getMimeType().toString());
+            inline.put(
+                "data", java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
+          }
+        }
       } else if (m instanceof AssistantMessage am) {
         ObjectNode turn = contents.addObject();
         turn.put("role", "model");
@@ -426,23 +436,49 @@ public class GeminiNativeToolClient {
    * Strip it recursively — semantically we lose strictness but the required-fields check still
    * applies.
    */
-  private JsonNode sanitizeSchemaForGemini(JsonNode node) {
+  JsonNode sanitizeSchemaForGemini(JsonNode node) {
+    return sanitizeSchemaForGemini(node, null);
+  }
+
+  private JsonNode sanitizeSchemaForGemini(JsonNode node, String propertyName) {
     if (node.isObject()) {
       ObjectNode copy = objectMapper.createObjectNode();
       node.fields()
           .forEachRemaining(
               e -> {
                 if ("additionalProperties".equals(e.getKey())) return;
-                copy.set(e.getKey(), sanitizeSchemaForGemini(e.getValue()));
+                copy.set(e.getKey(), sanitizeSchemaForGemini(e.getValue(), e.getKey()));
               });
+      // Gemini's schema validator requires an item schema for every ARRAY declaration. A few
+      // compatibility tools intentionally accept generic arrays and omit `items`; preserve their
+      // intent with a permissive object item for plan/todo/edit collections, and a string item for
+      // other unknown collections. Explicit item schemas always win and are recursively sanitized.
+      if ("array".equals(copy.path("type").asText()) && !copy.has("items")) {
+        copy.set("items", defaultArrayItemSchema(propertyName));
+      }
       return copy;
     }
     if (node.isArray()) {
       ArrayNode copy = objectMapper.createArrayNode();
-      node.forEach(el -> copy.add(sanitizeSchemaForGemini(el)));
+      node.forEach(el -> copy.add(sanitizeSchemaForGemini(el, propertyName)));
       return copy;
     }
     return node;
+  }
+
+  private ObjectNode defaultArrayItemSchema(String propertyName) {
+    ObjectNode item = objectMapper.createObjectNode();
+    if (propertyName != null
+        && switch (propertyName) {
+          case "plan", "items", "todos", "edits" -> true;
+          default -> false;
+        }) {
+      item.put("type", "object");
+      item.putObject("properties");
+    } else {
+      item.put("type", "string");
+    }
+    return item;
   }
 
   private ChatResponse parseResponse(JsonNode response, String requestedModel) {
@@ -527,9 +563,10 @@ public class GeminiNativeToolClient {
       //                                 stable across iterations. The 2026-05-08 stagnation-
       //                                 message-as-SystemMessage bug invalidated the prefix;
       //                                 see WorkerAgentStagnationTest for the regression pin.
-      //                             (2) explicit caching — caller POSTs to /v1beta/cachedContents
-      //                                 to mint a cache resource then references it by ID.
-      //                                 Not yet implemented; tracked as Phase 2 of the cache audit.
+      //                             (2) explicit caching — when the feature flag is enabled, this
+      //                                 client mints a /v1beta/cachedContents resource and
+      //                                 references it by ID, with fail-safe inline retry on any
+      //                                 stale/unsupported cache response.
       //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (we use gemini-3-pro-preview
       //                             and gemini-3-flash-preview). Gemini bills these at the
       //                             OUTPUT rate. Previously dropped → under-billing whenever
@@ -605,7 +642,7 @@ public class GeminiNativeToolClient {
     } catch (Exception e) {
       tools = String.valueOf(request.tools().size());
     }
-    return sha256(request.model() + " " + systemTextOf(request.messages()) + " " + tools);
+    return sha256(request.model() + "\u0000" + systemTextOf(request.messages()) + "\u0000" + tools);
   }
 
   /**

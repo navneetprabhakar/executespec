@@ -26,25 +26,22 @@ import lombok.extern.slf4j.Slf4j;
  * Boot-time recovery for V2 runs left mid-flight by a previous JVM — crash, SIGTERM, or deploy
  * rollover.
  *
- * <p>Phase 1 behaviour (this class): <em>fail-cleanly</em>. The resumer scans non-terminal V2 runs
- * and marks each FAILED with a clear reason + emits an SSE event so the UI shows it. This turns
- * "stuck in WORKING forever" into "user can see and retry" — already a meaningful availability
- * improvement without needing replay logic.
- *
- * <p>Phase 2 (follow-up PR): actual replay via {@link
- * com.navneet.executespec.context.ContextStore#load} + {@code WorkerAgent.resumeFromSnapshot()} +
- * {@code SequentialExecutor.continueFromTask(...)}. Designed as a drop-in replacement for the
- * fail-path below.
+ * <p>Recovery claims a bounded restart attempt with a database compare-and-set, validates the
+ * heartbeat/workspace state, and resumes from persisted task/context checkpoints when the run is
+ * eligible. Stale or exhausted runs fail cleanly with an explicit reason and an SSE event. The
+ * recovery path does not rebind an in-flight provider future, transfer a workspace across nodes, or
+ * provide cross-JVM hot handoff; those cases are deliberately surfaced as bounded recovery outcomes
+ * rather than being presented as transparent continuation.
  *
  * <p>Run state handling:
  *
  * <ul>
  *   <li>{@code AWAITING_APPROVAL} — untouched. The plan gate is user-facing; the user can approve
  *       whenever, and that path does not require the old orchestrator thread.
- *   <li>{@code PLANNING} — failed. No snapshot yet (worker hadn't started); no useful recovery
- *       other than restart-from-scratch, which we leave to the user.
- *   <li>{@code WORKING} / {@code REVIEWING} — failed with "recovery pending" reason. Snapshots
- *       exist in Redis, but replay wiring is Phase 2.
+ *   <li>{@code PLANNING} — recovered only when the persisted plan/task state is sufficient;
+ *       otherwise failed with an explicit restart-required reason.
+ *   <li>{@code WORKING} / {@code REVIEWING} — resumed from the persisted checkpoint when the
+ *       workspace and heartbeat checks pass; stale, exhausted, or unrecoverable rows fail cleanly.
  * </ul>
  *
  * <p>Scoping: only touches rows where {@code harnessVersion = "v2"}. V1's {@code StartupRunResumer}
@@ -57,7 +54,7 @@ public class StartupRunResumer {
 
   /** Statuses that indicate a run was in-flight when the JVM died. */
   private static final List<String> RESUMABLE_STATUSES =
-      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
+      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL", "APPROVAL_RESUMING");
 
   /**
    * Hard cap on resume attempts per run. Once exceeded the run is permanently FAILED; the user can
@@ -131,10 +128,21 @@ public class StartupRunResumer {
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
-      if ("AWAITING_APPROVAL".equals(status)) {
-        // User-facing gate; no orchestrator thread required to unblock.
-        log.info("StartupRunResumer: run={} AWAITING_APPROVAL — left as-is", run.getRunId());
-        awaitingApproval++;
+      if ("AWAITING_APPROVAL".equals(status) || "APPROVAL_RESUMING".equals(status)) {
+        try {
+          var outcome = runLifecycleServiceProvider.getObject().recoverPlanGate(run.getRunId());
+          log.info(
+              "StartupRunResumer: run={} status={} recoverPlanGate → {}",
+              run.getRunId(),
+              status,
+              outcome);
+          awaitingApproval++;
+        } catch (Exception e) {
+          // Leave the durable gate untouched. A later approval retry or next restart can reconcile
+          // it; failing the run here would destroy a valid user decision.
+          log.error(
+              "StartupRunResumer: durable plan-gate recovery failed for {}", run.getRunId(), e);
+        }
         continue;
       }
 
@@ -154,6 +162,21 @@ public class StartupRunResumer {
       // case and fail-cleanly with a clear status_reason.
       if (isExecutorDone(run.getRunId())) {
         if (workspaceMissing(run.getRunId())) {
+          var restoreOutcome = recoverMissingWorkspace(run.getRunId());
+          if (restoreOutcome
+              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK) {
+            // The lifecycle path restored the checkpoint and queued the post-executor recovery.
+            // Do not mark the run COMPLETE here: reviewer/validation still need to run.
+            failedInterrupted++;
+            continue;
+          }
+          if (restoreOutcome
+              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+                  .NOT_APPLICABLE) {
+            // Another JVM owns the recovery lease; leave the durable row untouched.
+            failedInterrupted++;
+            continue;
+          }
           markFailed(
               run,
               status,
@@ -242,6 +265,30 @@ public class StartupRunResumer {
         failedInterrupted,
         failedCapped,
         failedStale);
+  }
+
+  /**
+   * Give the normal crash-recovery path a chance to restore a missing workspace before the
+   * terminal-task salvage branch fails the run. The lifecycle service owns the GCS restore
+   * collaborator and the cross-JVM CAS/lease, so duplicating that logic here would create a second
+   * recovery protocol. A null provider is retained as a fail-closed compatibility path for focused
+   * tests and legacy embedders.
+   */
+  private com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+      recoverMissingWorkspace(String runId) {
+    try {
+      if (runLifecycleServiceProvider == null) {
+        return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+            .WORKSPACE_GONE;
+      }
+      return runLifecycleServiceProvider.getObject().resumeAfterCrash(runId);
+    } catch (Exception e) {
+      log.warn(
+          "StartupRunResumer: missing workspace recovery dispatch failed for run={}: {}",
+          runId,
+          e.getMessage());
+      return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
+    }
   }
 
   /**

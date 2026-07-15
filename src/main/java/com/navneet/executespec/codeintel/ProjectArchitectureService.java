@@ -20,6 +20,7 @@ import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ProjectProviderResolver;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class ProjectArchitectureService {
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepoRepository repoRepo;
   private final ProjectRepository projectRepository;
+  private final ProjectProviderResolver projectProviderResolver;
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectArchitectureDocRepository archDocRepo;
   private final RepoArchitectureDocRepository repoArchRepo;
@@ -95,6 +97,16 @@ public class ProjectArchitectureService {
   }
 
   /**
+   * Generate architecture using an explicit run provider when supplied. Run-scoped provider/model
+   * pins must also cover this pre-planner refresh; otherwise a pinned run can silently spend on the
+   * project's default provider before the worker starts.
+   */
+  public ProjectArchitectureDoc generate(
+      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
+    return generateInternal(projectId, branchOverride, patOverride, providerOverride);
+  }
+
+  /**
    * Regenerate codemaps for every linked repo using the supplied branch (falls back to each repo's
    * default when {@code branchOverride} is null or blank) and the supplied PAT (falls back to the
    * system PAT when {@code patOverride} is null).
@@ -129,6 +141,11 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride) {
+    return generateInternal(projectId, branchOverride, patOverride, null);
+  }
+
+  private ProjectArchitectureDoc generateInternal(
+      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
@@ -136,11 +153,7 @@ public class ProjectArchitectureService {
           "Project has no linked repos — link repos before generating architecture");
     }
 
-    LlmProvider provider =
-        projectRepository
-            .findById(projectId)
-            .map(Project::getAiProvider)
-            .orElse(LlmProvider.OPENAI);
+    LlmProvider provider = projectProviderResolver.resolve(projectId, providerOverride);
 
     boolean hasOverride = branchOverride != null && !branchOverride.isBlank();
     List<ProjectCodeMap> codeMaps = new ArrayList<>();
@@ -527,11 +540,7 @@ public class ProjectArchitectureService {
       workspace.writeAndCommit(
           projectId, "architecture.md", archMarkdown, "architecture: combined regenerated");
 
-      LlmProvider provider =
-          projectRepository
-              .findById(projectId)
-              .map(Project::getAiProvider)
-              .orElse(LlmProvider.OPENAI);
+      LlmProvider provider = projectProviderResolver.resolve(projectId);
       String summary = briefService.summarise(projectId, archMarkdown, provider);
       if (summary != null && !summary.isBlank()) {
         workspace.writeAndCommit(projectId, "summary.md", summary, "summary: regenerated");
@@ -714,11 +723,7 @@ public class ProjectArchitectureService {
           HttpStatus.BAD_REQUEST, "repo " + repoId + " is not linked to project " + projectId);
     }
 
-    LlmProvider provider =
-        projectRepository
-            .findById(projectId)
-            .map(Project::getAiProvider)
-            .orElse(LlmProvider.OPENAI);
+    LlmProvider provider = projectProviderResolver.resolve(projectId);
 
     ProjectCodeMap cm = ensureCodeMap(projectId, repo, repo.getDefaultBranch(), patOverride);
     RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);

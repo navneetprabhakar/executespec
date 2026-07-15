@@ -16,6 +16,8 @@ stitches them into one clip with ffmpeg.
 > intended (the story shows a genuine end-to-end run). It costs LLM credits per
 > recording. To re-render only the verdict beats from an already-finished run
 > without submitting a new one, pass `ES_RUN_ID=<uuid> ES_SKIP_PHASE_A=1`.
+> Reuse mode writes `website/media/hero-phase-b-only.webm`; it is deliberately
+> labelled as a verdict-only clip and never replaces the complete `hero.webm`.
 
 Output: **`website/media/hero.webm`** (1280×800, VP9, ~55–65 s, loop-friendly).
 
@@ -71,7 +73,7 @@ while it polls, then the output path, size, and duration. It overwrites
 | `ES_PROJECT_ID`              | `6119f4b2-…` (Surface Test — tictactoe)  | The single project the WHOLE story runs against.                |
 | `ES_RUN_SPEC`                | `Add a hasWinner() helper …`             | The spec typed + submitted in beat 3.                           |
 | `ES_RUN_ID`                  | unset                                    | Reuse an existing run for Phase B instead of submitting fresh.  |
-| `ES_SKIP_PHASE_A`            | unset                                    | With `ES_RUN_ID`, set `1` to skip the submit/gate recording.    |
+| `ES_SKIP_PHASE_A`            | unset                                    | With `ES_RUN_ID`, set `1` to skip the submit/gate recording; writes `website/media/hero-phase-b-only.webm`. |
 | `RUN_TIMEOUT_MS`             | `720000` (12 min)                        | How long the WAIT phase polls for the run to finish.            |
 | `NO_FFMPEG`                  | unset                                    | Set to `1` to ship Phase A raw only (debug; no stitch).         |
 | `KEEP_RAW`                   | unset                                    | Set to `1` to keep `.video-out/` (the raw phase clips).         |

@@ -98,7 +98,7 @@ public class ApiKeyResolver {
       }
     }
 
-    // Level 3: system keys (null = FallbackLlmRouter uses the system singleton bean)
+    // Level 3: system keys (null = LlmRouter uses the configured system transport)
     ResolvedKeys keys =
         new ResolvedKeys(
             anthropic,

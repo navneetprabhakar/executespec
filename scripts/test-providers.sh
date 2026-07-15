@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ExecuteSpec — Provider Eval Script
-# Measures: cost, time, accuracy, efficiency across Anthropic and OpenAI.
+# Measures: cost, time, verified score, efficiency across Anthropic and OpenAI.
 #
 # Usage:
 #   ./scripts/test-providers.sh                              # both specs, ANTHROPIC + OPENAI
@@ -18,7 +18,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-Admin@123}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI}"
 SPEC_TYPE="${SPEC_TYPE:-both}"   # single | multi | both
 SKIP_REPORT="${SKIP_REPORT:-0}"
@@ -37,14 +37,14 @@ fail() { echo -e "${RED}  ❌ $*${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠️  $*${NC}"; }
 hdr()  { echo -e "\n${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n  $*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; }
 
-# ── Spec A: single-shot — measures baseline accuracy on simple 1-file output ──
+# ── Spec A: single-shot — measures baseline verified score on simple 1-file output ──
 SPEC_SINGLE='Build a static HTML/CSS/JS todo app. Single index.html file.
 Features: add task, mark complete with strikethrough, delete task, task counter.
 Clean design: soft shadows, rounded cards, blue/white palette, smooth transitions.
 Use CSS custom properties (--color-primary, --color-bg, --color-text, --radius, --shadow) for all colors, spacing, and shadows — no hardcoded hex values in rules.
 LocalStorage persistence. No backend, no build step.'
 
-# ── Spec B: multi-task — measures accuracy on a real multi-file Express+HTML project ──
+# ── Spec B: multi-task — measures verified score on a real multi-file Express+HTML project ──
 SPEC_MULTI='Build a Node.js Express REST API for expense tracking with a simple HTML dashboard.
 
 Backend (Node.js + Express, no database — use in-memory arrays):
@@ -139,9 +139,10 @@ fetch_report() {
         resp=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" "$BASE_URL/api/runs/$run_id/report" -H "Authorization: Bearer $TOKEN")
         http_code=$(echo "$resp" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
         resp=$(echo "$resp" | sed 's/__HTTP_CODE__:[0-9]*//')
-        # Report is ready when HTTP 200 and accuracyScore is non-null
+        # Only verifiedScore makes a report usable for evaluation. accuracyScore
+        # is an LLM self-assessment retained for diagnostics, never a gate.
         if [[ "$http_code" == "200" ]]; then
-            score=$(echo "$resp" | jq -r '.accuracyScore // "null"')
+            score=$(echo "$resp" | jq -r '.verifiedScore // "null"')
             if [[ "$score" != "null" ]]; then
                 echo "$resp"; return 0
             fi
@@ -206,6 +207,7 @@ run_provider() {
 
     # ── ACCURACY: from validation report ──
     local accuracy_score="N/A" accuracy_grade="N/A"
+    local legacy_accuracy_score="N/A" legacy_accuracy_grade="N/A"
     local issues_total="N/A" build_breakers="N/A" review_failures="N/A"
     local report_status="SKIPPED"
 
@@ -213,15 +215,17 @@ run_provider() {
         log "[$provider/$spec_label] Waiting for validation report…"
         local report_json
         report_json=$(fetch_report "$run_id")
-        accuracy_score=$(echo "$report_json" | jq -r '.accuracyScore // "N/A"')
+        accuracy_score=$(echo "$report_json" | jq -r '.verifiedScore // "N/A"')
+        legacy_accuracy_score=$(echo "$report_json" | jq -r '.accuracyScore // "N/A"')
+        legacy_accuracy_grade=$(echo "$report_json" | jq -r '.accuracyGrade // "N/A"')
 
         if [[ "$accuracy_score" != "N/A" && "$accuracy_score" != "null" ]]; then
             report_status="COMPLETE"
-            accuracy_grade=$(echo "$report_json"   | jq -r '.accuracyGrade   // "N/A"')
+            accuracy_grade=$(echo "$report_json"   | jq -r '.verifiedScoreGrade // "N/A"')
             issues_total=$(echo "$report_json"     | jq -r '.issuesCaught    // 0')
             build_breakers=$(echo "$report_json"   | jq -r '.buildBreakers   // 0')
             review_failures=$(echo "$report_json"  | jq -r '.reviewFailures  // 0')
-            ok "[$provider/$spec_label] Report: accuracy=$accuracy_score ($accuracy_grade), issues=$issues_total (build=$build_breakers, review=$review_failures)"
+            ok "[$provider/$spec_label] Report: verifiedScore=$accuracy_score, legacyAccuracy=$legacy_accuracy_score, issues=$issues_total (build=$build_breakers, review=$review_failures)"
         else
             report_status="NOT_GENERATED"
             warn "[$provider/$spec_label] Report not ready within ${REPORT_WAIT}s"
@@ -248,7 +252,8 @@ run_provider() {
            "Tasks:"  "$tasks_total" "$tasks_done" "$tasks_partial" "$tasks_failed"
     printf "  │\n"
     echo -e "  │  ${CYAN}ACCURACY${NC}"
-    printf "  │  %-22s  %s (%s)\n"  "Spec adherence:"  "$accuracy_score" "$accuracy_grade"
+    printf "  │  %-22s  %s\n"  "Verified score:"  "$accuracy_score"
+    printf "  │  %-22s  %s (%s)\n"  "Legacy accuracy (diag):"  "$legacy_accuracy_score" "$legacy_accuracy_grade"
     printf "  │  %-22s  %s total (%s build, %s review)\n" \
            "Issues found:"  "$issues_total" "$build_breakers" "$review_failures"
     printf "  │  %-22s  %s\n"  "Report status:"   "$report_status"
@@ -283,6 +288,8 @@ run_provider() {
         --argjson tasks_partial "$tasks_partial" \
         --arg accuracy_score "$accuracy_score" \
         --arg accuracy_grade "$accuracy_grade" \
+        --arg legacy_accuracy_score "$legacy_accuracy_score" \
+        --arg legacy_accuracy_grade "$legacy_accuracy_grade" \
         --arg issues_total "$issues_total" \
         --arg build_breakers "$build_breakers" \
         --arg review_failures "$review_failures" \
@@ -315,6 +322,9 @@ run_provider() {
             accuracy: {
                 score: $accuracy_score,
                 grade: $accuracy_grade,
+                source: (if $accuracy_score != "N/A" then "verified" else "missing" end),
+                legacy_score: $legacy_accuracy_score,
+                legacy_grade: $legacy_accuracy_grade,
                 issues_total: $issues_total,
                 build_breakers: $build_breakers,
                 review_failures: $review_failures,

@@ -4,7 +4,7 @@
 # fully tear down).
 
 variable "results_bucket_name" {
-  description = "GCS bucket for eval results. Empty = derive from project id."
+  description = "GCS bucket for eval results. Empty = derive from project id (only safe for the original singleton environment)."
   type        = string
   default     = ""
 }

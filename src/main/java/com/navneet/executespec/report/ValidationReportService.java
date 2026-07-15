@@ -6,7 +6,6 @@ import java.time.Instant;
 import java.util.*;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -52,6 +51,7 @@ public class ValidationReportService {
   private final ReviewScoringService reviewScoringService;
   private final FeatureFlagService featureFlagService;
   private final ApplicationEventPublisher eventPublisher;
+  private final ValidationVerificationLedgerBuilder verificationLedgerBuilder;
   private final ValidationReportGoalProofEvaluator goalProofEvaluator =
       new ValidationReportGoalProofEvaluator();
 
@@ -73,6 +73,7 @@ public class ValidationReportService {
     this.reviewScoringService = reviewScoringService;
     this.featureFlagService = featureFlagService;
     this.eventPublisher = eventPublisher;
+    this.verificationLedgerBuilder = new ValidationVerificationLedgerBuilder(objectMapper);
   }
 
   ValidationReportService(
@@ -279,6 +280,14 @@ public class ValidationReportService {
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
+              .bootVerdict(
+                  input.bootVerification() == null
+                      ? null
+                      : input.bootVerification().verdict().name())
+              .bootHealthy(
+                  input.bootVerification() == null ? null : input.bootVerification().healthy())
+              .bootReason(
+                  input.bootVerification() == null ? null : input.bootVerification().reason())
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -380,6 +389,89 @@ public class ValidationReportService {
   public Optional<com.navneet.executespec.report.entity.ValidationReport> findEntityByRunId(
       String runId) {
     return repository.findByRunId(runId);
+  }
+
+  /**
+   * Recompute the persisted score after a concrete workspace-test execution completes.
+   *
+   * <p>Report generation normally happens before generated/preview tests finish. Updating only
+   * {@code testCoverageScore} in that later path left the headline {@code verifiedScore}, the
+   * rubric companion, and the evidence event describing the old test counts. This method keeps the
+   * rescore as one transactional operation: test counts, both headline scores, and the reloadable
+   * evidence ledger are written from the same execution summary.
+   *
+   * <p>The persisted report is the source of truth for every signal other than concrete tests. This
+   * deliberately does not rerun an LLM assessment or reviewer, and therefore cannot invent new
+   * quality evidence. A missing report is returned as empty so the caller can retain its existing
+   * report-generation race handling.
+   */
+  @org.springframework.transaction.annotation.Transactional
+  public Optional<ValidationReport> rescoreAfterConcreteTests(
+      String runId, TestExecutionSummary summary) {
+    if (runId == null || runId.isBlank() || summary == null || repository == null) {
+      return Optional.empty();
+    }
+    Optional<ValidationReport> found = repository.findByRunId(runId);
+    if (found.isEmpty()) {
+      return Optional.empty();
+    }
+
+    ValidationReport report = found.get();
+    int total = Math.max(0, summary.getTotalTests());
+    int passed = Math.max(0, Math.min(summary.getPassed(), total));
+    List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
+    ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
+        verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
+    int criticals = verificationLedgerBuilder.countUnfixedCriticalIssues(issues);
+    // A concrete runner returning 0/0 is evidence that no tests were executed. Do not
+    // fall back to an optimistic LLM coverage label from the original report.
+    String concreteCoverageLevel = total == 0 ? "NONE" : accuracy.testCoverageLevel();
+
+    report.setTestsTotal(total);
+    report.setTestsPassed(passed);
+    // Keep the existing six-dimension test axis in sync for callers that still render it.
+    report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
+    report.setVerifiedScore(
+        computeVerifiedScore(
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            report.getReviewerVerdict(),
+            criticals,
+            accuracy.endpointCoverage(),
+            concreteCoverageLevel,
+            report.getFilesGenerated(),
+            bootVerification(report)));
+    report.setRubricScore(
+        computeRubricScore(
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            report.getReviewerVerdict(),
+            criticals,
+            accuracy.endpointCoverage(),
+            concreteCoverageLevel));
+
+    ValidationReport saved = repository.save(report);
+    List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
+    GoalDonenessDecision runGoalDecision =
+        goalProofEvaluator.evaluate(
+            saved.getRunId(),
+            runGoalSummary(findRunForReport(saved.getRunId())),
+            saved.getPipelineResult(),
+            ledger);
+    persistRunGoalDecision(findRunForReport(saved.getRunId()), runGoalDecision);
+    publishEvidenceEvent(saved, ledger, runGoalDecision);
+    return Optional.of(saved);
+  }
+
+  private static int deriveConcreteTestCoverageScore(int total, int passed) {
+    if (total <= 0) return 20;
+    double ratio = (double) passed / total;
+    if (ratio >= 0.90) return 95;
+    if (ratio >= 0.60) return 75;
+    if (ratio >= 0.30) return 55;
+    return 35;
   }
 
   public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
@@ -804,280 +896,12 @@ public class ValidationReportService {
 
   List<VerificationEvidenceDTO> buildVerificationLedger(
       ValidationReport entity, List<ReportIssueDTO> issues) {
-    List<VerificationEvidenceDTO> out = new ArrayList<>();
-
-    out.add(
-        evidence(
-            "code-delivered",
-            "Code delivered",
-            "CODE",
-            entity.getFilesGenerated() > 0 ? "PASS" : "FAIL",
-            "DETERMINISTIC",
-            "HIGH",
-            "The run produced source changes.",
-            entity.getFilesGenerated() > 0
-                ? entity.getFilesGenerated() + " file(s) generated or modified."
-                : "No generated files were captured; the score cannot vouch for delivery.",
-            "validation_report.files_generated",
-            entity.getFilesGenerated(),
-            null));
-
-    Boolean build = entity.getFinalBuildPassed();
-    out.add(
-        evidence(
-            "build",
-            "Build",
-            "BUILD",
-            build == null ? "UNKNOWN" : build ? "PASS" : "FAIL",
-            "DETERMINISTIC",
-            build == null ? "MEDIUM" : "HIGH",
-            "The generated workspace compiled or passed the configured build check.",
-            build == null
-                ? "No final build signal was stored for this report."
-                : build ? "Final build passed." : "Final build failed.",
-            "validation_report.final_build_passed",
-            build == null ? null : build ? 1 : 0,
-            build == null ? null : 1));
-
-    Integer testsPassed = entity.getTestsPassed();
-    Integer testsTotal = entity.getTestsTotal();
-    int total = testsTotal == null ? 0 : testsTotal;
-    int passed = testsPassed == null ? 0 : testsPassed;
-    out.add(
-        evidence(
-            "tests",
-            "Tests",
-            "TESTS",
-            total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
-            "DETERMINISTIC",
-            total <= 0 ? "MEDIUM" : "HIGH",
-            "Generated or workspace tests passed.",
-            total <= 0
-                ? "No concrete test execution was captured."
-                : passed + "/" + total + " tests passed.",
-            "validation_report.tests_passed/tests_total",
-            total <= 0 ? null : passed,
-            total <= 0 ? null : total));
-
-    String reviewer = entity.getReviewerVerdict();
-    out.add(
-        evidence(
-            "reviewer",
-            "Reviewer",
-            "REVIEW",
-            reviewerStatus(reviewer),
-            "LLM_REVIEWER",
-            "MEDIUM",
-            "The reviewer pass found no unresolved critical implementation issues.",
-            reviewer == null ? "Reviewer verdict unavailable." : "Reviewer verdict: " + reviewer,
-            "validation_report.reviewer_verdict",
-            null,
-            null));
-
-    int blockingIssues = countBlockingIssues(issues);
-    out.add(
-        evidence(
-            "report-issues",
-            "Report issues",
-            "ISSUES",
-            blockingIssues == 0 ? "PASS" : "FAIL",
-            "HYBRID",
-            "MEDIUM",
-            "No non-lint build/review/bug issues remain open in the report.",
-            blockingIssues == 0
-                ? "No non-lint report issues."
-                : blockingIssues + " non-lint issue(s) remain in the report.",
-            "validation_report.issues_json",
-            blockingIssues,
-            null));
-
-    AccuracyFacts accuracy = parseAccuracyFacts(entity.getAccuracyJson());
-    out.add(
-        evidence(
-            "spec-adherence",
-            "Spec adherence",
-            "SPEC",
-            accuracy.score() == null
-                ? "UNKNOWN"
-                : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
-            "LLM_ASSESSMENT",
-            "LOW",
-            "The delivered code appears to satisfy the natural-language spec.",
-            accuracy.score() == null
-                ? "Accuracy assessment was not captured."
-                : "LLM assessment: "
-                    + accuracy.score()
-                    + "/100"
-                    + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
-                    + ".",
-            "validation_report.accuracy_json",
-            accuracy.score(),
-            accuracy.score() == null ? null : 100));
-
-    if (accuracy.endpointCoverage() != null) {
-      out.add(
-          evidence(
-              "endpoint-coverage",
-              "Endpoint coverage",
-              "ENDPOINTS",
-              accuracy.endpointCoverage() >= 95
-                  ? "PASS"
-                  : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
-              "LLM_ASSISTED_COUNT",
-              "MEDIUM",
-              "Expected API endpoints are present in the generated implementation.",
-              "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
-              "validation_report.accuracy_json.endpointCoverage",
-              accuracy.endpointCoverage(),
-              100));
-    }
-
-    if (accuracy.testCoverageLevel() != null) {
-      String level = accuracy.testCoverageLevel();
-      out.add(
-          evidence(
-              "test-coverage-judgment",
-              "Test coverage judgment",
-              "TESTS",
-              switch (level.toUpperCase()) {
-                case "GOOD", "COMPREHENSIVE" -> "PASS";
-                case "PARTIAL" -> "WARN";
-                case "NONE" -> "FAIL";
-                default -> "UNKNOWN";
-              },
-              "LLM_ASSESSMENT",
-              "LOW",
-              "Test coverage matches what the spec implied should be tested.",
-              "LLM test coverage judgment: " + level + ".",
-              "validation_report.accuracy_json.testCoverageLevel",
-              null,
-              null));
-    }
-
-    TrustCap trustCap =
-        trustCap(
-            100,
-            entity.getFinalBuildPassed(),
-            passed,
-            total,
-            entity.getReviewerVerdict(),
-            countBlockingIssues(issues),
-            accuracy.testCoverageLevel());
-    if (trustCap.cap() < 100) {
-      out.add(
-          evidence(
-              "trust-cap",
-              "Trust cap",
-              "SCORE",
-              entity.getVerifiedScore() != null && entity.getVerifiedScore() <= trustCap.cap()
-                  ? "WARN"
-                  : "UNKNOWN",
-              "INTERNAL_FORMULA",
-              "HIGH",
-              "The headline score is capped when verification signals say the run needs review.",
-              "Maximum credible score capped at "
-                  + trustCap.cap()
-                  + " because "
-                  + trustCap.reason()
-                  + ".",
-              "validation_report.*",
-              entity.getVerifiedScore(),
-              trustCap.cap()));
-    }
-
-    out.add(
-        evidence(
-            "score-summary",
-            "Internal score",
-            "SCORE",
-            entity.getVerifiedScore() == null
-                ? "UNKNOWN"
-                : entity.getVerifiedScore() >= 85
-                    ? "PASS"
-                    : entity.getVerifiedScore() >= 70 ? "WARN" : "FAIL",
-            "INTERNAL_FORMULA",
-            "MEDIUM",
-            "The internal routing score summarizes the available evidence.",
-            "verifiedScore="
-                + (entity.getVerifiedScore() == null ? "n/a" : entity.getVerifiedScore())
-                + (entity.getRubricScore() == null
-                    ? ""
-                    : ", rubricScore=" + entity.getRubricScore())
-                + ". Treat this as a summary, not independent proof.",
-            "validation_report.verified_score",
-            entity.getVerifiedScore(),
-            entity.getVerifiedScore() == null ? null : 100));
-
-    return List.copyOf(out);
-  }
-
-  private VerificationEvidenceDTO evidence(
-      String id,
-      String label,
-      String category,
-      String status,
-      String source,
-      String confidence,
-      String claim,
-      String summary,
-      String artifact,
-      Integer observed,
-      Integer total) {
-    return new VerificationEvidenceDTO(
-        id, label, category, status, source, confidence, claim, summary, artifact, observed, total);
-  }
-
-  private String reviewerStatus(String reviewerVerdict) {
-    if (reviewerVerdict == null) return "UNKNOWN";
-    return switch (reviewerVerdict) {
-      case "CLEAN", "FIXED_ISSUES" -> "PASS";
-      case "UNRESOLVED_ISSUES" -> "WARN";
-      case "REVIEW_FAILED" -> "FAIL";
-      default -> "UNKNOWN";
-    };
-  }
-
-  private int countBlockingIssues(List<ReportIssueDTO> issues) {
-    if (issues == null) return 0;
-    int count = 0;
-    for (ReportIssueDTO issue : issues) {
-      if (issue == null || issue.severity() == null) continue;
-      if (!"WOULD_FAIL_LINT".equals(issue.severity())) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  private record AccuracyFacts(
-      Integer score, String grade, Integer endpointCoverage, String testCoverageLevel) {}
-
-  private AccuracyFacts parseAccuracyFacts(String accuracyJson) {
-    if (accuracyJson == null || accuracyJson.isBlank()) {
-      return new AccuracyFacts(null, null, null, null);
-    }
-    try {
-      JsonNode root = objectMapper.readTree(accuracyJson);
-      Integer score =
-          root.hasNonNull("specAdherenceScore") ? root.get("specAdherenceScore").asInt() : null;
-      String grade =
-          root.hasNonNull("overallAccuracyGrade")
-              ? root.get("overallAccuracyGrade").asText()
-              : null;
-      JsonNode endpoint = root.path("endpointCoverage");
-      Integer endpointCoverage =
-          endpoint.hasNonNull("coveragePercent") ? endpoint.get("coveragePercent").asInt() : null;
-      String testCoverage =
-          root.hasNonNull("testCoverageLevel") ? root.get("testCoverageLevel").asText() : null;
-      return new AccuracyFacts(score, grade, endpointCoverage, testCoverage);
-    } catch (Exception e) {
-      log.warn("Failed to parse accuracy facts for verification ledger: {}", e.getMessage());
-      return new AccuracyFacts(null, null, null, null);
-    }
+    return verificationLedgerBuilder.build(entity, issues);
   }
 
   private ValidationReportShareDTO toShareDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
+    List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -1094,7 +918,30 @@ public class ValidationReportService {
         issues,
         checksPassed,
         entity.getReportMarkdown(),
-        entity.getCreatedAt());
+        entity.getCreatedAt(),
+        entity.getVerifiedScore(),
+        entity.getRubricScore(),
+        entity.getFinalBuildPassed(),
+        entity.getTestsPassed(),
+        entity.getTestsTotal(),
+        entity.getReviewerVerdict(),
+        verificationLedger);
+  }
+
+  /** Rehydrate the deterministic boot signal for a later concrete-test rescore. */
+  private static BootVerification bootVerification(ValidationReport report) {
+    if (report == null || report.getBootVerdict() == null) return null;
+    try {
+      return new BootVerification(
+          BootHealthEvaluator.Verdict.valueOf(report.getBootVerdict()),
+          Boolean.TRUE.equals(report.getBootHealthy()),
+          report.getBootReason());
+    } catch (IllegalArgumentException ex) {
+      // Never let malformed historical evidence break report rescoring. The compile signal remains
+      // the safe fallback, and the malformed value is still visible in the persisted row for
+      // repair.
+      return null;
+    }
   }
 
   private List<ReportIssueDTO> parseIssues(String json) {
@@ -1398,13 +1245,7 @@ public class ValidationReportService {
    * builds but doesn't run." Used only when a verifyBoot signal was captured for the run.
    */
   private static double bootSlotScore(BootHealthEvaluator.Verdict verdict) {
-    return switch (verdict) {
-      case HEALTHY -> 100.0; // boots + health path returned 2xx/3xx
-      case UNHEALTHY -> 55.0; // boots + responds, but a non-success status (app-level error)
-      case TIMED_OUT -> 35.0; // process started but never served the health path in time
-      case DID_NOT_START -> 15.0; // image built but the container/process did not come up
-      case BUILD_FAILED -> 0.0; // never built — same as a red build
-    };
+    return ValidationReportScorePolicy.bootSlotScore(verdict);
   }
 
   /**
@@ -1443,6 +1284,30 @@ public class ValidationReportService {
    * the endpoint count was meant to catch. Double-counting forced two trust gates into the old
    * formula. Drop the signal, drop the gates.
    */
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards,
+      BootVerification bootVerification) {
+    return ValidationReportScoreCalculator.additive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        bootVerification);
+  }
+
   int computeVerifiedScoreAdditive(
       Boolean finalBuildPassed,
       int testsPassed,
@@ -1498,7 +1363,7 @@ public class ValidationReportService {
    * keeps the exact compile-only behaviour, so the 9-arg callers (and every existing test pin) are
    * unchanged.
    */
-  int computeVerifiedScoreAdditive(
+  private int computeVerifiedScoreAdditiveLegacyUnused(
       Boolean finalBuildPassed,
       int testsPassed,
       int testsTotal,
@@ -1618,7 +1483,8 @@ public class ValidationReportService {
     if (weightTotal <= 0.0) return 0;
     double raw = weightedSum / weightTotal;
     int weighted = (int) Math.max(0, Math.min(100, Math.round(raw)));
-    return trustCap(
+    return verificationLedgerBuilder
+        .trustCap(
             weighted,
             finalBuildPassed,
             testsPassed,
@@ -1627,65 +1493,6 @@ public class ValidationReportService {
             unfixedCriticalCount,
             testCoverageLevel)
         .score();
-  }
-
-  record TrustCap(int score, int cap, String reason) {}
-
-  /**
-   * Trust caps run after the weighted score. The additive score intentionally preserves partial
-   * credit, but customers read the headline as a trust signal; review/build/test blockers must cap
-   * the maximum credible score even when other slots are strong.
-   */
-  TrustCap trustCap(
-      int rawScore,
-      Boolean finalBuildPassed,
-      int testsPassed,
-      int testsTotal,
-      String reviewerVerdictName,
-      int unfixedCriticalCount,
-      String testCoverageLevel) {
-    int cap = 100;
-    List<String> reasons = new ArrayList<>();
-
-    if ("REVIEW_FAILED".equals(reviewerVerdictName)) {
-      cap = Math.min(cap, 70);
-      reasons.add("reviewer failed");
-    } else if ("UNRESOLVED_ISSUES".equals(reviewerVerdictName)) {
-      cap = Math.min(cap, 80);
-      reasons.add("reviewer reported unresolved issues");
-    }
-
-    if (unfixedCriticalCount >= 3) {
-      cap = Math.min(cap, 70);
-      reasons.add(unfixedCriticalCount + " unresolved critical issues");
-    } else if (unfixedCriticalCount >= 1) {
-      cap = Math.min(cap, 85);
-      reasons.add(unfixedCriticalCount + " unresolved critical issue(s)");
-    }
-
-    if (Boolean.FALSE.equals(finalBuildPassed)) {
-      cap = Math.min(cap, 75);
-      reasons.add("final build failed");
-    }
-
-    if (testsTotal > 0 && testsPassed < testsTotal) {
-      cap = Math.min(cap, testsPassed <= 0 ? 70 : 85);
-      reasons.add(testsPassed + "/" + testsTotal + " tests passed");
-    } else if (testsTotal <= 0) {
-      String level = testCoverageLevel == null ? null : testCoverageLevel.toUpperCase();
-      if ("NONE".equals(level)) {
-        cap = Math.min(cap, 75);
-        reasons.add("test coverage was judged NONE");
-      } else if ("UNKNOWN".equals(level)) {
-        cap = Math.min(cap, 90);
-        reasons.add("tests were not concretely measured");
-      }
-    }
-
-    int boundedCap = Math.max(0, Math.min(100, cap));
-    int score = Math.min(Math.max(0, Math.min(100, rawScore)), boundedCap);
-    String reason = reasons.isEmpty() ? "no trust cap applied" : String.join("; ", reasons);
-    return new TrustCap(score, boundedCap, reason);
   }
 
   /**
@@ -1798,6 +1605,27 @@ public class ValidationReportService {
    * callers + test pins are unchanged.
    */
   int computeVerifiedScoreMultiplicative(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      BootVerification bootVerification) {
+
+    return ValidationReportScoreCalculator.multiplicative(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        bootVerification);
+  }
+
+  private int computeVerifiedScoreMultiplicativeLegacyUnused2(
       Boolean finalBuildPassed,
       int testsPassed,
       int testsTotal,
@@ -1932,13 +1760,7 @@ public class ValidationReportService {
    * </ul>
    */
   static double testFactorFromCoverageLevel(String testCoverageLevel) {
-    if (testCoverageLevel == null) return 0.5;
-    return switch (testCoverageLevel.toUpperCase()) {
-      case "COMPREHENSIVE", "GOOD" -> 1.0;
-      case "PARTIAL" -> 0.7;
-      case "NONE" -> 0.3;
-      default -> 0.5; // forward-compat with new values the AccuracyReport prompt might invent
-    };
+    return ValidationReportScorePolicy.testFactorFromCoverageLevel(testCoverageLevel);
   }
 
   /**
@@ -1946,7 +1768,7 @@ public class ValidationReportService {
    * the rubric's 20-point test slot. Same coverage-level → score mapping shape.
    */
   static int rubricTestPointsFromCoverageLevel(String testCoverageLevel) {
-    return (int) Math.round(20.0 * testFactorFromCoverageLevel(testCoverageLevel));
+    return ValidationReportScorePolicy.rubricTestPointsFromCoverageLevel(testCoverageLevel);
   }
 
   /**
@@ -2026,13 +1848,9 @@ public class ValidationReportService {
           };
     }
 
-    // Endpoint coverage — linear 15 pts; n/a → 15 (no spec endpoints means signal not relevant)
-    if (endpointCoveragePercent == null) {
-      total += 15;
-    } else {
-      double ratio = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
-      total += (int) Math.round(15.0 * ratio);
-    }
+    // Endpoint coverage — linear 15 pts; missing evidence gets neutral midpoint credit, not a
+    // full N/A award. Unknown evidence must not inflate the public/shared score.
+    total += ValidationReportScorePolicy.rubricEndpointPoints(endpointCoveragePercent);
 
     // Critical-issue damper — 10 minus 1 per critical, floored at 0
     total += Math.max(0, 10 - Math.max(0, unfixedCriticalCount));
@@ -2050,13 +1868,7 @@ public class ValidationReportService {
    * V1).
    */
   static String mapVerdictToV2Name(ReviewVerdict v) {
-    if (v == null) return null;
-    return switch (v) {
-      case APPROVED -> "CLEAN";
-      case APPROVED_WITH_NOTES -> "FIXED_ISSUES";
-      case NEEDS_FIXES -> "UNRESOLVED_ISSUES";
-      case REJECTED -> "REVIEW_FAILED";
-    };
+    return ValidationReportScorePolicy.mapVerdictToV2Name(v);
   }
 
   /**
@@ -2102,12 +1914,7 @@ public class ValidationReportService {
    * SYNTH-ACC-* id stamp. Kept as a separate predicate so a test can pin the exact prefix list.
    */
   static boolean isAccuracyHallucinationDescription(String description) {
-    if (description == null) return false;
-    String d = description.stripLeading();
-    return d.startsWith("Spec requirement not implemented:")
-        || d.startsWith("Spec requirement only partially implemented:")
-        || d.startsWith("Endpoint from spec not implemented:")
-        || d.startsWith("Endpoint exists but");
+    return ValidationReportScorePolicy.isAccuracyHallucinationDescription(description);
   }
 
   private String truncate(String s, int maxLen) {

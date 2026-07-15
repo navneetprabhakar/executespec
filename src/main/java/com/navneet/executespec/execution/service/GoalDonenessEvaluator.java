@@ -180,7 +180,10 @@ public class GoalDonenessEvaluator {
   }
 
   private static boolean isDone(GoalEvidence evidence) {
-    return Boolean.TRUE.equals(evidence.goalCriteriaSatisfied())
+    // A positive validation flag without an attempted validation is contradictory evidence. Do
+    // not allow hand-built or partially persisted payloads to turn that inconsistency into DONE.
+    return evidence.validationAttempted()
+        && Boolean.TRUE.equals(evidence.goalCriteriaSatisfied())
         && Boolean.TRUE.equals(evidence.validationPassed())
         && evidence.requiredOutputsPresent()
         && evidence.constraintsRespected();

@@ -1,6 +1,7 @@
 spring:
   application:
     name: executespec
+
   data:
     redis:
       host: localhost
@@ -49,7 +50,6 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
     locations: classpath:db/migration
-    ignore-migration-patterns: "*:missing"
 
   ai:
     retry:
@@ -59,35 +59,35 @@ spring:
         multiplier: 2
         max-interval: 10000
     anthropic:
-      api-key: ""
+      api-key: ${ANTHROPIC_API_KEY:}
       chat:
         options:
           model: claude-haiku-4-5-20251001
           max-tokens: 16384
     openai:
-      api-key: ""
+      api-key: ${OPENAI_API_KEY:}
       chat:
         options:
           model: gpt-5.4-mini
           max-tokens: 16384
     google:
       genai:
-        api-key: ""
+        api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
             model: gemini-3-flash-preview
     openrouter:
       base-url: https://openrouter.ai/api
-      api-key: ""
+      api-key: ${OPENROUTER_API_KEY:}
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: ""
+      api-key: ${DEEPSEEK_API_KEY:}
+      # Native thinking/tool responses can be slow; this applies only to callDeepSeek.
+      # OpenAI, OpenRouter, and Fireworks retain the shared 120s OpenAI-wire default.
+      read-timeout-seconds: ${DEEPSEEK_READ_TIMEOUT_SECONDS:300}
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
-      api-key: ""
-    sarvam:
-      base-url: https://api.sarvam.ai/v1
-      api-key: ""
+      api-key: ${FIREWORKS_API_KEY:}
 
 execution:
   continuation:
@@ -128,15 +128,19 @@ execution:
     max-total-tokens: -1
     max-task-wall-clock-ms: -1
     require-confirmation-before-expensive-continuation: false
-    require-benchmark-prior-for-automatic-continuation: false
+    require-benchmark-prior-for-automatic-continuation: true
     acting:
       enabled: true
     max-reruns-per-task: 1
 
 terminal-bench:
-  # Internal TB 2.1 runs use Harbor agent timeout 1350s. Keep the ExecuteSpec worker
-  # below that outer cap while leaving enough room for long productive terminal tasks.
-  worker-wall-clock-seconds: 1260
+  # Internal TB 2.1 runs use Harbor agent timeout 1500s. Keep the ExecuteSpec worker
+  # below that outer cap while leaving a 90s buffer for the terminal finalizer.
+  worker-wall-clock-seconds: 1410
+
+test-generation:
+  # HTTP test generation is post-run work. It must not hold terminal completion open forever.
+  timeout-seconds: ${EXECUTESPEC_TEST_GENERATION_TIMEOUT_SECONDS:600}
 
 managed-ai:
   enabled: true
@@ -218,6 +222,8 @@ model-matrix:
   # SHIPPED DARK: entries below are commented out until each passes its k>=3 gate vs the Phase-0
   # baseline (see infra/benchmark/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
   # the graduation act — do not do it without the eval evidence.
+  # Activation is separately gated by worker.capability-profiles.enabled (V271), seeded false;
+  # a YAML profile must never widen a worker schema or change thresholds by itself.
   capability-profiles: {}
   #  anthropic:
   #    optional-tools: [runWorkspaceTests, readCodeOutline, verifyBoot]
@@ -264,14 +270,6 @@ model-matrix:
       planning: deepseek-v4-pro-fw
       workhorse: deepseek-v4-pro-fw
       lightweight: deepseek-v4-flash-fw
-    sarvam:
-      # 2026-06-26 — disabled/dark only. Sarvam quality is not production-ready (worker eval
-      # produced zero-byte patches), so ModelAccessService rejects the provider and ModelController
-      # hides it from catalogs. Keep matrix breadcrumbs only so explicit stale ids fail closed.
-      planning: sarvam-105b
-      workhorse: sarvam-105b
-      lightweight: sarvam-30b
-
   models:
     claude-opus-4-6:
       provider: anthropic
@@ -526,43 +524,6 @@ model-matrix:
         cached-input-per-1m: 0.0028
         output-per-1m: 0.28
       notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from DeepSeek docs: $0.14 cache-miss input / $0.0028 cache-hit input / $0.28 output per 1M. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
-    sarvam-105b:
-      provider: sarvam
-      chain-tier: CAPABLE
-      cost-class: CHEAP
-      quality-class: BASIC
-      managed-ai-enabled: false
-      step-down-priority: 8
-      context-limit: 131072
-      max-output-tokens: 16384
-      display-label: "Sarvam 105B"
-      pricing:
-        input-per-1m: 0.047
-        cached-input-per-1m: 0.029
-        output-per-1m: 0.188
-      notes: |
-        DISABLED/DARK ONLY as of 2026-06-26. Kept as metadata so stale explicit model ids resolve to provider=sarvam and fail closed via ModelAccessService instead of becoming unknown paid-tier models.
-        Sarvam AI api.sarvam.ai flagship (105B, 128K ctx) — OpenAI-wire-compatible, native tool calling + JSON + reasoning_content (verified live 2026-06-21: Bearer->200, tool_calls in OpenAI schema). India-market / sovereign-AI + eval/benchmark route; ENTERPRISE/BYOK, NOT in failover-order.
-        managed-ai-enabled:false because this route must not consume ES managed-AI credits while disabled.
-        Pricing converted from Sarvam INR rates (Rs4 in / Rs2.5 cached / Rs16 out per 1M) at ~Rs85/$ (2026-06). Independent capability is sub-frontier (Artificial Analysis Intelligence Index v4.1 ~= 12; agentic ~= 25) — benchmark before routing real worker traffic.
-        VERIFY: max_tokens ceiling (docs default 2048; sent via extraBody), cache-token reporting (usage.prompt_tokens_details was null on the 2026-06-21 smoke).
-    sarvam-30b:
-      provider: sarvam
-      chain-tier: UTILITY
-      cost-class: CHEAP
-      quality-class: BASIC
-      managed-ai-enabled: false
-      step-down-priority: 3
-      context-limit: 65536
-      max-output-tokens: 8192
-      display-label: "Sarvam 30B"
-      pricing:
-        input-per-1m: 0.029
-        cached-input-per-1m: 0.018
-        output-per-1m: 0.118
-      notes: |
-        DISABLED/DARK ONLY as of 2026-06-26. Kept as metadata so stale explicit model ids resolve to provider=sarvam and fail closed via ModelAccessService.
-        Sarvam AI api.sarvam.ai (30B, 64K ctx) — OpenAI-wire-compatible, native tool calling. Light-tier / cheap-fast lane (~167 t/s). Pricing from INR (Rs2.5 in / Rs1.5 cached / Rs10 out per 1M) at ~Rs85/$. ENTERPRISE/BYOK, NOT in failover-order, managed-ai-enabled:false.
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -900,9 +861,17 @@ model-matrix:
     openai:
       - gemini
       - anthropic
+    deepseek:
+      - openrouter
+      - fireworks
 
 durability:
   task-checkpoint:
+    enabled: true
+  # A workspace-local atomic worker checkpoint complements Redis. It survives a Redis restart
+  # when the run workspace remains available, but does not claim that an in-memory provider future
+  # can be resumed across JVMs.
+  worker-context:
     enabled: true
 
 agent:
@@ -930,13 +899,6 @@ agent:
     estimation-buffer: 1.10
     budget-margin: 1.5
     max-credits-free: 1
-    batch:
-      enabled: true
-      poll-interval-seconds: 30
-      max-wait-hours: 4
-      discount: 0.50
-      max-output-token-multiplier: 1.5
-      google-inline-task-limit: 10
   github:
     default-owner: ""
   shell:
@@ -1173,6 +1135,12 @@ auth:
     app-return-url: ${APP_SURFACE_RETURN_URL:${app.cors.app-return-url:http://localhost:5173/auth/callback}}
 
 executespec:
+  # Production/runtime calls remain enabled. Maven test forks override this to false unless the
+  # explicit live-llm-test profile is selected after a provider-budget reservation is acquired.
+  live-llm:
+    enabled: true
+    test-mode: false
+    reservation-id: ""
   designs:
     root-path: /opt/executespec/designs/design-md
     cache-ttl: 30m
@@ -1323,3 +1291,25 @@ management:
   zipkin:
     tracing:
       enabled: false
+
+---
+# Operator-only benchmark controls are declared in the base configuration as well as the
+# dedicated benchmark profile. This keeps local/dev benchmark smokes deterministic when the
+# operator enables the harness without activating the benchmark profile. Production remains
+# disabled by default and retains the historical /var path unless an explicit override is set.
+swebench:
+  enabled: ${SWEBENCH_ENABLED:false}
+  bootstrap: ${SWEBENCH_BOOTSTRAP:false}
+  suite: ${SWEBENCH_SUITE:swe-bench}
+  output-base: ${SWEBENCH_OUTPUT_BASE:/var/swebench/runs}
+  instances-file: ${SWEBENCH_INSTANCES_FILE:/Users/navneetprabhakar/swebench-bench/swebench_lite_dev.json}
+  image-template: ${SWEBENCH_IMAGE_TEMPLATE:docker.io/swebench/sweb.eval.x86_64.%s:latest}
+  pro-image-repository: ${SWEBENCH_PRO_IMAGE_REPOSITORY:jefzda/sweap-images}
+  prediction-prefix: ${SWEBENCH_PREDICTION_PREFIX:executespec}
+  default-provider: ${SWEBENCH_DEFAULT_PROVIDER:deepseek}
+  task-wall-timeout-minutes: ${SWEBENCH_TASK_WALL_TIMEOUT_MINUTES:60}
+  hard-cap-usd: ${SWEBENCH_HARD_CAP_USD:8.0}
+  max-concurrent-runs: ${SWEBENCH_MAX_CONCURRENT_RUNS:1}
+  submit-queue-wait-seconds: ${SWEBENCH_SUBMIT_QUEUE_WAIT_SECONDS:180}
+  image-inspect-timeout-seconds: ${SWEBENCH_IMAGE_INSPECT_TIMEOUT_SECONDS:30}
+  image-pull-timeout-seconds: ${SWEBENCH_IMAGE_PULL_TIMEOUT_SECONDS:1800}

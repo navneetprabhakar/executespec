@@ -20,10 +20,14 @@ import {
   IdeLoader,
   FileIcon,
   ResizeHandle,
+  hunkRevertRequest,
   type DiffLine,
 } from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {
   confidenceColor,
+  continuationApprovalCandidate,
+  continuationApprovalReason,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -31,6 +35,7 @@ import {
   goalDecisionHelp,
   goalDecisionLabel,
   goalStateLabel,
+  goalStateKind,
   hasRunCostEvidence,
   isNoisyLogEvent,
   isFailedTerminalStatus,
@@ -44,13 +49,19 @@ import {
   modelRankingDetails,
   modelRankingLabel,
   num,
+  latestContinuationAction,
   runPhaseDiagnosis,
   SEV,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
+  isTestExecutionTerminal,
+  TEST_EXECUTION_MAX_POLLS,
+  TEST_EXECUTION_POLL_INTERVAL_MS,
   TABS,
   TAB_LABEL,
   testRerunState,
+  taskBudgetFacts,
+  taskGoalLine,
   type Tab,
   toLines,
   usd,
@@ -66,156 +77,6 @@ function Kv({k, v}: {k: string; v: React.ReactNode}) {
   );
 }
 
-function taskGoalLine(t: api.TaskSummary): string | null {
-  const goal = t.goalDoneness;
-  const continuation = t.continuationDecision;
-  if (!goal && !continuation) return null;
-  const source = continuationSourceLabel(continuation?.source || continuation?.policy?.source);
-  const goalPart =
-    goal?.state && goal?.recommendedDecision
-      ? `Goal ${goalStateLabel(goal.state)} -> ${goalDecisionLabel(goal.recommendedDecision)}`
-      : goal?.state
-        ? `Goal ${goalStateLabel(goal.state)}`
-        : null;
-  const nextPart = continuation?.decision
-    ? `${source ? `${source} · ` : ''}Next ${goalDecisionLabel(continuation.decision)}`
-    : null;
-  const reason = continuation?.reasons?.[0] || goal?.reason || null;
-  return [goalPart, nextPart, reason].filter(Boolean).join(' · ');
-}
-
-function continuationSourceLabel(source?: string | null): string | null {
-  switch ((source || '').toUpperCase()) {
-    case 'POST_REVIEW':
-      return 'Reviewer/build trigger';
-    case 'POST_VALIDATION_REPORT':
-      return 'Final validation trigger';
-    case 'TASK_BOUNDARY':
-      return 'Task trigger';
-    default:
-      return source ? source.replace(/_/g, ' ').toLowerCase() : null;
-  }
-}
-
-function continuationApprovalCandidate(t: api.TaskSummary) {
-  const continuation = t.continuationDecision;
-  const candidate = continuation?.selectedCandidate;
-  const explicitConfirmation = continuation?.policy?.requireConfirmationBeforeExpensiveContinuation;
-  const benchmarkConfidenceBlocked =
-    continuation?.policy?.requireBenchmarkPriorForAutomaticContinuation &&
-    candidate?.benchmarkQualityPriorAvailable === false;
-  if (
-    continuation?.decision !== 'STOP_BLOCKED' ||
-    (!explicitConfirmation && !benchmarkConfidenceBlocked) ||
-    !candidate?.provider ||
-    !candidate?.model
-  ) {
-    return null;
-  }
-  return candidate;
-}
-
-function continuationApprovalReason(t: api.TaskSummary): string | null {
-  const continuation = t.continuationDecision;
-  if (continuation?.decision !== 'STOP_BLOCKED') return null;
-  const source = continuationSourceLabel(continuation.source || continuation.policy?.source);
-  const prefix = source ? `${source}: ` : '';
-  switch ((continuation.approvalRequiredReason || '').toUpperCase()) {
-    case 'BENCHMARK_PRIOR_REQUIRED':
-      return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
-    case 'EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED':
-      return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
-    case 'ROUTE_PINNED':
-      return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
-    case 'APPROVAL_REQUIRED':
-      return `${prefix}Approval needed before this model/provider upgrade can run.`;
-    default:
-      break;
-  }
-  const candidate = continuation.selectedCandidate;
-  if (
-    continuation.policy?.requireBenchmarkPriorForAutomaticContinuation &&
-    candidate?.benchmarkQualityPriorAvailable === false
-  ) {
-    return `${prefix}Approval needed: no usable benchmark prior for this model on this task category.`;
-  }
-  if (continuation.policy?.requireConfirmationBeforeExpensiveContinuation) {
-    return `${prefix}Approval needed: this run requires confirmation before model/provider upgrade spend.`;
-  }
-  if (continuation.policy?.routePinned) {
-    return `${prefix}Blocked: this run is pinned to its selected provider/model, so automatic upgrade cannot change route.`;
-  }
-  return null;
-}
-
-function latestContinuationAction(t: api.TaskSummary): string | null {
-  const actions = t.continuationActions || [];
-  const action = actions.length > 0 ? actions[actions.length - 1] : null;
-  if (!action?.decision || !action?.provider || !action?.model) return null;
-  const rawStatus = (action.status || '').toUpperCase();
-  const status =
-    rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
-  const source = continuationSourceLabel(action.source);
-  const sourcePart = source ? `${source}: ` : '';
-  const limit =
-    action.limitName && action.maxLimit != null
-      ? ` · ${action.limitName} ${action.usedLimit ?? 0}/${action.maxLimit}`
-      : '';
-  return `${sourcePart}${status} ${action.decision} -> ${action.provider}/${action.model}${limit}`;
-}
-
-function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
-  const s = (state || '').toUpperCase();
-  if (s === 'DONE') return 'ok';
-  if (s === 'FAILED' || s === 'BLOCKED' || s === 'WASTE_RISK') return 'bad';
-  return 'warn';
-}
-
-function preciseUsd(n?: number | null): string {
-  if (n == null) return '—';
-  if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
-  return usd(n);
-}
-
-function positive(n?: number | null): number | null {
-  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
-  const goal = t.goalDoneness;
-  if (!goal) return [];
-  const policy = t.continuationDecision?.policy || {};
-  const facts: {k: string; v: string}[] = [];
-  const cost = positive(goal.costUsd);
-  const costLimit = positive(policy.maxTotalCostUsd);
-  if (cost != null || costLimit != null) {
-    facts.push({
-      k: 'Cost',
-      v: costLimit != null ? `${preciseUsd(cost)} / ${preciseUsd(costLimit)}` : preciseUsd(cost),
-    });
-  }
-  const tokens = positive(goal.totalTokens);
-  const tokenLimit = positive(policy.maxTotalTokens);
-  if (tokens != null || tokenLimit != null) {
-    facts.push({
-      k: 'Tokens',
-      v: tokenLimit != null ? `${num(tokens)} / ${num(tokenLimit)}` : num(tokens),
-    });
-  }
-  const wall = positive(goal.wallClockMs);
-  const wallLimit = positive(policy.maxTaskWallClockMs);
-  if (wall != null || wallLimit != null) {
-    facts.push({
-      k: 'Time',
-      v: wallLimit != null ? `${fmtDur(wall)} / ${fmtDur(wallLimit)}` : fmtDur(wall),
-    });
-  }
-  if (goal.budgetCeilingReason) {
-    facts.push({k: 'Ceiling', v: goal.budgetCeilingReason});
-  }
-  return facts;
-}
-
 export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
@@ -225,6 +86,7 @@ export default function IdeRunResult() {
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
+  const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -339,6 +201,51 @@ export default function IdeRunResult() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // Manual test execution is accepted asynchronously. Reconcile the report
+  // and plan until the backend marks the plan terminal, so the Tests tab does
+  // not remain stuck at the pre-execution 0/0 snapshot. The bound prevents a
+  // broken preview/runner from creating an unbounded request loop.
+  useEffect(() => {
+    if (!runId || !testRunPending) return;
+    let cancelled = false;
+    let polls = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      polls += 1;
+      const [nextTests, nextPlan] = await Promise.all([
+        api.getTestReport(runId),
+        api.getTestPlan(runId),
+      ]);
+      if (cancelled) return;
+      if (nextTests) setTests(nextTests);
+      if (nextPlan) setTestPlan(nextPlan);
+
+      const status = nextTests?.status || nextPlan?.status;
+      if (isTestExecutionTerminal(status)) {
+        setTestRunPending(false);
+        setMsg(
+          status?.toUpperCase() === 'FAILED'
+            ? 'Test run failed. Review the test errors below.'
+            : 'Test run complete — results refreshed.',
+        );
+        return;
+      }
+      if (polls >= TEST_EXECUTION_MAX_POLLS) {
+        setTestRunPending(false);
+        setMsg('Test run is still processing. Refresh Tests later to see the final report.');
+        return;
+      }
+      timer = setTimeout(poll, TEST_EXECUTION_POLL_INTERVAL_MS);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, testRunPending]);
+
   useEffect(() => {
     if (!runId || eventLog) return;
     const s = (run?.status || '').toUpperCase();
@@ -433,6 +340,21 @@ export default function IdeRunResult() {
       setBusy('');
     }
   }
+
+  async function rerunTests() {
+    if (!runId || testRunPending || busy === 'runtests') return;
+    setBusy('runtests');
+    setMsg('');
+    try {
+      await api.runTests(runId);
+      setTestRunPending(true);
+      setMsg('Test run queued — waiting for results…');
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Could not queue tests.');
+    } finally {
+      setBusy('');
+    }
+  }
   function tryProvider(p: string) {
     if (!run) return;
     action(
@@ -450,6 +372,30 @@ export default function IdeRunResult() {
         return 'Re-run started.';
       },
     );
+  }
+
+  function requestHunkRevert(filePath: string, diff: DiffLine[], hunkIndex: number) {
+    if (!runId || !diff.length || !run) return;
+    const request = hunkRevertRequest(filePath, diff, hunkIndex);
+    if (!request) return;
+    setConfirm({
+      title: `Prepare revert for hunk ${hunkIndex + 1}`,
+      body: 'This creates a fresh forked run containing only the requested hunk reversal. It does not mutate this run or your repository. You will review the new plan and diff before approval; run credits apply only after approval.',
+      confirmLabel: 'Create revert run',
+      onConfirm: async () => {
+        setConfirm(null);
+        setBusy('revert-hunk');
+        setMsg('Creating a reviewable revert run…');
+        try {
+          const fork = await api.forkRun(runId, {userRequest: request});
+          navigate(`/plan/${fork.runId}`);
+        } catch (e: unknown) {
+          setMsg(e instanceof Error ? e.message : 'Could not create the revert run.');
+        } finally {
+          setBusy('');
+        }
+      },
+    });
   }
 
   // Run management — fork / archive / unarchive / soft-delete (dark endpoints).
@@ -578,10 +524,8 @@ export default function IdeRunResult() {
       return true;
     }
     if (cmd === '/clear') {
-      const created = await api.createAgentSession(
-        webAgentSessionRequest({projectId: run?.projectId, runId}),
-      );
-      setRunAgentSessionId(created.id);
+      const session = await ensureRunAgentSession();
+      await api.clearAgentSessionHistory(session.id);
       setChat([]);
       return true;
     }
@@ -806,10 +750,7 @@ export default function IdeRunResult() {
             <div style={{display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 18px'}}>
               <IdeBadge kind={v.kind}>{v.label}</IdeBadge>
               {score != null && (
-                <span style={{fontSize: 20, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
-                  {score}
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}> / 100</span>
-                </span>
+                <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
               <span style={{flex: 1}} />
               {run?.statusReason && humanStatusReason(run.statusReason) && (
@@ -1079,6 +1020,37 @@ export default function IdeRunResult() {
                   {busy === 'pause' ? 'Pausing…' : '⏸ Pause'}
                 </button>
               )}
+              {files.length > 0 &&
+                ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(
+                  String(run?.status || '').toUpperCase(),
+                ) && (
+                  <button
+                    className='ide-btn ghost'
+                    style={{color: 'var(--ide-red)'}}
+                    disabled={busy === 'revert-workspace'}
+                    onClick={() =>
+                      setConfirm({
+                        title: 'Revert workspace to run start',
+                        body: 'This resets the cloned workspace to the exact commit captured when this run started. It does not change the remote repository or open a PR. Continue?',
+                        confirmLabel: 'Revert workspace',
+                        danger: true,
+                        onConfirm: () =>
+                          action(
+                            'revert-workspace',
+                            () => api.syncRunToOriginal(runId),
+                            (result) => {
+                              const response = result as {status?: string; reposSynced?: number};
+                              return response.status === 'failed'
+                                ? 'Workspace revert failed.'
+                                : `Workspace reverted (${response.reposSynced ?? 0} repos).`;
+                            },
+                          ),
+                      })
+                    }
+                  >
+                    {busy === 'revert-workspace' ? 'Reverting…' : '↶ Revert workspace'}
+                  </button>
+                )}
               <button
                 className='ide-btn ghost'
                 disabled={busy === 'preview'}
@@ -1502,6 +1474,12 @@ export default function IdeRunResult() {
                   filename={activeFile || ''}
                   content={active.content}
                   diff={active.diff}
+                  onRevertHunk={
+                    active.diff
+                      ? (hunkIndex) =>
+                          requestHunkRevert(activeFile || '', active.diff ?? [], hunkIndex)
+                      : undefined
+                  }
                 />
               ) : (
                 <div className='ide-empty'>
@@ -2337,23 +2315,22 @@ export default function IdeRunResult() {
               <button
                 className='ide-btn ghost'
                 style={{marginLeft: 'auto', padding: '4px 10px'}}
-                disabled={busy === 'runtests' || !canRerunTests}
+                disabled={busy === 'runtests' || testRunPending || !canRerunTests}
                 title={
                   canRerunTests
                     ? 'Queue a test run for this workspace'
                     : 'No generated code or test plan is available to re-run'
                 }
-                onClick={() =>
-                  action(
-                    'runtests',
-                    () => api.runTests(runId),
-                    () => 'Test run queued.',
-                  )
-                }
+                onClick={() => void rerunTests()}
               >
-                ↻ Re-run tests
+                {testRunPending ? '⏳ Tests running…' : '↻ Re-run tests'}
               </button>
             </h1>
+            {testRunPending && (
+              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+                Tests are running against the preview. This panel will refresh automatically.
+              </div>
+            )}
             {!tests ? (
               <div className='ide-empty'>{noCodeTestMessage}</div>
             ) : (

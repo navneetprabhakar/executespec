@@ -10,7 +10,7 @@ import {
   planMoney,
 } from './billingUtils';
 import type * as api from '@/lib/api';
-import type {BillingPlan} from '@/lib/billing-api';
+import type {BillingPlan} from '@/lib/api/billing';
 
 describe('billingUtils', () => {
   it('formats dashboard and plan money values', () => {

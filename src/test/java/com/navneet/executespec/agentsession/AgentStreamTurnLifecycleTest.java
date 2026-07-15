@@ -56,6 +56,9 @@ class AgentStreamTurnLifecycleTest {
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("STREAM_COMPLETED");
     assertThat(event.getValue().getPayloadJson()).contains("\"costUsd\":0.012");
+    assertThat(event.getValue().getPayloadJson()).contains("\"provider\":\"DEEPSEEK\"");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"model\":\"deepseek-v4-flash-native\"");
   }
 
   @Test
@@ -90,6 +93,44 @@ class AgentStreamTurnLifecycleTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("STREAM_DISCONNECTED");
+  }
+
+  @Test
+  void disconnectRetainsCappedPartialSummaryForReplay() {
+    AgentTurn turn = turn("t4", "STREAMING");
+    when(turnRepo.findById("t4")).thenReturn(Optional.of(turn));
+
+    String partial = "partial answer";
+    lifecycle().disconnect(ctx("t4"), partial);
+
+    assertThat(turn.getStatus()).isEqualTo("CANCELLED");
+    assertThat(turn.getAssistantSummary()).isEqualTo(partial);
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"partial\":true", "\"partialSummary\":\"partial answer\"");
+  }
+
+  @Test
+  void disconnectPersistsLatestUsageWhenProviderFinishedBeforeClientDisconnect() {
+    AgentTurn turn = turn("t5", "STREAMING");
+    when(turnRepo.findById("t5")).thenReturn(Optional.of(turn));
+    var cost = new RunCostTracker.Snapshot(1720, 17, 1664, 0, 0.000017, 1, 0);
+
+    lifecycle().disconnect(ctx("t5"), "4.", cost);
+
+    assertThat(turn.getStatus()).isEqualTo("CANCELLED");
+    assertThat(turn.getAssistantSummary()).isEqualTo("4.");
+    assertThat(turn.getInputTokens()).isEqualTo(1720);
+    assertThat(turn.getOutputTokens()).isEqualTo(17);
+    assertThat(turn.getCostUsd()).isEqualTo(0.000017);
+    var usage = ArgumentCaptor.forClass(AgentUsageLedger.class);
+    verify(usageRepo).save(usage.capture());
+    assertThat(usage.getValue().getCostUsd()).isEqualTo(0.000017);
+    var event = ArgumentCaptor.forClass(AgentActionEvent.class);
+    verify(eventRepo).save(event.capture());
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"costUsd\":1.7E-5", "\"inputTokens\":1720");
   }
 
   private AgentStreamTurnLifecycle lifecycle() {

@@ -1,7 +1,6 @@
 package com.navneet.executespec.engine;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -16,7 +15,6 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -28,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Owns the single-task PATCH-style worker request construction directly: prompt assembly,
  * provider patch fragments, per-provider iteration caps, source-scoped test gate, common critic
  * flags, and result mapping. This keeps benchmark and patch-mode orchestration on one code-gen
- * surface instead of routing through the deprecated {@code PatchAgent} wrapper.
+ * surface; PATCH policy is owned directly here rather than through a compatibility wrapper.
  *
  * <p><b>The caller owns setup</b> (per the contract): the workspace is already prepared and a
  * {@code PipelineRun} row for {@code request.runId()} already exists (the worker reads its {@code
@@ -120,7 +118,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         // (stagnationDisabled), so v2's repetition trigger is the ONLY loop protection a
         // benchmark PATCH run gets.
         .progressV2(featureFlagService.isEnabled("worker.progress-v2.enabled"))
-        // auto-verify (V255, default OFF): server-side edit-burst test runs with failure-output
+        // auto-verify (V259, default ON): server-side edit-burst test runs with failure-output
         // injection — the schema-free replacement for the reverted V209/V217 pair.
         .autoVerify(featureFlagService.isEnabled("worker.auto-verify.enabled"))
         .build();
@@ -162,27 +160,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private String loadProviderPatchFragment(String provider) {
     if (provider == null || provider.isBlank()) return "";
     String key = provider.trim().toLowerCase();
-    try {
-      Resource r =
-          new org.springframework.core.io.ClassPathResource(
-              "prompts/fragments/provider/" + key + "/patch.md");
-      if (!r.exists()) return "";
-      return r.getContentAsString(StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadProviderPatchFragment({}) failed: {}", provider, e.getMessage());
-      return "";
-    }
+    return promptAssembler.loadFileSafe("fragments/provider/" + key + "/patch.md");
   }
 
   @PostConstruct
   void loadPatchPrompt() {
-    try {
-      patchPrompt = promptAssembler.assemble("patch-agent.md");
-    } catch (Exception e) {
-      log.error("[CodeGenEngine] Failed to load classpath:prompts/patch-agent.md; using stub", e);
-      patchPrompt =
-          "You are a patch-mode coding agent. Make the minimum change that fixes the issue.";
-    }
+    patchPrompt = promptAssembler.assemble("patch-agent.md");
   }
 
   private static int iterCapFor(String provider) {

@@ -53,17 +53,12 @@ public class AvailableProviderResolver {
   @Value("${spring.ai.fireworks.api-key:}")
   private String systemFireworksKey;
 
-  // 2026-06-21 — Sarvam AI system key. Retained for future eval breadcrumbs only. It is
-  // deliberately not added to available providers because live quality was not production-ready.
-  @Value("${spring.ai.sarvam.api-key:}")
-  private String systemSarvamKey;
-
   /**
    * Determine which providers are available for a given run. Uses the already-resolved keys from
    * {@link RunKeyStore}.
    *
    * @param runId the pipeline run ID
-   * @return set of available providers (never empty — falls back to system keys)
+   * @return set of available providers; empty means no provider is configured or allowed
    */
   public Set<LlmProvider> resolve(String runId) {
     ResolvedKeys keys = runKeyStore.get(runId);
@@ -83,7 +78,6 @@ public class AvailableProviderResolver {
       if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
       if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
       if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
-      // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
     }
 
     if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
@@ -104,12 +98,15 @@ public class AvailableProviderResolver {
     }
     available.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
-    // Fallback: if nothing available, include all system providers
+    // Do not bypass an explicit key-source or provider policy. In particular, falling back to
+    // system keys here would let an OWN_KEYS run (or a run whose enabledProviders excludes every
+    // configured system key) silently spend on a platform provider. Callers can surface the empty
+    // set as an unavailable-provider outcome; the submit pre-flight already gives OWN_KEYS users a
+    // direct configuration error before a run starts.
     if (available.isEmpty()) {
       log.warn(
-          "No providers available for run {} after policy filtering — falling back to system keys",
-          runId);
-      return resolveSystemProviders();
+          "No providers available for run {} after key-source/provider policy filtering", runId);
+      return Set.of();
     }
 
     log.debug("Available providers for run {}: {} (mode={})", runId, available, keySourceMode);
@@ -125,13 +122,8 @@ public class AvailableProviderResolver {
     if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
     if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
     if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
-    // Sarvam dark-launched only: keep the key binding above but never expose it as selectable.
     providers.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
 
-    if (providers.isEmpty()) {
-      // Last resort: assume Anthropic is available (system default)
-      providers.add(LlmProvider.ANTHROPIC);
-    }
     return providers;
   }
 
@@ -143,7 +135,6 @@ public class AvailableProviderResolver {
       case OPENROUTER -> "openrouter";
       case DEEPSEEK -> "deepseek";
       case FIREWORKS -> "fireworks";
-      case SARVAM -> "sarvam";
     };
   }
 

@@ -12,10 +12,15 @@ import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import com.navneet.executespec.agentsession.AgentIntentService;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -61,6 +66,8 @@ public class SpecChatController {
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
   private final AiProviderPreferenceService aiProviderPreferenceService;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final AgentIntentService agentIntentService;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
@@ -91,6 +98,11 @@ public class SpecChatController {
     }
 
     String userId = String.valueOf(userDetails.getUser().getId());
+    // Project-scoped chat binds project read tools. Validate the caller before creating the audit
+    // row or entering the agent loop so an arbitrary projectId cannot become an IDOR oracle.
+    if (request.projectId() != null && !request.projectId().isBlank()) {
+      projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+    }
     String ip = clientIp(forwardedFor, http);
     String ipHash = sha256(ip);
 
@@ -140,6 +152,11 @@ public class SpecChatController {
     // is flag-gated); SpecChatService documents the async-before-prod requirement.
     try {
       emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", audit.getId())));
+      // Emit the same typed route evidence used by the v2 agent-session endpoint. This keeps the
+      // compatibility path observable without granting the legacy chat loop any new authority:
+      // the route classifier can only propose a route, while existing chat tools still enforce
+      // action and plan-gate policy.
+      emitRouteDecision(emitter, request, effectiveProvider);
       specChatService.runTurn(
           sseSink(emitter),
           userDetails,
@@ -158,6 +175,46 @@ public class SpecChatController {
       emitter.completeWithError(e);
     }
     return emitter;
+  }
+
+  private void emitRouteDecision(
+      SseEmitter emitter, SpecChatRequest request, String effectiveProvider) {
+    try {
+      OrchestratorDecision decision =
+          agentIntentService.decide(
+              new InterpretIntentRequest(
+                  request.sessionId(),
+                  latestUserMessage(request.conversation()),
+                  request.projectId(),
+                  null,
+                  new ClientCapabilities(false, false, false, false)),
+              effectiveProvider,
+              null);
+      send(
+          emitter,
+          "route_decision",
+          Map.of(
+              "route", decision.route(),
+              "confidence", decision.confidence(),
+              "reason_code", decision.reasonCode(),
+              "requires_user_confirmation", decision.requiresUserConfirmation(),
+              "assistant_reply", decision.assistantReply() == null ? "" : decision.assistantReply(),
+              "trace_id", decision.traceId() == null ? "" : decision.traceId()));
+    } catch (RuntimeException e) {
+      // Advisory route evidence must not turn a compatibility chat request into an outage.
+      log.debug("legacy spec-chat route evidence unavailable: {}", e.getMessage());
+    }
+  }
+
+  private static String latestUserMessage(List<Map<String, Object>> conversation) {
+    for (int i = conversation.size() - 1; i >= 0; i--) {
+      Map<String, Object> turn = conversation.get(i);
+      if (turn == null || !"user".equalsIgnoreCase(String.valueOf(turn.get("role")))) continue;
+      Object content = turn.get("content");
+      if (content instanceof String text && !text.isBlank()) return text.trim();
+      if (content != null) return String.valueOf(content).trim();
+    }
+    return "";
   }
 
   /** Audit row read endpoint — caller can verify a session exists + its current state. */

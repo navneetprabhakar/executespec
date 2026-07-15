@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
@@ -25,6 +26,7 @@ import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.recovery.RecoveryCheckpointLease;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
@@ -35,14 +37,16 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -63,9 +67,67 @@ import lombok.extern.slf4j.Slf4j;
  * bodies) follow in the second batch.
  */
 @Component
-@RequiredArgsConstructor
+@AllArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @Slf4j
 public class RunLifecycleService {
+
+  /** A heartbeat newer than this means another JVM still owns the run. */
+  private static final java.time.Duration CRASH_RECOVERY_HEARTBEAT_STALE_AFTER =
+      java.time.Duration.ofMinutes(2);
+
+  /** Task-level freshness window used to fence a worker that is still making progress. */
+  private static final java.time.Duration CRASH_RECOVERY_TASK_STALE_AFTER =
+      java.time.Duration.ofMinutes(2);
+
+  /** Stable, non-secret owner label persisted with a recovery claim for operator diagnostics. */
+  private static final String RECOVERY_INSTANCE_ID = recoveryInstanceId();
+
+  /** Compatibility constructor retained for focused lifecycle tests and older embedders. */
+  public RunLifecycleService(
+      PipelineRunRepository runRepo,
+      AgentTaskRepository taskRepo,
+      SseBroadcaster broadcaster,
+      Metrics metrics,
+      GateStore gateStore,
+      RunControlPort controlPort,
+      AgentProperties agentProps,
+      ObjectMapper objectMapper,
+      PipelineExecutorPool pool,
+      SequentialExecutor executor,
+      ReviewerAgent reviewer,
+      RunCostTracker costTracker,
+      RunTokenAttributor tokenAttributor,
+      RunKeyContextStore keyContextStore,
+      WorkspaceRestoreService workspaceRestoreService,
+      RunPersistenceWriter persistenceWriter,
+      RunContextComposer contextComposer,
+      RunValidationKickoff validationKickoff,
+      ModelResolver modelResolver,
+      ValidationReportRepository validationReportRepository) {
+    this(
+        runRepo,
+        taskRepo,
+        broadcaster,
+        metrics,
+        gateStore,
+        controlPort,
+        agentProps,
+        objectMapper,
+        pool,
+        executor,
+        reviewer,
+        costTracker,
+        tokenAttributor,
+        keyContextStore,
+        workspaceRestoreService,
+        persistenceWriter,
+        contextComposer,
+        validationKickoff,
+        modelResolver,
+        validationReportRepository,
+        null,
+        null);
+  }
 
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
@@ -76,7 +138,8 @@ public class RunLifecycleService {
    * sweep them alongside genuinely-active runs.
    */
   static final List<String> NON_TERMINAL_STATUSES =
-      List.of("QUEUED", "PLANNING", "AWAITING_APPROVAL", "WORKING", "REVIEWING");
+      List.of(
+          "QUEUED", "PLANNING", "AWAITING_APPROVAL", "APPROVAL_RESUMING", "WORKING", "REVIEWING");
 
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
@@ -101,6 +164,134 @@ public class RunLifecycleService {
   private final RunValidationKickoff validationKickoff;
   private final ModelResolver modelResolver;
   private final ValidationReportRepository validationReportRepository;
+  private final FeatureFlagService featureFlagService;
+  private final RemoteToolDispatcher remoteToolDispatcher;
+
+  public enum PlanApprovalOutcome {
+    RESUME_QUEUED,
+    REJECTED,
+    ALREADY_RESOLVED,
+    CONFLICTING_DECISION,
+    NOT_FOUND,
+    INVALID_STATE,
+    WORKSPACE_GONE,
+    PLAN_MISSING
+  }
+
+  /**
+   * Atomically resolves a durable plan gate and, on approval, queues the canonical post-plan
+   * pipeline. Repeating the same decision is a no-op; only an opposite decision conflicts.
+   */
+  public PlanApprovalOutcome resolvePlanGate(String runId, boolean approved) {
+    PipelineRun run = runRepo.findById(runId).orElse(null);
+    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
+    if (!"AWAITING_APPROVAL".equals(run.getStatus())
+        && !"APPROVAL_RESUMING".equals(run.getStatus())) {
+      return PlanApprovalOutcome.INVALID_STATE;
+    }
+
+    GateStore.PlanGateClaim claim = gateStore.claimPlanGate(runId, approved);
+    if (claim != GateStore.PlanGateClaim.CLAIMED) {
+      boolean sameDecision =
+          (approved && claim == GateStore.PlanGateClaim.ALREADY_APPROVED)
+              || (!approved && claim == GateStore.PlanGateClaim.ALREADY_REJECTED);
+      return sameDecision
+          ? PlanApprovalOutcome.ALREADY_RESOLVED
+          : PlanApprovalOutcome.CONFLICTING_DECISION;
+    }
+
+    if (!approved) {
+      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
+      return PlanApprovalOutcome.REJECTED;
+    }
+    return queueApprovedPlan(run, continuationFor(runId));
+  }
+
+  /** Reconciles an approved/rejected durable gate after a JVM restart. Pending gates stay idle. */
+  public PlanApprovalOutcome recoverPlanGate(String runId) {
+    PipelineRun run = runRepo.findById(runId).orElse(null);
+    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
+    var gate = gateStore.findPlanGate(runId).orElse(null);
+    if (gate == null || "PENDING".equals(gate.getStatus())) {
+      return PlanApprovalOutcome.ALREADY_RESOLVED;
+    }
+    if ("REJECTED".equals(gate.getStatus())) {
+      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
+      return PlanApprovalOutcome.REJECTED;
+    }
+    if (!"APPROVED".equals(gate.getStatus())) return PlanApprovalOutcome.INVALID_STATE;
+    return queueApprovedPlan(run, continuationFor(runId));
+  }
+
+  private RunOrchestrator.PlanGateContinuation continuationFor(String runId) {
+    String payload = gateStore.findPlanGate(runId).map(g -> g.getComment()).orElse(null);
+    if (payload == null || payload.isBlank()) {
+      return new RunOrchestrator.PlanGateContinuation(1, false, false, true, null, null);
+    }
+    try {
+      RunOrchestrator.PlanGateContinuation continuation =
+          objectMapper.readValue(payload, RunOrchestrator.PlanGateContinuation.class);
+      if (continuation.schemaVersion() != 1) {
+        throw new IllegalStateException(
+            "Unsupported plan-gate continuation schema " + continuation.schemaVersion());
+      }
+      return continuation;
+    } catch (Exception e) {
+      throw new IllegalStateException("Invalid plan-gate continuation for run " + runId, e);
+    }
+  }
+
+  private PlanApprovalOutcome queueApprovedPlan(
+      PipelineRun run, RunOrchestrator.PlanGateContinuation continuation) {
+    String runId = run.getRunId();
+    if (run.getPlanJson() == null || run.getPlanJson().isBlank()) {
+      controlPort.terminate(runId, "FAILED", "plan missing on approval resume", Instant.now());
+      return PlanApprovalOutcome.PLAN_MISSING;
+    }
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      try {
+        workspaceRestoreService.ensureWorkspaceAvailable(runId);
+      } catch (Exception e) {
+        log.warn("plan approval resume={} workspace restore failed: {}", runId, e.getMessage());
+      }
+      if (!Files.isDirectory(workspace)) {
+        controlPort.terminate(runId, "FAILED", "workspace gone on approval resume", Instant.now());
+        return PlanApprovalOutcome.WORKSPACE_GONE;
+      }
+    }
+
+    Instant resumedAt = Instant.now();
+    if ("AWAITING_APPROVAL".equals(run.getStatus())) {
+      // The initial state check in resolvePlanGate is intentionally not trusted here: cancel
+      // can win the race between that read and this queue operation. Claim the transition in the
+      // database so an approved run can never resurrect a concurrently-cancelled run.
+      if (runRepo.claimApprovalResume(runId, resumedAt) != 1) {
+        log.info("plan approval resume lost lifecycle race for run={}", runId);
+        return PlanApprovalOutcome.INVALID_STATE;
+      }
+      run.setStatus("APPROVAL_RESUMING");
+      run.setResumedAt(resumedAt);
+    } else if (!"APPROVAL_RESUMING".equals(run.getStatus())) {
+      return PlanApprovalOutcome.INVALID_STATE;
+    }
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "APPROVAL_RESUMING"));
+    broadcaster.emit(runId, RunEvent.log(runId, "approval", "Plan approved — resuming execution"));
+
+    RunOrchestrator.RunPipelineRequest request =
+        RunOrchestrator.RunPipelineRequest.fromApprovedPlanRow(run, continuation);
+    java.util.concurrent.Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                controlPort.runPipelineForResume(request);
+              } finally {
+                controlPort.removeActiveRun(runId);
+              }
+            });
+    controlPort.putActiveRun(runId, future);
+    return PlanApprovalOutcome.RESUME_QUEUED;
+  }
 
   public boolean cancel(String runId) {
     var opt = runRepo.findById(runId);
@@ -111,9 +302,11 @@ public class RunLifecycleService {
 
     log.info("RunOrchestrator cancel: run={} prev={}", runId, status);
 
-    // Wake a thread blocked on the plan gate (reject path).
+    // Resolve the durable gate for auditability, then release the transient Redis signal. Approval
+    // never blocks a pipeline thread; it queues a fresh continuation from the persisted run row.
     try {
       gateStore.setPlanGate(runId, false);
+      gateStore.clearPlanGate(runId);
     } catch (Exception e) {
       log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
     }
@@ -357,6 +550,60 @@ public class RunLifecycleService {
       return RunOrchestrator.CrashResumeOutcome.EXHAUSTED;
     }
 
+    // A run heartbeat can be stale while an individual task is still making progress (for
+    // example during a scheduler pause or a long provider turn).  Do not let boot recovery queue a
+    // second executor in that case.  The task timestamp is refreshed at every durable task-status
+    // write and is therefore a useful, independent signal from the run-level lease.
+    Instant taskCutoff = Instant.now().minus(CRASH_RECOVERY_TASK_STALE_AFTER);
+    if (hasFreshActiveTask(runId, taskCutoff)) {
+      log.info(
+          "resumeAfterCrash run={} has a fresh WORKING/LOCKED task; leaving live worker untouched",
+          runId);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+
+    // Claim before touching the workspace or submitting to the pool. Startup recovery may run
+    // concurrently on two JVMs during a rolling restart; only the caller that advances the
+    // durable attempt counter may proceed. A recent heartbeat means the original worker is still
+    // alive, so this caller must leave the run untouched and let that worker finish.
+    Instant claimAt = Instant.now();
+    int nextAttempt = attempts + 1;
+    int claimed =
+        runRepo.claimCrashResume(
+            runId,
+            attempts,
+            nextAttempt,
+            claimAt,
+            claimAt.minus(CRASH_RECOVERY_HEARTBEAT_STALE_AFTER),
+            RECOVERY_INSTANCE_ID);
+    if (claimed != 1) {
+      log.info(
+          "resumeAfterCrash run={} recovery claim lost (attempt={} or live heartbeat); leaving run"
+              + " untouched",
+          runId,
+          attempts);
+      emitRecoveryEvidence(runId, "CROSS_INSTANCE_LEASE_LOST", "REFUSED", 0);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+    // Keep the in-memory row coherent for any downstream diagnostics; the database update above
+    // is the source of truth and deliberately avoids a stale full-entity save.
+    run.setResumeAttempts(nextAttempt);
+    run.setResumedAt(claimAt);
+    run.setExecutingInstance(RECOVERY_INSTANCE_ID);
+    run.setExecutionHeartbeat(claimAt);
+
+    // Fence each stale in-flight task before submitting the resumed pipeline.  This is deliberately
+    // fail-closed: if another worker changed the row between the read above and this CAS, do not
+    // queue a duplicate recovery attempt.  The run claim remains durable and the next scanner can
+    // reconcile it using the normal heartbeat/attempt cap.
+    if (!claimStaleActiveTasks(runId, claimAt, taskCutoff)) {
+      log.info(
+          "resumeAfterCrash run={} task-level recovery claim lost; not queueing duplicate work",
+          runId);
+      emitRecoveryEvidence(runId, "TASK_LEASE_LOST", "REFUSED", 0);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+
     // Workspace must be on this node. Cross-node resume needs GCS shipping (chunk #3 of the
     // pause/resume design — same constraint as the existing PAUSED resume path).
     java.nio.file.Path workspace =
@@ -382,16 +629,26 @@ public class RunLifecycleService {
             "resumeAfterCrash run={} workspace not on this node + no restorable GCS checkpoint —"
                 + " failing cleanly (credits refunded via RunFailed)",
             runId);
+        emitRecoveryEvidence(runId, "WORKSPACE_UNAVAILABLE", "REFUSED", 0);
         controlPort.terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
         return RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
       }
     }
 
+    RecoveryCheckpointLease.AcquireResult checkpointLease =
+        RecoveryCheckpointLease.acquire(
+            workspace, runId, RECOVERY_INSTANCE_ID, run.getPlanJson(), claimAt);
+    if (!checkpointLease.acquired()) {
+      log.warn(
+          "resumeAfterCrash run={} checkpoint lease refused reason={}; not queueing takeover",
+          runId,
+          checkpointLease.reason());
+      emitRecoveryEvidence(runId, "CHECKPOINT_LEASE_" + checkpointLease.reason(), "REFUSED", 0);
+      return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
+    }
+
     // PLANNING crash → just re-run the planner (cheap) by calling the standard runPipeline.
     if ("PLANNING".equals(status)) {
-      run.setResumeAttempts(attempts + 1);
-      run.setResumedAt(java.time.Instant.now());
-      runRepo.save(run);
       log.info(
           "resumeAfterCrash run={} status=PLANNING attempt={} re-running planner",
           runId,
@@ -437,9 +694,6 @@ public class RunLifecycleService {
       return RunOrchestrator.CrashResumeOutcome.PLAN_MISSING;
     }
 
-    run.setResumeAttempts(attempts + 1);
-    run.setResumedAt(java.time.Instant.now());
-    runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, status));
     broadcaster.emit(
         runId,
@@ -469,6 +723,51 @@ public class RunLifecycleService {
     return RunOrchestrator.CrashResumeOutcome.OK;
   }
 
+  private boolean hasFreshActiveTask(String runId, Instant staleBefore) {
+    if (taskRepo == null) return false; // compatibility constructors used by focused unit tests
+    return taskRepo.findByRunIdAndStatusIn(runId, List.of("WORKING", "LOCKED")).stream()
+        .anyMatch(
+            task ->
+                task.getLastActivityAt() != null && task.getLastActivityAt().isAfter(staleBefore));
+  }
+
+  /**
+   * Publish a typed, replayable recovery outcome for cross-instance safety decisions. The event is
+   * deliberately additive to the durable lease/CAS: it never grants ownership and is best effort so
+   * an SSE outage cannot change the recovery result.
+   */
+  private void emitRecoveryEvidence(String runId, String classification, String action, int locks) {
+    if (broadcaster == null) return;
+    try {
+      broadcaster.emit(
+          runId, RunEvent.recoveryAttempted(runId, null, classification, action, locks));
+    } catch (RuntimeException eventFailure) {
+      log.debug(
+          "resumeAfterCrash run={} recovery evidence emit failed: {}",
+          runId,
+          eventFailure.getMessage());
+    }
+  }
+
+  private boolean claimStaleActiveTasks(String runId, Instant now, Instant staleBefore) {
+    if (taskRepo == null) return true; // compatibility constructors used by focused unit tests
+    for (AgentTask task : taskRepo.findByRunIdAndStatusIn(runId, List.of("WORKING", "LOCKED"))) {
+      if (taskRepo.claimStaleForRecovery(task.getTaskId(), now, staleBefore) != 1) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static String recoveryInstanceId() {
+    String host = System.getenv("HOSTNAME");
+    if (host == null || host.isBlank()) {
+      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
+    }
+    host = host == null || host.isBlank() ? "unknown" : host.trim();
+    return host.length() <= 128 ? host : host.substring(0, 128);
+  }
+
   /**
    * Inner crash-resume orchestration — assumes plan is loaded, workspace is present. Skips clone /
    * planning entirely; dispatches straight to executor (with a {@code
@@ -481,6 +780,7 @@ public class RunLifecycleService {
       Path workspace,
       boolean fromReviewing) {
     Instant startedAt = Instant.now();
+    boolean localRun = false;
     try {
       // Re-resolve BYOK keys for this resumed run — same pattern as runPipeline().
       try {
@@ -498,6 +798,21 @@ public class RunLifecycleService {
       if (row == null) {
         log.warn("resume run={} row vanished mid-resume", runId);
         return;
+      }
+      // Local-hands intent is durable; never fall back to server-side tools after a JVM restart.
+      // A missing client therefore remains a bounded remote-tool wait/error, not an unsafe shell
+      // execution. The feature flag is still an operator kill switch.
+      boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+      if (row.isLocalExecutionRequested() && !localHandsEnabled) {
+        log.error(
+            "resume run={} local-hands intent cannot be honoured: feature flag disabled", runId);
+        controlPort.terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
+        return;
+      }
+      localRun = row.isLocalExecutionRequested() && localHandsEnabled;
+      if (localRun) {
+        remoteToolDispatcher.registerAfterWorkerRestart(runId);
+        log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
       String model = row.getWorkerModel();
@@ -518,7 +833,8 @@ public class RunLifecycleService {
                       .model(model)
                       .runContext(rootCtx)
                       .maxIterationsPerTask(null)
-                      .enableSmokeTests(true)
+                      .enableSmokeTests(!localRun)
+                      .localHandsMode(localRun)
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
                       .workspaceSummary(
@@ -563,6 +879,14 @@ public class RunLifecycleService {
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
+    } finally {
+      if (localRun) {
+        try {
+          remoteToolDispatcher.unregister(runId);
+        } catch (Exception ignored) {
+          log.debug("resume run={} local-hands unregister failed", runId);
+        }
+      }
     }
   }
 

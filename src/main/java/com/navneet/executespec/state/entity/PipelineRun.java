@@ -210,6 +210,16 @@ public class PipelineRun {
   private String repoUrl; // HTTPS clone URL (null if no repo)
   private String repoMode; // "NEW" | "EXISTING" | null
   private String workspacePath; // per-run path: ./workspace/projects/{runId}/
+
+  /**
+   * Durable local-hands intent captured at submit time. Unlike the Redis marker, this survives a
+   * JVM restart so crash recovery cannot silently resume a client-owned run on the server shell.
+   * The execution path still requires the local-hands feature flag and a reconnecting client.
+   */
+  @Builder.Default
+  @Column(name = "local_execution_requested", nullable = false)
+  private boolean localExecutionRequested = false;
+
   private Integer queuePosition; // 0 if running/done, >0 if queued
   private String currentGate; // "PLAN_APPROVAL" | "MERGE_APPROVAL" | null
 

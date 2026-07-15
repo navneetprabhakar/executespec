@@ -2,7 +2,9 @@ package com.navneet.executespec.eval.v2.cases;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -149,26 +151,31 @@ public final class PlanningCases {
           return new ValidationVerdict(0, "args reparse failed: " + e.getMessage());
         }
 
+        if (args == null || !args.isObject()) {
+          return new ValidationVerdict(0, "tool args must be a JSON object");
+        }
+
         // Score additively, then floor at 0:
         //   +20  planTitle non-empty
         //   +20  planSummary non-empty
         //   +15  projectType present
         //   +25  tasks present + in the expected count band
         //   +10  every task has id + title
-        //   +10  at least one task carries a meetsRequirements array
+        //   +10  every task carries a non-empty meetsRequirements array
+        //   +5   some (but not every) task carries a non-empty meetsRequirements array
         int score = 0;
         java.util.List<String> notes = new java.util.ArrayList<>();
-        if (args.has("planTitle") && !args.get("planTitle").asText("").isBlank()) {
+        if (nonBlankText(args, "planTitle")) {
           score += 20;
         } else {
           notes.add("no planTitle");
         }
-        if (args.has("planSummary") && !args.get("planSummary").asText("").isBlank()) {
+        if (nonBlankText(args, "planSummary")) {
           score += 20;
         } else {
           notes.add("no planSummary");
         }
-        if (args.has("projectType") && !args.get("projectType").asText("").isBlank()) {
+        if (nonBlankText(args, "projectType")) {
           score += 15;
         } else {
           notes.add("no projectType");
@@ -185,22 +192,29 @@ public final class PlanningCases {
             notes.add("tasks=" + count + " (out of band " + minTasks + "-" + maxTasks + ")");
           }
           boolean allHaveIdTitle = true;
-          boolean anyMeetsReq = false;
+          int tasksWithMeetsReq = 0;
+          Set<String> declaredRequirementIds = declaredRequirementIds(args, notes);
           for (int i = 0; i < tasks.size(); i++) {
             JsonNode t = tasks.get(i);
-            if (!t.has("id") || !t.has("title")) {
+            boolean validTaskIdentity =
+                t != null && t.isObject() && nonBlankText(t, "id") && nonBlankText(t, "title");
+            if (!validTaskIdentity) {
               allHaveIdTitle = false;
             }
-            if (t.has("meetsRequirements")
-                && t.get("meetsRequirements").isArray()
-                && t.get("meetsRequirements").size() > 0) {
-              anyMeetsReq = true;
+            if (validTaskIdentity && hasValidRequirementLinks(t, declaredRequirementIds)) {
+              tasksWithMeetsReq++;
             }
           }
           if (allHaveIdTitle) score += 10;
           else notes.add("some tasks missing id/title");
-          if (anyMeetsReq) score += 10;
-          else notes.add("no task cites meetsRequirements");
+          if (tasksWithMeetsReq == tasks.size()) {
+            score += 10;
+          } else if (tasksWithMeetsReq > 0) {
+            score += 5;
+            notes.add("requirement coverage=" + tasksWithMeetsReq + "/" + tasks.size());
+          } else {
+            notes.add("no task cites meetsRequirements");
+          }
         } else {
           notes.add("no tasks array");
         }
@@ -208,6 +222,52 @@ public final class PlanningCases {
             Math.max(0, Math.min(100, score)), description + ": " + String.join("; ", notes));
       }
     };
+  }
+
+  private static boolean nonBlankText(JsonNode object, String field) {
+    if (object == null || !object.isObject()) return false;
+    JsonNode value = object.get(field);
+    return value != null && value.isTextual() && !value.asText().isBlank();
+  }
+
+  private static Set<String> declaredRequirementIds(JsonNode args, List<String> notes) {
+    Set<String> ids = new HashSet<>();
+    boolean invalid = false;
+    JsonNode requirements = args.get("requirements");
+    if (requirements == null) return ids;
+    if (!requirements.isArray()) {
+      notes.add("requirements is not an array");
+      return ids;
+    }
+    for (JsonNode requirement : requirements) {
+      if (requirement == null
+          || !requirement.isObject()
+          || !nonBlankText(requirement, "id")
+          || !nonBlankText(requirement, "text")) {
+        notes.add("invalid requirement declaration");
+        invalid = true;
+        continue;
+      }
+      String id = requirement.get("id").asText().trim();
+      if (!ids.add(id)) {
+        notes.add("duplicate requirement id=" + id);
+        invalid = true;
+      }
+    }
+    return invalid ? Set.of() : ids;
+  }
+
+  private static boolean hasValidRequirementLinks(JsonNode task, Set<String> declaredIds) {
+    if (task == null || !task.isObject()) return false;
+    JsonNode links = task.get("meetsRequirements");
+    if (links == null || !links.isArray() || links.isEmpty() || declaredIds.isEmpty()) return false;
+    Set<String> seen = new HashSet<>();
+    for (JsonNode link : links) {
+      if (link == null || !link.isTextual() || link.asText().isBlank()) return false;
+      String id = link.asText().trim();
+      if (!declaredIds.contains(id) || !seen.add(id)) return false;
+    }
+    return true;
   }
 
   /**

@@ -2,11 +2,14 @@ package com.navneet.executespec.agentsession;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
@@ -71,6 +74,8 @@ class AgentRecordedTurnServiceTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("INTENT");
+    assertThat(event.getValue().getTurnId()).isEqualTo(turn.getValue().getId());
+    assertThat(event.getValue().getActionId()).isEqualTo(turn.getValue().getId());
     assertThat(event.getValue().getPayloadJson()).contains("READ_ONLY_CODE_HELP");
     verify(sessionRepo).save(session);
   }
@@ -94,6 +99,39 @@ class AgentRecordedTurnServiceTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getType()).isEqualTo("INTENT");
+    assertThat(event.getValue().getTurnId()).isEqualTo(turn.getValue().getId());
+    assertThat(event.getValue().getActionId()).isEqualTo(turn.getValue().getId());
+  }
+
+  @Test
+  void usesOneCanonicalOrchestratorDecisionWithoutSecondClassifierCall() {
+    AgentIntentService intentService = org.mockito.Mockito.mock(AgentIntentService.class);
+    when(intentService.decide(any(), any(), any()))
+        .thenReturn(
+            new OrchestratorDecision(
+                "READ_ONLY_CODE_HELP",
+                0.91,
+                "structured_read",
+                false,
+                "I will inspect this without creating a run.",
+                null,
+                new OrchestratorPolicy(false, false, "read-only"),
+                "trace-1"));
+    service =
+        new AgentRecordedTurnService(
+            intentService,
+            new AgentTurnRecorder(turnRepo, new ObjectMapper()),
+            new AgentEventRecorder(eventRepo, new ObjectMapper()),
+            sessionRepo);
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+
+    var response =
+        service.record(
+            session("Existing title"), "s1", new TurnRequest("Explain the auth flow", null, null));
+
+    assertThat(response.decision().intent()).isEqualTo("CHAT");
+    verify(intentService).decide(any(), any(), any());
+    verify(intentService, never()).interpret(any());
   }
 
   private static AgentSession session(String title) {

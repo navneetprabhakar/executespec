@@ -28,6 +28,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class IntegrationController {
 
+  private static final String INTERNAL_ERROR = "Integration request could not be completed.";
+  private static final String INVALID_REQUEST = "Invalid integration request.";
+
   private final IntegrationManager manager;
   private final RunAccessGuard guard;
 
@@ -48,10 +51,10 @@ public class IntegrationController {
       return ResponseEntity.status(401).body(Map.of("error", "invalid_signature"));
     } catch (IllegalArgumentException e) {
       log.warn("[Webhook] Unknown source: {}", source);
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+      return ResponseEntity.badRequest().body(Map.of("error", INVALID_REQUEST));
     } catch (Exception e) {
       log.error("[Webhook] Error processing {} webhook: {}", source, e.getMessage(), e);
-      return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+      return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
 
@@ -78,7 +81,7 @@ public class IntegrationController {
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
       log.error("[Webhook] Jira manual trigger error: {}", e.getMessage(), e);
-      return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+      return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
 
@@ -106,7 +109,7 @@ public class IntegrationController {
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
       log.error("[Webhook] Confluence manual trigger error: {}", e.getMessage(), e);
-      return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+      return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
 

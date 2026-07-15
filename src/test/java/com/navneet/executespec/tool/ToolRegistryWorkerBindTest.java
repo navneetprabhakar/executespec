@@ -286,6 +286,60 @@ class ToolRegistryWorkerBindTest {
         .containsExactlyInAnyOrder("readFile", "read_file", "bash");
   }
 
+  @Test
+  void serverWorkersNeverAdvertiseFallbackStructuralTools_evenWhenLeanFlagIsOff() {
+    var flags = org.mockito.Mockito.mock(FeatureFlagService.class);
+    org.mockito.Mockito.when(flags.isEnabled("worker.lean-toolset.enabled")).thenReturn(false);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("ast_search"),
+                fakeTool("astSearch"),
+                fakeTool("ast_edit"),
+                fakeTool("astEdit"),
+                fakeTool("lsp"),
+                fakeTool("mcp_client"),
+                fakeTool("mcpClient"),
+                fakeTool("shell")),
+            new ObjectMapper(),
+            null,
+            flags,
+            null);
+
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "shell")
+        .doesNotContain(
+            "ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+  }
+
+  @Test
+  void remoteWorkersRetainCompatibilityTools() {
+    var remote =
+        org.mockito.Mockito.mock(com.navneet.executespec.tool.remote.RemoteToolDispatcher.class);
+    org.mockito.Mockito.when(remote.isRemote("run-1")).thenReturn(true);
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("ast_search"),
+                fakeTool("lsp"),
+                fakeTool("mcp_client")),
+            new ObjectMapper(),
+            remote,
+            null,
+            null);
+
+    List<String> names =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "ast_search", "lsp", "mcp_client");
+  }
+
   // ---- harness-resolution task 10: capability-profile optional tools ----
 
   @Test
@@ -294,13 +348,15 @@ class ToolRegistryWorkerBindTest {
     var profile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
     profile.setOptionalTools(List.of("runWorkspaceTests"));
     org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic")).thenReturn(profile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
 
     ToolRegistry toolRegistry =
         new ToolRegistry(
             List.of(fakeTool("readFile"), workspaceRunTests(false)),
             new ObjectMapper(),
             null,
-            null,
+            featureFlags,
             registry);
 
     List<String> withProfile =
@@ -319,5 +375,61 @@ class ToolRegistryWorkerBindTest {
     List<String> nullProvider =
         toolRegistry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
     org.assertj.core.api.Assertions.assertThat(nullProvider).containsExactly("readFile");
+  }
+
+  @Test
+  void modelProfileOverridesProviderProfileForToolBinding() {
+    var registry = org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class);
+    var providerProfile =
+        new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    providerProfile.setOptionalTools(List.of("runWorkspaceTests"));
+    var modelProfile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    modelProfile.setOptionalTools(List.of("verifyBoot"));
+    org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic"))
+        .thenReturn(providerProfile);
+    org.mockito.Mockito.when(registry.capabilityProfileFor("anthropic", "claude-sonnet-5"))
+        .thenReturn(modelProfile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
+
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(false), verifyBoot(false)),
+            new ObjectMapper(),
+            null,
+            featureFlags,
+            registry);
+
+    List<String> names =
+        toolRegistry.bindForWorker(ctx(), "anthropic", "claude-sonnet-5").stream()
+            .map(t -> t.getToolDefinition().name())
+            .toList();
+    org.assertj.core.api.Assertions.assertThat(names)
+        .containsExactlyInAnyOrder("readFile", "verifyBoot")
+        .doesNotContain("runWorkspaceTests");
+  }
+
+  @Test
+  void profileOptionalToolsStayDisabledWhenEvidenceGateIsOff() {
+    var registry = org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class);
+    var profile = new com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile();
+    profile.setOptionalTools(List.of("runWorkspaceTests"));
+    when(registry.capabilityProfileFor("anthropic")).thenReturn(profile);
+    var featureFlags = mock(FeatureFlagService.class);
+    when(featureFlags.isEnabled(ToolRegistry.FLAG_CAPABILITY_PROFILES)).thenReturn(false);
+
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(fakeTool("readFile"), workspaceRunTests(false)),
+            new ObjectMapper(),
+            null,
+            featureFlags,
+            registry);
+
+    org.assertj.core.api.Assertions.assertThat(
+            toolRegistry.bindForWorker(ctx(), "anthropic").stream()
+                .map(t -> t.getToolDefinition().name())
+                .toList())
+        .containsExactly("readFile");
   }
 }

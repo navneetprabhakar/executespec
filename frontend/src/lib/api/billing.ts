@@ -1,15 +1,108 @@
 import {
   ApiError,
   BASE,
-  BillingOverviewData,
   PagedResponse,
-  PaymentAuditEntry,
-  PricingRow,
   TopupPackageAdmin,
   authHeader,
   parseErrorMessage,
   req,
 } from './core';
+
+export interface PricingRow {
+  provider: string;
+  model: string;
+  inputCostPer1m: number;
+  cachedInputCostPer1m: number;
+  outputCostPer1m: number;
+  notes: string | null;
+  /** Chain tier from the YAML model matrix. */
+  chainTier: string | null;
+  /** Display label from the YAML model matrix. */
+  displayLabel: string | null;
+  updatedAt: string | null;
+}
+
+export interface UsageMetrics {
+  totalRuns: number;
+  successfulRuns: number;
+  failedRuns: number;
+  partialRuns: number;
+  runsByDay: {date: string; count: number; successRate: number}[];
+  runsByProject: Record<string, number>;
+  avgTimeToCompleteSeconds: number;
+  totalCost: number;
+  costByModel: Record<string, number>;
+}
+
+export interface BillingOverviewData {
+  billingEntityType: string;
+  billingEntityName: string;
+  currentPlan: string;
+  subscriptionStatus: string;
+  nextBillingDate: string | null;
+  periodUsage: number;
+  remainingRuns: number;
+  runLimit: number;
+  gateway: string | null;
+  topupCredits: number;
+  recentInvoices: {
+    invoiceNumber: string;
+    amount: number;
+    currency: string;
+    status: string;
+    issuedAt: string;
+  }[];
+}
+
+export interface PaymentAuditEntry {
+  id: string;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  oldTier: string | null;
+  newTier: string | null;
+  performedBy: string | null;
+  notes: string | null;
+  gatewayProvider: string | null;
+  gatewayEventId: string | null;
+  gatewayPaymentId: string | null;
+  currency: string | null;
+  amountMinor: number | null;
+  userId: string | null;
+  orgId: string | null;
+  createdAt: string;
+}
+
+/**
+ * Customer-facing billing plan returned by GET /api/billing/plans.
+ *
+ * Keep this contract beside the rest of the billing transport functions so the
+ * frontend has one billing API module.  The previous standalone billing-api.ts
+ * file duplicated this boundary and made it easy for callers to mix transports.
+ */
+export interface BillingPlan {
+  id: string;
+  name: string;
+  tier: string;
+  keyMode: string;
+  period: string;
+  baseAmountInr: number;
+  baseAmountUsd: number;
+  perSeatInr: number;
+  perSeatUsd: number;
+  includedSeats: number;
+  runLimit: number;
+  annualDiscountPct: number;
+  founderPricing: boolean;
+  active: boolean;
+  limits: Record<string, number>;
+}
+
+/** Fetch active customer-facing plans, optionally filtered by key mode. */
+export const fetchPlans = (keyMode?: string) => {
+  const params = keyMode ? `?keyMode=${encodeURIComponent(keyMode)}` : '';
+  return req<BillingPlan[]>(`/billing/plans${params}`);
+};
 
 export const getPricing = () => req<PricingRow[]>('/pricing');
 
@@ -36,6 +129,14 @@ export const getAnalyticsBilling = (entityType: string, entityId: string) =>
   req<BillingOverviewData>(
     `/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`,
   );
+
+export type BillingPaymentHistoryResponse = PaymentAuditEntry[] | PagedResponse<PaymentAuditEntry>;
+
+/** Read org-scoped payment history for the billing dashboard. */
+export const getPaymentHistory = (orgId: string, page = 0, size = 50) => {
+  const params = new URLSearchParams({orgId, page: String(page), size: String(size)});
+  return req<BillingPaymentHistoryResponse>(`/billing/payment-history?${params}`);
+};
 
 export type ManagedAiBalance = {
   userId: string;

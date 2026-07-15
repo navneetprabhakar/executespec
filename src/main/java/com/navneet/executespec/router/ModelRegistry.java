@@ -152,11 +152,44 @@ public class ModelRegistry {
    * Provider key matched case-insensitively.
    */
   public ModelMatrixProperties.CapabilityProfile capabilityProfileFor(String provider) {
+    return capabilityProfileFor(provider, null);
+  }
+
+  /**
+   * Resolve a capability profile for a concrete model, falling back to its provider profile.
+   *
+   * <p>Provider-level tuning is useful for broad transport differences, but it is too coarse for a
+   * provider that exposes materially different models (for example a frontier model and a small
+   * model with different tool-schema tolerance). Model-specific entries use the key {@code
+   * provider/model} and take precedence. The fallback preserves the existing provider-only contract
+   * and keeps an empty matrix byte-identical.
+   */
+  public ModelMatrixProperties.CapabilityProfile capabilityProfileFor(
+      String provider, String model) {
     if (provider == null || matrixProps.getCapabilityProfiles() == null) return null;
-    ModelMatrixProperties.CapabilityProfile exact =
-        matrixProps.getCapabilityProfiles().get(provider);
+    Map<String, ModelMatrixProperties.CapabilityProfile> profiles =
+        matrixProps.getCapabilityProfiles();
+    if (model != null && !model.isBlank()) {
+      String canonical = canonicalize(model);
+      for (String key : List.of(provider + "/" + canonical, provider + "/" + model)) {
+        ModelMatrixProperties.CapabilityProfile modelProfile = profiles.get(key);
+        if (modelProfile != null) return modelProfile;
+        modelProfile =
+            profiles.entrySet().stream()
+                .filter(entry -> entry.getKey().equalsIgnoreCase(key))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+        if (modelProfile != null) return modelProfile;
+      }
+    }
+    ModelMatrixProperties.CapabilityProfile exact = profiles.get(provider);
     if (exact != null) return exact;
-    return matrixProps.getCapabilityProfiles().get(provider.toLowerCase(java.util.Locale.ROOT));
+    return profiles.entrySet().stream()
+        .filter(entry -> entry.getKey().equalsIgnoreCase(provider))
+        .map(Map.Entry::getValue)
+        .findFirst()
+        .orElse(null);
   }
 
   public int contextLimitFor(String modelName) {
@@ -240,12 +273,44 @@ public class ModelRegistry {
    * String[]{provider, model}}.
    *
    * <p>Replaces the hardcoded {@code ARCHITECT_CHAIN}, {@code CAPABLE_CHAIN}, {@code
-   * UTILITY_CHAIN}, and {@code MODEL_CHAIN} in FallbackLlmRouter.
+   * UTILITY_CHAIN}, and {@code MODEL_CHAIN} in the retired compatibility router.
    */
   public List<String[]> fallbackChainFor(String modelName) {
     ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
     String tier = config != null ? config.getChainTier() : "CAPABLE";
     return fallbackChainForTier(tier);
+  }
+
+  /**
+   * Resolve the ordered recovery chain for a concrete primary provider.
+   *
+   * <p>Most providers continue to use the tier fallback chain. DeepSeek is intentionally different:
+   * its recovery order is native DeepSeek, then OpenRouter, then Fireworks. Keeping this
+   * provider-specific mapping here prevents the generic tier chain from silently routing a native
+   * DeepSeek failure to an unrelated Anthropic/OpenAI model.
+   */
+  public List<String[]> fallbackChainFor(String modelName, String primaryProvider) {
+    if ("deepseek".equalsIgnoreCase(primaryProvider)) {
+      boolean flash = modelName != null && modelName.toLowerCase().contains("flash");
+      String tier = flash ? "lightweight" : "workhorse";
+      String openRouterModel = providerModel("openrouter", tier);
+      String fireworksModel = providerModel("fireworks", tier);
+      if (openRouterModel == null || fireworksModel == null) return Collections.emptyList();
+      return List.of(
+          new String[] {"openrouter", openRouterModel}, new String[] {"fireworks", fireworksModel});
+    }
+    return fallbackChainFor(modelName);
+  }
+
+  private String providerModel(String provider, String tier) {
+    if (matrixProps.getProviders() == null) return null;
+    ModelMatrixProperties.ProviderModels models = matrixProps.getProviders().get(provider);
+    if (models == null) return null;
+    return switch (tier) {
+      case "planning" -> models.getPlanning();
+      case "lightweight" -> models.getLightweight();
+      default -> models.getWorkhorse();
+    };
   }
 
   /** Returns the fallback chain for a given tier name (ARCHITECT, CAPABLE, UTILITY). */

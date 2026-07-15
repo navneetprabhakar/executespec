@@ -17,6 +17,8 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.BootVerification;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.CompileResult;
@@ -95,6 +97,31 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void extracted_builder_matches_service_compatibility_delegate() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-builder")
+            .runId("run-builder")
+            .filesGenerated(1)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(1)
+            .testsTotal(1)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .accuracyJson(
+                "{\"specAdherenceScore\":100,\"testCoverageLevel\":\"GOOD\","
+                    + "\"endpointCoverage\":{\"coveragePercent\":100}}")
+            .build();
+    List<ReportIssueDTO> issues =
+        List.of(new ReportIssueDTO("lint", "WOULD_FAIL_LINT", null, "REVIEWER_AGENT", null));
+    ValidationVerificationLedgerBuilder builder =
+        new ValidationVerificationLedgerBuilder(new ObjectMapper());
+
+    assertEquals(svc.buildVerificationLedger(report, issues), builder.build(report, issues));
+  }
+
+  @Test
   void ledger_marks_missing_delivery_and_unmeasured_tests_honestly() {
     ValidationReport report =
         ValidationReport.builder()
@@ -116,6 +143,7 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(ledger, "tests", "UNKNOWN", "DETERMINISTIC", "MEDIUM");
     assertEntry(ledger, "reviewer", "UNKNOWN", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
+    assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "LOW");
   }
 
   @Test
@@ -140,6 +168,41 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("INTERNAL_FORMULA", cap.source());
     assertTrue(cap.summary().contains("reviewer failed"));
     assertEquals(70, cap.total());
+  }
+
+  @Test
+  void ledger_trust_cap_ignores_noncritical_blocking_issue() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-5")
+            .runId("run-5")
+            .filesGenerated(3)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(10)
+            .testsTotal(10)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .accuracyJson("{\"specAdherenceScore\":100,\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+
+    // This remains visible in the report-issues ledger, but must not be treated as an unresolved
+    // CRITICAL for the score trust cap.
+    List<VerificationEvidenceDTO> ledger =
+        svc.buildVerificationLedger(
+            report,
+            List.of(
+                new ReportIssueDTO(
+                    "minor review note",
+                    "WOULD_FAIL_REVIEW",
+                    "Add a test",
+                    "REVIEWER_AGENT",
+                    null)));
+
+    assertEntry(ledger, "report-issues", "FAIL", "HYBRID", "MEDIUM");
+    assertTrue(
+        ledger.stream().noneMatch(entry -> "trust-cap".equals(entry.id())),
+        "non-critical issue must not create a CRITICAL trust-cap evidence row");
   }
 
   @Test
@@ -180,7 +243,7 @@ class ValidationReportServiceVerificationLedgerTest {
             List.of(),
             false,
             null,
-            null);
+            new BootVerification(Verdict.HEALTHY, true, "boots; /health responded 200"));
     when(generator.generate(input))
         .thenReturn(new ValidationReportGenerator.LlmReportResult("# Report", "model-a", 0, 0));
     when(reviewScoringService.score(any(), any(), any(), any(), any()))
@@ -205,6 +268,10 @@ class ValidationReportServiceVerificationLedgerTest {
         event.runGoalDecision().goalSummary());
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
+    assertEntry(event.verificationLedger(), "boot-verification", "PASS", "DETERMINISTIC", "HIGH");
+    assertEquals(Verdict.HEALTHY.name(), saved.get().getBootVerdict());
+    assertTrue(saved.get().getBootHealthy());
+    assertEquals("boots; /health responded 200", saved.get().getBootReason());
     assertNotNull(run.getRunGoalDonenessJson());
     assertTrue(run.getRunGoalDonenessJson().contains("\"state\":\"UNCERTAIN\""));
     assertTrue(
@@ -249,9 +316,46 @@ class ValidationReportServiceVerificationLedgerTest {
     var dto = service.getByRunId("run-4").orElseThrow();
 
     assertNotNull(dto.runGoalDecision());
-    assertEquals("DONE", dto.runGoalDecision().state().name());
-    assertEquals("STOP_DONE", dto.runGoalDecision().recommendedDecision().name());
+    assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
+    assertEquals(
+        "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
     assertEquals("run goal: Generate a project setup guide", dto.runGoalDecision().goalSummary());
+  }
+
+  @Test
+  void sharedReportCarriesScoresAndEvidenceLedger() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-share")
+            .runId("run-share")
+            .shareToken("share-token")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .finalBuildPassed(true)
+            .testsPassed(2)
+            .testsTotal(2)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .rubricScore(100)
+            .bootVerdict(Verdict.HEALTHY.name())
+            .bootHealthy(true)
+            .bootReason("boots; /health responded 200")
+            .build();
+    when(repository.findByShareToken("share-token")).thenReturn(Optional.of(report));
+    ValidationReportService service =
+        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+
+    var shared = service.getByShareToken("share-token").orElseThrow();
+
+    assertEquals(100, shared.verifiedScore());
+    assertEquals(100, shared.rubricScore());
+    assertEquals(true, shared.finalBuildPassed());
+    assertEquals(2, shared.testsPassed());
+    assertEquals(2, shared.testsTotal());
+    assertEquals("CLEAN", shared.reviewerVerdict());
+    assertEntry(shared.verificationLedger(), "boot-verification", "PASS", "DETERMINISTIC", "HIGH");
   }
 
   private static void assertEntry(

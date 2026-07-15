@@ -8,6 +8,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRespo
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentResponse;
@@ -22,8 +23,13 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.subagent.ImplementerExecutionService;
+import com.navneet.executespec.agentsession.subagent.ImplementerMutationService;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
+import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,20 +41,60 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import io.micrometer.context.ContextSnapshotFactory;
-import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/agent")
-@RequiredArgsConstructor
 public class AgentSessionController {
 
   private final AgentSessionService sessionService;
   private final AgentActionCatalog actionCatalog;
   private final AgentStreamTurnRunner streamTurnRunner;
   private final AgentAttachmentService attachmentService;
+  private final AgentSessionHistoryService historyService;
+  private final SubagentExecutionService subagentExecutionService;
+  private final ImplementerMutationService implementerMutationService;
+  private final ImplementerExecutionService implementerExecutionService;
+
+  public AgentSessionController(
+      AgentSessionService sessionService,
+      AgentActionCatalog actionCatalog,
+      AgentStreamTurnRunner streamTurnRunner,
+      AgentAttachmentService attachmentService,
+      SubagentExecutionService subagentExecutionService) {
+    this(
+        sessionService,
+        actionCatalog,
+        streamTurnRunner,
+        attachmentService,
+        subagentExecutionService,
+        null,
+        null,
+        null);
+  }
+
+  @Autowired
+  public AgentSessionController(
+      AgentSessionService sessionService,
+      AgentActionCatalog actionCatalog,
+      AgentStreamTurnRunner streamTurnRunner,
+      AgentAttachmentService attachmentService,
+      SubagentExecutionService subagentExecutionService,
+      AgentSessionHistoryService historyService,
+      ImplementerMutationService implementerMutationService,
+      ImplementerExecutionService implementerExecutionService) {
+    this.sessionService = sessionService;
+    this.actionCatalog = actionCatalog;
+    this.streamTurnRunner = streamTurnRunner;
+    this.attachmentService = attachmentService;
+    this.subagentExecutionService = subagentExecutionService;
+    this.historyService = historyService;
+    this.implementerMutationService = implementerMutationService;
+    this.implementerExecutionService = implementerExecutionService;
+  }
 
   @GetMapping("/actions")
   public List<AgentActionDescriptor> actions() {
@@ -68,6 +114,175 @@ public class AgentSessionController {
     return sessionService.createSession(request, user);
   }
 
+  /**
+   * Execute one bounded, read-only role-contract child from a parent agent session.
+   *
+   * <p>This is intentionally a synchronous, small control-plane contract: the child has its own
+   * persisted session and budget, but it cannot create or approve a pipeline run. Larger fan-out
+   * orchestration remains a server concern and must not be reintroduced as a client-side fake
+   * {@code spawn_subagent} tool.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents")
+  public SubagentProtocol.Result executeSubagent(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.SpawnRequest request) {
+    if (request == null || !sessionId.equals(request.parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.execute(request, user, orgId(user));
+  }
+
+  /** Execute up to four reserved read-only children concurrently and return partial evidence. */
+  @PostMapping("/sessions/{sessionId}/subagents/batch")
+  public SubagentProtocol.BatchResult executeSubagentBatch(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody List<SubagentProtocol.SpawnRequest> requests) {
+    if (requests == null
+        || requests.isEmpty()
+        || requests.stream()
+            .anyMatch(request -> request == null || !sessionId.equals(request.parentSessionId()))) {
+      throw new IllegalArgumentException("all batch requests must match the parent session id");
+    }
+    return subagentExecutionService.executeBatch(requests, user, orgId(user));
+  }
+
+  /** Reserve the explicit single-writer scope used by the CLI/VS Code implementer seam. */
+  @PostMapping("/sessions/{sessionId}/writer/reserve")
+  public WriterReservation reserveWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterReserveRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer reservation is required");
+    return implementerMutationService.reserve(
+        sessionId, request.requestId(), request.scope(), user, orgId(user));
+  }
+
+  /**
+   * Execute one explicitly authorized writeFile/editFile mutation; WEB is rejected in the service.
+   */
+  @PostMapping("/sessions/{sessionId}/writer/mutate")
+  public com.navneet.executespec.tool.ToolResult mutateWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterMutationRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer mutation is required");
+    return implementerMutationService.mutate(
+        sessionId,
+        request.reservationId(),
+        request.scope(),
+        request.toolName(),
+        request.args(),
+        user,
+        orgId(user));
+  }
+
+  /** Execute a bounded model-driven IMPLEMENTER pass over an already reserved writer scope. */
+  @PostMapping("/sessions/{sessionId}/writer/execute")
+  public ImplementerExecutionService.ExecutionResult executeWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterExecutionRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer execution is required");
+    return implementerExecutionService.execute(
+        sessionId,
+        request.reservationId(),
+        request.scope(),
+        request.objective(),
+        request.provider(),
+        request.model(),
+        request.maxRounds(),
+        request.parentTurnId(),
+        user,
+        orgId(user));
+  }
+
+  /** Release a writer reservation; repeated release is idempotent. */
+  @PostMapping("/sessions/{sessionId}/writer/release")
+  public WriterReservation releaseWriter(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody WriterReleaseRequest request) {
+    if (request == null) throw new IllegalArgumentException("writer release is required");
+    return implementerMutationService.release(
+        sessionId, request.reservationId(), request.reason(), user, orgId(user));
+  }
+
+  record WriterReserveRequest(String requestId, String scope) {}
+
+  record WriterMutationRequest(
+      String reservationId,
+      String scope,
+      String toolName,
+      com.fasterxml.jackson.databind.JsonNode args) {}
+
+  record WriterReleaseRequest(String reservationId, String reason) {}
+
+  record WriterExecutionRequest(
+      String reservationId,
+      String scope,
+      String objective,
+      String provider,
+      String model,
+      int maxRounds,
+      String parentTurnId) {}
+
+  /**
+   * Execute a child only when an explicit deterministic coordinator trigger is supplied. The
+   * endpoint is opt-in and remains read-only with respect to the parent repository/run authority.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents/coordinator")
+  public SubagentProtocol.Result executeCoordinatorSubagent(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.CoordinatorExecutionRequest request) {
+    if (request == null
+        || request.spawn() == null
+        || !sessionId.equals(request.spawn().parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.executeCoordinator(request, user, orgId(user));
+  }
+
+  /**
+   * Return the deterministic parent-delegation decision without creating a child or calling a
+   * provider. A coordinator may use an eligible response immediately before the canonical spawn
+   * endpoint; spawn repeats the same limits transactionally.
+   */
+  @PostMapping("/sessions/{sessionId}/subagents/eligibility")
+  public SubagentProtocol.DelegationDecision subagentEligibility(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody SubagentProtocol.SpawnRequest request) {
+    if (request == null || !sessionId.equals(request.parentSessionId())) {
+      throw new IllegalArgumentException("parent session id must match the request");
+    }
+    return subagentExecutionService.evaluateDelegation(request, user, orgId(user));
+  }
+
+  /** Cancel all active child agents owned by this parent session. */
+  @PostMapping("/sessions/{sessionId}/subagents/cancel")
+  public java.util.Map<String, Integer> cancelSubagents(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody(required = false) CancelSubagentsRequest request) {
+    String reason = request == null ? null : request.reason();
+    int cancelled = subagentExecutionService.cancelChildren(sessionId, reason, user, orgId(user));
+    return java.util.Map.of("cancelled", cancelled);
+  }
+
+  record CancelSubagentsRequest(String reason) {}
+
+  private static String orgId(AppUserDetails user) {
+    if (user == null || user.getUser() == null) return null;
+    String orgId = user.getUser().getOrgId();
+    if (orgId == null && user.getOrgMember() != null) {
+      orgId = String.valueOf(user.getOrgMember().getOrgId());
+    }
+    return orgId;
+  }
+
   @GetMapping("/sessions")
   public List<AgentSessionResponse> sessions(
       @AuthenticationPrincipal AppUserDetails user, @RequestParam(defaultValue = "20") int limit) {
@@ -80,10 +295,31 @@ public class AgentSessionController {
     return sessionService.getSession(sessionId, user);
   }
 
+  /** Clear the durable server transcript while retaining the session identity and usage ledger. */
+  @org.springframework.web.bind.annotation.DeleteMapping("/sessions/{sessionId}/history")
+  public AgentSessionHistoryService.HistoryClearedResponse clearHistory(
+      @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
+    if (historyService == null) {
+      throw new IllegalStateException("agent session history service unavailable");
+    }
+    return historyService.clear(sessionId, user);
+  }
+
   @GetMapping("/sessions/{sessionId}/events")
   public List<AgentActionEvent> sessionEvents(
-      @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
-    return sessionService.listEvents(sessionId, user);
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(defaultValue = "500") int limit) {
+    return sessionService.listEvents(sessionId, limit, user);
+  }
+
+  /** Cursor-based event replay used after a stream interruption or tab resume. */
+  @GetMapping("/sessions/{sessionId}/events/replay")
+  public AgentEventReplayResponse replaySessionEvents(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(required = false) Long after) {
+    return sessionService.replayEvents(sessionId, after, user);
   }
 
   @GetMapping("/sessions/{sessionId}/turns")
@@ -122,16 +358,18 @@ public class AgentSessionController {
   }
 
   /**
-   * Deprecated compatibility endpoint. Local CLI/VS Code sessions must not send email; newer
-   * clients keep usage/cost visibility in the terminal. Keep the route as a no-op so older clients
-   * can exit cleanly without triggering mail.
+   * Retained only as a compatibility signal for clients that have not yet removed the old call.
+   * Session usage is visible through the agent-session turn/event APIs; this route never sent mail
+   * and must not report a successful delivery.
    */
   @PostMapping("/sessions/{sessionId}/summary-email")
   public ResponseEntity<Void> sessionSummaryEmail(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
       @RequestBody SessionSummaryEmailRequest request) {
-    return ResponseEntity.accepted().build();
+    throw new ResponseStatusException(
+        org.springframework.http.HttpStatus.GONE,
+        "Session summary email is retired; read usage from the agent-session turn or event APIs.");
   }
 
   /** Legacy request body retained for older clients that still POST this route. */

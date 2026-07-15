@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "test": "provider-free-live-jvm-restart",
+  "observedAt": "2026-07-15T01:59:21+05:30",
+  "backendSha": "ffa56fde4",
+  "profile": "local",
+  "port": 8098,
+  "providerCalls": 0,
+  "firstJvm": {
+    "pid": 13216,
+    "started": true,
+    "fixtureSeeded": true,
+    "fixture": {
+      "gateRunId": "web-qa-f4281aff-69dd-4719-afe9-496cd2cb21c4",
+      "recoveryRunId": "web-qa-97a10b1d-89d3-45d0-a7d0-7dba9fd6222a"
+    },
+    "termination": "SIGKILL"
+  },
+  "secondJvm": {
+    "pid": 17022,
+    "started": true,
+    "startupRecoveryLog": "StartupRunResumer: run=web-qa-97a10b1d-89d3-45d0-a7d0-7dba9fd6222a prev=WORKING salvaged → COMPLETE (REVIEWER_INTERRUPTED_CODE_PRESERVED)",
+    "recoveryStatus": "COMPLETE",
+    "recoveryStatusReason": "REVIEWER_INTERRUPTED_CODE_PRESERVED",
+    "gateStatus": "AWAITING_APPROVAL",
+    "gateStatusReason": "NO_REVIEW_RESULT"
+  },
+  "assertions": [
+    "A WORKING run with terminal task evidence was salvaged after a real JVM SIGKILL and restart.",
+    "The independent AWAITING_APPROVAL plan gate remained pending across the restart.",
+    "No provider dispatch was needed for recovery."
+  ],
+  "limitations": [
+    "This proves same-node local workspace recovery only; it does not prove cross-node workspace shipping or in-flight provider-call rebinding."
+  ]
+}

@@ -8,7 +8,7 @@
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
 #                               K CONCURRENCY HARBOR_AGENT_TIMEOUT_SEC COMPACTION TASK_LIMIT
-#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES
+#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES ES_PROFILE
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -23,7 +23,7 @@ K="${K:-1}"                                            # internal benchmark: exa
 TASK_LIMIT="${TASK_LIMIT:-}"                           # optional sanity subset; full TB leaves empty
 TOTAL_TASKS="${TOTAL_TASKS:-${TASK_LIMIT:-89}}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
-HARBOR_AGENT_TIMEOUT_SEC="${HARBOR_AGENT_TIMEOUT_SEC:-1350}" # higher than ES TB wall-clock; avoids Harbor killing first
+HARBOR_AGENT_TIMEOUT_SEC="${HARBOR_AGENT_TIMEOUT_SEC:-1500}" # higher than ES TB wall-clock; preserves finalizer buffer
 COMPACTION="${COMPACTION:-on}"                         # on|off  (TB: only history-compaction fires)
 TB_PREFLIGHT_IMAGES="${TB_PREFLIGHT_IMAGES:-on}"       # on|off; fail-fast on Docker Hub/cache issues
 TB_PREFLIGHT_JOBS="${TB_PREFLIGHT_JOBS:-4}"
@@ -34,7 +34,28 @@ GCS_BUCKET="${GCS_BUCKET:-}"                           # gs://bucket/path  (opti
 TRACKER="$REPO/infra/benchmark/scripts/tb-tracker.py"
 TG="${TG:-/tmp/tg-send.py}"
 ADMIN_ENV="${ADMIN_ENV:-$HOME/swebench-bench/.espec-admin.env}"
-export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
+ES_PROFILE="${ES_PROFILE:-benchmark}"
+# Keep the runner portable between the macOS laptop and the amd64 Linux benchmark VM.  The
+# previous unconditional macOS default made a fresh VM fail before Harbor started when Maven
+# looked for `/opt/homebrew/opt/openjdk@21`.  Respect an explicit JAVA_HOME, otherwise select the
+# pinned Temurin path used by startup.sh on Linux and the Homebrew path on macOS; leave it empty
+# only as a last resort so Maven can use java from PATH.
+if [ -z "${JAVA_HOME:-}" ]; then
+  case "$(uname -s)" in
+    Darwin)
+      [ -d /opt/homebrew/opt/openjdk@21 ] && JAVA_HOME=/opt/homebrew/opt/openjdk@21
+      ;;
+    Linux)
+      for candidate in /usr/lib/jvm/temurin-21-jdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64; do
+        if [ -x "$candidate/bin/java" ]; then
+          JAVA_HOME="$candidate"
+          break
+        fi
+      done
+      ;;
+  esac
+  export JAVA_HOME
+fi
 mkdir -p "$JOBS_DIR"
 LOG(){ echo "$(date '+%H:%M:%S') [run-tb] $*"; }
 
@@ -98,16 +119,24 @@ fi
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
   ( cd "$REPO" && JAVA_HOME=$JAVA_HOME mvn -q spring-boot:run -Dspring-boot.run.fork=false \
-      -Dspring-boot.run.profiles=local > "$JOBS_DIR/backend.log" 2>&1 ) &
-  curl -s --retry 90 --retry-delay 3 --retry-connrefused --retry-all-errors --max-time 6 \
+      -Dspring-boot.run.profiles="$ES_PROFILE" > "$JOBS_DIR/backend.log" 2>&1 ) &
+# `curl` without `--fail` treats an HTTP 503 during Spring startup as success, allowing the
+# login/flag POSTs below to race the connector. Wait for an actual 2xx health response and retain
+# the bounded retry window so a broken boot fails before Harbor spends provider tokens.
+  curl -fsS --retry 90 --retry-delay 3 --retry-connrefused --retry-all-errors --max-time 6 \
       localhost:8080/actuator/health >/dev/null 2>&1; }
-curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend…"; start_backend; }
+curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend (profile=$ES_PROFILE)…"; start_backend; }
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
 export ES_ADMIN_EMAIL="${ES_ADMIN_EMAIL:-${ESPEC_ADMIN_EMAIL:-}}"
 export ES_ADMIN_PW="${ES_ADMIN_PW:-${ESPEC_ADMIN_PW:-}}"
 TK=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
+if [ -z "$TK" ]; then
+  LOG "FATAL: benchmark admin login failed; refusing to start Harbor so no provider tokens are spent"
+  tail -40 "$JOBS_DIR/backend.log" 2>/dev/null || true
+  exit 1
+fi
 set_flag(){
   local flag="$1" value="$2"
   curl -fsS -X PUT "localhost:8080/api/admin/feature-flags/$flag" -H "Authorization: Bearer $TK" \
@@ -181,6 +210,32 @@ while kill -0 "$HARBOR_PID" 2>/dev/null; do
   sleep 10
 done
 wait "$HARBOR_PID" || HARBOR_RC=$?
+
+# Harbor 0.13 can cancel an agent while DockerEnvironment is awaiting
+# `docker compose exec`; the cancellation bypasses its subprocess timeout and
+# leaves a task verifier alive after Harbor records AgentTimeoutError.  Clean
+# only containers whose task prefixes belong to this job (never `docker prune`
+# or an unscoped `docker compose down`).  This is a bounded fallback until the
+# upstream Harbor cancellation path is fixed.
+cleanup_harbor_task_containers(){
+  command -v docker >/dev/null 2>&1 || return 0
+  local task_dir task_name container_ids cid
+  while IFS= read -r task_dir; do
+    task_name="${task_dir%%__*}"
+    [ -n "$task_name" ] || continue
+    container_ids=$(docker ps -aq --filter "name=${task_name}__" 2>/dev/null || true)
+    for cid in $container_ids; do
+      [ -n "$cid" ] || continue
+      LOG "cleanup: removing Harbor task container $cid (task=$task_name)"
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 20 docker rm -f "$cid" >/dev/null 2>&1 || true
+      else
+        docker rm -f "$cid" >/dev/null 2>&1 || true
+      fi
+    done
+  done < <(find "$JOBS_DIR/$JOB_NAME" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+}
+cleanup_harbor_task_containers
 
 # ── 5. done: marker, final tracker tick, GCS results sync, ping ─────────────
 touch "$DONE"; sleep 6   # let the tracker write its final cycle

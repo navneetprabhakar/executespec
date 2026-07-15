@@ -10,7 +10,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.entity.ExecutionSolution;
@@ -53,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ExecutionPlannerService {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
   private final ExecutionRunRepository runRepo;
@@ -140,15 +140,13 @@ public class ExecutionPlannerService {
       // user instead of silently switching providers. Users must retry with a
       // different provider explicitly.
       ChatResponse resp =
-          fallbackLlmRouter.callWithFallback(
+          llmRouter.callTextStrict(
               resolved.providerName(),
               resolved.getModel(),
-              prompt,
+              prompt.getInstructions(),
               "exec-plan-" + executionRunId,
-              "execution-planner",
-              FallbackLlmRouter.FallbackMode.NO_FALLBACK,
-              0,
-              false);
+              "ExecutionPlannerService",
+              "execution-plan");
       String body = resp.getResult().getOutput().getText();
       ExecutionPlan plan = parsePlan(body);
       persistPlan(run, plan);

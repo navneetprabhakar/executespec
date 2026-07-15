@@ -37,7 +37,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.local}"
-PASSWORD="${PASSWORD:-admin}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 GH_OWNER="${GH_OWNER:-exspec-test}"
 PHASES="${PHASES:-A,B,C,D,E}"
 

@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -173,6 +174,7 @@ export function IdeRuns() {
                   key={r.runId}
                   to={runDetailPath(r)}
                   className='ide-work-row'
+                  data-work-status={String(r.status || '').toLowerCase()}
                   style={{
                     borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
                   }}
@@ -185,18 +187,29 @@ export function IdeRuns() {
                       {r.projectName ? ` · ${String(r.projectName).slice(0, 24)}` : ''} ·{' '}
                       {relTime(r.startedAt)}
                     </span>
+                    {isLiveStatus(r.status) && (
+                      <span className='ide-work-state' role='status'>
+                        <span className='ide-work-state-dot' aria-hidden='true' />
+                        Work in progress — open for live updates
+                      </span>
+                    )}
+                    {['FAILED', 'CANCELLED'].includes(String(r.status || '').toUpperCase()) && (
+                      <span className='ide-work-state ide-work-state-error' role='status'>
+                        Needs attention — open to review the failure and retry options
+                      </span>
+                    )}
                   </span>
                   {r.aiProvider && (
                     <span className='ide-work-provider'>{providerLabel(r.aiProvider)}</span>
                   )}
                   <span className='ide-work-score'>
-                    <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
-                      {score != null
-                        ? `${Math.round(score)}%`
-                        : isLiveStatus(r.status)
-                          ? 'live'
-                          : '—'}
-                    </span>
+                    {score != null ? (
+                      <ScoreBadge score={score} compact />
+                    ) : (
+                      <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
+                        {isLiveStatus(r.status) ? 'live' : '—'}
+                      </span>
+                    )}
                     {isSuperAdmin && cost != null && (
                       <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
                     )}
@@ -324,18 +337,13 @@ export function IdeAccount() {
     }
   }
 
-  // GDPR data export — no api helper exists, so fetch the ZIP with the bearer
-  // token (same key the api client uses) and trigger a blob download.
+  // GDPR data export — the API module owns auth and response errors; this surface
+  // only controls the browser download affordance.
   async function onExport() {
     setExporting(true);
     setMsg('');
     try {
-      const token = localStorage.getItem('access_token') ?? '';
-      const resp = await fetch('/api/auth/me/data-export', {
-        headers: token ? {Authorization: `Bearer ${token}`} : {},
-      });
-      if (!resp.ok) throw new Error(`Export failed (${resp.status}).`);
-      const blob = await resp.blob();
+      const blob = await api.downloadUserDataExport();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

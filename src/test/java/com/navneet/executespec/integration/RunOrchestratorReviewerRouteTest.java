@@ -18,6 +18,30 @@ import org.junit.jupiter.api.Test;
 
 class RunOrchestratorReviewerRouteTest {
 
+  /**
+   * Characterization seam for post-review continuation: only explicit reviewer failure evidence (or
+   * an exception) may open the continuation path; missing optional evidence stays fail-open.
+   */
+  @Test
+  void postReviewQualityBoundaryTreatsReviewerExceptionAsFailureButMissingReviewAsUnknown() {
+    assertThat(RunOrchestrator.reviewerQualityFailed(null, true)).isTrue();
+    assertThat(RunOrchestrator.reviewerQualityFailed(null, false)).isFalse();
+
+    var decision = RunOrchestrator.reviewerLowQualityGoalDecision(null, false);
+    assertThat(decision.reason()).contains("UNKNOWN");
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+  }
+
+  /** Pins the validation-side boundary: no report is not itself proof of low quality. */
+  @Test
+  void postReviewValidationBoundaryDoesNotEscalateWithoutReport() {
+    assertThat(RunOrchestrator.validationReportQualityFailed(null, 70)).isFalse();
+
+    var decision = RunOrchestrator.validationReportLowQualityGoalDecision(null, 70);
+    assertThat(decision.reason()).contains("verifiedScore=unknown");
+    assertThat(decision.reason()).contains("pipelineResult=UNKNOWN");
+  }
+
   @Test
   void noContinuationAction_usesDefaultRoute() {
     RunOrchestrator.ProviderModel route =
@@ -231,6 +255,34 @@ class RunOrchestratorReviewerRouteTest {
 
     assertThat(target).isPresent();
     assertThat(target.get().taskId()).isEqualTo("T1");
+  }
+
+  /** Pins recovery behavior when continuation evidence exists but has no usable route. */
+  @Test
+  void reviewerRouteRecoveryKeepsDefaultWhenUpgradeRouteIsIncomplete() {
+    RunOrchestrator.ProviderModel route =
+        RunOrchestrator.reviewerRouteFor(
+            "deepseek",
+            "deepseek-v4-pro-native",
+            result(
+                task(
+                    TaskOutcome.Status.SUCCESS,
+                    RunContinuationDecision.STEP_UP_MODEL,
+                    null,
+                    null,
+                    "deepseek",
+                    "deepseek-v4-pro-native")));
+
+    assertThat(route.provider()).isEqualTo("deepseek");
+    assertThat(route.model()).isEqualTo("deepseek-v4-pro-native");
+  }
+
+  /** Pins the no-evidence recovery path used when a reviewer continuation cannot be targeted. */
+  @Test
+  void reviewerContinuationTargetReturnsEmptyForMissingExecutionEvidence() {
+    assertThat(RunOrchestrator.reviewerContinuationTarget(null)).isEmpty();
+    assertThat(RunOrchestrator.reviewerContinuationTarget(ExecutionResult.builder().build()))
+        .isEmpty();
   }
 
   @Test

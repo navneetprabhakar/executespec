@@ -1,194 +1,19 @@
-// Typed API client — all backend endpoints
-
-export const BASE = '/api';
-
-/** Returns the stored access token for authenticated requests. */
-export function authHeader(): Record<string, string> {
-  const token = localStorage.getItem('access_token');
-  return token ? {Authorization: `Bearer ${token}`} : {};
-}
-
-/** Status code → human-readable fallback messages */
-export const STATUS_MESSAGES: Record<number, string> = {
-  400: 'Invalid request. Please check your input and try again.',
-  401: 'Your session has expired. Please log in again.',
-  402: "You've reached your plan limit. Please upgrade or purchase additional runs.",
-  403: "You don't have permission to perform this action.",
-  404: 'The requested resource was not found.',
-  409: 'This action conflicts with the current state. Please refresh and try again.',
-  410: 'This feature is not available in the current harness. It may be coming back — reach out if you need it.',
-  422: 'The request could not be processed. Please check your input.',
-  429: 'Too many requests. Please wait a moment and try again.',
-  500: 'Something went wrong on our end. Please try again later.',
-  502: 'The server is temporarily unavailable. Please try again shortly.',
-  503: 'The service is temporarily unavailable. Please try again shortly.',
-};
-
-/**
- * R-311 (Wave 7) — typed API error so consumers can branch on status.
- *
- * The pre-existing pattern threw `new Error(friendlyMessage)` and lost
- * the HTTP status. AuditPage / AccessDenied both need to render a
- * specific "requires admin role" component on 403 instead of the
- * generic toast. This subclass preserves the status while keeping the
- * existing `errMsg(e)` shape for every existing call site.
- */
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
-}
-
-/**
- * Extracts a human-readable error message from a backend response.
- * Tries to parse JSON body for 'message' or 'error' fields,
- * falls back to known status messages, then to the raw body.
- */
-export function parseErrorMessage(status: number, raw: string): string {
-  // Try to extract message from JSON body (Spring Boot error format)
-  if (raw) {
-    try {
-      const json = JSON.parse(raw);
-      // Spring's BillingException / ResponseStatusException include 'message'
-      if (json.message && typeof json.message === 'string') return json.message;
-      // Some endpoints return { error: "..." }
-      if (
-        json.error &&
-        typeof json.error === 'string' &&
-        json.error !== 'Payment Required' &&
-        json.error !== 'Forbidden'
-      )
-        return json.error;
-    } catch {
-      // Not JSON — use raw text if it's short and readable
-      if (raw.length < 200 && !raw.startsWith('<') && !raw.startsWith('{')) return raw;
-    }
-  }
-  // Fall back to status-based friendly message
-  return STATUS_MESSAGES[status] ?? `Request failed (${status}). Please try again.`;
-}
-
-let refreshInFlight: Promise<boolean> | null = null;
-
-function shouldAttemptRefresh(url: string): boolean {
-  return (
-    !!localStorage.getItem('access_token') &&
-    !url.startsWith('/auth/login') &&
-    !url.startsWith('/auth/register') &&
-    !url.startsWith('/auth/refresh') &&
-    !url.startsWith('/auth/logout')
-  );
-}
-
-async function refreshAccessTokenOnce(): Promise<boolean> {
-  if (!refreshInFlight) {
-    refreshInFlight = fetch(BASE + '/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-    })
-      .then(async (res) => {
-        if (!res.ok) return false;
-        const text = await res.text();
-        if (!text.trim()) return false;
-        const json = JSON.parse(text) as {accessToken?: string};
-        if (!json.accessToken) return false;
-        localStorage.setItem('access_token', json.accessToken);
-        return true;
-      })
-      .catch(() => false)
-      .finally(() => {
-        refreshInFlight = null;
-      });
-  }
-  return refreshInFlight;
-}
-
-async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
-  // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
-  // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
-  // to fetch`. The catch site (RegisterPage / LoginPage / etc.) printed
-  // a generic "Registration failed" instead of the actual root cause —
-  // the user couldn't tell whether the product was broken or if they'd
-  // mistyped. Wrap the fetch call so network errors surface as a real
-  // ApiError with `status: 0` (a sentinel callers can branch on for
-  // retry UI). Genuine 4xx/5xx responses still reach the original status
-  // path.
-  let res: Response;
-  try {
-    const headers = {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers};
-    res = await fetch(BASE + url, {
-      ...opts,
-      headers,
-      credentials: 'include', // send refresh_token cookie
-    });
-  } catch (e) {
-    const reason = e instanceof Error ? e.message : 'unknown';
-    throw new ApiError(
-      0,
-      `Can't reach the server (${reason}). Check your connection and try again.`,
-    );
-  }
-  return res;
-}
-
-async function fetchText(url: string): Promise<Response> {
-  try {
-    return await fetch(BASE + url, {
-      headers: {...authHeader()},
-      credentials: 'include',
-    });
-  } catch (e) {
-    const reason = e instanceof Error ? e.message : 'unknown';
-    throw new ApiError(
-      0,
-      `Can't reach the server (${reason}). Check your connection and try again.`,
-    );
-  }
-}
-
-export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
-  let res = await fetchJson(url, opts);
-  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
-    res = await fetchJson(url, opts);
-  }
-  if (!res.ok) {
-    const raw = await res.text().catch(() => '');
-    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
-  }
-  if (res.status === 204) return undefined as unknown as T;
-  // Handle Spring returning 200 OK with an empty body (e.g. approve/merge endpoints)
-  const text = await res.text();
-  if (!text.trim()) return undefined as unknown as T;
-  return JSON.parse(text);
-}
-
-/**
- * Retryable HTTP statuses — callers can use this to decide whether to
- * surface a "Retry" affordance instead of asking the user to reload the
- * page. Audit r5 (P0-2).
- */
-export function isRetryableError(e: unknown): boolean {
-  if (!(e instanceof ApiError)) return false;
-  // 0 = network error (backend unreachable). 5xx = transient server error.
-  return e.status === 0 || e.status >= 500;
-}
-
-/** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
-export async function reqText(url: string): Promise<string> {
-  let res = await fetchText(url);
-  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
-    res = await fetchText(url);
-  }
-  if (!res.ok) {
-    const raw = await res.text().catch(() => '');
-    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
-  }
-  return res.text();
-}
+// Typed API contract definitions. Runtime transport is re-exported here to preserve the stable
+// `@/lib/api/core` import surface for existing API modules.
+export * from './transport';
+// Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
+// `@/lib/api/core` consumers keep compiling while the god-file shrinks.
+export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
+// Deployment/GCP DTOs live with the deployment API, but remain type-re-exported here for
+// existing `@/lib/api/core` consumers.
+export type {
+  CredentialSummary,
+  DeployAnalysisResult,
+  DeploymentSummary,
+  GcpValidationResult,
+  PermissionCheck,
+  RequiredPermission,
+} from './deployTypes';
 
 export interface RunSummary {
   runId: string;
@@ -546,101 +371,9 @@ export interface MetricsResponse {
   totalOutputTokens: number;
 }
 
-export interface PricingRow {
-  provider: string;
-  model: string;
-  inputCostPer1m: number;
-  cachedInputCostPer1m: number;
-  outputCostPer1m: number;
-  notes: string | null;
-  /**
-   * 2026-05-06 — chain-tier from YAML model-matrix (ARCHITECT / CAPABLE / UTILITY). Null for
-   * legacy DB rows that pre-date the field. Replaces the hardcoded MODEL_ROLES map.
-   */
-  chainTier: string | null;
-  /** Display label from YAML model-matrix display-label. Null fallback to model id. */
-  displayLabel: string | null;
-  updatedAt: string | null;
-}
-
 // v2.5.13 — TaskFeasibility + FeasibilityReport interfaces retired along with
 // FeasibilityEstimator.tsx. Backend `/api/feasibility` returns 410 Gone on V2
 // and will stay permanently 410 — use the plan-approval estimate instead.
-
-export interface DeploymentSummary {
-  id: string;
-  runId: string;
-  versionTag: string;
-  status: string;
-  strategy: string;
-  serviceUrl: string;
-  revisionName: string;
-  createdAt: string;
-  ttlExpiresAt: string;
-}
-
-export interface RequiredPermission {
-  role: string;
-  label: string;
-  reason: string;
-  required: boolean;
-}
-
-export interface PermissionCheck {
-  role: string;
-  label: string;
-  required: boolean;
-  granted: boolean;
-  detail: string;
-}
-
-export interface CredentialSummary {
-  id: string;
-  gcpProjectId: string;
-  serviceAccountEmail: string;
-  projectId: string | null;
-  createdAt: string;
-  validatedAt: string | null;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  issues: string[];
-  gcpProjectId: string | null;
-  permissionChecks: PermissionCheck[];
-}
-
-export interface DeployAnalysisResult {
-  manifest: {
-    projectType: string;
-    language: string;
-    framework: string;
-    buildTool: string;
-    detectedPort: number;
-    healthCheckPath: string;
-    databases: string[];
-    caches: string[];
-    queues: string[];
-    storageServices: string[];
-    envVars: string[];
-    isStateless: boolean;
-    hasHealthCheck: boolean;
-    hasDockerfile: boolean;
-    dockerfilePath: string | null;
-  };
-  decision: {
-    recommendedPath: string;
-    availablePaths: Array<{
-      path: string;
-      label: string;
-      description: string;
-      available: boolean;
-      reason: string;
-    }>;
-    reasoning: string;
-  };
-  hasGcpCredentials: boolean;
-}
 
 export interface TimelineData {
   tasks: Array<{
@@ -934,7 +667,7 @@ export interface SandboxStatus {
   hasSandbox: boolean;
 }
 
-export interface ValidationResult {
+export interface IntegrationValidationResult {
   valid: boolean;
   message: string;
 }
@@ -1378,18 +1111,6 @@ export interface PrCommentInboxDto {
   createdAt: string;
 }
 
-export interface UsageMetrics {
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  partialRuns: number;
-  runsByDay: {date: string; count: number; successRate: number}[];
-  runsByProject: Record<string, number>;
-  avgTimeToCompleteSeconds: number;
-  totalCost: number;
-  costByModel: Record<string, number>;
-}
-
 export interface MemberUsage {
   userId: string;
   firstName: string;
@@ -1398,47 +1119,6 @@ export interface MemberUsage {
   runCount: number;
   successRate: number;
   lastRunDate: string | null;
-}
-
-export interface BillingOverviewData {
-  billingEntityType: string;
-  billingEntityName: string;
-  currentPlan: string;
-  subscriptionStatus: string;
-  nextBillingDate: string | null;
-  periodUsage: number;
-  remainingRuns: number;
-  runLimit: number;
-  gateway: string | null;
-  topupCredits: number;
-  recentInvoices: {
-    invoiceNumber: string;
-    amount: number;
-    currency: string;
-    status: string;
-    issuedAt: string;
-  }[];
-}
-
-// Payment Audit (Admin)
-
-export interface PaymentAuditEntry {
-  id: string;
-  entityType: string;
-  entityId: string;
-  eventType: string;
-  oldTier: string | null;
-  newTier: string | null;
-  performedBy: string | null;
-  notes: string | null;
-  gatewayProvider: string | null;
-  gatewayEventId: string | null;
-  gatewayPaymentId: string | null;
-  currency: string | null;
-  amountMinor: number | null;
-  userId: string | null;
-  orgId: string | null;
-  createdAt: string;
 }
 
 export interface WebhookEventEntry {
@@ -1452,28 +1132,6 @@ export interface WebhookEventEntry {
   attempts: number;
   createdAt: string;
   processedAt: string | null;
-}
-
-export interface NotificationItem {
-  id: string;
-  userId: string;
-  type: string;
-  title: string;
-  body: string | null;
-  link: string | null;
-  read: boolean;
-  createdAt: string;
-}
-
-// Notification preferences (M-003 Wave 2)
-
-export interface NotificationPrefRow {
-  eventType: string; // canonical ActivityEventType name
-  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE';
-  channel: 'IN_APP' | 'EMAIL';
-  enabled: boolean; // effective (override → override; else default)
-  defaultEnabled: boolean;
-  override: boolean; // true if the user has an explicit row
 }
 
 // SSO config (M-004 Wave 2)
@@ -1846,192 +1504,27 @@ export interface ProjectChatMessageDto {
   createdAt: string;
 }
 
-// Migrations product (R-336..R-339)
-
-export interface MigrationRecipeSummary {
-  id: string;
-  slug: string;
-  name: string;
-  tagline: string | null;
-  description: string | null;
-  sourceStack: string;
-  targetStack: string;
-  affectedFilesGlob: string;
-  category: string;
-  tags: string | null;
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
-  source: 'FIRST_PARTY' | 'COMMUNITY';
-  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
-  estFilesLow: number | null;
-  estFilesHigh: number | null;
-  estCreditsLow: string | null;
-  estCreditsHigh: string | null;
-  iconUrl: string | null;
-  thumbnailUrl: string | null;
-  samplePrUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MigrationListItem {
-  recipe: MigrationRecipeSummary;
-  locked: boolean;
-  unlockTier: string | null;
-}
-
-export interface MigrationVariant {
-  id: string;
-  recipeId: string;
-  optionsSignature: string;
-  options: string;
-  specTemplate: string;
-  estCreditsLow: string | null;
-  estCreditsHigh: string | null;
-}
-
-export interface MigrationSlot {
-  id: string;
-  recipeId: string;
-  name: string;
-  displayName: string;
-  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
-  required: boolean;
-  defaultValue: string | null;
-  options: string | null;
-  description: string | null;
-  displayOrder: number;
-}
-
-export interface MigrationDependency {
-  recipeId: string;
-  dependsOnId: string;
-  kind: 'PREREQUISITE' | 'RECOMMENDED_AFTER';
-}
-
-export interface MigrationDetail {
-  recipe: MigrationRecipeSummary;
-  variants: MigrationVariant[];
-  slots: MigrationSlot[];
-  dependencies: MigrationDependency[];
-  locked: boolean;
-  unlockTier: string | null;
-}
-
-export interface MigrationDryRunRepoApplicability {
-  repoId: string;
-  fullName: string | null;
-  status: 'APPLICABLE' | 'INCOMPATIBLE_STACK' | 'UNKNOWN_STACK' | 'NOT_LINKED';
-  reason: string | null;
-  estFilesLow: number | null;
-  estFilesHigh: number | null;
-  estCostLow: string | null;
-  estCostHigh: string | null;
-}
-
-export interface MigrationDryRunResult {
-  slug: string;
-  name: string;
-  estCostLowTotal: string | null;
-  estCostHighTotal: string | null;
-  estFilesLowTotal: number | null;
-  estFilesHighTotal: number | null;
-  sampleDiff: string | null;
-  perRepo: MigrationDryRunRepoApplicability[];
-}
-
-export interface MigrationApplyResponse {
-  executionRunId: string;
-  status: string;
-  message: string;
-}
-
-// Readymade Solutions library (R-327..R-331)
-
-export interface ReadymadeSolutionSummary {
-  id: string;
-  slug: string;
-  name: string;
-  tagline: string | null;
-  description: string | null;
-  category: string;
-  macroGroup: string;
-  tags: string | null;
-  kind: 'PRIMITIVE' | 'STACK' | 'INTEGRATION';
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
-  source: 'FIRST_PARTY' | 'COMMUNITY';
-  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
-  iconUrl: string | null;
-  thumbnailUrl: string | null;
-  samplePrUrl: string | null;
-  estFilesLow: number | null;
-  estFilesHigh: number | null;
-  estCreditsLow: string | null;
-  estCreditsHigh: string | null;
-  authorUserId: string | null;
-  authorOrgId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ReadymadeListItem {
-  solution: ReadymadeSolutionSummary;
-  locked: boolean;
-  unlockTier: string | null;
-}
-
-export interface ReadymadeVariant {
-  id: string;
-  solutionId: string;
-  language: string;
-  framework: string;
-  options: string | null;
-  specTemplate: string;
-  scaffoldKey: string | null;
-  estCreditsLow: string | null;
-  estCreditsHigh: string | null;
-  createdAt: string;
-}
-
-export interface ReadymadeSlot {
-  id: string;
-  solutionId: string;
-  name: string;
-  displayName: string;
-  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
-  required: boolean;
-  defaultValue: string | null;
-  options: string | null;
-  description: string | null;
-  displayOrder: number;
-}
-
-export interface ReadymadeDependency {
-  solutionId: string;
-  dependsOnId: string;
-  required: boolean;
-}
-
-export interface ReadymadeDetail {
-  solution: ReadymadeSolutionSummary;
-  variants: ReadymadeVariant[];
-  slots: ReadymadeSlot[];
-  dependencies: ReadymadeDependency[];
-  locked: boolean;
-  unlockTier: string | null;
-}
-
-export interface VariantResolutionResult {
-  bestMatch: ReadymadeVariant | null;
-  availableVariants: ReadymadeVariant[];
-  detectedLanguage: string | null;
-  detectedFramework: string | null;
-  reason: 'OK' | 'NO_VARIANT_FOR_STACK' | 'STACK_NOT_DETECTED' | 'REPO_NOT_LINKED';
-}
-
-export interface LibraryFacets {
-  categories: Record<string, number>;
-  macroGroups: Record<string, number>;
-}
+// Discovery-library DTOs are re-exported here for backwards compatibility. New discovery code
+// should import from the narrower module directly.
+export type {
+  LibraryFacets,
+  MigrationApplyResponse,
+  MigrationDependency,
+  MigrationDetail,
+  MigrationDryRunRepoApplicability,
+  MigrationDryRunResult,
+  MigrationListItem,
+  MigrationRecipeSummary,
+  MigrationSlot,
+  MigrationVariant,
+  ReadymadeDependency,
+  ReadymadeDetail,
+  ReadymadeListItem,
+  ReadymadeSlot,
+  ReadymadeSolutionSummary,
+  ReadymadeVariant,
+  VariantResolutionResult,
+} from './discoveryTypes';
 
 // v2.6.4 — PR Review + Code Review agents (paid tier only)
 //

@@ -36,7 +36,11 @@ export default function ProtectedRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (isLoading) {
+  // A persisted token makes the session authenticated before the async /me
+  // hydration has populated the user. Keep nested guards behind the same
+  // loading boundary; otherwise SuperAdminOnly (and other role gates) see a
+  // transient null user and redirect a valid session to /home.
+  if (isLoading || (isAuthenticated && !user)) {
     return (
       <div
         className='flex h-screen items-center justify-center'

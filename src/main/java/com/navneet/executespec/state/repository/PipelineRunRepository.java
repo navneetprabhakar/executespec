@@ -37,6 +37,42 @@ public interface PipelineRunRepository
   void updateStatusAndClearGate(@Param("runId") String runId, @Param("status") String status);
 
   /**
+   * Atomically claims a terminal transition for the active pipeline thread.
+   *
+   * <p>Cancellation can race the reviewer/validation thread: a read-then-save terminal write can
+   * otherwise overwrite the user's {@code CANCELLED} state with a late {@code COMPLETE}. The
+   * conditional update makes the terminal transition a one-writer claim; once it succeeds,
+   * cancellation observes a terminal status and cannot replace it, and once cancellation wins the
+   * update returns zero.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "
+          + "r.completedAt = :completedAt, r.statusReason = :statusReason, "
+          + "r.failureReason = :failureReason "
+          + "WHERE r.runId = :runId "
+          + "AND r.status NOT IN ('CANCELLED', 'PAUSED', 'COMPLETE', 'FAILED', 'PARTIAL')")
+  int claimTerminalTransitionWithReasons(
+      @Param("runId") String runId,
+      @Param("status") String status,
+      @Param("statusReason") String statusReason,
+      @Param("failureReason") String failureReason,
+      @Param("completedAt") Instant completedAt);
+
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "
+          + "r.completedAt = :completedAt "
+          + "WHERE r.runId = :runId "
+          + "AND r.status NOT IN ('CANCELLED', 'PAUSED', 'COMPLETE', 'FAILED', 'PARTIAL')")
+  int claimTerminalTransitionPreservingReasons(
+      @Param("runId") String runId,
+      @Param("status") String status,
+      @Param("completedAt") Instant completedAt);
+
+  /**
    * Atomic execution mode update — avoids read-modify-write race with clearGateSync/markApproved.
    */
   @Modifying
@@ -52,6 +88,77 @@ public interface PipelineRunRepository
   @Transactional
   @Query("UPDATE PipelineRun r SET r.currentGate = NULL WHERE r.runId = :runId")
   void clearCurrentGate(@Param("runId") String runId);
+
+  /**
+   * Claim the post-approval resume transition without overwriting concurrent lifecycle changes. The
+   * approval endpoint may race cancellation after it has read {@code AWAITING_APPROVAL}; only the
+   * caller that still observes that state may move the run to {@code APPROVAL_RESUMING}.
+   *
+   * @return one when this caller won the transition, zero when another lifecycle action already
+   *     changed the run state
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = 'APPROVAL_RESUMING', r.resumedAt = :resumedAt "
+          + "WHERE r.runId = :runId AND r.status = 'AWAITING_APPROVAL'")
+  int claimApprovalResume(@Param("runId") String runId, @Param("resumedAt") Instant resumedAt);
+
+  /**
+   * Atomically claim one crash-recovery attempt.
+   *
+   * <p>The boot scanner can run concurrently on two JVMs during a rolling restart. A
+   * read-modify-write of {@code resume_attempts} lets both instances dispatch the same run. The
+   * compare-and-set below makes the attempt counter the durable recovery lease: only one caller can
+   * advance it, and a recent execution heartbeat protects a still-live worker from being mistaken
+   * for a crashed one.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.resumeAttempts = :nextAttempt, r.resumedAt = :resumedAt, "
+          + "r.executingInstance = :instanceId, r.executionHeartbeat = :resumedAt "
+          + "WHERE r.runId = :runId "
+          + "AND r.status IN ('PLANNING', 'WORKING', 'REVIEWING') "
+          + "AND (r.resumeAttempts = :expectedAttempt "
+          + "     OR (r.resumeAttempts IS NULL AND :expectedAttempt = 0)) "
+          + "AND (r.executionHeartbeat IS NULL OR r.executionHeartbeat < :staleBefore)")
+  int claimCrashResume(
+      @Param("runId") String runId,
+      @Param("expectedAttempt") int expectedAttempt,
+      @Param("nextAttempt") int nextAttempt,
+      @Param("resumedAt") Instant resumedAt,
+      @Param("staleBefore") Instant staleBefore,
+      @Param("instanceId") String instanceId);
+
+  /**
+   * Claims execution ownership for a locally submitted/resumed pipeline without loading the full
+   * row. The owner compare-and-set prevents a second JVM from taking over a live worker while the
+   * worker's heartbeat is being refreshed.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.executingInstance = :instanceId, r.executionHeartbeat ="
+          + " :heartbeat WHERE r.runId = :runId AND r.status IN ('QUEUED', 'PLANNING',"
+          + " 'APPROVAL_RESUMING', 'WORKING', 'REVIEWING') AND (r.executingInstance IS NULL OR"
+          + " r.executingInstance = :instanceId)")
+  int claimExecutionOwner(
+      @Param("runId") String runId,
+      @Param("instanceId") String instanceId,
+      @Param("heartbeat") Instant heartbeat);
+
+  /** Refreshes a live worker lease only when this JVM still owns the run. */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.executionHeartbeat = :heartbeat "
+          + "WHERE r.runId = :runId AND r.executingInstance = :instanceId "
+          + "AND r.status IN ('QUEUED', 'PLANNING', 'APPROVAL_RESUMING', 'WORKING', 'REVIEWING')")
+  int refreshExecutionHeartbeat(
+      @Param("runId") String runId,
+      @Param("instanceId") String instanceId,
+      @Param("heartbeat") Instant heartbeat);
 
   List<PipelineRun> findByStatusIn(List<String> statuses);
 

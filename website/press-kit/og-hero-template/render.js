@@ -19,7 +19,7 @@ const path = require('path');
   await page.evaluate(() => document.fonts.ready);
   await page.waitForFunction(() => {
     const img = new Image();
-    img.src = 'screenshot.png';
+    img.src = '../current/05-run-result.png';
     return img.complete || img.decode().then(() => true);
   });
   await page.waitForTimeout(500);

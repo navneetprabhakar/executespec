@@ -1,0 +1,6 @@
+fixtureId=low-python-addition-v1
+tier=LOW
+source=def add(a, b):
+source=    return a - b
+task=Fix calculator.py so add(a, b) returns the sum. Preserve the function name and signature. Verify the result for 2 and 3, then call completeTask.
+heldOut=add(2, 3)==5; add(-2, 7)==5

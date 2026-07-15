@@ -10,18 +10,21 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Tests for DockerExecutor.
  *
- * <p>Tests that invoke actual Docker commands are guarded by {@code
- * assumeTrue(executor.isDockerAvailable(), "Docker not available...")} so they skip cleanly in CI
- * or environments without Docker. The reason string surfaces in the surefire report (replaces the
- * bare "Skipped: N" line that gave no hint why).
+ * <p>This class is tagged {@code integration} because the build/lifecycle cases pull {@code
+ * alpine:3.19} and invoke a real Docker daemon. Run it with {@code -Pintegration} when Docker and
+ * network access are intentionally available. Individual Docker cases remain guarded by {@code
+ * assumeTrue(executor.isDockerAvailable(), "Docker not available...")} so selected runs still skip
+ * cleanly when Docker is absent.
  */
 @DisplayName("DockerExecutor")
+@Tag("integration")
 class DockerExecutorTest {
 
   DockerExecutor executor;

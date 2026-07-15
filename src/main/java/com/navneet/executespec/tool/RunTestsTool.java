@@ -2,7 +2,6 @@ package com.navneet.executespec.tool;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -519,10 +518,6 @@ public class RunTestsTool implements Tool {
     if (nl >= 0 && nl < s.length() - 1) idx = nl + 1;
     return "... [head omitted] ...\n" + s.substring(idx);
   }
-
-  // Avoids unused-warning when stream/stdlib alternates compile.
-  @SuppressWarnings("unused")
-  private static final String UNUSED_REF = Arrays.toString(new String[0]);
 
   static List<String> buildProcessCommand(
       String containerId, String workdir, boolean useLoginShell, List<String> testIds) {

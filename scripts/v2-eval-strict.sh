@@ -8,7 +8,7 @@
 # Requires:
 #   - Server running (default http://localhost:8080) with strict-provider mode ON
 #   - Provider API keys configured (OPENAI / ANTHROPIC / GOOGLE)
-#   - Admin credentials (defaults: admin@executespec.ai / Admin@123)
+#   - Admin credentials via EMAIL and PASSWORD environment variables
 #
 # Usage:
 #   ./scripts/v2-eval-strict.sh                          # all S3/S4/S5 × 3 providers = 9 runs
@@ -31,7 +31,7 @@ mkdir -p "$OUT_DIR"
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-admin@executespec.ai}"
-PASSWORD="${PASSWORD:-Admin@123}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 
 BANDS_DEFAULT=(s3-medium s4-large s5-integration)
 PROVIDERS_DEFAULT=(anthropic openai gemini)
@@ -234,7 +234,7 @@ jq -s 'sort_by(.provider,.band)' "${RAW_DIR}"/*.result.json > "$JSON_OUT"
   echo
   echo "## Notes"
   echo
-  echo "- \`Verified\` is the V106 deterministic score; \`Est.\` is the demoted LLM accuracy."
+  echo "- \`Verified\` is the deterministic/hybrid validation headline and the only score used for gates; \`Est.\` is the demoted LLM accuracy diagnostic."
   echo "- \`Reason\` maps to the status_reason taxonomy (V107)."
   echo "- S5 multi-repo runs require a pre-seeded project with 2 linked repos. Set PROJECT_ID env var and extend this script if the default /api/runs path doesn't hydrate the project context."
   echo

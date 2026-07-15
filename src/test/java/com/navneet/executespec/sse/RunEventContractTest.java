@@ -111,6 +111,37 @@ class RunEventContractTest {
   }
 
   @Test
+  void initialRoutingDecisionCarriesAuditableRouteEvidence() {
+    RunEvent event =
+        RunEvent.initialRoutingDecision(
+            "run-1",
+            "task-1",
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            "openai",
+            "gpt-5.4",
+            true,
+            true,
+            List.of("openai/gpt-5.4", "anthropic/claude-sonnet-4-6"),
+            List.of("gemini/gemini-3-flash-preview"),
+            List.of("persisted BUG_FIX validation pass rate 80.00% from 10 tasks"));
+
+    assertEquals("INITIAL_ROUTING_DECISION", event.type());
+    assertEquals(
+        "Initial route: anthropic/claude-haiku-4-5-20251001 -> openai/gpt-5.4", event.payload());
+    assertEquals("anthropic", event.data().get("currentProvider"));
+    assertEquals("gpt-5.4", event.data().get("selectedModel"));
+    assertEquals(true, event.data().get("changed"));
+    assertEquals(true, event.data().get("observedQualityEvidenceUsed"));
+    assertEquals(
+        List.of("openai/gpt-5.4", "anthropic/claude-sonnet-4-6"),
+        event.data().get("consideredCandidates"));
+    assertEquals(
+        List.of("persisted BUG_FIX validation pass rate 80.00% from 10 tasks"),
+        event.data().get("reasons"));
+  }
+
+  @Test
   void taskWavePlanCarriesTypedAdvisoryEnvelope() {
     RunEvent event =
         RunEvent.taskWavePlan(

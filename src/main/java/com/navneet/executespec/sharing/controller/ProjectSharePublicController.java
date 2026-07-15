@@ -15,7 +15,9 @@ import com.navneet.executespec.prreview.entity.PrReviewComment;
 import com.navneet.executespec.prreview.repository.PrReviewCommentRepository;
 import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -43,6 +45,7 @@ public class ProjectSharePublicController {
   private final ProjectShareLinkService linkService;
   private final PipelineRunRepository runRepo;
   private final ValidationReportRepository reportRepo;
+  private final ValidationReportService reportService;
   private final CodeReviewScanRepository scanRepo;
   private final CodeReviewIssueRepository issueRepo;
   private final PrReviewRepository prReviewRepo;
@@ -131,6 +134,13 @@ public class ProjectSharePublicController {
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Validation report not found"));
     assertSameProject(reportRun.getProjectId(), link);
+    ValidationReportDTO reportDto =
+        reportService
+            .getByRunId(report.getRunId())
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Validation report not found"));
     linkService.recordView(link);
     return ResponseEntity.ok(
         new SharedValidationReport(
@@ -142,7 +152,9 @@ public class ProjectSharePublicController {
             report.getTestsPassed(),
             report.getTestsTotal(),
             null, // recommendation field removed in v2.5.10 — left null for back-compat
-            report.getCreatedAt()));
+            report.getCreatedAt(),
+            reportDto.rubricScore(),
+            reportDto.verificationLedger()));
   }
 
   @GetMapping("/api/shared/{token}/code-review")
@@ -280,7 +292,10 @@ public class ProjectSharePublicController {
       Integer testsPassed,
       Integer testsTotal,
       String recommendation,
-      Instant createdAt) {}
+      Instant createdAt,
+      Integer rubricScore,
+      java.util.List<com.navneet.executespec.report.model.VerificationEvidenceDTO>
+          verificationLedger) {}
 
   public record SharedCodeReview(
       java.util.UUID id,

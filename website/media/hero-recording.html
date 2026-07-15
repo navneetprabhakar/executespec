@@ -427,12 +427,12 @@
       <div class="app">
         <aside class="side">
           <div class="navitem" data-nav="Start">+ <span>Start</span></div>
-          <div class="navitem" data-nav="Work">◦ <span>Work</span></div>
+          <div class="navitem" data-nav="Work">◦ <span>Agent</span></div>
           <div class="navitem" data-nav="Projects">◦ <span>Projects</span></div>
           <div class="navitem">◦ <span>Team</span></div>
           <div class="navitem">◦ <span>Setup</span></div>
           <h5>RECENT WORK</h5>
-          <small>Token ledger export</small>
+          <small>Agent session · checkout API</small>
           <small>OAuth callback hardening</small>
           <small>CI autofix checks</small>
           <h5>PROJECTS</h5>
@@ -446,8 +446,8 @@
           <div class="top-actions"><span class="start">+ Start</span><span>⌘</span><span>☼</span><span>○</span></div>
 
           <section data-scene="workspace">
-            <h1>Start work</h1>
-            <p class="sub">Describe the change. We keep technical defaults out of the way.</p>
+            <h1>Agent control plane</h1>
+            <p class="sub">Describe the change. Keep the plan, actions, and evidence in one durable session.</p>
             <div class="cards">
               <div class="panel run-card"><b>Add OAuth2 callback hardening</b><span class="pill">COMPLETE</span><span class="score">91</span></div>
               <div class="panel run-card"><b>Token ledger export for runs</b><span class="pill">COMPLETE</span><span class="score">88</span></div>
@@ -460,7 +460,7 @@
 
           <section data-scene="compose">
             <h1>Start work</h1>
-            <p class="sub">Ask before coding. Show spend before execution.</p>
+            <p class="sub">Ask before coding. Show the route, spend, and approval boundary before execution.</p>
             <div class="compose-grid">
               <div class="panel compose-card">
                 <div class="label">What should change?</div>
@@ -484,7 +484,7 @@
 
           <section data-scene="plan">
             <h1>Approve the plan before execution starts</h1>
-            <p class="sub">Task list, token estimate, route, and cap are visible before coding.</p>
+            <p class="sub">Task list, provider route, token estimate, and cap are visible before coding.</p>
             <div class="plan-grid">
               <div class="panel plan">
                 <div class="label">Plan</div>
@@ -506,7 +506,7 @@
           </section>
 
           <section data-scene="live">
-            <h1>Live run · R-c79e84</h1>
+            <h1>Live agent session · R-c79e84</h1>
             <p class="sub"><span id="live-sub">2/4 tasks · $0.20 spent</span></p>
             <div class="live-grid">
               <div class="panel tasks">
@@ -534,7 +534,7 @@
 
           <section data-scene="result">
             <div class="result-title"><h1>Token transparency panel shipped</h1><span class="pill">READY</span></div>
-            <p class="sub">Verified score 91/100 · clean completion</p>
+            <p class="sub">Evidence summary · verified score 91/100 · clean completion</p>
             <div class="result-grid">
               <div class="panel signals">
                 <div class="label">Signals</div>
@@ -573,18 +573,18 @@
         </main>
       </div>
     </div>
-    <div class="caption" id="caption">Ship PRs your team will actually merge.</div>
+    <div class="caption" id="caption">Illustrative local product walkthrough · synthetic demo data.</div>
   </div>
 
   <script>
-    const promptText = 'Add token transparency to every run: estimate before approval, live input/output/cache tokens while coding, and final cost by provider.';
+    const promptText = 'Add token transparency to every run: estimate before approval, show live evidence while agents work, and keep a final provider ledger.';
     const scenes = [
-      ['workspace', 0, 6, 'Ship PRs your team will actually merge.', 'Start · ExecuteSpec', 'Start'],
-      ['compose', 6, 15, 'Write the change in plain English. See estimated tokens before execution.', 'Start · ExecuteSpec', 'Start'],
-      ['plan', 15, 24, 'Approve the task list, model route, token estimate, and hard dollar cap.', 'Plan gate · ExecuteSpec', 'Work'],
-      ['live', 24, 38, 'Watch input, output, cache-read tokens, and spend while agents work.', 'Live · ExecuteSpec', 'Work'],
-      ['result', 38, 47, 'The final report explains the score and provider cost ledger.', 'Result · ExecuteSpec', 'Work'],
-      ['pr', 47, 54, 'A real PR, with validation and token transparency attached.', 'Pull request · GitHub', 'Projects'],
+      ['workspace', 0, 6, 'Illustrative demo · durable agent control plane for reviewable delivery.', 'Start · ExecuteSpec', 'Start'],
+      ['compose', 6, 15, 'Illustrative demo · write the change and see estimated usage before execution.', 'Start · ExecuteSpec', 'Start'],
+      ['plan', 15, 24, 'Illustrative demo · approve the task list, route, estimate, and cap.', 'Plan gate · ExecuteSpec', 'Work'],
+      ['live', 24, 38, 'Illustrative demo · watch actions, evidence, usage, and spend while agents work.', 'Live · ExecuteSpec', 'Work'],
+      ['result', 38, 47, 'Illustrative demo · final report with score and provider ledger.', 'Result · ExecuteSpec', 'Work'],
+      ['pr', 47, 54, 'Illustrative demo · PR summary with validation evidence attached.', 'Pull request · GitHub', 'Projects'],
     ];
     const fmt = n => Math.round(n).toLocaleString('en-US');
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

@@ -7,6 +7,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanReque
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
@@ -72,6 +73,16 @@ public class AgentSessionService {
   public List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
     requireOrg(user);
     return sessionReadService.listEvents(sessionId, user);
+  }
+
+  public List<AgentActionEvent> listEvents(String sessionId, int limit, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.listEvents(sessionId, limit, user);
+  }
+
+  public AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.replayEvents(sessionId, after, user);
   }
 
   public List<AgentTurnResponse> listTurns(
@@ -182,6 +193,17 @@ public class AgentSessionService {
   @Transactional
   public void disconnectStreamTurn(StreamTurnContext ctx) {
     streamTurnLifecycle.disconnect(ctx);
+  }
+
+  @Transactional
+  public void disconnectStreamTurn(StreamTurnContext ctx, String partialSummary) {
+    disconnectStreamTurn(ctx, partialSummary, null);
+  }
+
+  @Transactional
+  public void disconnectStreamTurn(
+      StreamTurnContext ctx, String partialSummary, RunCostTracker.Snapshot cost) {
+    streamTurnLifecycle.disconnect(ctx, partialSummary, cost);
   }
 
   public IntentDecision interpret(InterpretIntentRequest request) {

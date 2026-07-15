@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "record": "node record-hero.mjs",
+    "test": "node --test record-hero.test.mjs",
     "postinstall-note": "After install run: npx playwright install chromium"
   },
   "devDependencies": {

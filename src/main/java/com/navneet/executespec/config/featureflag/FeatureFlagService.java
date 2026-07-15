@@ -17,6 +17,8 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,8 +78,9 @@ public class FeatureFlagService implements MessageListener {
 
     // Update local cache immediately
     putCacheValue(key, value);
-    // Publish to Redis so other instances pick it up
-    redisTemplate.convertAndSend(REDIS_CHANNEL, key);
+    // Publish only after commit. Publishing inside the transaction lets this JVM (or another
+    // subscriber) reload the still-old DB row and overwrite the write-through cache immediately.
+    publishAfterCommit(key);
 
     // When force_logout is enabled, stamp the epoch so all existing JWTs are invalidated
     if ("force_logout".equals(key) && "true".equalsIgnoreCase(value)) {
@@ -106,7 +109,7 @@ public class FeatureFlagService implements MessageListener {
     flag.setUpdatedAt(Instant.now());
     repository.save(flag);
     putCacheValue(key, value);
-    redisTemplate.convertAndSend(REDIS_CHANNEL, key);
+    publishAfterCommit(key);
   }
 
   public List<FeatureFlag> listAll() {
@@ -147,6 +150,20 @@ public class FeatureFlagService implements MessageListener {
           java.util.Map<String, String> next = new java.util.HashMap<>(current);
           next.put(key, value);
           return Map.copyOf(next);
+        });
+  }
+
+  private void publishAfterCommit(String key) {
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      redisTemplate.convertAndSend(REDIS_CHANNEL, key);
+      return;
+    }
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            redisTemplate.convertAndSend(REDIS_CHANNEL, key);
+          }
         });
   }
 }
