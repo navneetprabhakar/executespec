@@ -236,6 +236,8 @@ scripts/v2-eval.sh   # LOW/MEDIUM/HIGH × anthropic/openai/gemini, outputs scrip
 ```bash
 # Required — LLM
 # The Spring AI provider blocks in application.yml resolve these environment variables at startup.
+# Anthropic/OpenAI role beans are optional at boot: if a key is absent, the corresponding role
+# remains inactive and the V2 router can still run a configured provider such as native DeepSeek.
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 

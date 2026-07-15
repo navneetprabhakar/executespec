@@ -14,6 +14,7 @@ import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.ApplicationContext;
@@ -77,25 +78,48 @@ public class AgentModelConfig {
         // 2026-05-16 (Spring Boot 3.5 upgrade) — Spring 6.2 narrows bean types by reflecting the
         // returned instance, so plannerModel + workerModel + reviewerModel all register as
         // AnthropicChatModel at runtime (whatever the declared `ChatModel` return type says).
-        // That made `ctx.getBean(AnthropicChatModel.class)` ambiguous. Qualify by the @Bean
-        // name "anthropicChatModel" so we always resolve the canonical bean.
-        AnthropicChatModel model = ctx.getBean("anthropicChatModel", AnthropicChatModel.class);
-        if (model == null) {
-          throw new IllegalStateException(
-              "Anthropic provider requested but ANTHROPIC_API_KEY not configured");
-        }
-        yield model;
+        // Use a typed provider lookup so a missing optional bean (Spring's NullBean) does not
+        // abort startup.
+        yield optionalModel(
+            "anthropic", ctx.getBeanProvider(AnthropicChatModel.class), "ANTHROPIC_API_KEY");
       }
       case "openai" -> {
-        OpenAiChatModel model = ctx.getBean("openAiChatModel", OpenAiChatModel.class);
-        if (model == null) {
-          throw new IllegalStateException(
-              "OpenAI provider requested but OPENAI_API_KEY not configured");
-        }
-        yield model;
+        yield optionalModel("openai", ctx.getBeanProvider(OpenAiChatModel.class), "OPENAI_API_KEY");
       }
       default -> throw new IllegalArgumentException("Unknown provider: " + provider);
     };
+  }
+
+  /**
+   * Resolve an optional system chat model without turning Spring's {@code NullBean} placeholder
+   * into a startup failure. The role beans are retained for backwards compatibility when their
+   * provider key is configured, but the V2 router can run a different provider (for example native
+   * DeepSeek) without requiring the default Anthropic/OpenAI bean to exist at boot.
+   */
+  static <T extends ChatModel> T optionalModel(
+      String provider,
+      org.springframework.beans.factory.ObjectProvider<T> modelProvider,
+      String keyName) {
+    try {
+      T model = modelProvider.getIfAvailable();
+      if (model == null) {
+        log.warn(
+            "[AgentModelConfig] {} provider unavailable ({} not configured); role bean will remain"
+                + " inactive",
+            provider,
+            keyName);
+      }
+      return model;
+    } catch (BeansException ex) {
+      // A @Bean method returning null is represented by Spring as a NullBean. Some Spring
+      // versions surface that placeholder through a typed ObjectProvider; treat it exactly like
+      // an absent provider rather than failing the whole application context.
+      log.warn(
+          "[AgentModelConfig] {} provider bean unavailable ({}); role bean will remain inactive",
+          provider,
+          ex.getMessage());
+      return null;
+    }
   }
 
   /**
