@@ -2,7 +2,7 @@
 
 ## Decision
 
-Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V272; any future schema cleanup may start at V273 or later.
+Existing databases must upgrade from their current migration head without manual history edits. Applied `V*.sql` files are immutable. The current release ends at V272; any future schema cleanup may start at V273 or later. The historical V119 source is intentionally present in the release classpath because dev and older installations may already record it as applied.
 
 The default runtime does not suppress missing applied migrations. A package with an incomplete
 `classpath:db/migration` chain must fail Flyway validation rather than silently starting against an
@@ -39,7 +39,7 @@ The `model_overrides_json` cleanup treats this legacy TEXT column defensively: v
 
 | Path | Status |
 |---|---|
-| V1–V272 | Existing history; do not rewrite or rename |
+| V1–V272 | Existing history; do not rewrite or rename; V119 is retained in source for applied-history validation |
 | V256–V272 cleanup, flags, execution intent, replay cursor, provider safeguards, boot evidence, capability profiles, and action-result dedupe | Forward migrations; source/classpath inventory expects the complete chain |
 | Squashed clean-install baseline | Not yet generated; deferred until schema freeze; separate clean-install profile only, never a replacement for the immutable V1–V262 history |
 | Upgrade integration test | Testcontainers/Flyway suite proves V255→V272 (17 forward migrations), idempotent rerun, and historical data preservation |
