@@ -120,7 +120,10 @@ fi
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
   ( cd "$REPO" && JAVA_HOME=$JAVA_HOME mvn -q spring-boot:run -Dspring-boot.run.fork=false \
       -Dspring-boot.run.profiles="$ES_PROFILE" > "$JOBS_DIR/backend.log" 2>&1 ) &
-  curl -s --retry 90 --retry-delay 3 --retry-connrefused --retry-all-errors --max-time 6 \
+# `curl` without `--fail` treats an HTTP 503 during Spring startup as success, allowing the
+# login/flag POSTs below to race the connector. Wait for an actual 2xx health response and retain
+# the bounded retry window so a broken boot fails before Harbor spends provider tokens.
+  curl -fsS --retry 90 --retry-delay 3 --retry-connrefused --retry-all-errors --max-time 6 \
       localhost:8080/actuator/health >/dev/null 2>&1; }
 curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend (profile=$ES_PROFILE)…"; start_backend; }
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
@@ -129,6 +132,11 @@ export ES_ADMIN_PW="${ES_ADMIN_PW:-${ESPEC_ADMIN_PW:-}}"
 TK=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
+if [ -z "$TK" ]; then
+  LOG "FATAL: benchmark admin login failed; refusing to start Harbor so no provider tokens are spent"
+  tail -40 "$JOBS_DIR/backend.log" 2>/dev/null || true
+  exit 1
+fi
 set_flag(){
   local flag="$1" value="$2"
   curl -fsS -X PUT "localhost:8080/api/admin/feature-flags/$flag" -H "Authorization: Bearer $TK" \
