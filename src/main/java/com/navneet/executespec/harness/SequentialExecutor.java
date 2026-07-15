@@ -4158,27 +4158,18 @@ to boot — skip it for those.""";
       var profiles = matrixProps.getCapabilityProfiles();
       com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile profile = null;
       if (provider != null && model != null) {
-        String modelKey = provider + "/" + model;
-        profile = profiles.get(modelKey);
-        if (profile == null) {
-          profile =
-              profiles.entrySet().stream()
-                  .filter(e -> e.getKey().equalsIgnoreCase(modelKey))
-                  .map(Map.Entry::getValue)
-                  .findFirst()
-                  .orElse(null);
+        // Resolve legacy/case-variant model names before looking up the model-specific profile.
+        // The worker receives the resolved route from ModelResolver, which may still carry an
+        // in-flight alias; profile selection must use the same canonical identity as ModelRegistry
+        // or a model override silently falls back to the provider profile.
+        String canonicalModel = canonicalProfileModel(model);
+        profile = findCapabilityProfile(profiles, provider + "/" + canonicalModel);
+        if (profile == null && !canonicalModel.equals(model)) {
+          profile = findCapabilityProfile(profiles, provider + "/" + model);
         }
       }
       if (profile == null && provider != null) {
-        profile = profiles.get(provider);
-        if (profile == null) {
-          profile =
-              profiles.entrySet().stream()
-                  .filter(e -> e.getKey().equalsIgnoreCase(provider))
-                  .map(Map.Entry::getValue)
-                  .findFirst()
-                  .orElse(null);
-        }
+        profile = findCapabilityProfile(profiles, provider);
       }
       if (profile == null) return new int[] {0, 0};
       int warn = profile.getStagnationWarnAfter() == null ? 0 : profile.getStagnationWarnAfter();
@@ -4194,6 +4185,27 @@ to boot — skip it for those.""";
           e.getMessage());
       return new int[] {0, 0};
     }
+  }
+
+  private String canonicalProfileModel(String model) {
+    if (model == null || matrixProps.getLegacyAliases() == null) return model;
+    String aliasTarget = matrixProps.getLegacyAliases().get(model.toLowerCase(Locale.ROOT));
+    return aliasTarget == null ? model : aliasTarget;
+  }
+
+  private static com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile
+      findCapabilityProfile(
+          Map<String, com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile>
+              profiles,
+          String key) {
+    if (key == null) return null;
+    var exact = profiles.get(key);
+    if (exact != null) return exact;
+    return profiles.entrySet().stream()
+        .filter(entry -> entry.getKey().equalsIgnoreCase(key))
+        .map(Map.Entry::getValue)
+        .findFirst()
+        .orElse(null);
   }
 
   private boolean capabilityProfilesEnabled() {
