@@ -29,9 +29,8 @@ import lombok.Builder;
  * @param temperature optional sampling temperature (default 0.0 for determinism)
  * @param maxTokens optional output cap; provider-specific defaults apply if null
  * @param readTimeoutSeconds optional per-call HTTP read-timeout override; provider clients use
- *     their default if null. Currently plumbed only into Gemini (where the default 60s read-timeout
- *     trips up large single-shot OutlinePlanner calls on gemini-3-pro-preview). Anthropic + OpenAI
- *     clients ignore the field today — Spring AI manages their HTTP timeouts.
+ *     their default if null. Gemini and the OpenAI-wire DeepSeek route use this value; OpenAI,
+ *     OpenRouter, and Fireworks retain the shared 120-second transport default.
  * @param toolChoice optional OpenAI-wire {@code tool_choice} override ({@code "auto"} | {@code
  *     "required"} | {@code "none"}). Null ⇒ the client's default ({@code "auto"}). Honoured only by
  *     the OpenAI-wire clients (OpenAI / DeepSeek / OpenRouter via {@code OpenAiNativeToolClient});

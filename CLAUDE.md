@@ -244,6 +244,7 @@ GOOGLE_API_KEY=                  # Gemini API key; retained for operator regress
 OPENROUTER_API_KEY=              # Enterprise gateway — DeepSeek / Qwen / Kimi / MiMo / GLM via openrouter.ai. Empty = provider registered but every call short-circuits with "OpenRouter api-key not configured."
 DEEPSEEK_API_KEY=                # Native DeepSeek (api.deepseek.com). Empty = provider disabled.
 FIREWORKS_API_KEY=               # Fireworks AI OpenAI-wire route for Chinese open models. Empty = provider disabled; live slug/latency smoke requires a real key.
+DEEPSEEK_READ_TIMEOUT_SECONDS=   # Optional native DeepSeek read window; defaults to 300s. Other OpenAI-wire providers stay at 120s.
 
 # Optional — Integrations
 # (GITHUB_PAT removed 2026-05-23 — there is no system GitHub PAT; every GitHub op uses the caller's own PAT)
