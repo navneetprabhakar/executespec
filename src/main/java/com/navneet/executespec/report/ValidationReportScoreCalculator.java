@@ -46,22 +46,26 @@ final class ValidationReportScoreCalculator {
     if (testsTotal > 0) {
       double tests = 100 * clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
       if (gamingGuards && coverageLevel != null) {
-        tests = Math.min(tests, switch (coverageLevel) {
-          case "NONE" -> 30;
-          case "PARTIAL" -> 70;
-          default -> 100;
-        });
+        tests =
+            Math.min(
+                tests,
+                switch (coverageLevel) {
+                  case "NONE" -> 30;
+                  case "PARTIAL" -> 70;
+                  default -> 100;
+                });
       }
       weighted += 20 * tests;
       weight += 20;
     } else if (coverageLevel != null) {
-      Double tests = switch (coverageLevel) {
-        case "GOOD", "COMPREHENSIVE" -> 70.0;
-        case "PARTIAL" -> 40.0;
-        case "UNKNOWN" -> 50.0;
-        case "NONE" -> 10.0;
-        default -> null;
-      };
+      Double tests =
+          switch (coverageLevel) {
+            case "GOOD", "COMPREHENSIVE" -> 70.0;
+            case "PARTIAL" -> 40.0;
+            case "UNKNOWN" -> 50.0;
+            case "NONE" -> 10.0;
+            default -> null;
+          };
       if (tests != null) {
         weighted += 20 * tests;
         weight += 20;
@@ -75,8 +79,16 @@ final class ValidationReportScoreCalculator {
     weight += 5;
     if (weight <= 0) return 0;
     int raw = (int) clamp(Math.round(weighted / weight), 0, 100);
-    return Math.min(raw, trustCap(raw, buildPassed, testsPassed, testsTotal, reviewerVerdict,
-        unfixedCriticals, coverageLevel));
+    return Math.min(
+        raw,
+        trustCap(
+            raw,
+            buildPassed,
+            testsPassed,
+            testsTotal,
+            reviewerVerdict,
+            unfixedCriticals,
+            coverageLevel));
   }
 
   static int multiplicative(
@@ -88,30 +100,43 @@ final class ValidationReportScoreCalculator {
       Integer endpointCoverage,
       String coverageLevel,
       BootVerification bootVerification) {
-    double build = bootVerification != null
-        ? ValidationReportScorePolicy.bootSlotScore(bootVerification.verdict()) / 100.0
-        : (Boolean.TRUE.equals(buildPassed) ? 1 : 0);
-    double tests = testsTotal <= 0
-        ? ValidationReportScorePolicy.testFactorFromCoverageLevel(coverageLevel)
-        : clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
+    double build =
+        bootVerification != null
+            ? ValidationReportScorePolicy.bootSlotScore(bootVerification.verdict()) / 100.0
+            : (Boolean.TRUE.equals(buildPassed) ? 1 : 0);
+    double tests =
+        testsTotal <= 0
+            ? ValidationReportScorePolicy.testFactorFromCoverageLevel(coverageLevel)
+            : clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
     double reviewer = reviewerVerdict == null ? .5 : reviewerFactor(reviewerVerdict);
     double endpoint = endpointCoverage == null ? 1 : clamp(endpointCoverage / 100.0, 0, 1);
     if ("CLEAN".equals(reviewerVerdict) || "FIXED_ISSUES".equals(reviewerVerdict)) {
       endpoint = Math.max(endpoint, reviewer);
     }
-    if (testsTotal <= 0 && ("CLEAN".equals(reviewerVerdict) || "FIXED_ISSUES".equals(reviewerVerdict))
-        && endpointCoverage != null && endpointCoverage >= 95) {
+    if (testsTotal <= 0
+        && ("CLEAN".equals(reviewerVerdict) || "FIXED_ISSUES".equals(reviewerVerdict))
+        && endpointCoverage != null
+        && endpointCoverage >= 95) {
       tests = Math.max(tests, reviewer);
     }
     double criticalDamper = Math.max(.5, 1 - .05 * Math.max(0, unfixedCriticals));
-    return (int) clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
+    return (int)
+        clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
   }
 
-  static int rubric(Boolean buildPassed, int testsPassed, int testsTotal, String reviewerVerdict,
-      int unfixedCriticals, Integer endpointCoverage, String coverageLevel) {
+  static int rubric(
+      Boolean buildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdict,
+      int unfixedCriticals,
+      Integer endpointCoverage,
+      String coverageLevel) {
     int total = Boolean.TRUE.equals(buildPassed) ? 25 : 0;
-    total += testsTotal <= 0 ? ValidationReportScorePolicy.rubricTestPointsFromCoverageLevel(coverageLevel)
-        : (int) Math.round(20 * clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1));
+    total +=
+        testsTotal <= 0
+            ? ValidationReportScorePolicy.rubricTestPointsFromCoverageLevel(coverageLevel)
+            : (int) Math.round(20 * clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1));
     total += reviewerVerdict == null ? 10 : (int) (reviewerScore(reviewerVerdict) * .2);
     total += ValidationReportScorePolicy.rubricEndpointPoints(endpointCoverage);
     total += Math.max(0, 10 - Math.max(0, unfixedCriticals));
@@ -139,8 +164,14 @@ final class ValidationReportScoreCalculator {
     };
   }
 
-  private static int trustCap(int raw, Boolean build, int passed, int total, String reviewer,
-      int criticals, String coverage) {
+  private static int trustCap(
+      int raw,
+      Boolean build,
+      int passed,
+      int total,
+      String reviewer,
+      int criticals,
+      String coverage) {
     int cap = 100;
     if ("REVIEW_FAILED".equals(reviewer)) cap = Math.min(cap, 70);
     else if ("UNRESOLVED_ISSUES".equals(reviewer)) cap = Math.min(cap, 80);

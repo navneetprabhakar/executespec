@@ -1658,8 +1658,16 @@ public class ValidationReportService {
       Integer endpointCoveragePercent,
       boolean gamingGuards) {
     return computeVerifiedScoreAdditive(
-        finalBuildPassed, testsPassed, testsTotal, reviewerVerdictName, unfixedCriticalCount,
-        testCoverageLevel, filesGenerated, endpointCoveragePercent, gamingGuards, null);
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        null);
   }
 
   /**
@@ -1982,8 +1990,14 @@ public class ValidationReportService {
       BootVerification bootVerification) {
 
     return ValidationReportScoreCalculator.multiplicative(
-        finalBuildPassed, testsPassed, testsTotal, reviewerVerdictName, unfixedCriticalCount,
-        endpointCoveragePercent, testCoverageLevel, bootVerification);
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        bootVerification);
   }
 
   private int computeVerifiedScoreMultiplicativeLegacyUnused2(

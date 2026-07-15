@@ -138,7 +138,8 @@ class ModelResolverAdaptiveOptInTest {
 
   @Test
   void deepSeekKeepsNativePrimaryEvenWhenAdaptiveRoutingPrefersFireworks() {
-    ModelMatrixProperties.ProviderModels nativeDeepSeek = new ModelMatrixProperties.ProviderModels();
+    ModelMatrixProperties.ProviderModels nativeDeepSeek =
+        new ModelMatrixProperties.ProviderModels();
     nativeDeepSeek.setPlanning("deepseek-v4-pro-native");
     nativeDeepSeek.setWorkhorse("deepseek-v4-pro-native");
     nativeDeepSeek.setLightweight("deepseek-v4-flash-native");
@@ -150,8 +151,9 @@ class ModelResolverAdaptiveOptInTest {
     matrixProps.setProviders(Map.of("deepseek", nativeDeepSeek, "fireworks", fireworks));
     matrixProps.setFailoverOrder(Map.of("deepseek", java.util.List.of("openrouter", "fireworks")));
 
-    ModelResolver r = new ModelResolver(
-        matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry(), featureFlagService);
+    ModelResolver r =
+        new ModelResolver(
+            matrixProps, healthTracker, perfTracker, new SimpleMeterRegistry(), featureFlagService);
     when(healthTracker.isHealthy(LlmProvider.DEEPSEEK)).thenReturn(true);
     when(healthTracker.isHealthy(LlmProvider.FIREWORKS)).thenReturn(true);
     when(featureFlagService.isEnabled(ModelResolver.FLAG_ADAPTIVE_ROUTING)).thenReturn(true);

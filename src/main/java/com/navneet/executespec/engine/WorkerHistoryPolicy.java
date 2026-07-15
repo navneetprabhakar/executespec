@@ -17,7 +17,8 @@ final class WorkerHistoryPolicy {
     if (s == null) return "";
     if (s.length() <= max) return s;
     int end = max - 1;
-    if (end > 0 && Character.isHighSurrogate(s.charAt(end - 1))
+    if (end > 0
+        && Character.isHighSurrogate(s.charAt(end - 1))
         && Character.isLowSurrogate(s.charAt(end))) end--;
     return s.substring(0, end) + "…";
   }
@@ -27,9 +28,12 @@ final class WorkerHistoryPolicy {
       String message = t.getMessage();
       if (message == null) continue;
       String lower = message.toLowerCase(Locale.ROOT);
-      if (lower.contains("context length") || lower.contains("context window")
-          || lower.contains("context_length_exceeded") || lower.contains("maximum context")
-          || lower.contains("prompt is too long") || lower.contains("input is too long")
+      if (lower.contains("context length")
+          || lower.contains("context window")
+          || lower.contains("context_length_exceeded")
+          || lower.contains("maximum context")
+          || lower.contains("prompt is too long")
+          || lower.contains("input is too long")
           || lower.contains("too many tokens")
           || lower.contains("exceeds the maximum number of tokens")) return true;
     }
@@ -38,24 +42,37 @@ final class WorkerHistoryPolicy {
 
   static List<Message> hardTrimHistory(List<Message> history) {
     if (history == null || history.size() < 4) return null;
-    if (history.size() < 8 && history.stream().noneMatch(m -> m instanceof ToolResponseMessage)) return null;
+    if (history.size() < 8 && history.stream().noneMatch(m -> m instanceof ToolResponseMessage))
+      return null;
     int n = history.size();
     int cut = -1;
     for (int i = Math.max(3, n - 8); i >= 3; i--) {
-      if (history.get(i) instanceof AssistantMessage) { cut = i; break; }
+      if (history.get(i) instanceof AssistantMessage) {
+        cut = i;
+        break;
+      }
     }
     if (cut < 0) {
       for (int i = Math.min(n - 1, n - 9); i >= 3; i--) {
-        if (history.get(i) instanceof AssistantMessage) { cut = i; break; }
+        if (history.get(i) instanceof AssistantMessage) {
+          cut = i;
+          break;
+        }
       }
     }
     if (cut < 0) return truncateOversizedToolResponses(history);
     List<Message> out = new ArrayList<>(n - cut + 2);
     out.add(history.get(0));
-    String task = history.get(1) instanceof UserMessage um && um.getText() != null ? um.getText() : "";
-    out.add(new UserMessage(task + "\n\n--- NOTE: " + (cut - 2)
-        + " earlier conversation turns were DROPPED to recover from a context-window overflow."
-        + " Re-read any file you are no longer sure about before editing it. ---"));
+    String task =
+        history.get(1) instanceof UserMessage um && um.getText() != null ? um.getText() : "";
+    out.add(
+        new UserMessage(
+            task
+                + "\n\n--- NOTE: "
+                + (cut - 2)
+                + " earlier conversation turns were DROPPED to recover from a context-window"
+                + " overflow. Re-read any file you are no longer sure about before editing it."
+                + " ---"));
     out.addAll(history.subList(cut, n));
     return out;
   }
@@ -64,17 +81,26 @@ final class WorkerHistoryPolicy {
     List<Message> out = new ArrayList<>(history.size());
     boolean changed = false;
     for (Message message : history) {
-      if (!(message instanceof ToolResponseMessage responses) || responses.getResponses() == null
-          || responses.getResponses().isEmpty()) { out.add(message); continue; }
+      if (!(message instanceof ToolResponseMessage responses)
+          || responses.getResponses() == null
+          || responses.getResponses().isEmpty()) {
+        out.add(message);
+        continue;
+      }
       List<ToolResponseMessage.ToolResponse> bounded = new ArrayList<>();
       boolean responseChanged = false;
       for (ToolResponseMessage.ToolResponse response : responses.getResponses()) {
         String data = response.responseData();
-        if (data != null && data.length() > 8_000) { data = data.substring(0, 8_000) + "\n[context overflow trim]"; responseChanged = true; }
+        if (data != null && data.length() > 8_000) {
+          data = data.substring(0, 8_000) + "\n[context overflow trim]";
+          responseChanged = true;
+        }
         bounded.add(new ToolResponseMessage.ToolResponse(response.id(), response.name(), data));
       }
-      if (responseChanged) { out.add(ToolResponseMessage.builder().responses(bounded).build()); changed = true; }
-      else out.add(message);
+      if (responseChanged) {
+        out.add(ToolResponseMessage.builder().responses(bounded).build());
+        changed = true;
+      } else out.add(message);
     }
     return changed ? out : null;
   }

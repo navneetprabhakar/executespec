@@ -259,8 +259,26 @@ class RunLifecycleServiceCrashClaimTest {
 
     RunLifecycleService service =
         new RunLifecycleService(
-            runRepo, taskRepo, null, null, null, controlPort, null, null, null, null, null, null,
-            null, null, null, null, null, null, null, null);
+            runRepo,
+            taskRepo,
+            null,
+            null,
+            null,
+            controlPort,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
 
     assertThat(service.resumeAfterCrash(run.getRunId()))
         .isEqualTo(RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE);
