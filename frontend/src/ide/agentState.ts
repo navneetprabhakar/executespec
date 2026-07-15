@@ -36,6 +36,36 @@ export type StreamTimelineItem = {
   detail?: string;
 };
 
+/**
+ * Convert the server's semantic tool-progress event into the same compact timeline item used by
+ * live and replayed Web streams.  The CLI already preserves these handoff/provider events in its
+ * surface-neutral transcript; keeping the conversion here prevents the Web adapter from silently
+ * dropping them on either the live POST-SSE path or durable replay.
+ */
+export function toolEventTimelineItem(
+  event: api.AgentStreamToolEvent,
+  id: string,
+  streamSequence?: number,
+): StreamTimelineItem {
+  const semantic = String(event.semantic ?? '').toLowerCase();
+  const role = event.role ?? event.agent_role;
+  const provider = event.provider ?? event.provider_name;
+  const model = event.model ?? event.model_name;
+  const title =
+    semantic === 'handoff' || role || provider || model
+      ? 'Provider/model handoff'
+      : (event.name ?? event.type ?? event.kind ?? 'Agent update');
+  const detail = [
+    role,
+    provider && model ? `${provider}/${model}` : (provider ?? model),
+    event.status ?? event.state,
+    event.detail ?? event.message ?? event.reason,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return {id, streamSequence, type: 'system', title, detail: detail || undefined};
+}
+
 export type PendingAction = {
   sessionId: string;
   turnId: string;
@@ -366,6 +396,11 @@ function hydratePersistedEvents(
         title: 'Tool result',
         detail: String(payload.result ?? ''),
       });
+    } else if (type === 'TOOL_EVENT') {
+      next = appendTimeline(
+        next,
+        toolEventTimelineItem(payload as unknown as api.AgentStreamToolEvent, id, streamSequence),
+      );
     } else if (type === 'TURN_TEXT') {
       next = {...next, streamText: next.streamText + String(payload.text ?? '')};
       next = appendTimeline(next, {
@@ -461,6 +496,7 @@ function persistedTimelineId(
   if (type === 'PROPOSAL') return `proposal:${turnId}`;
   if (type === 'TOOL_CALL') return `tool:${itemId}`;
   if (type === 'TOOL_RESULT') return `result:${itemId}`;
+  if (type === 'TOOL_EVENT') return `event:${itemId}`;
   if (type === 'TURN_TEXT') return `text:${turnId}`;
   if (type === 'TURN_DONE') return `usage:${turnId}`;
   return `persisted:${event.streamSequence ?? event.id}`;
