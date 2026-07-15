@@ -145,6 +145,9 @@ import lombok.Builder;
  *     stall class is structurally avoided), deterministic (fires for every model, including ones
  *     too weak to self-verify), bounded per task, inert on remote runs and when no runner resolves.
  *     This is the edit→run→observe loop; supersedes V209/V217 on graduation.
+ * @param strictProvider operator/evaluation route pin. When true, this worker pass must not enter
+ *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
+ *     allow-listed fallback instead. Null/false preserves normal routing.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -169,7 +172,8 @@ public record WorkerTaskRequest(
     Boolean criticPass,
     Boolean verifyBeforeComplete,
     Boolean progressV2,
-    Boolean autoVerify) {
+    Boolean autoVerify,
+    Boolean strictProvider) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
