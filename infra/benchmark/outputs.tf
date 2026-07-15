@@ -8,12 +8,12 @@ output "zone" {
 }
 
 output "external_ip" {
-  description = "Global load balancer IP for benchmark.executespec.ai"
+  description = "Global load balancer IP for the configured benchmark domain"
   value       = google_compute_global_address.lb.address
 }
 
 output "load_balancer_ip" {
-  description = "Cloudflare A-record target for benchmark.executespec.ai"
+  description = "Cloudflare A-record target for the configured benchmark domain"
   value       = google_compute_global_address.lb.address
 }
 
