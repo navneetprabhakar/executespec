@@ -591,6 +591,86 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('SCOUT returned cited files');
   });
 
+  it('drains paginated replay pages so older activity is not lost on reload', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.replayAgentEvents.mockImplementation(async (_sessionId: string, after?: number | null) =>
+      after == null
+        ? {
+            events: [
+              {
+                id: 'event-page-1',
+                sessionId: 's1',
+                actionId: null,
+                type: 'SUBAGENT_STARTED',
+                payloadJson: JSON.stringify({summary: 'SCOUT started'}),
+                createdAt: '2026-06-20T00:00:01Z',
+                streamSequence: 1,
+              },
+            ],
+            lastSequence: 1,
+            snapshot: true,
+            hasMore: true,
+            nextSequence: 1,
+          }
+        : {
+            events: [
+              {
+                id: 'event-page-2',
+                sessionId: 's1',
+                actionId: null,
+                type: 'SUBAGENT_COMPLETED',
+                payloadJson: JSON.stringify({summary: 'SCOUT returned cited files'}),
+                createdAt: '2026-06-20T00:00:02Z',
+                streamSequence: 2,
+              },
+            ],
+            lastSequence: 2,
+            snapshot: false,
+            hasMore: false,
+            nextSequence: null,
+          },
+    );
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+    await flush();
+
+    expect(api.replayAgentEvents).toHaveBeenNthCalledWith(1, 's1');
+    expect(api.replayAgentEvents).toHaveBeenNthCalledWith(2, 's1', 1);
+    expect(host.textContent).toContain('SUBAGENT STARTED');
+    expect(host.textContent).toContain('SCOUT returned cited files');
+  });
+
+  it('keeps the replay page already fetched when a later page is interrupted', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.replayAgentEvents.mockImplementation(async (_sessionId: string, after?: number | null) => {
+      if (after != null) throw new Error('replay page unavailable');
+      return {
+        events: [
+          {
+            id: 'event-partial-page',
+            sessionId: 's1',
+            actionId: null,
+            type: 'SUBAGENT_COMPLETED',
+            payloadJson: JSON.stringify({summary: 'Recovered first page'}),
+            createdAt: '2026-06-20T00:00:02Z',
+            streamSequence: 1,
+          },
+        ],
+        lastSequence: 1,
+        snapshot: true,
+        hasMore: true,
+        nextSequence: 1,
+      };
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+    await flush();
+
+    expect(host.textContent).toContain('Recovered first page');
+  });
+
   it('offers a keyboard-accessible jump when activity arrives off-screen', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);

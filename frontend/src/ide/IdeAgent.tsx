@@ -130,23 +130,99 @@ export default function IdeAgent() {
   ];
   const sessionUsage = useMemo(() => usageFromTurns(state.turns), [state.turns]);
 
-  const loadTurns = useCallback(async (sessionId: string) => {
-    const rows = await api.listAgentTurns(sessionId, {limit: 50});
-    dispatch({type: 'turns:set', turns: rows});
-    try {
-      if (typeof api.replayAgentEvents === 'function') {
-        const replay = await api.replayAgentEvents(sessionId);
-        eventCursorRef.current = replay.lastSequence || 0;
-        dispatch({type: 'events:hydrate', events: replay.events});
-      } else if (typeof api.listAgentEvents === 'function') {
-        // Compatibility with older servers and reduced test clients.
-        const events = (await api.listAgentEvents(sessionId)) ?? [];
-        dispatch({type: 'events:hydrate', events});
+  /**
+   * The replay endpoint deliberately bounds an initial snapshot. A reconnect that consumes only
+   * that first page silently loses older tool/progress events, so drain every advertised page
+   * before handing the result to the reducer. The length fallback keeps clients compatible with
+   * pre-pagination servers which returned `snapshot=true` without the newer metadata.
+   */
+  const replayAllEvents = useCallback(
+    async (sessionId: string, after?: number | null): Promise<api.AgentEventReplayResponse> => {
+      const pages: api.AgentEventReplayResponse[] = [];
+      const seenIds = new Set<string>();
+      const seenSequences = new Set<number>();
+      const requestedCursors = new Set<string>();
+      let cursor = after ?? null;
+      let firstPage = true;
+
+      for (;;) {
+        const cursorKey = cursor == null ? 'snapshot' : String(cursor);
+        if (requestedCursors.has(cursorKey)) break;
+        requestedCursors.add(cursorKey);
+        let response: api.AgentEventReplayResponse;
+        try {
+          response =
+            cursor == null
+              ? await api.replayAgentEvents(sessionId)
+              : await api.replayAgentEvents(sessionId, cursor);
+        } catch (error) {
+          // Preserve pages already fetched if a later page is interrupted. An initial-page
+          // failure still propagates so the compatibility `/events` route can be attempted.
+          if (pages.length === 0) throw error;
+          break;
+        }
+        pages.push(response);
+
+        const sequenceValues = response.events
+          .map((event) => event.streamSequence)
+          .filter((sequence): sequence is number => sequence != null);
+        const maxPageSequence = sequenceValues.length > 0 ? Math.max(...sequenceValues) : null;
+        const shouldContinue =
+          response.hasMore === true ||
+          (firstPage && response.snapshot && response.events.length >= 500);
+        if (!shouldContinue) break;
+
+        const next = response.nextSequence ?? maxPageSequence;
+        if (next == null || (cursor != null && next <= cursor)) break;
+        cursor = next;
+        firstPage = false;
       }
-    } catch {
-      // Historical event replay is additive; a missing event endpoint must not hide turns.
-    }
-  }, []);
+
+      const events = pages.flatMap((page) =>
+        page.events.filter((event) => {
+          if (event.streamSequence != null) {
+            if (seenSequences.has(event.streamSequence)) return false;
+            seenSequences.add(event.streamSequence);
+          }
+          if (seenIds.has(event.id)) return false;
+          seenIds.add(event.id);
+          return true;
+        }),
+      );
+      return {
+        ...(pages[0] ?? {events: [], lastSequence: after ?? 0, snapshot: after == null}),
+        events,
+        lastSequence: pages.reduce(
+          (last, page) => Math.max(last, page.lastSequence ?? 0),
+          after ?? 0,
+        ),
+        hasMore: false,
+        nextSequence: null,
+      };
+    },
+    [],
+  );
+
+  const loadTurns = useCallback(
+    async (sessionId: string) => {
+      const rows = await api.listAgentTurns(sessionId, {limit: 50});
+      dispatch({type: 'turns:set', turns: rows});
+      try {
+        if (typeof api.replayAgentEvents === 'function') {
+          const replay = await replayAllEvents(sessionId);
+          eventCursorRef.current = replay.lastSequence || 0;
+          dispatch({type: 'events:hydrate', events: replay.events});
+        } else if (typeof api.listAgentEvents === 'function') {
+          // Compatibility with older servers and reduced test clients.
+          const events = (await api.listAgentEvents(sessionId)) ?? [];
+          dispatch({type: 'events:hydrate', events});
+        }
+      } catch {
+        // Historical event replay is additive; a missing event endpoint must not hide turns.
+      }
+    },
+    [replayAllEvents],
+  );
 
   const loadSessions = useCallback(async () => {
     const items = await api.listAgentSessions(25);
@@ -447,7 +523,7 @@ export default function IdeAgent() {
       if (activeSessionId) {
         try {
           if (typeof api.replayAgentEvents === 'function') {
-            const replay = await api.replayAgentEvents(activeSessionId, eventCursorRef.current);
+            const replay = await replayAllEvents(activeSessionId, eventCursorRef.current);
             eventCursorRef.current = replay.lastSequence || eventCursorRef.current;
             if (replay.events.length > 0) {
               dispatch({type: 'events:hydrate', events: replay.events, append: true});
