@@ -289,6 +289,11 @@ finish the requested edit and report what existing check, if any, you ran. Do no
 validation-report flows unless the user explicitly asks for review/validation.
 """;
 
+  /** Package-local prompt-composition seam; keeps the legacy constant private to this facade. */
+  static String localHandsFinalOverride() {
+    return LOCAL_HANDS_FINAL_OVERRIDE;
+  }
+
   /**
    * RL-2026-05-066 (verifyBoot) — appended to the worker prompt ONLY when {@code
    * worker.verify-boot.enabled} is on (default OFF). Kept out of {@link #SYSTEM_PROMPT_BASE} per
@@ -4878,43 +4883,16 @@ to boot — skip it for those.""";
    * style.
    */
   String loadProviderFragment(String provider) {
-    if (provider == null || provider.isBlank()) return "";
-    String key = provider.trim().toLowerCase();
-    if (!PromptResourceReader.isSafeSegment(key)) return "";
-    return PromptResourceReader.readOptional("prompts/fragments/provider/" + key, "build");
+    return new PromptComposer(featureFlagService).loadProviderFragment(provider);
   }
 
   /** Load an optional model-specific BUILD fragment under model/{provider}/{model}/build.md. */
   String loadModelFragment(String provider, String model) {
-    String providerKey = promptKey(provider);
-    String modelKey = promptKey(model);
-    if (providerKey.isBlank() || modelKey.isBlank()) return "";
-    return PromptResourceReader.readOptional(
-        "prompts/fragments/model/" + providerKey + "/" + modelKey, "build");
-  }
-
-  private static String promptKey(String value) {
-    if (value == null || value.isBlank()) return "";
-    String key = value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-");
-    key = key.replaceAll("^-+|-+$", "");
-    return PromptResourceReader.isSafeSegment(key) ? key : "";
+    return new PromptComposer(featureFlagService).loadModelFragment(provider, model);
   }
 
   String loadProjectTypeFragments(String projectType) {
-    List<String> keys = fragmentKeysForProjectType(projectType);
-    if (keys.isEmpty()) return "";
-    StringBuilder sb = new StringBuilder();
-    for (String key : keys) {
-      String fragment = loadPromptFragment(key);
-      if (fragment.isBlank()) continue;
-      if (!sb.isEmpty()) sb.append("\n\n");
-      sb.append(fragment);
-    }
-    return sb.toString();
-  }
-
-  private String loadPromptFragment(String key) {
-    return PromptResourceReader.readOptional("prompts/fragments", key);
+    return new PromptComposer(featureFlagService).loadProjectTypeFragments(projectType);
   }
 
   /**
@@ -4925,38 +4903,16 @@ to boot — skip it for those.""";
    * example {@code java-spring-boot} resolves to {@code prompts/scaffolds/spring-boot.md}.
    */
   private String loadScaffoldForProjectType(String projectType) {
-    if (projectType == null || projectType.isBlank()) return "";
-    String key = scaffoldKeyForProjectType(projectType);
-    return PromptResourceReader.readOptional("prompts/scaffolds", key);
+    return PromptResourceReader.readOptional(
+        "prompts/scaffolds", PromptComposer.scaffoldKeyForProjectType(projectType));
   }
 
   static String scaffoldKeyForProjectType(String projectType) {
-    if (projectType == null || projectType.isBlank()) return "";
-    String key = projectType.trim().toLowerCase().replace('_', '-');
-    return switch (key) {
-      case "java-spring-boot", "springboot" -> "spring-boot";
-      default -> key;
-    };
+    return PromptComposer.scaffoldKeyForProjectType(projectType);
   }
 
   static List<String> fragmentKeysForProjectType(String projectType) {
-    String key = scaffoldKeyForProjectType(projectType);
-    return switch (key) {
-      case "fullstack", "node-fullstack" ->
-          List.of(
-              "api-url-rules",
-              "module-system",
-              "router-isolation",
-              "backend-robustness",
-              "preview-defaults",
-              "fullstack-directory");
-      case "node-backend" ->
-          List.of("module-system", "router-isolation", "backend-robustness", "preview-defaults");
-      case "node-frontend" -> List.of("api-url-rules", "module-system");
-      case "spring-boot", "python", "go", "rust" ->
-          List.of("backend-robustness", "preview-defaults");
-      default -> List.of();
-    };
+    return PromptComposer.fragmentKeysForProjectType(projectType);
   }
 
   /**
@@ -4985,71 +4941,22 @@ to boot — skip it for those.""";
   }
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError) {
-    return composeUserPrompt(task, previousBuildError, null);
+    return PromptComposer.composeUserPrompt(task, previousBuildError, null);
   }
 
   /** task 12 — one journal line per finished task; accumulated every run, injected when flagged. */
   static String journalEntry(PlannedTask task, TaskOutcome outcome) {
-    String summary = null;
-    if (outcome.workerOutcome() != null && outcome.workerOutcome().completionSummary() != null) {
-      summary = outcome.workerOutcome().completionSummary();
-    }
-    if (summary != null && summary.length() > 220) summary = summary.substring(0, 220) + "…";
-    return task.id()
-        + " ("
-        + task.title()
-        + ") → "
-        + outcome.status()
-        + (summary == null || summary.isBlank() ? "" : " — " + summary);
+    return PromptComposer.journalEntry(task, outcome);
   }
 
   /** task 12 — plan outline + the last few journal entries (~1-2k tokens max). */
   static String journalBlock(Plan plan, List<String> runJournal) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# RUN JOURNAL (context from earlier tasks in this run)\n\n");
-    sb.append("Plan outline: ");
-    List<String> titles = new ArrayList<>();
-    for (PlannedTask t : plan.tasks()) titles.add(t.id() + " " + t.title());
-    sb.append(String.join(" · ", titles.subList(0, Math.min(titles.size(), 12))));
-    sb.append("\n\nCompleted so far:\n");
-    int from = Math.max(0, runJournal.size() - 5);
-    for (int i = from; i < runJournal.size(); i++) {
-      sb.append("- ").append(runJournal.get(i)).append("\n");
-    }
-    sb.append(
-        "\nStay consistent with the files, names, and interfaces established above — later tasks"
-            + " (and the reviewer) assume they hold.");
-    return sb.toString();
+    return PromptComposer.journalBlock(plan, runJournal);
   }
 
   private String composeUserPrompt(
       PlannedTask task, String previousBuildError, String orientation) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
-    sb.append(task.description());
-    if (orientation != null && !orientation.isBlank()) {
-      // task 11 (worker.localization.enabled): advisory warm-start block — layout, identifier
-      // hits, detected build/test commands — so localization isn't re-derived from a cold prompt.
-      sb.append("\n\n").append(orientation);
-    }
-    if (previousBuildError != null && !previousBuildError.isBlank()) {
-      // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
-      // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the
-      // specification of what to fix. The agent's earlier edits are still in the workspace
-      // (per-task retry doesn't reset the workspace), so this is a continuation, not a redo.
-      sb.append("\n\n---\nBUILD FAILED ON THE PREVIOUS ATTEMPT.\n\n");
-      sb.append(
-          "The error below is your spec for this retry — read it carefully, identify the "
-              + "specific files / line numbers / error messages, and fix the root cause. Don't "
-              + "refactor, don't reorganise, don't second-guess your earlier design choices. "
-              + "Your previous edits are still in place; this is a continuation. Use readFile "
-              + "to confirm the current file state where the error points, editFile to fix it, "
-              + "buildProject to verify, then completeTask.\n\n");
-      sb.append("--- BUILD ERROR (verbatim) ---\n");
-      sb.append(truncateBuildErrorForRetry(previousBuildError));
-      sb.append("\n--- END BUILD ERROR ---\n");
-    }
-    return sb.toString();
+    return PromptComposer.composeUserPrompt(task, previousBuildError, orientation);
   }
 
   /**
@@ -5059,16 +4966,7 @@ to boot — skip it for those.""";
    * is repetition.
    */
   private static String truncateBuildErrorForRetry(String s) {
-    if (s == null) return "";
-    int cap = 12_000;
-    if (s.length() <= cap) return s;
-    int head = 8_000;
-    int omitted = s.length() - cap;
-    return s.substring(0, head)
-        + "\n\n... ["
-        + omitted
-        + " chars omitted from middle of build output] ...\n\n"
-        + s.substring(s.length() - (cap - head));
+    return PromptComposer.truncateBuildErrorForRetry(s);
   }
 
   private SmokeTestResult runSmokeTest(ExecutionContext ctx, String plannerCommand) {
