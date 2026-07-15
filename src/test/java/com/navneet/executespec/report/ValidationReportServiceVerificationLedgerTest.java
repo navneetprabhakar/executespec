@@ -97,6 +97,31 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void extracted_builder_matches_service_compatibility_delegate() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-builder")
+            .runId("run-builder")
+            .filesGenerated(1)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(1)
+            .testsTotal(1)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .accuracyJson(
+                "{\"specAdherenceScore\":100,\"testCoverageLevel\":\"GOOD\","
+                    + "\"endpointCoverage\":{\"coveragePercent\":100}}")
+            .build();
+    List<ReportIssueDTO> issues =
+        List.of(new ReportIssueDTO("lint", "WOULD_FAIL_LINT", null, "REVIEWER_AGENT", null));
+    ValidationVerificationLedgerBuilder builder =
+        new ValidationVerificationLedgerBuilder(new ObjectMapper());
+
+    assertEquals(svc.buildVerificationLedger(report, issues), builder.build(report, issues));
+  }
+
+  @Test
   void ledger_marks_missing_delivery_and_unmeasured_tests_honestly() {
     ValidationReport report =
         ValidationReport.builder()
