@@ -8,6 +8,7 @@ import {
   initialAgentState,
   isTerminalRunStatus,
   toMessages,
+  toolEventTimelineItem,
   type PendingAction,
 } from '@/ide/agentState';
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
@@ -409,6 +410,14 @@ export default function IdeAgent() {
                 title: 'Tool result',
                 detail: result.result,
               },
+            }),
+          onToolEvent: (event) =>
+            dispatch({
+              type: 'stream:event',
+              item: toolEventTimelineItem(
+                event,
+                `event:${event.name ?? event.type ?? 'update'}:${event.status ?? event.state ?? ''}:${event.detail ?? event.message ?? ''}`,
+              ),
             }),
           onDone: (done) =>
             dispatch({

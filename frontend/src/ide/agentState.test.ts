@@ -12,6 +12,7 @@ import {
   runPhaseLabel,
   runProgress,
   sessionTitle,
+  toolEventTimelineItem,
   toMessages,
 } from './agentState';
 import type * as api from '@/lib/api';
@@ -66,6 +67,55 @@ const turn: api.AgentTurnResponse = {
 };
 
 describe('agentState', () => {
+  it('keeps semantic provider handoff events visible on live and replay paths', () => {
+    const item = toolEventTimelineItem(
+      {
+        semantic: 'handoff',
+        role: 'worker',
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro-native',
+        status: 'selected',
+        detail: 'quality escalation',
+      },
+      'event:handoff:1',
+      21,
+    );
+    expect(item).toMatchObject({
+      id: 'event:handoff:1',
+      streamSequence: 21,
+      type: 'system',
+      title: 'Provider/model handoff',
+      detail: 'worker · deepseek/deepseek-v4-pro-native · selected · quality escalation',
+    });
+    const hydrated = agentReducer(initialAgentState, {
+      type: 'events:hydrate',
+      events: [
+        {
+          id: 'persisted-handoff',
+          sessionId: 'session-1',
+          turnId: 'turn-2',
+          actionId: null,
+          type: 'TOOL_EVENT',
+          payloadJson: JSON.stringify({
+            semantic: 'handoff',
+            role: 'worker',
+            provider: 'deepseek',
+            model: 'deepseek-v4-pro-native',
+            status: 'selected',
+            detail: 'quality escalation',
+          }),
+          createdAt: '2026-07-15T00:00:00Z',
+          streamSequence: 21,
+        },
+      ],
+    });
+    expect(hydrated.streamEvents).toHaveLength(1);
+    expect(hydrated.streamEvents[0]).toMatchObject({
+      type: 'system',
+      title: 'Provider/model handoff',
+    });
+  });
+
   it('tracks route and proposal transitions in the reducer', () => {
     const streaming = agentReducer(initialAgentState, {
       type: 'stream:start',
