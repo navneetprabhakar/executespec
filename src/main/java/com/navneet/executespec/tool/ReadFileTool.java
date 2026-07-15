@@ -85,7 +85,8 @@ public class ReadFileTool implements Tool {
   public String description() {
     return "Reads a file's contents. Supports optional line-range slicing — provide startLine and"
         + " endLine (1-indexed, inclusive) to read a portion of a large file without"
-        + " consuming tokens on irrelevant content.";
+        + " consuming tokens on irrelevant content. Legacy offset (0-indexed) + limit are"
+        + " accepted as aliases; startLine/endLine take precedence.";
   }
 
   @Override
@@ -107,6 +108,16 @@ public class ReadFileTool implements Tool {
                  "type": "integer",
                  "description": "Optional 1-indexed last line to include (inclusive)",
                  "minimum": 1
+               },
+               "offset": {
+                 "type": "integer",
+                 "description": "Legacy alias: skip this many lines (0-indexed)",
+                 "minimum": 0
+               },
+               "limit": {
+                 "type": "integer",
+                 "description": "Legacy alias: maximum lines to return with offset",
+                 "minimum": 1
                }
              },
              "required": ["path"],
@@ -123,6 +134,12 @@ public class ReadFileTool implements Tool {
     }
     Integer start = args.hasNonNull("startLine") ? args.get("startLine").asInt() : null;
     Integer end = args.hasNonNull("endLine") ? args.get("endLine").asInt() : null;
+    if (start == null && end == null && (args.hasNonNull("offset") || args.hasNonNull("limit"))) {
+      int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
+      int limit = args.hasNonNull("limit") ? Math.max(1, args.get("limit").asInt()) : 200;
+      start = offset + 1;
+      end = start + limit - 1;
+    }
     if (start != null && end != null && start > end) {
       return ToolResult.err(
           ToolResult.ErrorKind.INVALID_ARGS, "startLine (" + start + ") > endLine (" + end + ")");
@@ -177,7 +194,7 @@ public class ReadFileTool implements Tool {
         // too large to return whole, and the slice it sees is exactly editable via editFile.
         return ToolResult.ok(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
       }
-        return ToolResult.ok(readFullCapped(resolved));
+      return ToolResult.ok(readFullCapped(resolved));
     } catch (NoSuchFileException nsfe) {
       return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
     } catch (SecurityException se) {
@@ -232,26 +249,36 @@ public class ReadFileTool implements Tool {
    * return the bounded full-read preview. The in-memory {@link #clampFullRead(String)} helper is
    * retained for project/DB-backed content and unit tests.
    */
-  private static String readFullCapped(Path path) throws IOException {
-    StringBuilder head = new StringBuilder(MAX_FULL_READ_CHARS);
-    int totalLines = 0;
-    int shownLines = 0;
-    boolean truncated = false;
+  static String readFullCapped(Path path) throws IOException {
+    StringBuilder prefix = new StringBuilder(MAX_FULL_READ_CHARS);
+    long totalChars = 0;
+    int newlines = 0;
     try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        totalLines++;
-        int nextLength = head.length() + line.length() + (head.length() == 0 ? 0 : 1);
-        if (!truncated && shownLines < MAX_FULL_READ_LINES && nextLength <= MAX_FULL_READ_CHARS) {
-          if (head.length() > 0) head.append('\n');
-          head.append(line);
-          shownLines++;
-        } else {
-          truncated = true;
+      char[] buffer = new char[8192];
+      int read;
+      while ((read = reader.read(buffer)) >= 0) {
+        if (read == 0) continue;
+        int remaining = MAX_FULL_READ_CHARS - prefix.length();
+        if (remaining > 0) {
+          prefix.append(buffer, 0, Math.min(remaining, read));
         }
+        for (int i = 0; i < read; i++) if (buffer[i] == '\n') newlines++;
+        totalChars += read;
       }
     }
-    if (!truncated) return head.toString();
+    int totalLines = totalChars == 0 ? 0 : newlines + 1;
+    if (totalChars <= MAX_FULL_READ_CHARS && totalLines <= MAX_FULL_READ_LINES) {
+      return prefix.toString();
+    }
+    int cut = prefix.length();
+    int lineCut = nthNewlineIndex(prefix.toString(), MAX_FULL_READ_LINES);
+    if (lineCut >= 0 && lineCut < cut) cut = lineCut;
+    if (cut == MAX_FULL_READ_CHARS) {
+      int boundary = prefix.lastIndexOf("\n", cut - 1);
+      if (boundary >= 0) cut = boundary;
+    }
+    String head = prefix.substring(0, cut);
+    int shownLines = countLines(head);
     return head
         + "\n\n...[truncated: showing the first "
         + shownLines
@@ -259,12 +286,14 @@ public class ReadFileTool implements Tool {
         + totalLines
         + " lines ("
         + head.length()
+        + " of "
+        + totalChars
         + " chars). The content above is byte-exact and editable as-is; read the rest with"
         + " startLine/endLine.]...";
   }
 
   /** Stream only the requested line window; do not read the complete file into a list first. */
-  private static String readRange(Path path, int startLine, int endLine) throws IOException {
+  static String readRange(Path path, int startLine, int endLine) throws IOException {
     int start = Math.max(1, startLine);
     int end = Math.max(start, endLine);
     StringBuilder out = new StringBuilder();
