@@ -153,6 +153,48 @@ class LocalHandsStateServiceTest {
   }
 
   @Test
+  void findRestartedResult_matchesExactFrameForReplayWithoutDuplicateExecution() {
+    String restartedPayload =
+        "{\"state\":\"WORKER_RESTARTED\",\"runId\":\"run-1\","
+            + "\"callId\":\"call-1\",\"taskId\":\"task-1\",\"toolName\":\"shell\","
+            + "\"permissionKind\":\"shell\",\"frame\":{\"taskId\":\"task-1\","
+            + "\"name\":\"shell\",\"args\":{\"cmd\":\"touch x\"}}}";
+    String completedPayload =
+        "{\"state\":\"COMPLETED\",\"runId\":\"run-1\","
+            + "\"callId\":\"call-1\",\"taskId\":\"task-1\",\"toolName\":\"shell\","
+            + "\"permissionKind\":\"shell\",\"frame\":{\"taskId\":\"task-1\","
+            + "\"name\":\"shell\",\"args\":{\"cmd\":\"touch x\"}},"
+            + "\"result\":{\"ok\":true,\"content\":\"done\"}}";
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                AgentActionEvent.builder()
+                    .id("restart")
+                    .sessionId("session-1")
+                    .actionId("call-1")
+                    .type("LOCAL_HANDS_WORKER_RESTARTED")
+                    .payloadJson(restartedPayload)
+                    .createdAt(Instant.parse("2026-07-10T00:00:01Z"))
+                    .build(),
+                AgentActionEvent.builder()
+                    .id("complete")
+                    .sessionId("session-1")
+                    .actionId("call-1")
+                    .type("LOCAL_HANDS_COMPLETED")
+                    .payloadJson(completedPayload)
+                    .createdAt(Instant.parse("2026-07-10T00:00:02Z"))
+                    .build()));
+
+    assertThat(service.findRestartedResult("run-1", "task-1", "shell", "{ \"cmd\": \"touch x\" }"))
+        .get()
+        .satisfies(
+            result -> {
+              assertThat(result.callId()).isEqualTo("call-1");
+              assertThat(result.resultEnvelope()).contains("done");
+            });
+  }
+
+  @Test
   void acceptRestartedResult_rejectsMarkerOutsideBoundedRecoveryWindow() {
     when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
         .thenReturn(

@@ -160,6 +160,100 @@ public class LocalHandsStateService {
     }
   }
 
+  /**
+   * Finds a result that completed after the old worker was fenced by a restart.
+   *
+   * <p>The restarted worker may resume from a snapshot taken immediately before a remote tool
+   * result was appended. Re-dispatching the same mutating command would then execute it twice.
+   * Matching the complete tool frame (task, name and canonical args) lets the new worker consume
+   * the already-authoritative result without emitting a second client request. This is deliberately
+   * limited to calls that have an explicit {@code WORKER_RESTARTED} transition and to the exact
+   * frame; ordinary repeated tool calls in a healthy worker are unaffected.
+   */
+  public java.util.Optional<RestartedResult> findRestartedResult(
+      String runId, String taskId, String toolName, String argsJson) {
+    if (runId == null || runId.isBlank() || toolName == null || toolName.isBlank()) {
+      return java.util.Optional.empty();
+    }
+    try {
+      List<AgentSession> sessions =
+          sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc(runId, "ACTIVE");
+      if (sessions == null || sessions.isEmpty()) return java.util.Optional.empty();
+      String requestedArgs = canonicalArgs(argsJson);
+      RestartedResult best = null;
+      for (AgentSession session : sessions) {
+        List<AgentActionEvent> events =
+            eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(
+                session.getId(), REPLAYABLE_TYPES);
+        java.util.Set<String> restarted = new java.util.HashSet<>();
+        for (AgentActionEvent event : events) {
+          if (event == null || event.getActionId() == null) continue;
+          JsonNode payload = readPayload(event);
+          if (payload == null) continue;
+          LocalHandsState state;
+          try {
+            state = LocalHandsState.valueOf(payload.path("state").asText());
+          } catch (Exception ignored) {
+            continue;
+          }
+          if (state == LocalHandsState.WORKER_RESTARTED) {
+            restarted.add(event.getActionId());
+            continue;
+          }
+          if (state != LocalHandsState.COMPLETED || !restarted.contains(event.getActionId())) {
+            continue;
+          }
+          JsonNode frame = payload.get("frame");
+          if (frame == null
+              || !toolName.equals(text(frame, "name"))
+              || !java.util.Objects.equals(taskId, text(frame, "taskId"))
+              || !requestedArgs.equals(canonicalArgs(frame.get("args")))) {
+            continue;
+          }
+          JsonNode result = payload.get("result");
+          if (result == null || result.isNull()) continue;
+          RestartedResult candidate =
+              new RestartedResult(event.getActionId(), result.toString(), event.getCreatedAt());
+          if (best == null || isAfter(candidate.updatedAt(), best.updatedAt())) best = candidate;
+        }
+      }
+      return java.util.Optional.ofNullable(best);
+    } catch (RuntimeException ex) {
+      log.warn(
+          "[LocalHands] failed to find restarted result for run {} task {}: {}",
+          runId,
+          taskId,
+          ex.getMessage());
+      return java.util.Optional.empty();
+    }
+  }
+
+  private JsonNode readPayload(AgentActionEvent event) {
+    try {
+      return event.getPayloadJson() == null ? null : objectMapper.readTree(event.getPayloadJson());
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private String canonicalArgs(String argsJson) {
+    if (argsJson == null || argsJson.isBlank()) return "{}";
+    try {
+      return canonicalArgs(objectMapper.readTree(argsJson));
+    } catch (Exception ignored) {
+      return argsJson.trim();
+    }
+  }
+
+  private String canonicalArgs(JsonNode args) {
+    return args == null || args.isNull() ? "{}" : args.toString();
+  }
+
+  private static boolean isAfter(Instant candidate, Instant previous) {
+    if (candidate == null) return false;
+    return previous == null || candidate.isAfter(previous);
+  }
+
   private boolean recordInternal(
       String runId,
       String callId,
@@ -377,6 +471,9 @@ public class LocalHandsStateService {
       this(callId, runId, taskId, toolName, permissionKind, frameJson, state, updatedAt, null);
     }
   }
+
+  /** Exact result of a remote call completed after a worker restart fence. */
+  public record RestartedResult(String callId, String resultEnvelope, Instant updatedAt) {}
 
   /**
    * Prefer the database cursor when available. Timestamp-only ordering is not deterministic when

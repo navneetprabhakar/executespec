@@ -252,6 +252,28 @@ public class RemoteToolDispatcher {
     if (s == null) {
       return errorEnvelope("INTERNAL", "no remote session bound for run " + runId);
     }
+    // A crash can happen after the local client executed a mutating command but before the old
+    // worker received its HTTP response. Crash recovery resumes from the last context snapshot;
+    // consume the exact durable post-restart result when available instead of issuing the command
+    // a second time. The lookup is intentionally exact and only matches calls fenced by
+    // WORKER_RESTARTED, so normal repeated commands and healthy reconnects are unchanged.
+    try {
+      java.util.Optional<LocalHandsStateService.RestartedResult> recovered =
+          stateService.findRestartedResult(runId, taskId, toolName, argsJson);
+      if (recovered.isPresent()) {
+        log.info(
+            "[RemoteTool] reusing durable post-restart result run={} task={} tool={} oldCall={}",
+            runId,
+            taskId,
+            toolName,
+            recovered.get().callId());
+        return recovered.get().resultEnvelope();
+      }
+    } catch (RuntimeException ex) {
+      // Durable evidence is an optimisation and must never make the remote worker unavailable.
+      log.debug(
+          "[RemoteTool] restarted-result lookup failed for run {}: {}", runId, ex.getMessage());
+    }
     s.workerWaitRebound = true;
     String callId = UUID.randomUUID().toString();
     CompletableFuture<String> future = new CompletableFuture<>();
