@@ -1,0 +1,9 @@
+# Copy this file into a per-run Terraform working directory. Never reuse the
+# singleton benchmark directory's local state for a parallel TB 2.1 instance.
+project_id          = "executespecv1"
+region              = "us-east4"
+zone                = "us-east4-b"
+instance_name       = "tb21-20260715-a1b2"
+results_bucket_name = "executespec-tb21-20260715-a1b2-results"
+benchmark_domain    = "tb21-20260715-a1b2.executespec.ai"
+use_spot            = false

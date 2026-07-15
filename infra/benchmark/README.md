@@ -11,6 +11,11 @@ up → run → **`terraform destroy`**.
 **Standalone module with LOCAL state** — deliberately *not* wired to the prod/dev
 GCS backend in `../`, so a `destroy` here can never touch production infra.
 
+For a parallel Terminal-Bench 2.1 instance, use a copied working directory and
+[`terraform-tb21-isolated.tfvars.example`](terraform-tb21-isolated.tfvars.example).
+The isolated profile requires a unique VM name, results bucket, and DNS name; do
+not reuse `benchmark.executespec.ai` or the singleton local state file.
+
 Defaults: `e2-standard-16` (16 vCPU / 64 GB), 1 TB `pd-ssd`, Ubuntu 22.04, project
 `executespecv1`, zone `us-east4-a`. The VM has no external IP; SSH is over IAP
 and package/Docker/LLM egress goes through Cloud NAT. `terraform apply` also
@@ -24,6 +29,26 @@ Cloudflare `benchmark.executespec.ai` A record.
 - **A ~10 hr parallel run ≈ $15–25 all-in; a 2-day run ≈ $30–45.** `destroy` ends all of it.
 
 ## Use
+
+### Isolated TB 2.1 instance (recommended)
+
+```bash
+RUN_ID=tb21-20260715-a1b2
+WORKDIR=/tmp/executespec-$RUN_ID
+mkdir -p "$WORKDIR"
+cp -R infra/benchmark/. "$WORKDIR/"
+cd "$WORKDIR"
+cp terraform-tb21-isolated.tfvars.example terraform.tfvars
+terraform init -backend=false
+terraform validate
+terraform plan -var-file=terraform.tfvars -out=tfplan
+# Review the plan, then apply only after confirming the unique names/domain.
+terraform apply tfplan
+```
+
+The generated outputs are the authoritative SSH command, zone, load-balancer
+address, and GCS results bucket for that instance. Keep this directory and its
+state separate from the singleton benchmark environment.
 
 ```bash
 # 0. Auth (once)

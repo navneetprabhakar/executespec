@@ -22,6 +22,12 @@ variable "instance_name" {
   default     = "benchmark-instance"
 }
 
+variable "benchmark_domain" {
+  description = "DNS name for the optional public benchmark load balancer. Use a unique per-run name for parallel instances."
+  type        = string
+  default     = "benchmark.executespec.ai"
+}
+
 variable "machine_type" {
   description = "GCE machine type. e2-standard-16 = 16 vCPU / 64 GB — fits ~10-15 parallel SWE-bench containers. Bump to e2-standard-32 for more parallelism."
   type        = string
