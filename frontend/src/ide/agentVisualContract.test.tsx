@@ -220,6 +220,64 @@ describe('protected transcript visual contract', () => {
     expect(panel?.getAttribute('aria-labelledby')).toBe(`${panelId}-heading`);
   });
 
+  it('requires confirmation before preparing a hunk revert plan', async () => {
+    vi.spyOn(api, 'getFilesWithStatus').mockResolvedValue([{path: 'src/a.ts', status: 'MODIFIED'}]);
+    vi.spyOn(api, 'getFileDiff').mockResolvedValue({
+      path: 'src/a.ts',
+      status: 'MODIFIED',
+      base: 'before();',
+      head: 'after();',
+    });
+    const fork = vi.spyOn(api, 'forkRun').mockResolvedValue({runId: 'revert-plan-1'} as any);
+    const onOpenRun = vi.fn();
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        onOpenRun={onOpenRun}
+        streamEvents={[]}
+        hasNewActivity={false}
+        runStreamStatus='CLOSED'
+        runCard={{...activeRun, status: 'COMPLETE', completedAt: '2026-07-10T00:10:00Z'}}
+      />,
+    );
+
+    const toggle = rendered.querySelector<HTMLButtonElement>('.agent-inline-diff > button');
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const file = rendered.querySelector<HTMLButtonElement>('.agent-inline-diff-files button');
+    await act(async () => {
+      file?.click();
+      await Promise.resolve();
+    });
+    const revert = rendered.querySelector<HTMLButtonElement>('[aria-label^="Prepare revert"]');
+    expect(revert).toBeTruthy();
+    await act(async () => {
+      revert?.click();
+    });
+    expect(rendered.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'current run and repository are not mutated',
+    );
+    expect(fork).not.toHaveBeenCalled();
+
+    const confirm = Array.from(rendered.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Create revert plan'),
+    );
+    await act(async () => {
+      confirm?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fork).toHaveBeenCalledWith(
+      'run-visual-1',
+      expect.objectContaining({userRequest: expect.stringContaining('Revert ONLY hunk 1')}),
+    );
+    expect(onOpenRun).toHaveBeenCalledWith('/plan/revert-plan-1');
+  });
+
   it('keeps approval actions explicit for narrow transcript layouts', () => {
     const rendered = mount(
       <AgentConversation

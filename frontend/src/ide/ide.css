@@ -4174,6 +4174,26 @@
   max-height: 320px;
   overflow: auto;
 }
+.agent-inline-diff-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--ide-border);
+  background: color-mix(in srgb, var(--ide-accent) 8%, var(--ide-surface-2));
+  color: var(--ide-text);
+  font-size: 11px;
+}
+.agent-inline-diff-confirm > span {
+  flex: 1 1 260px;
+  color: var(--ide-muted);
+}
+.agent-inline-diff-confirm-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
 .agent-inline-diff-foot {
   border-top: 1px solid var(--ide-border);
 }
