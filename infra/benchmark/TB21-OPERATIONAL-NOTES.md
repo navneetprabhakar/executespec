@@ -60,6 +60,9 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
   `result.json`; those trials are posted as `TIMEOUT`, not `PASSED`, and must be excluded from
   model-quality denominators. Final reports must reconcile `result.json`, `exception.txt`, and
   the ExecuteSpec run id rather than relying on the aggregate Harbor mean alone.
+- For a reproducible offline report, run `python3 infra/benchmark/scripts/reconcile-tb-result.py
+  <job-dir>`. The JSON output separates valid ExecuteSpec passes, ordinary verifier failures,
+  timeout artifacts, and positive rewards with no ExecuteSpec run.
 
 ### Docker image preflight and contaminated-run guard
 
