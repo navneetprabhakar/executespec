@@ -73,11 +73,11 @@ flowchart TD
 | 7. Prompt/harness | Prompt manifest, caller coverage, capability overlays, frozen comparator, ablations and adversarial cases | Prompt manifest passes; SOTA comparator is blocked by missing native-x86 evaluator/runtime and sealed repeated baselines | BLOCKED BY AUTHORIZED EVIDENCE |
 | 8. Routing | One outcome-driven routing service with availability, quality, cost, latency, switch limits and audit trail | Replay/degradation tests; remaining legacy text callers and production outcome closure remain | PARTIAL |
 | 9. Protocol v2 | Semantic resumable event/state contract shared across all clients | SSE replay, handoff, subagent, and compatibility tests pass | PARTIAL |
-| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI/core/VS Code gate and deterministic viewport acceptance pass; native Terminal interactive capture remains permission-gated | PARTIAL (NATIVE VISUAL PENDING) |
+| 10. CLI/TUI 1.0 | Transcript-first OpenTUI plus one plain renderer; no route shell/Inspector/Ink | Full CLI/core/VS Code gate and deterministic viewport acceptance pass; Forge has provided UX signoff, while native Terminal interactive capture remains optional/manual | PARTIAL (NATIVE CAPTURE OPTIONAL) |
 | 11. Web 2.0 | Same semantic transcript/control states as CLI, accessible, resumable, and responsive | 161 Web tests/build/lint; authenticated screenshot QA remains | PARTIAL |
 | 12. Performance | Measured startup, event overhead, search, rendering, memory, provider isolation and recovery | Offline CLI runtime comparator and search cache evidence; full published report remains | PARTIAL |
 | 13. Benchmarks | Versioned manifests, repeated comparable runs and honest provider readiness | Six-provider capability evidence and benchmark cap control pass; native-x86 repeated comparator remains unavailable | BLOCKED BY AUTHORIZED EVIDENCE |
-| 14. Cleanup/release | Delete replacements, graduate flags, upgrade schemas/docs, synchronize versions, run complete gates | Release-readiness table with explicit blockers | IN PROGRESS |
+| 14. Cleanup/release | Delete replacements, graduate flags, upgrade schemas/docs, synchronize versions, run complete gates | Release-readiness table with explicit blockers; large stateful-class decomposition remains a post-release backlog item | IN PROGRESS |
 
 ## Sequencing rules
 
@@ -87,6 +87,16 @@ flowchart TD
 - Delete old paths immediately after their replacement passes its compatibility gate. Compatibility paths are time-boxed and receive no new behavior.
 - Every live provider call must reserve budget before dispatch and reconcile immediately after. A missing key produces `NOT_VERIFIED`, not a workaround.
 - Every benchmark claim carries repository, provider/model slug, prompt, tool schema, harness, dataset slice, flags and budget identity.
+
+## Explicit post-release backlog
+
+- Cross-JVM provider-future replay: transfer a live workspace/context dossier and safely resume a
+  provider handoff on a fresh JVM/node, including in-flight call and reservation semantics. The
+  current evidence proves only same-node/provider-free restart recovery.
+- Large stateful-class cleanup: continue decomposing `RunOrchestrator`, `SequentialExecutor`,
+  `WorkerAgent`, and remaining frontend/API god surfaces behind explicit seams, with behavior
+  characterization tests and deleted predecessor paths. This is important maintainability work,
+  but it is not being disguised as provider-quality evidence.
 
 ## Maintained evidence
 

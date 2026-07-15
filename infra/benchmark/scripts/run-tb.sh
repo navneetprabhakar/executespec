@@ -8,7 +8,7 @@
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
 #                               K CONCURRENCY HARBOR_AGENT_TIMEOUT_SEC COMPACTION TASK_LIMIT
-#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES
+#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES ES_PROFILE
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -34,7 +34,28 @@ GCS_BUCKET="${GCS_BUCKET:-}"                           # gs://bucket/path  (opti
 TRACKER="$REPO/infra/benchmark/scripts/tb-tracker.py"
 TG="${TG:-/tmp/tg-send.py}"
 ADMIN_ENV="${ADMIN_ENV:-$HOME/swebench-bench/.espec-admin.env}"
-export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
+ES_PROFILE="${ES_PROFILE:-benchmark}"
+# Keep the runner portable between the macOS laptop and the amd64 Linux benchmark VM.  The
+# previous unconditional macOS default made a fresh VM fail before Harbor started when Maven
+# looked for `/opt/homebrew/opt/openjdk@21`.  Respect an explicit JAVA_HOME, otherwise select the
+# pinned Temurin path used by startup.sh on Linux and the Homebrew path on macOS; leave it empty
+# only as a last resort so Maven can use java from PATH.
+if [ -z "${JAVA_HOME:-}" ]; then
+  case "$(uname -s)" in
+    Darwin)
+      [ -d /opt/homebrew/opt/openjdk@21 ] && JAVA_HOME=/opt/homebrew/opt/openjdk@21
+      ;;
+    Linux)
+      for candidate in /usr/lib/jvm/temurin-21-jdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64; do
+        if [ -x "$candidate/bin/java" ]; then
+          JAVA_HOME="$candidate"
+          break
+        fi
+      done
+      ;;
+  esac
+  export JAVA_HOME
+fi
 mkdir -p "$JOBS_DIR"
 LOG(){ echo "$(date '+%H:%M:%S') [run-tb] $*"; }
 
@@ -98,10 +119,10 @@ fi
 # ── 2. backend up + compaction flags (via API, never DB) ────────────────────
 start_backend(){ pkill -f 'spring-boot:run' 2>/dev/null; sleep 3
   ( cd "$REPO" && JAVA_HOME=$JAVA_HOME mvn -q spring-boot:run -Dspring-boot.run.fork=false \
-      -Dspring-boot.run.profiles=local > "$JOBS_DIR/backend.log" 2>&1 ) &
+      -Dspring-boot.run.profiles="$ES_PROFILE" > "$JOBS_DIR/backend.log" 2>&1 ) &
   curl -s --retry 90 --retry-delay 3 --retry-connrefused --retry-all-errors --max-time 6 \
       localhost:8080/actuator/health >/dev/null 2>&1; }
-curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend…"; start_backend; }
+curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || { LOG "starting backend (profile=$ES_PROFILE)…"; start_backend; }
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
 export ES_ADMIN_EMAIL="${ES_ADMIN_EMAIL:-${ESPEC_ADMIN_EMAIL:-}}"
 export ES_ADMIN_PW="${ES_ADMIN_PW:-${ESPEC_ADMIN_PW:-}}"
