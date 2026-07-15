@@ -275,6 +275,13 @@ export const listAgentSessions = (limit = 20) =>
 export const getAgentSession = (sessionId: string) =>
   req<AgentSessionResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}`);
 
+/** Destructively clears the durable server transcript while retaining the session shell. */
+export const clearAgentSessionHistory = (sessionId: string) =>
+  req<{sessionId: string; turnsDeleted: number; eventsDeleted: number; clearedAt: string}>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/history`,
+    {method: 'DELETE'},
+  );
+
 export const listAgentTurns = (
   sessionId: string,
   options: {limit?: number; before?: string | null} = {},

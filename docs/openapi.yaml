@@ -1300,6 +1300,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentSessionResponse"
 
+  /agent/sessions/{sessionId}/history:
+    delete:
+      tags: [Agent Sessions]
+      summary: Clear the durable transcript for one agent session
+      description: >
+        Deletes persisted turn and action-event history after ownership checks while retaining the
+        session shell and immutable usage-ledger rows. Web, CLI, and VS Code use this explicit
+        reset contract for /clear; an unavailable server must be surfaced as local-only cleanup.
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      responses:
+        "200":
+          description: Transcript cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentHistoryClearedResponse"
+        "401": { description: Authentication required }
+        "403": { description: Session is owned by another user or organization }
+        "404": { description: Session not found }
+
   /agent/sessions/{sessionId}/events:
     get:
       tags: [Agent Sessions]
@@ -4878,6 +4899,15 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    AgentHistoryClearedResponse:
+      type: object
+      required: [sessionId, turnsDeleted, eventsDeleted, clearedAt]
+      properties:
+        sessionId: { type: string }
+        turnsDeleted: { type: integer, format: int64 }
+        eventsDeleted: { type: integer, format: int64 }
+        clearedAt: { type: string, format: date-time }
 
     AgentActionEvent:
       type: object
