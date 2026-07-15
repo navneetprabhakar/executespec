@@ -3,34 +3,34 @@
   "repositories": {
     "backend": {
       "name": "executespec-2.0",
-      "sha": "81e6a5e79ffb8972bcf503a1347313d5341efa12",
+      "sha": "4dd62745a37a9469a5531caf483ec874a11392d4",
       "branch": "codex/executespec-2.0",
-      "trackedFiles": 2769,
-      "worktreeFingerprint": "53657df4d098979cbf77e8c5555fd6e69a51c8d274456fd317e8dc87686da7fd"
+      "trackedFiles": 2803,
+      "worktreeFingerprint": "f3d723263710f1cc0af3ef1aa5faa60cdc589b87997298248af26a59533b6ff6"
     },
     "cli": {
       "name": "executespec-cli-1.0",
-      "sha": "dce66737e09ca8d083aad30e0794ecaaa59d4587",
+      "sha": "d834c8b756f8540a5460e42942ddf8d0f3c344ab",
       "branch": "codex/cli-1.0",
-      "trackedFiles": 320,
-      "worktreeFingerprint": "7b20f012b29f368477ac32e177d3ae79675c28f2fc297effc0ea099e6f90f9a3"
+      "trackedFiles": 321,
+      "worktreeFingerprint": "3ddc24e4169aa84019e217a12431154705d7bcc0269efa56af20bc76d29abb5e"
     },
     "docs": {
       "name": "executespec-docs-2.0",
-      "sha": "4054f5e75218b927d192d4d5a57b52177cd32987",
+      "sha": "706db16e25b613e0a6a2fceb150ca7cf029fb69b",
       "branch": "codex/executespec-2.0-docs",
-      "trackedFiles": 1179,
-      "worktreeFingerprint": "fb1f90a94b97346763260d6026b15a4488cee1c2d4604f27d118b738541a8e6e"
+      "trackedFiles": 1235,
+      "worktreeFingerprint": "468d9c0507328316e600e534b9dcf3d8b405a39c503569f0dcb55e3c456c1fd4"
     }
   },
   "backend": {
     "mainJava": {
-      "files": 1253,
-      "lines": 200511
+      "files": 1261,
+      "lines": 201875
     },
-    "testJavaFiles": 430,
-    "controllers": 111,
-    "mappingAnnotations": 616,
+    "testJavaFiles": 440,
+    "controllers": 112,
+    "mappingAnnotations": 618,
     "prompts": {
       "count": 88,
       "markdown": 53,
@@ -237,9 +237,9 @@
       "worker.verify-boot.enabled"
     ],
     "web": {
-      "sourceFiles": 163,
-      "lines": 44735,
-      "testFiles": 45,
+      "sourceFiles": 165,
+      "lines": 45176,
+      "testFiles": 46,
       "routePaths": [
         "*",
         "/",
@@ -349,7 +349,7 @@
   },
   "cli": {
     "sourceFiles": 117,
-    "lines": 45617,
+    "lines": 45986,
     "testFiles": 120,
     "rendererRoots": [
       "cli/src/opentuiApp.ts",
@@ -360,8 +360,8 @@
     ]
   },
   "docs": {
-    "trackedFiles": 671,
-    "markdownFiles": 201,
+    "trackedFiles": 674,
+    "markdownFiles": 204,
     "outputFiles": 420
   }
 }
