@@ -148,5 +148,4 @@ final class PromptComposer {
     String key = value.trim().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
     return PromptResourceReader.isSafeSegment(key) ? key : "";
   }
-
 }
