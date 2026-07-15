@@ -32,6 +32,8 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
 ### One-pass internal runner
 
 - `infra/benchmark/scripts/run-tb.sh` is locked to internal `k=1` by default.
+- The runner selects a portable Java 21 home on macOS/Linux and starts the backend with
+  `ES_PROFILE=benchmark` by default; set `ES_PROFILE=local` only for a deliberately local run.
 - `SUBMIT_TB` is refused unless it stays `off`; leaderboard submission is intentionally manual and
   outside this internal campaign.
 - `CONCURRENCY` defaults to `4` for a single model run.
