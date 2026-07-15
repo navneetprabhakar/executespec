@@ -41,8 +41,12 @@ class AgentActionLifecycleService {
             AgentText.firstNonBlank(req.projectId(), session.getProjectId()),
             req.repoContext(),
             req.clientCapabilities());
-    OrchestratorDecision orchestratorDecision = intentService.decide(intentRequest);
-    IntentDecision decision = intentService.interpret(intentRequest);
+    OrchestratorDecision orchestratorDecision =
+        intentService.decide(
+            intentRequest, session.getDefaultProvider(), session.getDefaultModel());
+    // Reuse the provider-aware canonical decision; re-running interpret would spend a second
+    // classifier call and would fall back to the legacy Anthropic route.
+    IntentDecision decision = AgentIntentLegacyAdapter.toLegacy(orchestratorDecision);
     String actionId = UUID.randomUUID().toString();
     Instant now = Instant.now();
     eventRecorder.appendAction(

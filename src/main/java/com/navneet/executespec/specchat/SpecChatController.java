@@ -156,7 +156,7 @@ public class SpecChatController {
       // compatibility path observable without granting the legacy chat loop any new authority:
       // the route classifier can only propose a route, while existing chat tools still enforce
       // action and plan-gate policy.
-      emitRouteDecision(emitter, request);
+      emitRouteDecision(emitter, request, effectiveProvider);
       specChatService.runTurn(
           sseSink(emitter),
           userDetails,
@@ -177,7 +177,8 @@ public class SpecChatController {
     return emitter;
   }
 
-  private void emitRouteDecision(SseEmitter emitter, SpecChatRequest request) {
+  private void emitRouteDecision(
+      SseEmitter emitter, SpecChatRequest request, String effectiveProvider) {
     try {
       OrchestratorDecision decision =
           agentIntentService.decide(
@@ -186,7 +187,9 @@ public class SpecChatController {
                   latestUserMessage(request.conversation()),
                   request.projectId(),
                   null,
-                  new ClientCapabilities(false, false, false, false)));
+                  new ClientCapabilities(false, false, false, false)),
+              effectiveProvider,
+              null);
       send(
           emitter,
           "route_decision",

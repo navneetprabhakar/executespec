@@ -106,7 +106,7 @@ class AgentRecordedTurnServiceTest {
   @Test
   void usesOneCanonicalOrchestratorDecisionWithoutSecondClassifierCall() {
     AgentIntentService intentService = org.mockito.Mockito.mock(AgentIntentService.class);
-    when(intentService.decide(any()))
+    when(intentService.decide(any(), any(), any()))
         .thenReturn(
             new OrchestratorDecision(
                 "READ_ONLY_CODE_HELP",
@@ -130,7 +130,7 @@ class AgentRecordedTurnServiceTest {
             session("Existing title"), "s1", new TurnRequest("Explain the auth flow", null, null));
 
     assertThat(response.decision().intent()).isEqualTo("CHAT");
-    verify(intentService).decide(any());
+    verify(intentService).decide(any(), any(), any());
     verify(intentService, never()).interpret(any());
   }
 
