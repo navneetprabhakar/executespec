@@ -2,6 +2,8 @@ package com.navneet.executespec.deployment;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -46,6 +48,15 @@ public class GcsTaskCheckpointService {
   private final GcsWorkspaceStore gcsStore;
   private final StateStore stateStore;
 
+  /**
+   * Per-run checkpoint chain. Checkpoint uploads overwrite one GCS object, so concurrent
+   * fire-and-forget exports can otherwise complete out of order and leave an older workspace as the
+   * latest restore candidate. The chain is deliberately local-process only; the database/GCS lease
+   * still fences cross-JVM recovery, while this prevents the common same-JVM async reorder.
+   */
+  private final ConcurrentHashMap<String, CompletableFuture<Void>> checkpointChains =
+      new ConcurrentHashMap<>();
+
   @Value("${durability.task-checkpoint.enabled:true}")
   private boolean enabled;
 
@@ -57,6 +68,29 @@ public class GcsTaskCheckpointService {
   public void checkpointAfterTask(String runId, String taskIdShort) {
     if (!enabled || runId == null) return;
     if (!gcsStore.isConfigured()) return; // local dev / GCS off — nothing to do, skip the zip
+
+    enqueueCheckpoint(runId, taskIdShort);
+  }
+
+  private void enqueueCheckpoint(String runId, String taskIdShort) {
+    for (; ; ) {
+      CompletableFuture<Void> previous = checkpointChains.get(runId);
+      CompletableFuture<Void> next =
+          (previous == null ? CompletableFuture.completedFuture(null) : previous)
+              .handle((ignored, failure) -> null)
+              .thenRun(() -> performCheckpoint(runId, taskIdShort));
+      boolean installed =
+          previous == null
+              ? checkpointChains.putIfAbsent(runId, next) == null
+              : checkpointChains.replace(runId, previous, next);
+      if (installed) {
+        next.whenComplete((ignored, failure) -> checkpointChains.remove(runId, next));
+        return;
+      }
+    }
+  }
+
+  private void performCheckpoint(String runId, String taskIdShort) {
     Path zipPath = null;
     try {
       zipPath = exportService.exportWorkspace(runId);
