@@ -2,20 +2,20 @@
   "schemaVersion": 1,
   "type": "hero-recording-provenance",
   "recordedAgainst": {
-    "backendCommit": "5aa65033300a5d304f523fcdf6c79690680a93f7",
-    "cliCommit": "65fbbf9d239d2b1166d452dda73f1912537665e3",
-    "webFrontendSha": "5aa65033300a5d304f523fcdf6c79690680a93f7"
+    "backendCommit": "7ccfe1a53376fe588c5d77df563e0280cc486e56",
+    "cliCommit": "c58cc990d41443c73908909d5226d3673916e070",
+    "webFrontendSha": "7ccfe1a53376fe588c5d77df563e0280cc486e56"
   },
   "currentCandidate": {
-    "backendCommit": "f42f50c4557c3e4ed91bbf3611aa7e0a5653d4a7",
-    "backendTree": "2b9508f46de02d42f96b42ca38dc884ecf2d7531",
+    "backendCommit": "7ccfe1a53376fe588c5d77df563e0280cc486e56",
+    "backendTree": "c3965f7db330ed98455e61e46cd668d20196556f",
     "cliCommit": "c58cc990d41443c73908909d5226d3673916e070",
     "cliTree": "ecf050a6a966e46866d6f683e88f1f4f936df92c",
-    "webFrontendSha": "f42f50c4557c3e4ed91bbf3611aa7e0a5653d4a7"
+    "webFrontendSha": "7ccfe1a53376fe588c5d77df563e0280cc486e56"
   },
-  "currentTupleMatch": false,
+  "currentTupleMatch": true,
   "asset": "website/media/hero.webm",
-  "sha256": "387e7e1deb82457938cd4ad3822db83528d25a285c91a80f109f452022efaa47",
+  "sha256": "cdd78e58d1b016fa119bcc8b60f15d849d8789f2af087c45a5ed9bfbc0dbdeb6",
   "durationSeconds": 54.0,
   "scenes": ["agent", "plan-gate", "working-task", "verdict", "code-diff", "terminal-outcome"],
   "fixtureIds": {
@@ -25,5 +25,5 @@
   "providerCalls": 0,
   "externalSpendUsd": 0,
   "independentHumanReview": "PENDING",
-  "claim": "Historical provider-free synthetic hero recording. Its source tuple predates the current candidate; it is not current visual evidence, a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off. A fresh recording is required before release publication."
+  "claim": "Provider-free synthetic hero recording regenerated against the current candidate tuple. It is illustrative website media only, not a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
 }
