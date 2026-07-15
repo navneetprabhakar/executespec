@@ -190,6 +190,9 @@ The Spring AI provider settings resolve the variables above (and the optional `O
 `DEEPSEEK_API_KEY`, and `FIREWORKS_API_KEY`) at startup; do not edit provider keys into the tracked
 YAML configuration.
 
+Native DeepSeek thinking/tool calls use a 300-second read window by default (`DEEPSEEK_READ_TIMEOUT_SECONDS`);
+OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire default.
+
 **Optional**
 
 | Variable                                                                                   | Default / notes                                                       |

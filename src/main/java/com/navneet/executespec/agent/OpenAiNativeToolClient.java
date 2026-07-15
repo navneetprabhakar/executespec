@@ -74,6 +74,10 @@ public class OpenAiNativeToolClient {
   /** Read timeout for the OpenAI HTTP call. Generous because tool-emitting calls can be slow. */
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
 
+  /** Shared default for OpenAI-wire providers; native DeepSeek supplies a longer per-call value. */
+  @Value("${executespec.llm.openai-wire.read-timeout-seconds:120}")
+  private int configuredReadTimeoutSeconds = (int) READ_TIMEOUT.toSeconds();
+
   private final ObjectMapper objectMapper;
 
   @Value("${spring.ai.openai.api-key:}")
@@ -121,7 +125,7 @@ public class OpenAiNativeToolClient {
     // connection or stalled body never blocks the harness loop indefinitely.
     HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-    factory.setReadTimeout(READ_TIMEOUT);
+    factory.setReadTimeout(effectiveReadTimeout(request));
     RestClient client =
         RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
     JsonNode response;
@@ -143,6 +147,13 @@ public class OpenAiNativeToolClient {
       throw new IllegalStateException("OpenAI returned empty response body");
     }
     return parseResponse(response, request.model());
+  }
+
+  /** Resolves an explicit per-call timeout while preserving the shared OpenAI-wire default. */
+  Duration effectiveReadTimeout(OpenAiToolCallRequest request) {
+    int requested = request.readTimeoutSeconds() == null ? 0 : request.readTimeoutSeconds();
+    int seconds = requested > 0 ? requested : configuredReadTimeoutSeconds;
+    return Duration.ofSeconds(Math.max(1, seconds));
   }
 
   private ObjectNode buildRequestBody(OpenAiToolCallRequest request) {
@@ -415,5 +426,6 @@ public class OpenAiNativeToolClient {
       Integer maxCompletionTokens,
       String apiKey,
       String baseUrl,
-      Map<String, Object> extraBody) {}
+      Map<String, Object> extraBody,
+      Integer readTimeoutSeconds) {}
 }

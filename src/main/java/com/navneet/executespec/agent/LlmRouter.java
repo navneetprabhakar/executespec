@@ -304,6 +304,10 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
   private String deepSeekBaseUrl;
 
+  /** Native DeepSeek thinking/tool responses can take longer than other OpenAI-wire providers. */
+  @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
+  private int deepSeekReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -926,6 +930,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .readTimeoutSeconds(deepSeekReadTimeoutSeconds)
             .baseUrl(deepSeekBaseUrl)
             .build());
   }

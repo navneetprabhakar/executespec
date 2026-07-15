@@ -451,6 +451,13 @@ class LlmRouterTest {
 
     assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
     assertThat(nativeFailures).hasValue(4);
+    verify(openai, times(4))
+        .call(
+            argThat(
+                request ->
+                    request.readTimeoutSeconds() != null
+                        && request.readTimeoutSeconds() == 300
+                        && request.baseUrl().contains("deepseek")));
     verify(openai, times(1))
         .call(
             argThat(
