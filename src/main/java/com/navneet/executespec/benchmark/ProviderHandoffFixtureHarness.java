@@ -83,6 +83,7 @@ public final class ProviderHandoffFixtureHarness {
       String evaluatorReason) {}
 
   public record Evidence(
+      String runId,
       String fixtureId,
       String fixtureVersion,
       String handoffHarnessVersion,
@@ -133,7 +134,7 @@ public final class ProviderHandoffFixtureHarness {
           request.fallbackReservationId(),
           request.fallbackProvider(),
           request.fallbackModel(),
-          effectiveRunId + "-handoff");
+          effectiveRunId);
       fallback =
           runPass(
               worker,
@@ -147,6 +148,7 @@ public final class ProviderHandoffFixtureHarness {
     }
 
     return new Evidence(
+        effectiveRunId,
         fixture.id(),
         fixture.version(),
         HANDOFF_FIXTURE_VERSION,
