@@ -1476,7 +1476,8 @@ export default function IdeRunResult() {
                   diff={active.diff}
                   onRevertHunk={
                     active.diff
-                      ? (hunkIndex) => requestHunkRevert(activeFile || '', active.diff!, hunkIndex)
+                      ? (hunkIndex) =>
+                          requestHunkRevert(activeFile || '', active.diff ?? [], hunkIndex)
                       : undefined
                   }
                 />
