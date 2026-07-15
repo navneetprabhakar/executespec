@@ -22,7 +22,9 @@ class FlywayMigrationInventoryTest {
   void migrationInventoryHasNoSilentVersionDrift() throws IOException {
     List<MigrationFile> migrations = readMigrations();
 
-    assertThat(migrations).hasSize(272);
+    // V119 is an applied historical migration and must remain on the classpath.
+    // V60_1 is fractional, so V1..V272 contains 273 migration files.
+    assertThat(migrations).hasSize(273);
     assertThat(migrations.getLast().version()).isEqualTo("272");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
@@ -31,7 +33,7 @@ class FlywayMigrationInventoryTest {
 
     assertThat(migrations.stream().filter(MigrationFile::fractional).map(MigrationFile::version))
         .containsExactly("60_1");
-    assertThat(majorGaps(migrations)).containsExactly("V118->V120");
+    assertThat(majorGaps(migrations)).isEmpty();
   }
 
   @Test
