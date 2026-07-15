@@ -983,20 +983,19 @@ function SandboxRunCard({
           </button>
         )}
       </div>
-      {terminal && <InlineRunDiff runId={run.runId} />}
+      {terminal && <InlineRunDiff runId={run.runId} onOpen={onOpen} />}
     </div>
   );
 }
 
 /**
- * Bounded, read-only diff inspection for the chat-first run card.
+ * Bounded diff inspection for the chat-first run card.
  *
- * This deliberately has no revert/apply control: the browser agent does not
- * have local workspace authority and the existing run-result endpoint is the
- * source of truth for changed files. Users can open the full result surface
- * for the existing PR/push workflow.
+ * The viewer remains read-only for the current run. A requested hunk revert is
+ * sent through the existing fork endpoint only after explicit confirmation,
+ * then the user is taken to the normal plan gate for review and approval.
  */
-function InlineRunDiff({runId}: {runId: string}) {
+function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) => void}) {
   const panelId = `agent-inline-diff-${runId}`;
   const headingId = `${panelId}-heading`;
   const [expanded, setExpanded] = useState(false);
@@ -1005,6 +1004,12 @@ function InlineRunDiff({runId}: {runId: string}) {
   const [diff, setDiff] = useState<DiffLine[] | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [pendingRevert, setPendingRevert] = useState<{
+    filePath: string;
+    hunkIndex: number;
+    request: string;
+  } | null>(null);
+  const [revertBusy, setRevertBusy] = useState(false);
 
   async function toggle() {
     if (expanded) {
@@ -1050,6 +1055,21 @@ function InlineRunDiff({runId}: {runId: string}) {
     } catch {
       setDiff(null);
       setMessage('This file diff is unavailable. Open Changed files for the full result.');
+    }
+  }
+
+  async function confirmRevert() {
+    if (!pendingRevert || revertBusy) return;
+    setRevertBusy(true);
+    setMessage('Creating a reviewable revert run…');
+    try {
+      const fork = await api.forkRun(runId, {userRequest: pendingRevert.request});
+      setPendingRevert(null);
+      onOpen(`/plan/${fork.runId}`);
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'Could not create the revert run.');
+    } finally {
+      setRevertBusy(false);
     }
   }
 
@@ -1103,6 +1123,9 @@ function InlineRunDiff({runId}: {runId: string}) {
                     filename={selected}
                     content={diff.map((line) => line.text).join('\n')}
                     diff={diff}
+                    onRevertHunk={(hunkIndex, request) =>
+                      setPendingRevert({filePath: selected, hunkIndex, request})
+                    }
                   />
                 ) : (
                   <div className='agent-inline-diff-note'>Select a file to inspect its diff.</div>
@@ -1115,8 +1138,40 @@ function InlineRunDiff({runId}: {runId: string}) {
               {message}
             </div>
           )}
+          {pendingRevert && (
+            <div
+              className='agent-inline-diff-confirm'
+              role='alertdialog'
+              aria-label='Confirm hunk revert'
+            >
+              <strong>Prepare a revert run?</strong>
+              <span>
+                This creates a new plan for hunk {pendingRevert.hunkIndex + 1} in{' '}
+                <code>{pendingRevert.filePath}</code>. The current run and repository are not
+                mutated.
+              </span>
+              <div className='agent-inline-diff-confirm-actions'>
+                <button
+                  className='ide-btn ghost'
+                  type='button'
+                  onClick={() => setPendingRevert(null)}
+                  disabled={revertBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  className='ide-btn'
+                  type='button'
+                  onClick={() => void confirmRevert()}
+                  disabled={revertBusy}
+                >
+                  {revertBusy ? 'Creating…' : 'Create revert plan'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className='agent-inline-diff-foot'>
-            Read-only preview. Revert/apply is not available in the web agent.
+            Read-only preview. Revert creates a new plan and never mutates this run directly.
           </div>
         </div>
       )}
