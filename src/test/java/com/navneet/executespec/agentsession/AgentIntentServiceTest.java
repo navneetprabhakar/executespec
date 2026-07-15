@@ -314,6 +314,49 @@ class AgentIntentServiceTest {
   }
 
   @Test
+  void structuredClassifierUsesEffectiveProviderInsteadOfHardcodedAnthropic() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(registry.lightweightModelFor("openai")).thenReturn("gpt-5.4-mini");
+    when(router.callText(
+            eq("openai"),
+            eq("gpt-5.4-mini"),
+            anyList(),
+            anyString(),
+            eq("AgentIntentService"),
+            eq("orchestrator.intent.classify"),
+            eq(400)))
+        .thenReturn(
+            ok(
+                "{\"route\":\"CHAT_ONLY\",\"confidence\":0.9,\"reasonCode\":\"chat\",\"requiresUserConfirmation\":false,\"negativeEvidence\":[]}"));
+
+    AgentIntentService routed =
+        new AgentIntentService(
+            router, registry, new ObjectMapper(), new OrchestratorRoutingPromptCatalog());
+    var decision =
+        routed.decide(
+            new InterpretIntentRequest(
+                "s1",
+                "What is the weather?",
+                "project-1",
+                null,
+                new ClientCapabilities(false, true, true, true)),
+            "openai",
+            null);
+
+    assertThat(decision.route()).isEqualTo("CHAT_ONLY");
+    verify(router, never())
+        .callText(
+            eq("anthropic"),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            eq(400));
+  }
+
+  @Test
   void malformedStructuredOutputFallsBackWithoutCreatingRun() {
     LlmRouter router = mock(LlmRouter.class);
     ModelRegistry registry = mock(ModelRegistry.class);

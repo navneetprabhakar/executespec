@@ -55,26 +55,6 @@ class AgentStreamTurnStarter {
   AgentSessionService.StreamTurnContext begin(
       AgentSession session, String sessionId, StreamTurnRequest request, AppUserDetails user) {
     String message = request == null ? "" : request.message();
-    var decision =
-        intentService.decide(
-            new InterpretIntentRequest(
-                sessionId,
-                message,
-                session.getProjectId(),
-                request == null ? null : request.repoContext(),
-                request == null ? null : request.clientCapabilities()));
-    AgentTurn turn =
-        turnRecorder.record(
-            session,
-            null,
-            message,
-            decision.assistantReply(),
-            decision.route(),
-            decision.confidence(),
-            decision.proposedAction(),
-            "STREAMING");
-
-    session.setUpdatedAt(Instant.now());
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
@@ -111,6 +91,28 @@ class AgentStreamTurnStarter {
       session.setDefaultModel(
           modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel));
     }
+    var decision =
+        intentService.decide(
+            new InterpretIntentRequest(
+                sessionId,
+                message,
+                session.getProjectId(),
+                request == null ? null : request.repoContext(),
+                request == null ? null : request.clientCapabilities()),
+            effectiveProvider,
+            session.getDefaultModel());
+    AgentTurn turn =
+        turnRecorder.record(
+            session,
+            null,
+            message,
+            decision.assistantReply(),
+            decision.route(),
+            decision.confidence(),
+            decision.proposedAction(),
+            "STREAMING");
+
+    session.setUpdatedAt(Instant.now());
     if (message != null
         && !message.isBlank()
         && "New ExecuteSpec session".equals(session.getTitle())) {

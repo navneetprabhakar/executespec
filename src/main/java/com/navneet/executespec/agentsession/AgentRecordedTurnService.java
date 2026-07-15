@@ -33,7 +33,9 @@ class AgentRecordedTurnService {
             session.getProjectId(),
             request == null ? null : request.repoContext(),
             request == null ? null : request.clientCapabilities());
-    OrchestratorDecision orchestratorDecision = intentService.decide(intentRequest);
+    OrchestratorDecision orchestratorDecision =
+        intentService.decide(
+            intentRequest, session.getDefaultProvider(), session.getDefaultModel());
     // The orchestrator decision is canonical for this turn. Re-running the classifier through
     // the legacy adapter would spend a second model call and could produce a different route,
     // causing the persisted transcript and returned decision to disagree.

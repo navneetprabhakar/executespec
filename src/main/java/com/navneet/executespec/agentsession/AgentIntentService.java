@@ -67,6 +67,17 @@ public class AgentIntentService {
   }
 
   public OrchestratorDecision decide(InterpretIntentRequest request) {
+    return decide(request, null, null);
+  }
+
+  /**
+   * Classify using the effective session route. The route decision is advisory, but it must use the
+   * same provider/model selected for the session instead of silently spending Anthropic tokens for
+   * every surface. A blank route is intentionally kept backward compatible with the historical
+   * Anthropic default.
+   */
+  public OrchestratorDecision decide(
+      InterpretIntentRequest request, String effectiveProvider, String effectiveModel) {
     String message = request == null || request.message() == null ? "" : request.message().trim();
     String lower = message.toLowerCase(Locale.ROOT);
     ClientCapabilities caps = request == null ? null : request.clientCapabilities();
@@ -94,7 +105,8 @@ public class AgentIntentService {
     // Natural-language turns are classified by the typed routing contract. Explicit commands and
     // safety guards above remain deterministic so an unavailable or malformed model response can
     // never turn a guarded request into a run.
-    var structuredDecision = decideWithStructuredClassifier(message, lower, request);
+    var structuredDecision =
+        decideWithStructuredClassifier(message, lower, request, effectiveProvider, effectiveModel);
     if (structuredDecision.isPresent()) {
       return structuredDecision.get();
     }
@@ -108,11 +120,19 @@ public class AgentIntentService {
   }
 
   private java.util.Optional<OrchestratorDecision> decideWithStructuredClassifier(
-      String message, String lower, InterpretIntentRequest request) {
+      String message,
+      String lower,
+      InterpretIntentRequest request,
+      String effectiveProvider,
+      String effectiveModel) {
     if (llmRouter == null || modelRegistry == null || promptCatalog == null) {
       return java.util.Optional.empty();
     }
-    String model = modelRegistry.lightweightModelFor(ROUTING_PROVIDER);
+    String provider = normalizeRoutingProvider(effectiveProvider, effectiveModel);
+    String model =
+        effectiveModel == null || effectiveModel.isBlank()
+            ? modelRegistry.lightweightModelFor(provider)
+            : modelRegistry.canonicalize(effectiveModel);
     if (model == null || model.isBlank()) {
       return java.util.Optional.empty();
     }
@@ -123,10 +143,10 @@ public class AgentIntentService {
                   Map.of("message", message, "context", requestContext(request)));
       ChatResponse response =
           llmRouter.callText(
-              ROUTING_PROVIDER,
+              provider,
               model,
               List.of(
-                  new SystemMessage(promptCatalog.fullPromptFor(ROUTING_PROVIDER)),
+                  new SystemMessage(promptCatalog.fullPromptFor(promptProvider(provider))),
                   new UserMessage(userPrompt)),
               "intent-routing-" + Integer.toHexString(message.hashCode()),
               ROUTING_ROLE,
@@ -144,6 +164,23 @@ public class AgentIntentService {
       // provider, prompt resource, serializer, or transport is unavailable.
       return java.util.Optional.empty();
     }
+  }
+
+  private String normalizeRoutingProvider(String provider, String model) {
+    String requested = provider == null ? "" : provider.trim();
+    if (!requested.isBlank()) return requested.toLowerCase(Locale.ROOT);
+    if (model != null && !model.isBlank()) {
+      String inferred = modelRegistry.providerFor(model);
+      if (inferred != null && !inferred.isBlank()) return inferred.toLowerCase(Locale.ROOT);
+    }
+    return ROUTING_PROVIDER;
+  }
+
+  private String promptProvider(String provider) {
+    return switch (provider) {
+      case "openrouter", "fireworks" -> "deepseek";
+      default -> provider;
+    };
   }
 
   private Map<String, Object> requestContext(InterpretIntentRequest request) {
