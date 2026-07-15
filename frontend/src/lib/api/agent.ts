@@ -201,6 +201,12 @@ export interface AgentEventReplayResponse {
   events: AgentActionEvent[];
   lastSequence: number;
   snapshot: boolean;
+  /** True when the server returned only the first bounded page. */
+  hasMore?: boolean;
+  /** Cursor to use for the next page when `hasMore` is true. */
+  nextSequence?: number | null;
+  /** Additional server-side truncation metadata (optional for older servers). */
+  truncated?: boolean;
 }
 
 export interface AgentRunConfirmationRequest {
