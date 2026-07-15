@@ -4,6 +4,11 @@
 signals, derives the internal verified/rubric summaries, and reconstructs the reloadable
 `verificationLedger` for authenticated and shared report DTOs.
 
+`ValidationVerificationLedgerBuilder` is the package-local pure collaborator for reconstructing that
+ledger from a persisted `ValidationReport` and mapped issues. Keep it side-effect free: it must not
+load run state, call providers, or mutate score/report entities. `ValidationReportService` retains the
+compatibility seam used by report projections and scoring/rescore flows.
+
 ## Evidence contract
 
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
