@@ -32,6 +32,7 @@ class ProviderHandoffFixtureControllerTest {
   void requestCarriesNoImplicitRouteDefaults() {
     var request =
         new ProviderHandoffFixtureController.Request(
+            "run-1",
             "repository-localization-v1",
             "v1",
             "deepseek",

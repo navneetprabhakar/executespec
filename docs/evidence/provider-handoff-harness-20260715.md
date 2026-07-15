@@ -14,7 +14,7 @@ cohort that was previously blocked by the single addition fixture. Version
 The `POST /api/v2/test/provider-handoff` route is restricted to the `local`,
 `dev`, and `benchmark` profiles and `SUPER_ADMIN`. The request must explicitly
 provide the primary and fallback provider/model, distinct external reservation
-ids, an exact two-provider allow-list, and one handoff trigger (`ALWAYS`,
+ids scoped to the caller-supplied `runId`, an exact two-provider allow-list, and one handoff trigger (`ALWAYS`,
 `ON_PROVIDER_ERROR`, or `ON_STAGNATION`). Each pass is authorized immediately
 before dispatch through `ProviderDispatchAuthorization`.
 
