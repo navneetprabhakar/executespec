@@ -187,7 +187,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-dir", required=True)
     ap.add_argument("--suite", default="TERMINAL_BENCH")
-    ap.add_argument("--dataset", default="terminal-bench-2")
+    ap.add_argument("--dataset", default="terminal-bench-2-1")
     ap.add_argument("--provider", required=True)
     ap.add_argument("--model", required=True)
     ap.add_argument("--run-id", help="Existing ExecuteSpec benchmark_run id to resume")

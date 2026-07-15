@@ -38,6 +38,11 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
   outside this internal campaign.
 - `CONCURRENCY` defaults to `4` for a single model run.
 - `BRIDGE=on` is the default so `/benchmark` receives task-level events.
+- The runner waits for a real 2xx health response and aborts before Harbor if the admin login
+  cannot produce a token; this prevents startup races from spending provider tokens.
+- After a restart, the runner waits for a real 2xx health response (not merely an HTTP 503 body)
+  and aborts before Harbor if SUPER_ADMIN login cannot produce a token. Startup or auth failures
+  therefore cannot spend provider tokens or create an unattributed benchmark row.
 
 ### Internal matrix runner
 
