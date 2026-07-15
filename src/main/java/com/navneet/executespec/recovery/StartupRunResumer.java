@@ -162,6 +162,21 @@ public class StartupRunResumer {
       // case and fail-cleanly with a clear status_reason.
       if (isExecutorDone(run.getRunId())) {
         if (workspaceMissing(run.getRunId())) {
+          var restoreOutcome = recoverMissingWorkspace(run.getRunId());
+          if (restoreOutcome
+              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK) {
+            // The lifecycle path restored the checkpoint and queued the post-executor recovery.
+            // Do not mark the run COMPLETE here: reviewer/validation still need to run.
+            failedInterrupted++;
+            continue;
+          }
+          if (restoreOutcome
+              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+                  .NOT_APPLICABLE) {
+            // Another JVM owns the recovery lease; leave the durable row untouched.
+            failedInterrupted++;
+            continue;
+          }
           markFailed(
               run,
               status,
@@ -250,6 +265,30 @@ public class StartupRunResumer {
         failedInterrupted,
         failedCapped,
         failedStale);
+  }
+
+  /**
+   * Give the normal crash-recovery path a chance to restore a missing workspace before the
+   * terminal-task salvage branch fails the run. The lifecycle service owns the GCS restore
+   * collaborator and the cross-JVM CAS/lease, so duplicating that logic here would create a second
+   * recovery protocol. A null provider is retained as a fail-closed compatibility path for focused
+   * tests and legacy embedders.
+   */
+  private com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+      recoverMissingWorkspace(String runId) {
+    try {
+      if (runLifecycleServiceProvider == null) {
+        return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+            .WORKSPACE_GONE;
+      }
+      return runLifecycleServiceProvider.getObject().resumeAfterCrash(runId);
+    } catch (Exception e) {
+      log.warn(
+          "StartupRunResumer: missing workspace recovery dispatch failed for run={}: {}",
+          runId,
+          e.getMessage());
+      return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
+    }
   }
 
   /**

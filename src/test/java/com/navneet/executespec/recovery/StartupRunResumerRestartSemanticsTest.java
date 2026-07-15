@@ -124,4 +124,34 @@ class StartupRunResumerRestartSemanticsTest {
     verify(lifecycleProvider, never()).getObject();
     verify(broadcaster).complete(RUN_ID);
   }
+
+  @Test
+  void terminalTasksWithMissingWorkspace_useCheckpointRecoveryBeforeFailing() throws Exception {
+    Path workspaceRoot = Files.createTempDirectory("executespec-restart-missing-");
+    PipelineRun run =
+        PipelineRun.builder().runId(RUN_ID).status("WORKING").harnessVersion("v2").build();
+    AgentTask task =
+        AgentTask.builder().taskId(RUN_ID + "-task").runId(RUN_ID).status("COMPLETE").build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
+
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+    when(taskRepo.findByRunId(RUN_ID)).thenReturn(List.of(task));
+    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
+    when(lifecycle.resumeAfterCrash(RUN_ID))
+        .thenReturn(com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK);
+
+    StartupRunResumer resumer =
+        new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider);
+    ReflectionTestUtils.setField(resumer, "workspaceRoot", workspaceRoot.toString());
+    resumer.scanAndRecover();
+
+    verify(lifecycle).resumeAfterCrash(RUN_ID);
+    verify(runRepo, never()).save(any(PipelineRun.class));
+    assertThat(run.getStatus()).isEqualTo("WORKING");
+  }
 }
