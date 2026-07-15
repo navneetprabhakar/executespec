@@ -36,6 +36,7 @@ public class ProviderHandoffFixtureController {
   private final ProviderDispatchAuthorization dispatchAuthorization;
 
   public record Request(
+      String runId,
       String fixtureId,
       String fixtureVersion,
       String primaryProvider,
@@ -68,7 +69,7 @@ public class ProviderHandoffFixtureController {
               request.fallbackReservationId(),
               request.allowedProviders(),
               request.handoffTrigger()),
-          "provider-handoff-" + java.util.UUID.randomUUID(),
+          request.runId(),
           workspace,
           dispatchAuthorization::authorizeReservedTest);
     } catch (IllegalArgumentException denied) {

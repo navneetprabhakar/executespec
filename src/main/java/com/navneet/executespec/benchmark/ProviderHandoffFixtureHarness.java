@@ -67,7 +67,7 @@ public final class ProviderHandoffFixtureHarness {
       fallbackProvider = normalize(fallbackProvider, "fallbackProvider");
       fallbackModel = require(fallbackModel, "fallbackModel");
       fallbackReservationId = require(fallbackReservationId, "fallbackReservationId");
-      allowedProviders = allowedProviders == null ? Set.of() : Set.copyOf(allowedProviders);
+      allowedProviders = normalizeProviders(allowedProviders);
       if (handoffTrigger == null) throw new IllegalArgumentException("handoffTrigger is required");
     }
   }
@@ -235,6 +235,13 @@ public final class ProviderHandoffFixtureHarness {
     if (request.primaryReservationId().equals(request.fallbackReservationId())) {
       throw new IllegalArgumentException("primary and fallback reservations must differ");
     }
+  }
+
+  private static Set<String> normalizeProviders(Set<String> providers) {
+    if (providers == null) return Set.of();
+    return providers.stream()
+        .map(value -> normalize(value, "allowedProviders entry"))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 
   private static boolean shouldHandoff(HandoffTrigger trigger, WorkerResult.Outcome outcome) {
