@@ -5,7 +5,6 @@ import java.util.List;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 /**
  * Package-local prompt assembly seam for the BUILD worker.
@@ -15,12 +14,6 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
  * compatibility facade used by the pipeline and characterization tests.
  */
 final class PromptComposer {
-
-  private final FeatureFlagService featureFlagService;
-
-  PromptComposer(FeatureFlagService featureFlagService) {
-    this.featureFlagService = featureFlagService;
-  }
 
   static String composeUserPrompt(PlannedTask task, String previousBuildError, String orientation) {
     StringBuilder sb = new StringBuilder();
@@ -99,11 +92,6 @@ final class PromptComposer {
       sb.append(fragment);
     }
     return sb.toString();
-  }
-
-  private String loadScaffoldForProjectType(String projectType) {
-    return PromptResourceReader.readOptional(
-        "prompts/scaffolds", scaffoldKeyForProjectType(projectType));
   }
 
   static String scaffoldKeyForProjectType(String projectType) {

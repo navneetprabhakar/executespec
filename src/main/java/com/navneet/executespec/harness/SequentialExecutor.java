@@ -4883,16 +4883,16 @@ to boot — skip it for those.""";
    * style.
    */
   String loadProviderFragment(String provider) {
-    return new PromptComposer(featureFlagService).loadProviderFragment(provider);
+    return new PromptComposer().loadProviderFragment(provider);
   }
 
   /** Load an optional model-specific BUILD fragment under model/{provider}/{model}/build.md. */
   String loadModelFragment(String provider, String model) {
-    return new PromptComposer(featureFlagService).loadModelFragment(provider, model);
+    return new PromptComposer().loadModelFragment(provider, model);
   }
 
   String loadProjectTypeFragments(String projectType) {
-    return new PromptComposer(featureFlagService).loadProjectTypeFragments(projectType);
+    return new PromptComposer().loadProjectTypeFragments(projectType);
   }
 
   /**
