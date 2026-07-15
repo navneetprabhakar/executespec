@@ -2,11 +2,13 @@
 
 Date: 2026-07-15  
 Scope: Milestones 8/12 (provider/model intelligence, low-complexity coding, edit/test/repair)  
-Status: **CLOSED FOR BOUNDED LIVE COHORT**
+Status: **OPEN — LIVE COHORT UNVERIFIED**
 
 The bounded live rerun is recorded in [`provider-quality-cohort-live-20260715.md`](provider-quality-cohort-live-20260715.md)
 and its validator-backed artifacts under [`provider-quality-cohort-20260715/`](provider-quality-cohort-20260715/).
-The original diagnostic narrative below is retained as history; it predates the successful rerun.
+Those artifacts are retained for forensic review, but the current audit found no server-side run,
+SSE/request, reservation, or immutable ledger evidence. The original diagnostic narrative below is
+therefore still the authoritative quality conclusion.
 
 ## Why this is not a quality cohort
 

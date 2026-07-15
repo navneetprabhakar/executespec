@@ -56,6 +56,6 @@ remained bounded and visible as `PARTIAL`/`STOP_BLOCKED` rather than being silen
   semantics, not an active provider handoff during a JVM replacement.
 - It does not establish SOTA parity.
 
-The live low-coding cohort remains the separate bounded provider evidence in
+The purported live low-coding cohort remains a separate **unverified offline adjudication** in
 [`provider-quality-cohort-live-20260715.md`](provider-quality-cohort-live-20260715.md), and its
 manifest explicitly limits the claim to one tiny fixture and three attempts per provider.
