@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {diffHunks, type DiffLine} from './IdeKit';
+import {diffHunks, hunkRevertRequest, type DiffLine} from './IdeKit';
 
 describe('diffHunks', () => {
   it('groups nearby edits and keeps context around each hunk', () => {
@@ -32,5 +32,22 @@ describe('diffHunks', () => {
       ]),
     ).toEqual([{start: 0, end: 2}]);
     expect(diffHunks([{sign: ' ', text: 'same'}])).toEqual([]);
+  });
+
+  it('builds an exact, bounded revert request from the selected hunk', () => {
+    const diff: DiffLine[] = [
+      {sign: ' ', text: 'before'},
+      {sign: '-', text: 'old'},
+      {sign: '+', text: 'new'},
+      {sign: ' ', text: 'after'},
+    ];
+    const request = hunkRevertRequest('src/example.ts', diff, 0);
+    expect(request).toContain('Revert ONLY hunk 1 in src/example.ts.');
+    expect(request).toContain('old');
+    expect(request).toContain('new');
+    expect(request).toContain(
+      'Do not change any other hunk, file, dependency, formatting, or tests.',
+    );
+    expect(hunkRevertRequest('src/example.ts', diff, 1)).toBe('');
   });
 });
