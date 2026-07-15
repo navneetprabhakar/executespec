@@ -7,7 +7,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.FilePurposeSummary;
 import com.navneet.executespec.codeintel.repository.FilePurposeSummaryRepository;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -85,7 +85,7 @@ public class FilePurposeSummaryService {
 
   private final FilePurposeSummaryRepository repo;
   private final ModelResolver modelResolver;
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final FeatureFlagService featureFlagService;
   private final RunCostTracker costTracker;
 
@@ -146,15 +146,13 @@ public class FilePurposeSummaryService {
       Prompt prompt =
           new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(userPayload)));
       ChatResponse response =
-          fallbackLlmRouter.callWithFallback(
+          llmRouter.callText(
               resolved.providerName(),
               resolved.getModel(),
-              prompt,
+              prompt.getInstructions(),
               "file-purpose-" + filePath,
-              "file-purpose-summary",
-              FallbackLlmRouter.FallbackMode.IMMEDIATE,
-              0,
-              false);
+              "FilePurposeSummaryService",
+              "summary");
       String summary = response.getResult().getOutput().getText();
       if (summary == null || summary.isBlank()) {
         log.debug("FilePurposeSummary: empty LLM response for {}:{}", repoFullName, filePath);

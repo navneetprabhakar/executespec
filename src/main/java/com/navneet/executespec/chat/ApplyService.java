@@ -1,10 +1,7 @@
 package com.navneet.executespec.chat;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.engine.WorkerAgent;
@@ -337,62 +334,5 @@ public class ApplyService {
         + " failed across "
         + r.perRepo().size()
         + " repos";
-  }
-
-  /**
-   * Legacy workspace-root commit helper. Retained as an internal escape hatch (currently unused
-   * after Fix L) — every apply now goes through {@link ScmPushService#pushApplyChanges} which
-   * commits + pushes per-repo. If a future code path needs to capture changes in the wrapping
-   * workspace git without pushing, restore the call site here.
-   */
-  @SuppressWarnings("unused")
-  private static String tryGitCommit(Path workspace, String prefix, String title) {
-    try {
-      runCmd(workspace, "git", "add", "-A");
-      String status = runCmd(workspace, "git", "status", "--porcelain");
-      if (status == null || status.isBlank()) {
-        return "no-op (nothing to commit)";
-      }
-      String msg = prefix + ": " + (title.isBlank() ? "apply user suggestion" : title);
-      runCmd(
-          workspace,
-          "git",
-          "commit",
-          "-m",
-          msg,
-          "--author",
-          "Executespec Copilot <copilot@executespec.local>");
-      return "committed";
-    } catch (Exception e) {
-      log.warn("ApplyService git commit failed at {}: {}", workspace, e.getMessage());
-      return "commit-failed: " + e.getMessage();
-    }
-  }
-
-  @SuppressWarnings("unused")
-  private static String runCmd(Path cwd, String... cmd) throws IOException, InterruptedException {
-    ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd.toFile()).redirectErrorStream(true);
-    Process p = pb.start();
-    StringBuilder sb = new StringBuilder();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = br.readLine()) != null) sb.append(line).append('\n');
-    }
-    if (!p.waitFor(30, TimeUnit.SECONDS)) {
-      p.destroyForcibly();
-      throw new IOException("git command timeout: " + String.join(" ", cmd));
-    }
-    if (p.exitValue() != 0) {
-      throw new IOException(
-          "exit="
-              + p.exitValue()
-              + " cmd="
-              + String.join(" ", cmd)
-              + " output="
-              + sb.toString().trim());
-    }
-    return sb.toString().trim();
   }
 }

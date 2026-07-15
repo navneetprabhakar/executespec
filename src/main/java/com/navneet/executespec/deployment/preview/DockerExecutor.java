@@ -1,5 +1,6 @@
 package com.navneet.executespec.deployment.preview;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -198,17 +199,36 @@ public class DockerExecutor {
       }
 
       Process process = pb.start();
+      ByteArrayOutputStream captured = new ByteArrayOutputStream();
+      Thread outputReader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try (InputStream is = process.getInputStream()) {
+                      is.transferTo(captured);
+                    } catch (IOException e) {
+                      log.debug("Process output read failed: {}", e.getMessage());
+                    }
+                  });
 
-      // Read output in bounded fashion
-      String output;
-      try (InputStream is = process.getInputStream()) {
-        byte[] buf = is.readNBytes(MAX_OUTPUT_BYTES);
-        output = new String(buf);
-      }
-
+      // Start the timeout while the child is running. Reading stdout synchronously before
+      // waitFor() lets a stalled Docker daemon defeat the timeout by keeping its pipe open.
       boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       if (!finished) {
         process.destroyForcibly();
+        process.waitFor(1, TimeUnit.SECONDS);
+      }
+
+      outputReader.join(TimeUnit.SECONDS.toMillis(1));
+      byte[] bytes = captured.toByteArray();
+      String output =
+          new String(
+              bytes,
+              0,
+              Math.min(bytes.length, MAX_OUTPUT_BYTES),
+              java.nio.charset.StandardCharsets.UTF_8);
+
+      if (!finished) {
         return new ProcessResult(-1, output, true);
       }
 

@@ -4,11 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.Message;
@@ -35,7 +35,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ArchitectureDocGenerator {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
   // ObjectProvider (lazy) breaks the bean cycle through projectArchitectureService
   // (RL-2026-06-002).
   private final ObjectProvider<LlmRouter> llmRouter;
@@ -101,7 +100,7 @@ public class ArchitectureDocGenerator {
           "combined arch needs at least one per-repo arch doc; got 0");
     }
 
-    LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
+    LlmProvider effective = provider != null ? provider : ProjectProviderResolver.CANONICAL_DEFAULT;
     ResolvedModel resolved = modelResolver.resolve("ArchitectureDocGenerator", effective);
 
     String userPayload = buildPayload(projectId, repoArchDocs, repoFullNames);
@@ -109,11 +108,9 @@ public class ArchitectureDocGenerator {
     List<Message> messages =
         List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
 
-    // DeepSeek / OpenRouter route via LlmRouter (FallbackLlmRouter has no such case); all other
-    // providers keep the existing FallbackLlmRouter path byte-identical. See ArchLlmDispatch.
+    // All providers use the canonical text router; architecture generation has no tool callbacks.
     ChatResponse response =
         ArchLlmDispatch.dispatch(
-            fallbackLlmRouter,
             llmRouter.getObject(),
             resolved,
             messages,

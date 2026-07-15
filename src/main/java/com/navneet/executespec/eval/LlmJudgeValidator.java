@@ -4,11 +4,11 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class LlmJudgeValidator {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final EvalScorer scorer;
   private final ModelRegistry modelRegistry;
   private static final ObjectMapper mapper = new ObjectMapper();
@@ -47,11 +47,15 @@ public class LlmJudgeValidator {
     String judgePrompt = buildJudgePrompt(testCase, modelResponse);
 
     try {
-      Prompt prompt = new Prompt(List.of(new UserMessage(judgePrompt)));
-      FallbackLlmRouter.LlmResponse response =
-          fallbackLlmRouter.callDirect(
-              "anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
-      String judgeResponse = response.response().getResult().getOutput().getText();
+      ChatResponse response =
+          llmRouter.callText(
+              "anthropic",
+              modelRegistry.lightweightModelFor("anthropic"),
+              List.of(new UserMessage(judgePrompt)),
+              "eval-judge-" + testCase.id(),
+              "LlmJudgeValidator",
+              "judge");
+      String judgeResponse = response.getResult().getOutput().getText();
 
       return parseJudgeResponse(judgeResponse, testCase.validationPatterns().size());
     } catch (Exception e) {

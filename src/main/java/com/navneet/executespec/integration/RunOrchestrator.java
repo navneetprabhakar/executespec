@@ -2,7 +2,6 @@ package com.navneet.executespec.integration;
 
 import static com.navneet.executespec.integration.RunPipelineSupport.computeRepoCountForEstimate;
 import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
-import static com.navneet.executespec.integration.RunPipelineSupport.isTerminal;
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
@@ -49,7 +48,6 @@ import com.navneet.executespec.engine.VerifyMode;
 import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
-import com.navneet.executespec.execution.model.GoalDonenessState;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.harness.ExecutionRequest;
@@ -88,6 +86,7 @@ import com.navneet.executespec.testgen.TestGenOrchestrator;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -106,23 +105,28 @@ import lombok.extern.slf4j.Slf4j;
  * working unchanged — {@code GET /api/runs/{id}} returns V2 runs as V1-shaped JSON. The only
  * distinguishing field is {@code harnessVersion = "v2"}.
  *
- * <p><b>Phase 11.A scope</b>: entity persistence, status lifecycle mapping, plan + task rows. Cost
- * tracking (Phase 11.B), code view (11.C), and GitHub push (11.D) layer on top in subsequent
- * commits.
+ * <p>The V2 path now owns the complete run lifecycle on top of those compatibility tables,
+ * including cost attribution, code/evidence views, validation, and SCM handoff through their
+ * dedicated collaborators.
  *
- * <p><b>Not yet implemented</b>:
+ * <p><b>Compatibility notes</b>:
  *
  * <ul>
- *   <li>Plan gate — V2 runs skip {@code AWAITING_APPROVAL}, go straight to {@code WORKING}
- *   <li>Batch execution — V2 only supports realtime for now
- *   <li>Preview / deploy / GitHub push — separate phases
- *   <li>Credits / billing — Phase 11.B hooks {@code CostEstimator}
+ *   <li>Production runs persist a non-blocking {@code AWAITING_APPROVAL} plan gate; prototype and
+ *       explicitly integration-triggered runs may bypass it.
+ *   <li>Batch execution remains a separate operator path; realtime execution is the default.
+ *   <li>Preview, deploy, GitHub push, and billing are integrated through their dedicated services.
  * </ul>
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class RunOrchestrator implements RunControlPort {
+
+  /** Recovery policy: persisted client intent may only resume through the local-hands transport. */
+  static boolean shouldResumeLocalHands(boolean persistedIntent, boolean localHandsEnabled) {
+    return persistedIntent && localHandsEnabled;
+  }
 
   /**
    * Back-compat classification for {@link PlannerRequest}. Live planning strategy flows through
@@ -170,6 +174,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunValidationKickoff validationKickoff;
   private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
+  private final BoundedTestGenKickoff boundedTestGenKickoff;
   private final PerkyMessenger perky;
   private final GateStore gateStore;
   private final ModelResolver modelResolver;
@@ -238,6 +243,9 @@ public class RunOrchestrator implements RunControlPort {
 
   private final com.navneet.executespec.tool.remote.RemoteToolDispatcher remoteToolDispatcher;
 
+  /** Submit-time handoff used to stamp local intent before the async pipeline can start. */
+  private final ThreadLocal<Boolean> submitLocalExecutionIntent = new ThreadLocal<>();
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -274,6 +282,9 @@ public class RunOrchestrator implements RunControlPort {
   /** runId → in-flight pipeline future; the cancel/pause/halt interrupt handle (invariant #4). */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
+  /** Stable process label used by the database-backed execution lease. */
+  private static final String EXECUTION_INSTANCE_ID = executionInstanceId();
+
   @Value("${execution.continuation.post-review.enabled:true}")
   private boolean postReviewContinuationEnabled = true;
 
@@ -299,11 +310,37 @@ public class RunOrchestrator implements RunControlPort {
   @Override
   public void putActiveRun(String runId, Future<?> future) {
     activeRuns.put(runId, future);
+    // Register the lease before the pipeline can outlive this JVM. A startup scanner on another
+    // replica must see a live owner rather than interpreting a null heartbeat as a crash.
+    runRepo.claimExecutionOwner(runId, EXECUTION_INSTANCE_ID, Instant.now());
   }
 
   @Override
   public Future<?> removeActiveRun(String runId) {
     return activeRuns.remove(runId);
+  }
+
+  /** Refreshes leases for locally owned futures so rolling restarts cannot duplicate live work. */
+  @Scheduled(fixedRate = 30_000, initialDelay = 30_000)
+  void refreshExecutionHeartbeats() {
+    Instant heartbeat = Instant.now();
+    activeRuns.forEach(
+        (runId, future) -> {
+          if (future == null || future.isDone() || future.isCancelled()) {
+            activeRuns.remove(runId, future);
+            return;
+          }
+          runRepo.refreshExecutionHeartbeat(runId, EXECUTION_INSTANCE_ID, heartbeat);
+        });
+  }
+
+  private static String executionInstanceId() {
+    String host = System.getenv("HOSTNAME");
+    if (host == null || host.isBlank()) {
+      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
+    }
+    host = host == null || host.isBlank() ? "unknown" : host.trim();
+    return host.length() <= 128 ? host : host.substring(0, 128);
   }
 
   /**
@@ -321,7 +358,8 @@ public class RunOrchestrator implements RunControlPort {
    * <p>Signature originally mirrored V1's {@code PipelineHarness.submitRun(...)} (since deleted) so
    * the controller could delegate with zero argument transformation.
    */
-  public PipelineRun submitRun(
+  /** Full submit variant that stamps local-hands intent atomically with the run row. */
+  public PipelineRun submitRunWithLocalExecution(
       String userRequest,
       String source,
       String repoUrl,
@@ -335,23 +373,46 @@ public class RunOrchestrator implements RunControlPort {
       String createdByUserId,
       String orgId,
       String projectId,
-      String executionMode) {
-    return submitRun(
-        userRequest,
-        source,
-        repoUrl,
-        repoMode,
-        githubPat,
-        githubOwner,
-        skipApproval,
-        autoMerge,
-        modelName,
-        aiProvider,
-        createdByUserId,
-        orgId,
-        projectId,
-        executionMode,
-        List.of());
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier,
+      boolean localExecutionRequested) {
+    submitLocalExecutionIntent.set(localExecutionRequested);
+    try {
+      return submitRun(
+          userRequest,
+          source,
+          repoUrl,
+          repoMode,
+          githubPat,
+          githubOwner,
+          skipApproval,
+          autoMerge,
+          modelName,
+          aiProvider,
+          createdByUserId,
+          orgId,
+          projectId,
+          executionMode,
+          selectedRepoIds,
+          figmaUrl,
+          tddMode,
+          branchOverride,
+          prReviewComments,
+          runMode,
+          requireConfirmationBeforeExpensiveContinuation,
+          requireBenchmarkPriorForAutomaticContinuation,
+          lowComplexityWorkerStartTier);
+    } finally {
+      submitLocalExecutionIntent.remove();
+    }
   }
 
   /**
@@ -845,6 +906,7 @@ public class RunOrchestrator implements RunControlPort {
             .totalOutputTokens(0)
             .figmaUrl(figmaUrl)
             .selectedRepoIds(serializeRepoIds(selectedRepoIds))
+            .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
             .build();
     run = runRepo.save(run);
 
@@ -930,7 +992,7 @@ public class RunOrchestrator implements RunControlPort {
                 activeRuns.remove(runIdFinal);
               }
             });
-    activeRuns.put(runIdFinal, future);
+    putActiveRun(runIdFinal, future);
     return run;
   }
 
@@ -1074,6 +1136,40 @@ public class RunOrchestrator implements RunControlPort {
       // bind site below, ENTERPRISE-gated; null on every non-submit path (resume / re-plan).
       String pinnedModel,
       String lowComplexityWorkerStartTierOverride) {
+    runPipeline(
+        runId,
+        provider,
+        model,
+        userRequest,
+        skipApproval,
+        executionMode,
+        projectId,
+        selectedRepoIds,
+        githubPat,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        pinnedModel,
+        lowComplexityWorkerStartTierOverride,
+        null);
+  }
+
+  private void runPipeline(
+      String runId,
+      String provider,
+      String model,
+      String userRequest,
+      boolean skipApproval,
+      String executionMode,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String githubPat,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String pinnedModel,
+      String lowComplexityWorkerStartTierOverride,
+      PlanGateContinuation approvedPlanContinuation) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -1196,27 +1292,50 @@ public class RunOrchestrator implements RunControlPort {
       // Reuse V1's workspace init — creates a fresh git repo with .gitignore/.gitattributes
       // and an initial empty commit. This is required for `/push-github` to work against
       // V2 runs: the endpoint assumes the workspace already has git history.
-      workspaceInit.ensureRunWorkspace(runId);
+      if (approvedPlanContinuation == null) {
+        workspaceInit.ensureRunWorkspace(runId);
+      }
 
       // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. When on, the
       // worker's tool calls are proxied to the caller's machine (clone / smoke / reviewer / push
       // are
       // all skipped below). Flag OFF ⇒ false ⇒ every branch below is inert and prod is
       // byte-identical.
+      boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+      boolean persistedLocalIntent =
+          runRepo.findById(runId).map(PipelineRun::isLocalExecutionRequested).orElse(false);
+      boolean continuationLocalIntent =
+          approvedPlanContinuation != null && approvedPlanContinuation.localRun();
+      if ((persistedLocalIntent || continuationLocalIntent) && !localHandsEnabled) {
+        log.error(
+            "V2 run={} local-hands intent cannot be honoured: feature flag is disabled", runId);
+        terminate(runId, "FAILED", "LOCAL_HANDS_DISABLED", startedAt);
+        return;
+      }
       localRun =
-          featureFlagService.isEnabled("worker.local-hands.enabled")
-              && runLocalExecutionFlag.consume(runId);
-      boolean requireContinuationConfirmation = runContinuationConfirmationFlag.consume(runId);
+          approvedPlanContinuation != null
+              ? approvedPlanContinuation.localRun()
+              : localHandsEnabled && (runLocalExecutionFlag.consume(runId) || persistedLocalIntent);
+      boolean requireContinuationConfirmation =
+          approvedPlanContinuation != null
+              ? approvedPlanContinuation.requireContinuationConfirmation()
+              : runContinuationConfirmationFlag.consume(runId);
       boolean requireContinuationBenchmarkPrior =
-          runContinuationBenchmarkPriorFlag
-              .consume(runId)
-              .orElse(postReviewRequireBenchmarkPriorForAutomaticContinuation);
+          approvedPlanContinuation != null
+              ? approvedPlanContinuation.requireContinuationBenchmarkPrior()
+              : runContinuationBenchmarkPriorFlag
+                  .consume(runId)
+                  .orElse(postReviewRequireBenchmarkPriorForAutomaticContinuation);
 
       // Pilot v3.0 — clone any project-linked repos the user selected for this run
       // into <workspace>/<runId>/repos/<name>/ subdirectories. Non-fatal: if a clone
       // fails we log and continue so the run can at least try to plan against what
       // was fetched. (Skipped entirely for LOCAL runs — the working tree is the client's.)
-      if (!localRun && projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+      if (approvedPlanContinuation == null
+          && !localRun
+          && projectId != null
+          && selectedRepoIds != null
+          && !selectedRepoIds.isEmpty()) {
         try {
           List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
           List<WorkspaceInitService.RepoToClone> toClone =
@@ -1245,7 +1364,7 @@ public class RunOrchestrator implements RunControlPort {
       // classifier, planner, executor, reviewer, validation report — and dispatch the whole user
       // request to a single CodeGenEngine loop. Product entry points stay on RunMode.BUILD by
       // default and fall through to the unchanged build-mode flow below.
-      {
+      if (approvedPlanContinuation == null) {
         PipelineRun modeProbe = runRepo.findById(runId).orElse(null);
         if (modeProbe != null
             && com.navneet.executespec.state.RunMode.isPatch(modeProbe.getRunMode())) {
@@ -1268,346 +1387,373 @@ public class RunOrchestrator implements RunControlPort {
             runId);
       }
 
-      // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
-      // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
-      // plan approval; the summarised codemap becomes the planner's
-      // workspaceSummary AND extra context for the assessment.
-      String codemapSummary = null;
-      PipelineRun runRow = runRepo.findById(runId).orElse(null);
-      if (runRow != null
-          && projectId == null
-          && "EXISTING".equalsIgnoreCase(runRow.getRepoMode())
-          && runRow.getRepoUrl() != null
-          && runRow.getCreatedByUserId() != null) {
-        String tier =
-            appUserRepository
-                .findById(runRow.getCreatedByUserId())
-                .map(u -> u.getTier())
-                .orElse(null);
-        if (runCodeMapService.isEligible(tier)) {
-          try {
-            broadcaster.emit(
-                runId,
-                RunEvent.log(runId, "codemap", "Generating codebase map for planner context"));
-            codemapSummary =
-                runCodeMapService.generateForRun(
-                    runId, runRow.getRepoUrl(), null, githubPat, runRow.getProjectId());
-            if (codemapSummary != null) {
+      Plan plan;
+      String designBlock;
+      RunCostTracker.Snapshot afterPlan;
+      if (approvedPlanContinuation == null) {
+
+        // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
+        // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
+        // plan approval; the summarised codemap becomes the planner's
+        // workspaceSummary AND extra context for the assessment.
+        String codemapSummary = null;
+        PipelineRun runRow = runRepo.findById(runId).orElse(null);
+        if (runRow != null
+            && projectId == null
+            && "EXISTING".equalsIgnoreCase(runRow.getRepoMode())
+            && runRow.getRepoUrl() != null
+            && runRow.getCreatedByUserId() != null) {
+          String tier =
+              appUserRepository
+                  .findById(runRow.getCreatedByUserId())
+                  .map(u -> u.getTier())
+                  .orElse(null);
+          if (runCodeMapService.isEligible(tier)) {
+            try {
               broadcaster.emit(
                   runId,
-                  RunEvent.log(
-                      runId, "codemap", "Codemap ready — injected into planner + assessment"));
+                  RunEvent.log(runId, "codemap", "Generating codebase map for planner context"));
+              codemapSummary =
+                  runCodeMapService.generateForRun(
+                      runId, runRow.getRepoUrl(), null, githubPat, runRow.getProjectId());
+              if (codemapSummary != null) {
+                broadcaster.emit(
+                    runId,
+                    RunEvent.log(
+                        runId, "codemap", "Codemap ready — injected into planner + assessment"));
+              }
+            } catch (Exception cmEx) {
+              log.warn("V2 run={} codemap generation failed: {}", runId, cmEx.getMessage());
             }
-          } catch (Exception cmEx) {
-            log.warn("V2 run={} codemap generation failed: {}", runId, cmEx.getMessage());
           }
         }
-      }
 
-      // 0c. Pilot R4: feature assessment
-      // Runs only when a project context is available so the assessment can
-      // reason about linked repos + architecture annotations. Result is
-      // persisted, broadcast over SSE, and available to the planner via
-      // the run row. Heuristic for now (no extra LLM cost).
-      if (projectId != null) {
-        try {
-          String assessmentJson =
-              featureAssessmentService.assessAsJson(runId, projectId, userRequest);
-          if (assessmentJson != null) {
-            runRepo
-                .findById(runId)
-                .ifPresent(
-                    r -> {
-                      r.setAssessmentResult(assessmentJson);
-                      runRepo.save(r);
-                    });
-            broadcaster.emit(runId, RunEvent.log(runId, "assessment", "Feature assessment ready"));
-          }
-        } catch (Exception assessEx) {
-          log.warn("V2 run={} assessment failed: {}", runId, assessEx.getMessage());
-        }
-      }
-
-      perky.start(runId, "PLANNING");
-      Plan plan;
-      try {
-        Classification autoClassification = SpecClassifier.classify(userRequest);
-        log.info(
-            "V2 run={} spec classified as {} (len={})",
-            runId,
-            autoClassification,
-            userRequest == null ? 0 : userRequest.length());
-
-        // Smart classifier verdict drives downstream routing: SMALL/MEDIUM use the outline planner
-        // in full-plan mode; LARGE/LEGACY use skeleton expansion; SINGLE_SHOT is synthesized
-        // locally. Cost flows through RunCostTracker so it auto-aggregates into the run total.
-        PlanStrategy planStrategy =
-            planningCoordinator.runClassifierShadow(
-                runId, runRow, userRequest, projectId, selectedRepoIds, provider);
-        String projectMemory =
-            projectId != null ? projectMemoryProvider.buildPlannerContext(projectId) : "";
+        // 0c. Pilot R4: feature assessment
+        // Runs only when a project context is available so the assessment can
+        // reason about linked repos + architecture annotations. Result is
+        // persisted, broadcast over SSE, and available to the planner via
+        // the run row. Heuristic for now (no extra LLM cost).
         if (projectId != null) {
           try {
-            // Gap #5 (v2.5.12) — thread the submitting user's PAT through
-            // staleness + regen so private-org repos don't 404 in the
-            // background. Falls back to system PAT (null) if the user has
-            // no PAT configured (public repos work fine that way).
-            String runOwnerId = runRow == null ? null : runRow.getCreatedByUserId();
-            String runUserPat =
-                runOwnerId == null
-                    ? null
-                    : appUserRepository
-                        .findById(runOwnerId)
-                        .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
-                        .orElse(null);
-            var staleness = stalenessService.report(projectId, runUserPat);
-            if (staleness != null && staleness.stale()) {
-              log.info(
-                  "V2 run={} project={} has {} stale codemap(s); regenerating before planner",
-                  runId,
-                  projectId,
-                  staleness.staleCount());
-              projectArchitectureService.generate(projectId, null, runUserPat);
-              stalenessService.invalidate(projectId);
+            String assessmentJson =
+                featureAssessmentService.assessAsJson(runId, projectId, userRequest);
+            if (assessmentJson != null) {
+              runRepo
+                  .findById(runId)
+                  .ifPresent(
+                      r -> {
+                        r.setAssessmentResult(assessmentJson);
+                        runRepo.save(r);
+                      });
+              broadcaster.emit(
+                  runId, RunEvent.log(runId, "assessment", "Feature assessment ready"));
             }
-          } catch (Exception e) {
-            log.warn(
-                "V2 run={} pre-execution staleness refresh failed (continuing): {}",
-                runId,
-                e.getMessage());
+          } catch (Exception assessEx) {
+            log.warn("V2 run={} assessment failed: {}", runId, assessEx.getMessage());
           }
-        }
-        String projectBrief = projectId != null ? projectBriefService.buildBrief(projectId) : "";
-        String referenceDocs =
-            projectId != null ? retrievalService.retrieve(projectId, userRequest) : "";
-        String multiRepoSummary = contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds);
-        String summary;
-        if (multiRepoSummary != null) {
-          summary = multiRepoSummary;
-        } else if (codemapSummary != null) {
-          summary = "Existing repository — codebase map below.\n\n" + codemapSummary;
-        } else {
-          summary = "empty scratch workspace (V2 harness)";
-        }
-        // RL-2026-05-035 — feed the generated code-intel (codemap symbol maps) into the planner.
-        // Flag-gated + bounded + best-effort; no-op on greenfield (no project/codemap).
-        if (projectId != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
-          try {
-            String codeIntel =
-                contextComposer.buildCodeIntelContext(
-                    projectId,
-                    projectRepoService.resolveForRun(projectId, selectedRepoIds),
-                    userRequest,
-                    featureFlagService.isEnabled("codeintel.tiered.enabled"));
-            if (!codeIntel.isBlank()) {
-              summary = summary + "\n\n" + codeIntel;
-              log.info(
-                  "V2 run={} injected code-intel into planner ({} chars)",
-                  runId,
-                  codeIntel.length());
-            }
-          } catch (Exception e) {
-            log.warn("V2 run={} code-intel planner injection skipped: {}", runId, e.getMessage());
-          }
-        }
-        // Architecture-doc injection — feed the project's high-level design (cross-repo HLD/LLD)
-        // into the planner alongside the codemap. Flag-gated (`codeintel.inject-arch.enabled`,
-        // default OFF), bounded (~8k chars), best-effort; no project / no arch doc → no-op
-        // (greenfield + blind-bench fail-safe). Mirrors the codemap-injection pattern above.
-        if (projectId != null && featureFlagService.isEnabled("codeintel.inject-arch.enabled")) {
-          try {
-            String arch = contextComposer.buildArchitectureContext(projectId);
-            if (!arch.isBlank()) {
-              summary = summary + "\n\n" + arch;
-              log.info(
-                  "V2 run={} injected architecture into planner ({} chars)", runId, arch.length());
-            }
-          } catch (Exception e) {
-            log.warn("V2 run={} architecture planner injection skipped: {}", runId, e.getMessage());
-          }
-        }
-        // Enterprise-knowledge injection — feed cross-repo contracts + accepted ADRs into the
-        // planner so it plans changes that respect them. Flag-gated (`enterprise.inject.enabled`,
-        // default OFF), bounded (~8000 chars each), best-effort per block. No project → both empty
-        // → no-op (greenfield fail-safe). Mirrors the codemap-injection pattern above.
-        String contractsBlock = "";
-        String adrsBlock = "";
-        if (projectId != null && featureFlagService.isEnabled("enterprise.inject.enabled")) {
-          try {
-            String c = contractInjectionService.compose(projectId).block();
-            contractsBlock = truncate(c == null ? "" : c, ENTERPRISE_INJECT_CAP);
-            if (!contractsBlock.isBlank()) {
-              log.info(
-                  "V2 run={} injected contracts into planner ({} chars)",
-                  runId,
-                  contractsBlock.length());
-            }
-          } catch (Exception e) {
-            log.warn("V2 run={} contracts planner injection skipped: {}", runId, e.getMessage());
-            contractsBlock = "";
-          }
-          try {
-            String a = adrInjectionService.compose(projectId).block();
-            adrsBlock = truncate(a == null ? "" : a, ENTERPRISE_INJECT_CAP);
-            if (!adrsBlock.isBlank()) {
-              log.info(
-                  "V2 run={} injected ADRs into planner ({} chars)", runId, adrsBlock.length());
-            }
-          } catch (Exception e) {
-            log.warn("V2 run={} ADR planner injection skipped: {}", runId, e.getMessage());
-            adrsBlock = "";
-          }
-        }
-        PlannerRequest plannerReq =
-            PlannerRequest.builder()
-                .spec(userRequest)
-                .classification(autoClassification)
-                .planStrategy(planStrategy)
-                .provider(provider)
-                .model(model)
-                .context(rootCtx)
-                .workspaceSummary(summary)
-                .projectMemory(projectMemory)
-                .projectBrief(projectBrief)
-                .referenceDocs(referenceDocs)
-                .contracts(contractsBlock)
-                .projectAdrs(adrsBlock)
-                .tddMode(tddMode)
-                .prReviewComments(prReviewComments)
-                .build();
-
-        // v2.6.2 slice 3 — strategy-driven routing with auto-degrade
-        // when a strategy's circuit breaker is open.
-        //   SMALL / MEDIUM → outline planner (FULL_PLAN mode, single call).
-        //   LARGE          → outline planner (SKELETON_ONLY) → parallel
-        //                    expansion → coherence pass.
-        //   LEGACY         → defer to slice 4 — recursive depth-2
-        //                    expansion isn't built yet, so degrade to LARGE.
-        //   SINGLE_SHOT / null / classifier failure → synthetic one-task plan.
-        PlanStrategy effective =
-            planStrategy == null
-                ? null
-                : planStrategyBreaker.degradeIfOpen(
-                    planStrategy == PlanStrategy.LEGACY ? PlanStrategy.LARGE : planStrategy);
-        if (effective != planStrategy && effective != null) {
-          log.warn("V2 run={} circuit breaker degraded {} → {}", runId, planStrategy, effective);
         }
 
-        // Slice 4 — LEGACY classifications now drive depth-2 recursive
-        // expansion in the LARGE pipeline. The classifier verdict
-        // (pre-degrade) tells us whether to recurse on EPIC tasks; the
-        // breaker still degrades to LARGE for capacity reasons but the
-        // intent (and the recursion) is preserved.
-        boolean legacyRecursion = planStrategy == PlanStrategy.LEGACY;
-
-        if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
-          try {
-            plan =
-                planningCoordinator.runOutlinePhase(
-                    runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
-            planStrategyBreaker.recordSuccess(effective);
-          } catch (Exception outlineEx) {
-            planStrategyBreaker.recordFailure(effective);
-            log.warn(
-                "V2 run={} outline planner ({}) failed → SINGLE_SHOT fallback", runId, effective);
-            plan = outlinePlanner.synthesizeSingleShot(plannerReq);
-          }
-        } else if (effective == PlanStrategy.LARGE) {
-          try {
-            plan =
-                planningCoordinator.runLargePipeline(runId, plannerReq, rootCtx, legacyRecursion);
-            planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
-          } catch (Exception largeEx) {
-            planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
-            log.warn(
-                "V2 run={} LARGE pipeline failed → SINGLE_SHOT fallback: {}",
-                runId,
-                largeEx.getMessage());
-            plan = outlinePlanner.synthesizeSingleShot(plannerReq);
-          }
-        } else if (effective == PlanStrategy.SINGLE_SHOT) {
-          // v2.6.2 slice 5b — heuristic-fast-path classification.
-          // No LLM planner call; synthesise a one-task plan from the
-          // spec verbatim.
-          plan = outlinePlanner.synthesizeSingleShot(plannerReq);
-        } else {
-          // Classifier failed (effective == null) or returned an
-          // unhandled value. Treat as SINGLE_SHOT — same shape as
-          // the legacy synthesised path, no LLM cost beyond the
-          // optional title summarizer.
-          log.warn("V2 run={} no usable strategy verdict → synthesised SINGLE_SHOT plan", runId);
-          plan = outlinePlanner.synthesizeSingleShot(plannerReq);
-        }
-      } catch (Exception e) {
-        log.error("RunOrchestrator run={} planner failed", runId, e);
-        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
-        return;
-      }
-      if (plan.tasks() == null || plan.tasks().isEmpty()) {
-        log.error("RunOrchestrator run={} planner returned empty plan — failing", runId);
-        terminate(
-            runId,
-            "FAILED",
-            "planner: returned empty plan (model likely emitted malformed tool-call payload)",
-            startedAt);
-        return;
-      }
-      persistenceWriter.persistPlan(runId, plan);
-      persistenceWriter.persistTasks(runId, plan);
-      persistenceWriter.persistRunTitle(runId, plan);
-      contextComposer.writeAgentContext(workspace, plan);
-      persistEstimate(runId, provider, model, plan);
-      String designBlock = contextComposer.buildDesignBlock(userRequest, plan);
-      // Phase 1: attribute tokens used so far to the planner.
-      RunCostTracker.Snapshot afterPlan = costTracker.snapshot(runId);
-      tokenAttributor.attributePhase(
-          runId,
-          com.navneet.executespec.cost.RunTokenAttributor.Phase.PLANNER,
-          afterPlan.inputTokens(),
-          afterPlan.outputTokens(),
-          upperProvider,
-          model);
-
-      // 1b. Plan approval gate (PRODUCTION only)
-      // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass
-      // the gate so they flow straight into execution. PRODUCTION runs block
-      // on GateStore.awaitPlanGate until the user approves or rejects via
-      // /api/runs/{id}/approve.
-      boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
-      if (needsApproval) {
-        perky.stop(runId);
-        persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
-        // Open a PENDING row so the approve-endpoint's atomic claim
-        // (GateStore.tryClaimPlanGate) can detect concurrent approvals and
-        // return 409 to the loser — adversarial-test-report Finding 4.
-        gateStore.openPlanGate(runId);
-        int credits =
-            runRepo
-                .findById(runId)
-                .map(r -> r.getCreditsCharged() == null ? 1 : r.getCreditsCharged())
-                .orElse(1);
-        double estimatedCost =
-            runRepo
-                .findById(runId)
-                .map(r -> r.getCostEstimateHigh() == null ? 0.0 : r.getCostEstimateHigh())
-                .orElse(0.0);
-        broadcaster.emit(
-            runId, RunEvent.gateOpenedWithCredits(runId, "PLAN_APPROVAL", credits, estimatedCost));
-        eventPublisher.publishEvent(new PipelineEvent.GateOpened(runId, "PLAN_APPROVAL", credits));
-        boolean approved;
+        perky.start(runId, "PLANNING");
         try {
-          approved = gateStore.awaitPlanGate(runId);
-        } catch (InterruptedException ie) {
-          Thread.currentThread().interrupt();
-          log.warn("RunOrchestrator run={} plan gate interrupted — cancelling", runId);
-          terminate(runId, "CANCELLED", "plan gate interrupted", startedAt);
+          Classification autoClassification = SpecClassifier.classify(userRequest);
+          log.info(
+              "V2 run={} spec classified as {} (len={})",
+              runId,
+              autoClassification,
+              userRequest == null ? 0 : userRequest.length());
+
+          // Smart classifier verdict drives downstream routing: SMALL/MEDIUM use the outline
+          // planner
+          // in full-plan mode; LARGE/LEGACY use skeleton expansion; SINGLE_SHOT is synthesized
+          // locally. Cost flows through RunCostTracker so it auto-aggregates into the run total.
+          PlanStrategy planStrategy =
+              planningCoordinator.runClassifierShadow(
+                  runId, runRow, userRequest, projectId, selectedRepoIds, provider);
+          String projectMemory =
+              projectId != null ? projectMemoryProvider.buildPlannerContext(projectId) : "";
+          if (projectId != null) {
+            try {
+              // Gap #5 (v2.5.12) — thread the submitting user's PAT through
+              // staleness + regen so private-org repos don't 404 in the
+              // background. Falls back to system PAT (null) if the user has
+              // no PAT configured (public repos work fine that way).
+              String runOwnerId = runRow == null ? null : runRow.getCreatedByUserId();
+              String runUserPat =
+                  runOwnerId == null
+                      ? null
+                      : appUserRepository
+                          .findById(runOwnerId)
+                          .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
+                          .orElse(null);
+              var staleness = stalenessService.report(projectId, runUserPat);
+              if (staleness != null && staleness.stale()) {
+                log.info(
+                    "V2 run={} project={} has {} stale codemap(s); regenerating before planner",
+                    runId,
+                    projectId,
+                    staleness.staleCount());
+                // Preserve the run's explicit provider pin during pre-planner architecture refresh.
+                // Without this, a stale project can spend on its project-default provider before
+                // the pinned worker route is reached.
+                projectArchitectureService.generate(
+                    projectId,
+                    null,
+                    runUserPat,
+                    LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
+                stalenessService.invalidate(projectId);
+              }
+            } catch (Exception e) {
+              log.warn(
+                  "V2 run={} pre-execution staleness refresh failed (continuing): {}",
+                  runId,
+                  e.getMessage());
+            }
+          }
+          String projectBrief = projectId != null ? projectBriefService.buildBrief(projectId) : "";
+          String referenceDocs =
+              projectId != null ? retrievalService.retrieve(projectId, userRequest) : "";
+          String multiRepoSummary =
+              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds);
+          String summary;
+          if (multiRepoSummary != null) {
+            summary = multiRepoSummary;
+          } else if (codemapSummary != null) {
+            summary = "Existing repository — codebase map below.\n\n" + codemapSummary;
+          } else {
+            summary = "empty scratch workspace (V2 harness)";
+          }
+          // RL-2026-05-035 — feed the generated code-intel (codemap symbol maps) into the planner.
+          // Flag-gated + bounded + best-effort; no-op on greenfield (no project/codemap).
+          if (projectId != null && featureFlagService.isEnabled("codeintel.inject.enabled")) {
+            try {
+              String codeIntel =
+                  contextComposer.buildCodeIntelContext(
+                      projectId,
+                      projectRepoService.resolveForRun(projectId, selectedRepoIds),
+                      userRequest,
+                      featureFlagService.isEnabled("codeintel.tiered.enabled"));
+              if (!codeIntel.isBlank()) {
+                summary = summary + "\n\n" + codeIntel;
+                log.info(
+                    "V2 run={} injected code-intel into planner ({} chars)",
+                    runId,
+                    codeIntel.length());
+              }
+            } catch (Exception e) {
+              log.warn("V2 run={} code-intel planner injection skipped: {}", runId, e.getMessage());
+            }
+          }
+          // Architecture-doc injection — feed the project's high-level design (cross-repo HLD/LLD)
+          // into the planner alongside the codemap. Flag-gated (`codeintel.inject-arch.enabled`,
+          // default OFF), bounded (~8k chars), best-effort; no project / no arch doc → no-op
+          // (greenfield + blind-bench fail-safe). Mirrors the codemap-injection pattern above.
+          if (projectId != null && featureFlagService.isEnabled("codeintel.inject-arch.enabled")) {
+            try {
+              String arch = contextComposer.buildArchitectureContext(projectId);
+              if (!arch.isBlank()) {
+                summary = summary + "\n\n" + arch;
+                log.info(
+                    "V2 run={} injected architecture into planner ({} chars)",
+                    runId,
+                    arch.length());
+              }
+            } catch (Exception e) {
+              log.warn(
+                  "V2 run={} architecture planner injection skipped: {}", runId, e.getMessage());
+            }
+          }
+          // Enterprise-knowledge injection — feed cross-repo contracts + accepted ADRs into the
+          // planner so it plans changes that respect them. Flag-gated (`enterprise.inject.enabled`,
+          // default OFF), bounded (~8000 chars each), best-effort per block. No project → both
+          // empty
+          // → no-op (greenfield fail-safe). Mirrors the codemap-injection pattern above.
+          String contractsBlock = "";
+          String adrsBlock = "";
+          if (projectId != null && featureFlagService.isEnabled("enterprise.inject.enabled")) {
+            try {
+              String c = contractInjectionService.compose(projectId).block();
+              contractsBlock = truncate(c == null ? "" : c, ENTERPRISE_INJECT_CAP);
+              if (!contractsBlock.isBlank()) {
+                log.info(
+                    "V2 run={} injected contracts into planner ({} chars)",
+                    runId,
+                    contractsBlock.length());
+              }
+            } catch (Exception e) {
+              log.warn("V2 run={} contracts planner injection skipped: {}", runId, e.getMessage());
+              contractsBlock = "";
+            }
+            try {
+              String a = adrInjectionService.compose(projectId).block();
+              adrsBlock = truncate(a == null ? "" : a, ENTERPRISE_INJECT_CAP);
+              if (!adrsBlock.isBlank()) {
+                log.info(
+                    "V2 run={} injected ADRs into planner ({} chars)", runId, adrsBlock.length());
+              }
+            } catch (Exception e) {
+              log.warn("V2 run={} ADR planner injection skipped: {}", runId, e.getMessage());
+              adrsBlock = "";
+            }
+          }
+          PlannerRequest plannerReq =
+              PlannerRequest.builder()
+                  .spec(userRequest)
+                  .classification(autoClassification)
+                  .planStrategy(planStrategy)
+                  .provider(provider)
+                  .model(model)
+                  .context(rootCtx)
+                  .workspaceSummary(summary)
+                  .projectMemory(projectMemory)
+                  .projectBrief(projectBrief)
+                  .referenceDocs(referenceDocs)
+                  .contracts(contractsBlock)
+                  .projectAdrs(adrsBlock)
+                  .tddMode(tddMode)
+                  .prReviewComments(prReviewComments)
+                  .build();
+
+          // v2.6.2 slice 3 — strategy-driven routing with auto-degrade
+          // when a strategy's circuit breaker is open.
+          //   SMALL / MEDIUM → outline planner (FULL_PLAN mode, single call).
+          //   LARGE          → outline planner (SKELETON_ONLY) → parallel
+          //                    expansion → coherence pass.
+          //   LEGACY         → defer to slice 4 — recursive depth-2
+          //                    expansion isn't built yet, so degrade to LARGE.
+          //   SINGLE_SHOT / null / classifier failure → synthetic one-task plan.
+          PlanStrategy effective =
+              planStrategy == null
+                  ? null
+                  : planStrategyBreaker.degradeIfOpen(
+                      planStrategy == PlanStrategy.LEGACY ? PlanStrategy.LARGE : planStrategy);
+          if (effective != planStrategy && effective != null) {
+            log.warn("V2 run={} circuit breaker degraded {} → {}", runId, planStrategy, effective);
+          }
+
+          // Slice 4 — LEGACY classifications now drive depth-2 recursive
+          // expansion in the LARGE pipeline. The classifier verdict
+          // (pre-degrade) tells us whether to recurse on EPIC tasks; the
+          // breaker still degrades to LARGE for capacity reasons but the
+          // intent (and the recursion) is preserved.
+          boolean legacyRecursion = planStrategy == PlanStrategy.LEGACY;
+
+          if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
+            try {
+              plan =
+                  planningCoordinator.runOutlinePhase(
+                      runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
+              planStrategyBreaker.recordSuccess(effective);
+            } catch (Exception outlineEx) {
+              planStrategyBreaker.recordFailure(effective);
+              log.warn(
+                  "V2 run={} outline planner ({}) failed → SINGLE_SHOT fallback", runId, effective);
+              plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+            }
+          } else if (effective == PlanStrategy.LARGE) {
+            try {
+              plan =
+                  planningCoordinator.runLargePipeline(runId, plannerReq, rootCtx, legacyRecursion);
+              planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
+            } catch (Exception largeEx) {
+              planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
+              log.warn(
+                  "V2 run={} LARGE pipeline failed → SINGLE_SHOT fallback: {}",
+                  runId,
+                  largeEx.getMessage());
+              plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+            }
+          } else if (effective == PlanStrategy.SINGLE_SHOT) {
+            // v2.6.2 slice 5b — heuristic-fast-path classification.
+            // No LLM planner call; synthesise a one-task plan from the
+            // spec verbatim.
+            plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+          } else {
+            // Classifier failed (effective == null) or returned an
+            // unhandled value. Treat as SINGLE_SHOT — same shape as
+            // the legacy synthesised path, no LLM cost beyond the
+            // optional title summarizer.
+            log.warn("V2 run={} no usable strategy verdict → synthesised SINGLE_SHOT plan", runId);
+            plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+          }
+        } catch (Exception e) {
+          log.error("RunOrchestrator run={} planner failed", runId, e);
+          terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
           return;
         }
-        if (!approved) {
-          log.info("RunOrchestrator run={} plan rejected — cancelling", runId);
-          terminate(runId, "CANCELLED", "plan rejected at approval gate", startedAt);
+        if (plan.tasks() == null || plan.tasks().isEmpty()) {
+          log.error("RunOrchestrator run={} planner returned empty plan — failing", runId);
+          terminate(
+              runId,
+              "FAILED",
+              "planner: returned empty plan (model likely emitted malformed tool-call payload)",
+              startedAt);
           return;
         }
+        persistenceWriter.persistPlan(runId, plan);
+        persistenceWriter.persistTasks(runId, plan);
+        persistenceWriter.persistRunTitle(runId, plan);
+        contextComposer.writeAgentContext(workspace, plan);
+        persistEstimate(runId, provider, model, plan);
+        designBlock = contextComposer.buildDesignBlock(userRequest, plan);
+        // Phase 1: attribute tokens used so far to the planner.
+        afterPlan = costTracker.snapshot(runId);
+        tokenAttributor.attributePhase(
+            runId,
+            com.navneet.executespec.cost.RunTokenAttributor.Phase.PLANNER,
+            afterPlan.inputTokens(),
+            afterPlan.outputTokens(),
+            upperProvider,
+            model);
+
+        // 1b. Plan approval gate (PRODUCTION only)
+        // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass the gate. A
+        // PRODUCTION run persists everything required for continuation and returns immediately, so
+        // AWAITING_APPROVAL consumes no PipelineExecutorPool worker.
+        boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
+        if (needsApproval) {
+          perky.stop(runId);
+          persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
+          PlanGateContinuation continuation =
+              new PlanGateContinuation(
+                  1,
+                  localRun,
+                  requireContinuationConfirmation,
+                  requireContinuationBenchmarkPrior,
+                  pinnedModel,
+                  lowComplexityWorkerStartTierOverride);
+          gateStore.openPlanGate(runId, objectMapper.writeValueAsString(continuation));
+          int credits =
+              runRepo
+                  .findById(runId)
+                  .map(r -> r.getCreditsCharged() == null ? 1 : r.getCreditsCharged())
+                  .orElse(1);
+          double estimatedCost =
+              runRepo
+                  .findById(runId)
+                  .map(r -> r.getCostEstimateHigh() == null ? 0.0 : r.getCostEstimateHigh())
+                  .orElse(0.0);
+          broadcaster.emit(
+              runId,
+              RunEvent.gateOpenedWithCredits(runId, "PLAN_APPROVAL", credits, estimatedCost));
+          eventPublisher.publishEvent(
+              new PipelineEvent.GateOpened(runId, "PLAN_APPROVAL", credits));
+          log.info("RunOrchestrator run={} suspended at durable plan gate", runId);
+          return;
+        }
+      } else {
+        PipelineRun resumed =
+            runRepo
+                .findById(runId)
+                .orElseThrow(() -> new IllegalStateException("Approved run disappeared: " + runId));
+        if (resumed.getPlanJson() == null || resumed.getPlanJson().isBlank()) {
+          throw new IllegalStateException("Approved run has no persisted plan: " + runId);
+        }
+        plan = objectMapper.readValue(resumed.getPlanJson(), Plan.class);
+        if (plan.tasks() == null || plan.tasks().isEmpty()) {
+          throw new IllegalStateException("Approved run has an empty persisted plan: " + runId);
+        }
+        designBlock = contextComposer.buildDesignBlock(userRequest, plan);
+        afterPlan = costTracker.snapshot(runId);
       }
 
       persistenceWriter.updateStatus(runId, "WORKING");
@@ -1958,7 +2104,8 @@ public class RunOrchestrator implements RunControlPort {
       if (plan.runtimeSurface() == Plan.RuntimeSurface.HTTP) {
         try {
           String planJson = objectMapper.writeValueAsString(plan);
-          testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson);
+          boundedTestGenKickoff.kickoff(
+              runId, () -> testGenOrchestrator.runTestGenPipeline(runId, userRequest, planJson));
         } catch (Exception e) {
           log.warn("RunOrchestrator run={} testGen kickoff failed: {}", runId, e.getMessage());
         }
@@ -2424,6 +2571,7 @@ public class RunOrchestrator implements RunControlPort {
    */
   @Override
   public void runPipelineForResume(RunPipelineRequest req) {
+    PlanGateContinuation continuation = req.planGateContinuation();
     runPipeline(
         req.runId(),
         req.provider(),
@@ -2435,7 +2583,11 @@ public class RunOrchestrator implements RunControlPort {
         req.selectedRepoIds(),
         req.githubPat(),
         req.tddMode(),
-        req.branchOverride());
+        req.branchOverride(),
+        null,
+        continuation == null ? null : continuation.pinnedModel(),
+        continuation == null ? null : continuation.lowComplexityWorkerStartTierOverride(),
+        continuation);
   }
 
   /** Outcome of a {@code RunLifecycleService.resumeAfterCrash(String)} dispatch. */
@@ -2468,6 +2620,15 @@ public class RunOrchestrator implements RunControlPort {
    * design-compliance scorer reads it directly from {@code pipeline_run.figma_url}; resume doesn't
    * need to re-thread it.
    */
+  /** Versioned state that crosses the durable plan-approval suspension point. */
+  public record PlanGateContinuation(
+      int schemaVersion,
+      boolean localRun,
+      boolean requireContinuationConfirmation,
+      boolean requireContinuationBenchmarkPrior,
+      String pinnedModel,
+      String lowComplexityWorkerStartTierOverride) {}
+
   public record RunPipelineRequest(
       String runId,
       String userRequest,
@@ -2479,7 +2640,36 @@ public class RunOrchestrator implements RunControlPort {
       List<UUID> selectedRepoIds,
       String githubPat,
       boolean tddMode,
-      String branchOverride) {
+      String branchOverride,
+      PlanGateContinuation planGateContinuation) {
+
+    /** Compatibility constructor for pause/crash resume callers that predate plan suspension. */
+    public RunPipelineRequest(
+        String runId,
+        String userRequest,
+        String provider,
+        String model,
+        String executionMode,
+        boolean skipApproval,
+        String projectId,
+        List<UUID> selectedRepoIds,
+        String githubPat,
+        boolean tddMode,
+        String branchOverride) {
+      this(
+          runId,
+          userRequest,
+          provider,
+          model,
+          executionMode,
+          skipApproval,
+          projectId,
+          selectedRepoIds,
+          githubPat,
+          tddMode,
+          branchOverride,
+          null);
+    }
 
     public static RunPipelineRequest fromPausedRow(
         com.navneet.executespec.state.entity.PipelineRun run) {
@@ -2497,7 +2687,25 @@ public class RunOrchestrator implements RunControlPort {
           deserializeRepoIds(run.getSelectedRepoIds()),
           /* githubPat */ null, // resume reuses workspace state — no fresh PAT needed for clones
           /* tddMode */ false,
-          /* branchOverride */ null);
+          /* branchOverride */ null,
+          null);
+    }
+
+    public static RunPipelineRequest fromApprovedPlanRow(
+        PipelineRun run, PlanGateContinuation continuation) {
+      return new RunPipelineRequest(
+          run.getRunId(),
+          run.getUserRequest(),
+          run.getAiProvider(),
+          run.getWorkerModel(),
+          run.getApprovedExecutionMode() == null ? "PRODUCTION" : run.getApprovedExecutionMode(),
+          true,
+          run.getProjectId(),
+          deserializeRepoIds(run.getSelectedRepoIds()),
+          null,
+          false,
+          null,
+          continuation);
     }
   }
 
@@ -2560,6 +2768,20 @@ public class RunOrchestrator implements RunControlPort {
         cost.inputTokens(),
         cost.outputTokens(),
         String.format("%.4f", cost.costUsd()));
+    // Claim the terminal transition before loading and enriching the entity. Cancellation may race
+    // this reviewer/validation thread; a read-then-save below is not a compare-and-set and can
+    // overwrite a user CANCELLED state after the cancel endpoint has already emitted its terminal
+    // event. Once this claim succeeds, cancel() observes a terminal status and returns false;
+    // when cancellation wins, the claim returns zero and this method must preserve that status.
+    int terminalClaim =
+        statusReason == null && !"FAILED".equals(finalStatus)
+            ? runRepo.claimTerminalTransitionPreservingReasons(runId, finalStatus, Instant.now())
+            : runRepo.claimTerminalTransitionWithReasons(
+                runId,
+                finalStatus,
+                statusReason,
+                "FAILED".equals(finalStatus) ? note : null,
+                Instant.now());
     runRepo
         .findById(runId)
         .ifPresent(
@@ -2569,28 +2791,18 @@ public class RunOrchestrator implements RunControlPort {
               // without this guard the late write clobbers the user-initiated status
               // (e.g. clinic run 6d23d5b5 showed PARTIAL despite a successful cancel).
               String currentStatus = r.getStatus();
-              if (!"CANCELLED".equals(currentStatus) && !"PAUSED".equals(currentStatus)) {
-                r.setStatus(finalStatus);
+              if (terminalClaim > 0) {
                 persistedStatus[0] = finalStatus;
               } else {
                 persistedStatus[0] = currentStatus;
               }
-              if (!"PAUSED".equals(persistedStatus[0])) {
-                r.setCompletedAt(Instant.now());
-              }
-              if ("FAILED".equals(finalStatus) && r.getFailureReason() == null) {
-                r.setFailureReason(note);
-              }
-              // v2.5.10 — persist status_reason so /api/runs/{id} surfaces it and the
-              // UI's status badge + tooltip can explain "PARTIAL because X".
-              // Only write if non-null: legacy callers still reach here without a
-              // reason and we don't want to clobber a previously-set value.
-              if (statusReason != null
-                  && !isTerminal(currentStatus)
-                  && !"PAUSED".equals(currentStatus)) {
-                r.setStatusReason(statusReason);
-              }
               persistedReason[0] = r.getStatusReason();
+              // A lost terminal claim means cancellation or another terminal writer won. Do not
+              // save the entity at all: even cost/token enrichment must not reintroduce the stale
+              // status from this thread's persistence context.
+              if (terminalClaim == 0) {
+                return;
+              }
               // Only overwrite actualCostUsd with a positive tracker reading; an empty
               // snapshot (e.g. tracker evicted across a deploy boundary) must not
               // clobber a previously-persisted cost.
@@ -3371,85 +3583,23 @@ public class RunOrchestrator implements RunControlPort {
   private record ContinuationLimitData(String limitName, int used, int max) {}
 
   static boolean reviewerQualityFailed(ReviewerResult reviewResult, boolean reviewerErrored) {
-    if (reviewerErrored) {
-      return true;
-    }
-    if (reviewResult == null || reviewResult.overall() == null) {
-      return false;
-    }
-    return Boolean.FALSE.equals(reviewResult.finalBuildPassed())
-        || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
-        || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
+    return PostReviewQualityPolicy.reviewerQualityFailed(reviewResult, reviewerErrored);
   }
 
   static boolean validationReportQualityFailed(
       ValidationReport report, double requiredQualityThreshold) {
-    if (report == null) {
-      return false;
-    }
-    if (report.getPipelineResult() == com.navneet.executespec.report.entity.PipelineResult.FAILED
-        || report.getPipelineResult()
-            == com.navneet.executespec.report.entity.PipelineResult.NEEDS_ATTENTION) {
-      return true;
-    }
-    Integer verifiedScore = report.getVerifiedScore();
-    return verifiedScore != null
-        && verifiedScore < sanitizeRequiredQualityThreshold(requiredQualityThreshold);
-  }
-
-  private static double sanitizeRequiredQualityThreshold(double requiredQualityThreshold) {
-    return requiredQualityThreshold <= 0.0 ? 70.0 : Math.min(100.0, requiredQualityThreshold);
+    return PostReviewQualityPolicy.validationReportQualityFailed(report, requiredQualityThreshold);
   }
 
   static GoalDonenessDecision validationReportLowQualityGoalDecision(
       ValidationReport report, double requiredQualityThreshold) {
-    int score =
-        report == null || report.getVerifiedScore() == null ? -1 : report.getVerifiedScore();
-    String result =
-        report == null || report.getPipelineResult() == null
-            ? "UNKNOWN"
-            : report.getPipelineResult().name();
-    double threshold = sanitizeRequiredQualityThreshold(requiredQualityThreshold);
-    String scoreText = score < 0 ? "unknown" : String.valueOf(score);
-    return new GoalDonenessDecision(
-        GoalDonenessState.FAILED,
-        RunContinuationDecision.STOP_FAILED,
-        "final validation report quality is below threshold: verifiedScore="
-            + scoreText
-            + ", requiredQualityThreshold="
-            + threshold
-            + ", pipelineResult="
-            + result,
-        "final validation report",
-        List.of(),
-        List.of("validation report did not prove acceptable output quality"),
-        List.of("verifiedScore=" + scoreText, "pipelineResult=" + result),
-        List.of("a stronger model/provider may be needed to improve final quality evidence"),
-        false,
-        true);
+    return PostReviewQualityPolicy.validationReportLowQualityGoalDecision(
+        report, requiredQualityThreshold);
   }
 
   static GoalDonenessDecision reviewerLowQualityGoalDecision(
       ReviewerResult reviewResult, boolean reviewerErrored) {
-    String verdict =
-        reviewerErrored
-            ? "REVIEWER_EXCEPTION"
-            : reviewResult != null && Boolean.FALSE.equals(reviewResult.finalBuildPassed())
-                ? "FINAL_BUILD_FAILED"
-                : reviewResult == null || reviewResult.overall() == null
-                    ? "UNKNOWN"
-                    : reviewResult.overall().name();
-    return new GoalDonenessDecision(
-        GoalDonenessState.FAILED,
-        RunContinuationDecision.STOP_FAILED,
-        "final reviewer produced low-quality evidence: " + verdict,
-        "final BUILD-mode reviewer",
-        List.of(),
-        List.of("reviewer did not prove the implementation is acceptable"),
-        List.of("reviewerVerdict=" + verdict),
-        List.of("a stronger model/provider may be needed to finish or repair the implementation"),
-        false,
-        true);
+    return PostReviewQualityPolicy.reviewerLowQualityGoalDecision(reviewResult, reviewerErrored);
   }
 
   static Optional<TaskOutcome> reviewerContinuationTarget(ExecutionResult execResult) {
@@ -3759,47 +3909,14 @@ public class RunOrchestrator implements RunControlPort {
    * intermediate-warning separation from {@link ExecutionResult#anyIntermediateWarning()}).
    *
    * <p>Tests run ASYNC after terminate (see {@code generateValidationReport} → {@code
-   * testGenOrchestrator.runTestGenPipeline}), so test counts are NOT a gating signal here. They're
+   * boundedTestGenKickoff.kickoff, so test counts are NOT a gating signal here. They're
    * captured on ValidationReport via {@code retryValidation} after tests complete and feed
    * verifiedScore.
    */
   static StatusAndReason resolveTerminalStatus(
       ExecutionResult exec, com.navneet.executespec.reviewer.ReviewerResult review) {
-    if (exec.overall() == ExecutionResult.Overall.ABORTED) {
-      return new StatusAndReason("FAILED", "EXECUTION_ABORTED");
-    }
-    com.navneet.executespec.reviewer.ReviewerResult.Overall verdict =
-        review != null ? review.overall() : null;
-    boolean buildPassed = review != null && Boolean.TRUE.equals(review.finalBuildPassed());
-    boolean anyWarn = exec.anyIntermediateWarning();
-    boolean anyTaskSucceeded = exec.tasksSuccessful() > 0;
-
-    if (buildPassed
-        && verdict != null
-        && (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.CLEAN
-            || verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.FIXED_ISSUES)) {
-      return new StatusAndReason(
-          "COMPLETE", anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
-    }
-    if (review != null && !buildPassed) {
-      return new StatusAndReason("PARTIAL", "FINAL_BUILD_FAILED");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.UNRESOLVED_ISSUES) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_UNRESOLVED");
-    }
-    if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
-      return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");
-    }
-    // Defensive fallback — reached when the reviewer didn't run (review == null)
-    // or produced a verdict outside the known set. 2026-05-13 audit — the legacy
-    // "LEGACY_UNKNOWN" label was inherited from V108's backfill of pre-v2.5.10
-    // rows and conveys nothing for NEW runs. Tag the reason with what we actually
-    // know — the reviewer didn't deliver a usable verdict — so dashboards +
-    // retry logic can branch on it instead of treating it as "we have no idea".
-    return new StatusAndReason(mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
+    TerminalStatusResolver.Result result = TerminalStatusResolver.resolve(exec, review);
+    return new StatusAndReason(result.status(), result.reason());
   }
 
   /**

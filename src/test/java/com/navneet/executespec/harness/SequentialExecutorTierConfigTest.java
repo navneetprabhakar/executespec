@@ -19,6 +19,7 @@ import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.project.rag.RetrievalService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -59,6 +60,21 @@ class SequentialExecutorTierConfigTest {
   }
 
   private SequentialExecutor newExecutor(ModelResolver modelResolver) {
+    return newExecutor(modelResolver, mock(ModelMatrixProperties.class));
+  }
+
+  private SequentialExecutor newExecutor(
+      ModelResolver modelResolver, ModelMatrixProperties matrixProperties) {
+    return newExecutor(
+        modelResolver,
+        matrixProperties,
+        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class));
+  }
+
+  private SequentialExecutor newExecutor(
+      ModelResolver modelResolver,
+      ModelMatrixProperties matrixProperties,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags) {
     return new SequentialExecutor(
         mock(com.navneet.executespec.engine.WorkerAgent.class),
         mock(BuildProjectTool.class),
@@ -67,10 +83,10 @@ class SequentialExecutorTierConfigTest {
         mock(SseBroadcaster.class),
         mock(AgentTaskRepository.class),
         modelResolver,
-        mock(com.navneet.executespec.router.ModelMatrixProperties.class),
+        matrixProperties,
         mock(RetrievalService.class),
         mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
-        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+        featureFlags,
         mock(ContextStore.class),
         mock(RunCostTracker.class),
         mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
@@ -332,5 +348,110 @@ class SequentialExecutorTierConfigTest {
           proj.stagnationWarnAfter,
           "warn threshold must not change between fresh and project for " + c);
     }
+  }
+
+  @Test
+  void model_capability_profile_overrides_complexity_stagnation_defaults() throws Exception {
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    lenient()
+        .when(modelResolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.ANTHROPIC)
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-sonnet-profiled")
+                .agentTier(AgentTier.WORKHORSE)
+                .build());
+    ModelMatrixProperties.CapabilityProfile profile = new ModelMatrixProperties.CapabilityProfile();
+    profile.setStagnationWarnAfter(22);
+    profile.setStagnationForceAfter(47);
+    ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
+    org.mockito.Mockito.when(matrix.getCapabilityProfiles())
+        .thenReturn(Map.of("anthropic/claude-sonnet-profiled", profile));
+    var featureFlags = mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(featureFlags.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES))
+        .thenReturn(true);
+
+    Cfg cfg =
+        invoke(
+            newExecutor(modelResolver, matrix, featureFlags),
+            PlannedTask.Complexity.LOW,
+            "anthropic",
+            "fallback",
+            false);
+
+    assertEquals(22, cfg.stagnationWarnAfter);
+    assertEquals(47, cfg.stagnationForceAfter);
+  }
+
+  @Test
+  void model_capability_profile_is_ignored_when_evidence_gate_is_off() throws Exception {
+    ModelMatrixProperties.CapabilityProfile profile = new ModelMatrixProperties.CapabilityProfile();
+    profile.setStagnationWarnAfter(22);
+    profile.setStagnationForceAfter(47);
+    ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
+    org.mockito.Mockito.when(matrix.getCapabilityProfiles())
+        .thenReturn(Map.of("anthropic", profile));
+    var featureFlags = mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+    org.mockito.Mockito.when(featureFlags.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES))
+        .thenReturn(false);
+
+    Cfg cfg =
+        invoke(
+            newExecutorWithTierResolvingModelWithMatrix(matrix, featureFlags),
+            PlannedTask.Complexity.MEDIUM,
+            "anthropic",
+            "fallback",
+            false);
+
+    assertEquals(16, cfg.stagnationWarnAfter);
+    assertEquals(28, cfg.stagnationForceAfter);
+  }
+
+  @Test
+  void malformed_model_capability_profile_keeps_complexity_defaults() throws Exception {
+    ModelMatrixProperties.CapabilityProfile profile = new ModelMatrixProperties.CapabilityProfile();
+    profile.setStagnationWarnAfter(47);
+    profile.setStagnationForceAfter(22);
+    ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
+    org.mockito.Mockito.when(matrix.getCapabilityProfiles())
+        .thenReturn(Map.of("anthropic", profile));
+
+    Cfg cfg =
+        invoke(
+            newExecutorWithTierResolvingModelWithMatrix(matrix),
+            PlannedTask.Complexity.MEDIUM,
+            "anthropic",
+            "fallback",
+            false);
+
+    assertEquals(16, cfg.stagnationWarnAfter);
+    assertEquals(28, cfg.stagnationForceAfter);
+  }
+
+  private SequentialExecutor newExecutorWithTierResolvingModelWithMatrix(
+      ModelMatrixProperties matrix) {
+    return newExecutorWithTierResolvingModelWithMatrix(
+        matrix, mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class));
+  }
+
+  private SequentialExecutor newExecutorWithTierResolvingModelWithMatrix(
+      ModelMatrixProperties matrix,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags) {
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    lenient()
+        .when(modelResolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenAnswer(
+            invocation -> {
+              LlmProvider provider = invocation.getArgument(1);
+              AgentTier tier = invocation.getArgument(2);
+              return ResolvedModel.builder()
+                  .requestedProvider(provider)
+                  .actualProvider(provider)
+                  .agentTier(tier)
+                  .model("profiled")
+                  .build();
+            });
+    return newExecutor(modelResolver, matrix, featureFlags);
   }
 }

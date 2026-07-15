@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -19,6 +19,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -52,23 +53,24 @@ public class PromptOptimiserAgent {
 
   private final PromptPatternAnalyser analyser;
   private final PromptAuditService auditService;
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final PromptOptimiserProperties props;
   private final StateStore stateStore;
   private final PromptVersioningService versioningService;
 
+  @Autowired
   public PromptOptimiserAgent(
       PromptPatternAnalyser analyser,
       PromptAuditService auditService,
-      FallbackLlmRouter fallbackLlmRouter,
+      LlmRouter llmRouter,
       ModelResolver modelResolver,
       PromptOptimiserProperties props,
       StateStore stateStore,
       PromptVersioningService versioningService) {
     this.analyser = analyser;
     this.auditService = auditService;
-    this.fallbackLlmRouter = fallbackLlmRouter;
+    this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
     this.stateStore = stateStore;
@@ -181,15 +183,13 @@ public class PromptOptimiserAgent {
 
     ResolvedModel resolved = modelResolver.resolve("PromptOptimiserAgent", run.getAiProviderEnum());
     var response =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            prompt.getInstructions(),
             run.getRunId(),
-            "prompt-optimiser",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "PromptOptimiserAgent",
+            "prompt.optimize");
 
     // Track tokens for billing accuracy
     try {

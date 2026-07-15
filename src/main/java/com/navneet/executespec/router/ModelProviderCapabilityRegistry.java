@@ -100,7 +100,10 @@ public class ModelProviderCapabilityRegistry {
         signal.latencyP95Ms(),
         signal.requiredQualityThreshold(),
         signal.benchmarkQualityScore() != null,
-        reasons);
+        !weightedSignals.isEmpty(),
+        signal.providerAvailable(),
+        reasons,
+        signal.contextFitsRequestedBudget());
   }
 
   private static List<WeightedSignal> weightedSignals(ModelProviderCapabilitySignal signal) {

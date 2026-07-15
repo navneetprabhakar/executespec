@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,7 +13,18 @@ public interface AgentTurnRepository extends JpaRepository<AgentTurn, String> {
 
   List<AgentTurn> findBySessionIdOrderBySequenceAsc(String sessionId);
 
+  /** Loads only the newest bounded transcript rows, avoiding full-session materialisation. */
+  List<AgentTurn> findBySessionIdOrderBySequenceDesc(String sessionId, Pageable pageable);
+
+  /** Loads the bounded page immediately before a turn cursor in descending sequence order. */
+  List<AgentTurn> findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+      String sessionId, int sequence, Pageable pageable);
+
   long countBySessionId(String sessionId);
+
+  void deleteBySessionId(String sessionId);
+
+  boolean existsByIdAndSessionId(String id, String sessionId);
 
   @Query(
       """

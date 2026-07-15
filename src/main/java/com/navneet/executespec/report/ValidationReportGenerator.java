@@ -7,7 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ValidationReportGenerator {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
 
   /** Max issues included in the LLM prompt to stay within token budget. */
@@ -57,23 +57,19 @@ public class ValidationReportGenerator {
     String runId = input.run().getRunId();
     ResolvedModel resolved =
         modelResolver.resolve("ValidationReportGenerator", input.run().getAiProviderEnum());
-    FallbackLlmRouter.LlmResponse lr =
-        fallbackLlmRouter.callWithFallbackTracked(
+    ChatResponse response =
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            prompt.getInstructions(),
             runId,
             "validation-report",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
-
-    ChatResponse response = lr.response();
+            "generate");
     String markdown = response.getResult().getOutput().getText();
     int inTokens = response.getMetadata().getUsage().getPromptTokens().intValue();
     int outTokens = response.getMetadata().getUsage().getCompletionTokens().intValue();
 
-    return new LlmReportResult(markdown, lr.model(), inTokens, outTokens);
+    return new LlmReportResult(markdown, resolved.getModel(), inTokens, outTokens);
   }
 
   private String buildUserMessage(ReportInput input) {

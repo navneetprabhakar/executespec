@@ -15,7 +15,6 @@ import com.navneet.executespec.migration.entity.MigrationRecipe;
 import com.navneet.executespec.migration.entity.MigrationSlot;
 import com.navneet.executespec.migration.entity.MigrationVariant;
 import com.navneet.executespec.migration.repository.MigrationDependencyRepository;
-import com.navneet.executespec.migration.repository.MigrationDryRunCacheRepository;
 import com.navneet.executespec.migration.repository.MigrationRecipeRepository;
 import com.navneet.executespec.migration.repository.MigrationSlotRepository;
 import com.navneet.executespec.migration.repository.MigrationVariantRepository;
@@ -49,13 +48,6 @@ public class MigrationRecipeSeeder {
   private final MigrationVariantRepository variantRepo;
   private final MigrationSlotRepository slotRepo;
   private final MigrationDependencyRepository dependencyRepo;
-
-  @SuppressWarnings("unused")
-  private final MigrationDryRunCacheRepository dryRunCacheRepo;
-
-  // ^ injected so the bean wiring stays consistent and so the
-  //   reseed path can later cache-bust dry-run rows when a recipe
-  //   definition changes (W2.5 follow-up).
 
   @PostConstruct
   public void onStartup() {

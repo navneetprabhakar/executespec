@@ -50,6 +50,8 @@ import lombok.RequiredArgsConstructor;
  *       failed.
  *   <li><b>{@code executespec.v2.context.save.bytes}</b> (distribution) — serialized context size
  *       per save.
+ *   <li><b>{@code executespec.v2.context.load}</b> (counter) — context handoff outcome tagged
+ *       {result}: redis | disk | identity_mismatch | redis_error | miss.
  * </ul>
  */
 @Component
@@ -202,6 +204,21 @@ public class Metrics {
     if (bytes > 0) {
       DistributionSummary.builder(NS + "context.save.bytes").register(registry).record(bytes);
     }
+  }
+
+  /**
+   * Records where a worker context handoff was recovered from, or why recovery was unavailable.
+   *
+   * <p>The result vocabulary is intentionally bounded: {@code redis} is a direct Redis hit, {@code
+   * disk} is a workspace checkpoint fallback, {@code identity_mismatch} is a rejected snapshot,
+   * {@code redis_error} is an unavailable Redis read with no usable disk snapshot, and {@code miss}
+   * means no checkpoint existed.
+   */
+  public void recordContextLoad(String result) {
+    Counter.builder(NS + "context.load")
+        .tag("result", nonNull(result))
+        .register(registry)
+        .increment();
   }
 
   private static String nonNull(String s) {

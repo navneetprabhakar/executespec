@@ -43,6 +43,40 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ScmPushService {
 
+  /** Explicit result for the canonical {@code /push-scm} contract. */
+  public record PushResult(
+      String status,
+      String scmProvider,
+      String prUrl,
+      String message,
+      int attempted,
+      int succeeded,
+      int failed) {
+
+    public static PushResult pushed(String provider, String prUrl, String message) {
+      return new PushResult("PUSHED", provider, prUrl == null ? "" : prUrl, message, 1, 1, 0);
+    }
+
+    public static PushResult failed(String message, String provider) {
+      return new PushResult("FAILED", provider == null ? "" : provider, "", message, 1, 0, 1);
+    }
+
+    public static PushResult noConfiguration(String provider, String message) {
+      return new PushResult(
+          "NO_CONFIGURATION", provider == null ? "" : provider, "", message, 0, 0, 0);
+    }
+
+    public static PushResult partial(
+        String provider, String prUrl, String message, int attempted, int succeeded, int failed) {
+      return new PushResult(
+          "PARTIAL", provider, prUrl == null ? "" : prUrl, message, attempted, succeeded, failed);
+    }
+
+    public static PushResult noChanges(String provider, String message, int attempted) {
+      return new PushResult("NO_CHANGES", provider, "", message, attempted, 0, 0);
+    }
+  }
+
   private final GitTool gitTool;
   private final GitHubRepoService gitHubRepoService;
   private final BitbucketRepoService bitbucketRepoService;
@@ -62,20 +96,20 @@ public class ScmPushService {
    * Entry point for manual SCM push from {@code RunController}. Resolves the user creds off the
    * run's creator, then delegates.
    */
-  public void push(PipelineRun run) {
+  public PushResult push(PipelineRun run) {
+    if (run == null) return PushResult.failed("missing run", "");
     AppUser scmUser =
         run.getCreatedByUserId() != null
             ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
             : null;
-    pushIfConfigured(run, scmUser);
+    return pushIfConfigured(run, scmUser);
   }
 
   /** Dispatch to Bitbucket or GitHub based on credentials. */
-  private void pushIfConfigured(PipelineRun run, AppUser user) {
+  private PushResult pushIfConfigured(PipelineRun run, AppUser user) {
     if (StringUtils.hasText(run.getBitbucketUsername())
         && StringUtils.hasText(run.getBitbucketWorkspace())) {
-      pushToBitbucket(run);
-      return;
+      return pushToBitbucket(run);
     }
     if (user != null
         && StringUtils.hasText(user.getBitbucketUsername())
@@ -85,13 +119,12 @@ public class ScmPushService {
       run.setBitbucketWorkspace(user.getBitbucketWorkspace());
       run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
       run.setScmProvider("BITBUCKET");
-      pushToBitbucket(run);
-      return;
+      return pushToBitbucket(run);
     }
-    pushToGitHubIfConfigured(run, user);
+    return pushToGitHubIfConfigured(run, user);
   }
 
-  private void pushToBitbucket(PipelineRun run) {
+  private PushResult pushToBitbucket(PipelineRun run) {
     String workspace = run.getBitbucketWorkspace();
     String repoSlug = run.getBitbucketRepoSlug();
     String username = run.getBitbucketUsername();
@@ -100,7 +133,7 @@ public class ScmPushService {
     if (!StringUtils.hasText(repoSlug)) {
       log.warn(
           "[{}] Bitbucket workspace set but repo slug missing — skipping push", run.getRunId());
-      return;
+      return PushResult.noConfiguration("BITBUCKET", "Bitbucket repository is not configured");
     }
 
     try {
@@ -133,13 +166,16 @@ public class ScmPushService {
         broadcaster.emit(
             run.getRunId(),
             RunEvent.log(run.getRunId(), "scm", "Bitbucket pull request created: " + prUrl));
+        return PushResult.pushed("BITBUCKET", prUrl, "Bitbucket pull request created");
       }
+      return PushResult.failed("Bitbucket pull request was not created", "BITBUCKET");
     } catch (Exception e) {
       log.warn("[{}] Bitbucket push failed: {}", run.getRunId(), e.getMessage());
+      return PushResult.failed("Bitbucket push failed: " + safeMessage(e), "BITBUCKET");
     }
   }
 
-  private void pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
+  private PushResult pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
     // Pilot v3.0 — multi-repo runs: push each cloned subdirectory as its own
     // branch + PR. Falls through to the single-repo path if no project repos
     // were selected.
@@ -147,16 +183,16 @@ public class ScmPushService {
       String pat = resolvePat(run, user);
       if (pat == null || pat.isBlank()) {
         log.warn("Multi-repo push requires a PAT — skipping for run {}", run.getRunId());
-        return;
+        return PushResult.noConfiguration("GITHUB", "GitHub PAT is not configured");
       }
-      pushMultiRepo(run, pat);
-      return;
+      return pushMultiRepo(run, pat);
     }
 
     String repoMode = run.getRepoMode();
     String repoUrl = run.getRepoUrl();
 
-    if ((repoMode == null || "NONE".equals(repoMode)) && repoUrl == null) return;
+    if (!StringUtils.hasText(repoUrl) && !"NEW".equals(repoMode))
+      return PushResult.noConfiguration("GITHUB", "GitHub repository is not configured");
 
     String pat = resolvePat(run, user);
     String owner =
@@ -166,7 +202,7 @@ public class ScmPushService {
 
     if (pat == null || pat.isBlank()) {
       log.warn("GitHub PAT not configured — skipping push for run {}", run.getRunId());
-      return;
+      return PushResult.noConfiguration("GITHUB", "GitHub PAT is not configured");
     }
 
     String remote = repoUrl;
@@ -184,7 +220,7 @@ public class ScmPushService {
 
     if (remote == null || remote.isBlank()) {
       log.warn("No remote URL available — skipping push for run {}", run.getRunId());
-      return;
+      return PushResult.failed("GitHub repository could not be resolved", "GITHUB");
     }
 
     log.info("Pushing workspace to GitHub: {}", remote);
@@ -199,7 +235,7 @@ public class ScmPushService {
       GitToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
       if (!result.isOk()) {
         log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
-        return;
+        return PushResult.failed("GitHub branch push failed: " + result.value(), "GITHUB");
       }
       String targetBranch =
           (project != null && StringUtils.hasText(project.getTargetBranch()))
@@ -238,19 +274,30 @@ public class ScmPushService {
             gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
           }
         }
+        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+        return PushResult.pushed("GITHUB", prUrl, "GitHub pull request created");
       } else {
         // RL-2026-05-041 (audit #16) — the branch pushed but PR creation failed: it's now an
         // orphan. Enqueue the saga compensation to delete it (PAT resolved from the run owner at
         // execution time — not stored in the payload).
         enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+        return PushResult.failed("GitHub branch pushed but pull request creation failed", "GITHUB");
       }
-      gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
     } else {
       GitToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
       if (!result.isOk()) {
         log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
+        return PushResult.failed("GitHub push failed: " + result.value(), "GITHUB");
       }
+      return PushResult.pushed("GITHUB", "", "GitHub changes pushed");
     }
+  }
+
+  private static String safeMessage(Exception e) {
+    return e.getMessage() == null || e.getMessage().isBlank()
+        ? e.getClass().getSimpleName()
+        : e.getMessage();
   }
 
   /**
@@ -340,13 +387,14 @@ public class ScmPushService {
    * workspace/<runId>/repos/<name>/} to its own branch + open a PR. Cross-links the PRs by patching
    * each body to reference the others. Failure of one repo does not abort the others.
    */
-  private void pushMultiRepo(PipelineRun run, String pat) {
+  private PushResult pushMultiRepo(PipelineRun run, String pat) {
     Project project =
         run.getProjectId() != null
             ? projectRepository.findById(run.getProjectId()).orElse(null)
             : null;
     List<java.util.UUID> ids = parseRepoIds(run.getSelectedRepoIds());
-    if (ids.isEmpty()) return;
+    if (ids.isEmpty())
+      return PushResult.noConfiguration("GITHUB", "No linked repositories configured");
 
     String branchName = resolveBranchName(project, run);
     String runTitle =
@@ -358,10 +406,17 @@ public class ScmPushService {
 
     record Created(ProjectRepo repo, String prUrl, Integer prNumber) {}
     List<Created> created = new java.util.ArrayList<>();
+    int attempted = 0;
+    int failed = 0;
+    int clean = 0;
 
     for (java.util.UUID repoId : ids) {
       ProjectRepo repo = projectRepoRepository.findById(repoId).orElse(null);
-      if (repo == null) continue;
+      if (repo == null) {
+        failed++;
+        continue;
+      }
+      attempted++;
       String subPath = "repos/" + lastPathSegment(repo.getGithubRepoFullName());
       String remote = "https://github.com/" + repo.getGithubRepoFullName();
 
@@ -385,11 +440,13 @@ public class ScmPushService {
                 run.getRunId(),
                 "scm",
                 "Push failed for " + repo.getGithubRepoFullName() + ": " + pushResult.value()));
+        failed++;
         continue;
       }
       if ("CLEAN".equals(pushResult.value())) {
         log.info(
             "[{}] no changes for {}, skipping PR", run.getRunId(), repo.getGithubRepoFullName());
+        clean++;
         continue;
       }
 
@@ -403,6 +460,7 @@ public class ScmPushService {
       if (prUrl == null) {
         // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
         enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        failed++;
         continue;
       }
 
@@ -491,6 +549,25 @@ public class ScmPushService {
             persistEx.getMessage());
       }
     }
+
+    String representativePr = created.isEmpty() ? "" : created.get(0).prUrl();
+    if (!created.isEmpty() && failed > 0) {
+      return PushResult.partial(
+          "GITHUB",
+          representativePr,
+          "Some repositories pushed successfully; others failed",
+          attempted,
+          created.size(),
+          failed);
+    }
+    if (!created.isEmpty()) {
+      return PushResult.pushed("GITHUB", representativePr, "GitHub pull requests created");
+    }
+    if (failed > 0) {
+      return PushResult.failed("No GitHub pull requests were created", "GITHUB");
+    }
+    return PushResult.noChanges(
+        "GITHUB", "No repository changes to push", attempted == 0 ? clean : attempted);
   }
 
   private List<java.util.UUID> parseRepoIds(String json) {

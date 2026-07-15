@@ -13,7 +13,7 @@ import org.yaml.snakeyaml.Yaml;
 class ContinuationConfigDefaultsTest {
 
   @Test
-  void automaticContinuationDoesNotRequireBenchmarkPriorByDefault() throws Exception {
+  void automaticContinuationRequiresBenchmarkPriorByDefault() throws Exception {
     Map<String, Object> root = loadApplicationYaml();
 
     @SuppressWarnings("unchecked")
@@ -25,10 +25,10 @@ class ContinuationConfigDefaultsTest {
     assertNotNull(continuation, "execution.continuation section missing from application.yml");
 
     assertEquals(
-        Boolean.FALSE,
+        Boolean.TRUE,
         continuation.get("require-benchmark-prior-for-automatic-continuation"),
-        "Automatic continuation must work before every model has benchmark priors; users can opt"
-            + " into benchmark-required upgrades per run or server config.");
+        "Automatic continuation must require compatible benchmark evidence by default; operators"
+            + " can explicitly opt out for a submitted run when evidence is unavailable.");
   }
 
   @SuppressWarnings("unchecked")

@@ -21,6 +21,7 @@ class AgentApiOpenApiCoverageTest {
             "/agent/v2/capabilities:",
             "/agent/sessions:",
             "/agent/sessions/{sessionId}:",
+            "/agent/sessions/{sessionId}/history:",
             "/agent/sessions/{sessionId}/events:",
             "/agent/sessions/{sessionId}/turns:",
             "/agent/sessions/{sessionId}/summary-email:",
@@ -50,6 +51,7 @@ class AgentApiOpenApiCoverageTest {
     assertThat(openApi)
         .contains(
             "AgentTurnResponse:",
+            "AgentHistoryClearedResponse:",
             "CapabilityTool:",
             "ActionPlanRequest:",
             "ActionPlanResponse:",

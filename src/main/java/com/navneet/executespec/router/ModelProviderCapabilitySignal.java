@@ -31,7 +31,8 @@ public record ModelProviderCapabilitySignal(
     int fallbackOrder,
     double requiredQualityThreshold,
     Double fallbackQualityScore,
-    List<String> reasons) {
+    List<String> reasons,
+    Boolean contextFitsRequestedBudget) {
 
   public ModelProviderCapabilitySignal {
     if (provider == null || provider.isBlank()) {
@@ -51,6 +52,7 @@ public record ModelProviderCapabilitySignal(
     fallbackOrder = Math.max(0, fallbackOrder);
     requiredQualityThreshold = Math.max(0.0, Math.min(100.0, requiredQualityThreshold));
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
+    contextFitsRequestedBudget = contextFitsRequestedBudget == null || contextFitsRequestedBudget;
   }
 
   public double blendedCostPerMillionTokens() {

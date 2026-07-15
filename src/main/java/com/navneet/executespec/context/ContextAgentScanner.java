@@ -28,16 +28,24 @@ public class ContextAgentScanner {
       throws IOException {
     String currentDoc = readContextDoc(projectPath);
 
+    String diffSummary = buildGitDiffSummary(projectPath, run);
+    List<String> workerSummaries = summariseWorkerReports(workerReports);
+    String reviewerSummary = summariseReviewReport(reviewReport);
+    String decisions = readRecentDecisions(projectPath);
     return new ContextAgentInput(
         currentDoc,
-        buildGitDiffSummary(projectPath, run),
+        diffSummary,
         detectNewPackages(projectPath, currentDoc),
         detectNewFiles(projectPath, currentDoc),
-        summariseWorkerReports(workerReports),
-        summariseReviewReport(reviewReport),
-        readRecentDecisions(projectPath),
+        workerSummaries,
+        reviewerSummary,
+        decisions,
         run.getRunId(),
-        run.getUserRequest());
+        run.getUserRequest(),
+        "", // Context Agent does not infer a hypothesis; preserve an explicit empty value.
+        changedFiles(diffSummary),
+        failures(workerSummaries, reviewerSummary),
+        decisionSections(decisions));
   }
 
   private String buildGitDiffSummary(Path projectPath, PipelineRun run) {
@@ -118,5 +126,43 @@ public class ContextAgentScanner {
     String[] sections = content.split("(?=## )");
     int from = Math.max(0, sections.length - 5);
     return String.join("", Arrays.copyOfRange(sections, from, sections.length));
+  }
+
+  private List<String> changedFiles(String diffSummary) {
+    if (diffSummary == null || diffSummary.isBlank()) return List.of();
+    return diffSummary
+        .lines()
+        .map(String::strip)
+        .filter(line -> line.startsWith("A ") || line.startsWith("M ") || line.startsWith("D "))
+        .map(line -> line.substring(2).strip())
+        .filter(value -> !value.isBlank())
+        .distinct()
+        .toList();
+  }
+
+  private List<String> failures(List<String> workerSummaries, String reviewerSummary) {
+    List<String> failures = new ArrayList<>();
+    if (workerSummaries != null) {
+      workerSummaries.stream().filter(this::looksLikeFailure).forEach(failures::add);
+    }
+    if (looksLikeFailure(reviewerSummary)) failures.add(reviewerSummary);
+    return failures.stream().distinct().toList();
+  }
+
+  private boolean looksLikeFailure(String value) {
+    if (value == null || value.isBlank()) return false;
+    String lower = value.toLowerCase(java.util.Locale.ROOT);
+    return lower.contains("fail")
+        || lower.contains("error")
+        || lower.contains("blocker")
+        || lower.contains("unresolved");
+  }
+
+  private List<String> decisionSections(String decisions) {
+    if (decisions == null || decisions.isBlank()) return List.of();
+    return Arrays.stream(decisions.split("(?=## )"))
+        .map(String::strip)
+        .filter(value -> !value.isBlank())
+        .toList();
   }
 }

@@ -35,7 +35,7 @@ class TestOutputParserTest {
   void pytest_all_passed_with_skips() {
     var s =
         ok(TestOutputParser.parse(Framework.PYTEST, "==== 9 passed, 1 skipped in 0.4s ====", 0));
-    assertEquals(9, s.getTotalTests());
+    assertEquals(10, s.getTotalTests());
     assertEquals(9, s.getPassed());
     assertEquals(0, s.getFailed());
     assertEquals(1, s.getSkipped());
@@ -74,7 +74,7 @@ class TestOutputParserTest {
         ok(
             TestOutputParser.parse(
                 Framework.CARGO, "test result: ok. 8 passed; 0 failed; 1 ignored;", 0));
-    assertEquals(8, s.getTotalTests());
+    assertEquals(9, s.getTotalTests());
     assertEquals(8, s.getPassed());
   }
 
@@ -102,6 +102,22 @@ class TestOutputParserTest {
     assertTrue(TestOutputParser.parse(Framework.SUREFIRE, "BUILD FAILURE\nno tests", 1).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.CARGO, "error[E0433]", 101).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.UNKNOWN, "5 passed", 0).isEmpty());
+  }
+
+  @Test
+  void impossibleFrameworkCounts_areRejectedAsUntrustedEvidence() {
+    assertTrue(
+        TestOutputParser.parse(
+                Framework.SUREFIRE, "Tests run: 2, Failures: 2, Errors: 1, Skipped: 0", 1)
+            .isEmpty());
+    assertTrue(
+        TestOutputParser.parse(Framework.JEST, "Tests: 3 failed, 2 passed, 4 total", 1).isEmpty());
+    assertTrue(
+        TestOutputParser.parseJunitXmlReports(
+                java.util.List.of(
+                    "<testsuite name=\"Broken\" tests=\"1\" failures=\"1\" errors=\"1\""
+                        + " skipped=\"0\">"))
+            .isEmpty());
   }
 
   // ── JUnit XML report fallback (RL-2026-06-049) ────────────────────────────────

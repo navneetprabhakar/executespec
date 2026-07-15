@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -33,11 +35,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @DisplayName("LlmRouter dispatch / retry / failover")
 class LlmRouterTest {
@@ -50,6 +55,7 @@ class LlmRouterTest {
   private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
   private ManagedAiUsageService managedAiUsageService;
+  private ObjectProvider<AnthropicChatModel> anthropicModelProvider;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
@@ -73,8 +79,7 @@ class LlmRouterTest {
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
     managedAiUsageService = mock(ManagedAiUsageService.class);
-    @SuppressWarnings("unchecked")
-    ObjectProvider<AnthropicChatModel> anthropicModelProvider = mock(ObjectProvider.class);
+    anthropicModelProvider = mock(ObjectProvider.class);
     lenient().when(anthropicModelProvider.getIfAvailable()).thenReturn(null);
     lenient()
         .when(
@@ -118,6 +123,49 @@ class LlmRouterTest {
         .build();
   }
 
+  private static RunKeyContext deepSeekFailoverKeys() {
+    return new RunKeyContext(
+        null,
+        null,
+        null,
+        "openrouter-key",
+        "deepseek-key",
+        "fireworks-key",
+        RunKeyContext.Source.PLATFORM,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.PLATFORM,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.USER,
+        RunKeyContext.Source.USER,
+        "u1",
+        "o1");
+  }
+
+  @Test
+  void testTransportKillSwitchRejectsBeforeAnyProviderOrUsageCall() {
+    LlmRouter subject = build();
+    ReflectionTestUtils.setField(subject, "liveLlmEnabled", false);
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Live LLM transport is disabled");
+    verify(openai, never()).call(any());
+    verify(managedAiUsageService, never())
+        .authorizeCall(anyString(), anyString(), anyString(), any(), any(), any());
+  }
+
+  @Test
+  void goalLiveTestModeRequiresAProviderBudgetReservation() {
+    LlmRouter subject = build();
+    ReflectionTestUtils.setField(subject, "liveLlmTestMode", true);
+    ReflectionTestUtils.setField(subject, "liveLlmReservationId", "");
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("requires executespec.live-llm.reservation-id");
+    verify(openai, never()).call(any());
+  }
+
   private static LlmRequest attributedReq(String provider, String model) {
     return req(provider, model).toBuilder()
         .agentRole("WorkerAgent")
@@ -131,6 +179,77 @@ class LlmRouterTest {
     when(openai.call(any())).thenReturn(ok());
     assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
     verify(openai, times(1)).call(any());
+  }
+
+  @Test
+  void textSeamPreservesAnthropicSystemOnlyCacheIntent() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-4-6",
+        List.of(new UserMessage("stable system context")),
+        "run-cache",
+        "ConversationAgent",
+        "suggestion-plan",
+        128,
+        LlmRequest.PromptCacheStrategy.SYSTEM_ONLY);
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getCacheOptions().getStrategy())
+        .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.SYSTEM_ONLY);
+    assertThat(options.getTemperature()).isEqualTo(0.0);
+  }
+
+  @Test
+  void textSeamCanDisableAnthropicPromptCaching() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-4-6",
+        List.of(new UserMessage("no cache")),
+        "run-cache-none",
+        "ConversationAgent",
+        "test",
+        128,
+        LlmRequest.PromptCacheStrategy.NONE);
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getCacheOptions().getStrategy())
+        .isEqualTo(org.springframework.ai.anthropic.api.AnthropicCacheStrategy.NONE);
+  }
+
+  @Test
+  void textSeamUsesYamlOutputCapWhenCallerOmitsMaxTokens() {
+    build();
+    when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(4096);
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.callText(
+        "anthropic",
+        "claude-sonnet-4-6",
+        List.of(new UserMessage("doc generation")),
+        "run-doc",
+        "ProjectDocGeneratorService",
+        "generate");
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getMaxTokens()).isEqualTo(4096);
   }
 
   @Test
@@ -308,6 +427,91 @@ class LlmRouterTest {
   }
 
   @Test
+  void deepSeekFailureFallsBackToOpenRouterBeforeFireworks() {
+    build();
+    configureWireProviderUrls();
+    when(keyStore.get("run-1")).thenReturn(deepSeekFailoverKeys());
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(eq("deepseek-v4-pro-native"), eq("deepseek")))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "deepseek-v4-pro"},
+                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+    AtomicInteger nativeFailures = new AtomicInteger();
+    when(openai.call(any()))
+        .thenAnswer(
+            invocation -> {
+              OpenAiNativeToolClient.OpenAiToolCallRequest request = invocation.getArgument(0);
+              if (request.baseUrl() != null && request.baseUrl().contains("deepseek")) {
+                nativeFailures.incrementAndGet();
+                throw new RuntimeException("503 native unavailable");
+              }
+              return ok();
+            });
+
+    assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
+    assertThat(nativeFailures).hasValue(4);
+    verify(openai, times(4))
+        .call(
+            argThat(
+                request ->
+                    request.readTimeoutSeconds() != null
+                        && request.readTimeoutSeconds() == 300
+                        && request.baseUrl().contains("deepseek")));
+    verify(openai, times(1))
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("deepseek/deepseek-v4-pro")
+                        && request.baseUrl().contains("openrouter")));
+    verify(openai, never())
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                        && request.baseUrl().contains("fireworks")));
+  }
+
+  @Test
+  void deepSeekFailureReachesFireworksOnlyAfterOpenRouterFails() {
+    build();
+    configureWireProviderUrls();
+    when(keyStore.get("run-1")).thenReturn(deepSeekFailoverKeys());
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(eq("deepseek-v4-pro-native"), eq("deepseek")))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "deepseek-v4-pro"},
+                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+    when(openai.call(any()))
+        .thenAnswer(
+            invocation -> {
+              OpenAiNativeToolClient.OpenAiToolCallRequest request = invocation.getArgument(0);
+              if (request.baseUrl() != null
+                  && (request.baseUrl().contains("deepseek")
+                      || request.baseUrl().contains("openrouter"))) {
+                throw new RuntimeException("503 provider unavailable");
+              }
+              return ok();
+            });
+
+    assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
+    verify(openai, times(1))
+        .call(
+            argThat(
+                request ->
+                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                        && request.baseUrl().contains("fireworks")));
+  }
+
+  private void configureWireProviderUrls() {
+    ReflectionTestUtils.setField(router, "deepSeekBaseUrl", "https://api.deepseek.com");
+    ReflectionTestUtils.setField(router, "openRouterBaseUrl", "https://openrouter.ai/api/v1");
+    ReflectionTestUtils.setField(
+        router, "fireworksBaseUrl", "https://api.fireworks.ai/inference/v1");
+  }
+
+  @Test
   void byok_run_does_not_fail_over_to_an_unkeyed_provider() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
@@ -333,19 +537,6 @@ class LlmRouterTest {
         .isInstanceOf(RuntimeException.class);
     verify(gemini, never())
         .call(any()); // BYOK run never crosses to an unkeyed provider's platform key
-  }
-
-  @Test
-  void excluded_providers_are_never_failover_targets() {
-    build();
-    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    // Only deepseek as an alternate -> excluded -> no failover target -> rethrow primary.
-    when(registry.fallbackChainFor(anyString()))
-        .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"deepseek", "ds-x"}));
-    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
-        .isInstanceOf(RuntimeException.class);
-    verify(gemini, never()).call(any());
   }
 
   @Test

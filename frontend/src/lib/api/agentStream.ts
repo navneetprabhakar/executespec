@@ -13,6 +13,7 @@ export interface StreamAgentTurnRequest {
   repoContext?: AgentRepoContext | null;
   clientCapabilities?: AgentClientCapabilities | null;
   providerOverride?: string | null;
+  modelOverride?: string | null;
   attachmentIds?: string[] | null;
 }
 
@@ -23,6 +24,7 @@ export type AgentStreamEventName =
   | 'token'
   | 'tool_call'
   | 'tool_result'
+  | 'tool_event'
   | 'done'
   | 'error'
   | 'message';
@@ -70,6 +72,28 @@ export interface AgentStreamToolResult {
   result: string;
 }
 
+/** Explicit lifecycle marker; ordinary tool progress must not be inferred as a handoff. */
+export interface AgentStreamToolEvent {
+  /** Server-declared semantic class; clients must not infer lifecycle meaning from labels. */
+  semantic?: 'tool_event' | 'handoff';
+  name?: string;
+  status?: string;
+  detail?: string;
+  type?: string;
+  kind?: string;
+  event_type?: string;
+  action?: string;
+  role?: string;
+  agent_role?: string;
+  provider?: string;
+  provider_name?: string;
+  model?: string;
+  model_name?: string;
+  state?: string;
+  message?: string;
+  reason?: string;
+}
+
 export interface AgentStreamDone {
   session_id: string;
   turn_id: string;
@@ -94,6 +118,7 @@ export interface StreamAgentTurnHandlers {
   onToken?: (data: AgentStreamToken) => void;
   onToolCall?: (data: AgentStreamToolCall) => void;
   onToolResult?: (data: AgentStreamToolResult) => void;
+  onToolEvent?: (data: AgentStreamToolEvent) => void;
   onDone?: (data: AgentStreamDone) => void;
   onErrorEvent?: (data: AgentStreamError) => void;
   onEvent?: (event: AgentStreamEvent) => void;
@@ -151,15 +176,22 @@ export async function streamAgentTurn(
     const raw = await response.text().catch(() => '');
     throw new ApiError(response.status, parseErrorMessage(response.status, raw));
   }
-  if (!response.body) return;
+  if (!response.body) {
+    throw new ApiError(502, 'Agent stream ended before it delivered a response. Please retry.');
+  }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let terminalEventSeen = false;
+  const markTerminal = (event: string) => {
+    if (event === 'done' || event === 'error') terminalEventSeen = true;
+  };
 
   const emitFrame = (frame: string) => {
     const parsed = parseAgentSseFrame(frame);
     if (!parsed) return;
+    markTerminal(parsed.event);
     handlers.onEvent?.(parsed);
     if (parsed.event === 'ack') handlers.onAck?.(parsed.data as AgentStreamAck);
     if (parsed.event === 'route_decision') {
@@ -175,10 +207,18 @@ export async function streamAgentTurn(
     if (parsed.event === 'tool_result') {
       handlers.onToolResult?.(parsed.data as AgentStreamToolResult);
     }
+    if (parsed.event === 'tool_event') {
+      handlers.onToolEvent?.(parsed.data as AgentStreamToolEvent);
+    }
     if (parsed.event === 'done') handlers.onDone?.(parsed.data as AgentStreamDone);
     if (parsed.event === 'error') handlers.onErrorEvent?.(parsed.data as AgentStreamError);
   };
 
+  // A successful HTTP response is not proof that a turn completed. Proxies and browser
+  // connections can close an SSE body after a partial sequence (for example after `ack` or a
+  // few tokens). Keep this explicit so callers do not render a truncated answer as complete and
+  // can offer their normal retry/reload path. `error` is terminal because the server has already
+  // persisted the failure; transport EOF without either terminal event is not.
   let reading = true;
   while (reading) {
     const {value, done} = await reader.read();
@@ -194,4 +234,10 @@ export async function streamAgentTurn(
     reading = !done;
   }
   if (buffer.trim()) emitFrame(buffer);
+  if (!terminalEventSeen && !signal?.aborted) {
+    throw new ApiError(
+      502,
+      'Agent stream ended before the turn completed. Refresh the conversation and retry.',
+    );
+  }
 }

@@ -140,8 +140,9 @@ export function LoginPage() {
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
-            <label>Email</label>
+            <label htmlFor='login-email'>Email</label>
             <input
+              id='login-email'
               type='email'
               autoComplete='email'
               placeholder='you@company.com'
@@ -151,8 +152,9 @@ export function LoginPage() {
             />
           </div>
           <div className='signal-field'>
-            <label>Password</label>
+            <label htmlFor='login-password'>Password</label>
             <input
+              id='login-password'
               type='password'
               autoComplete='current-password'
               placeholder='••••••••'
@@ -243,8 +245,9 @@ export function SignupPage() {
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
-            <label>Email</label>
+            <label htmlFor='signup-email'>Email</label>
             <input
+              id='signup-email'
               type='email'
               autoComplete='email'
               placeholder='you@company.com'
@@ -254,8 +257,9 @@ export function SignupPage() {
             />
           </div>
           <div className='signal-field'>
-            <label>Password</label>
+            <label htmlFor='signup-password'>Password</label>
             <input
+              id='signup-password'
               type='password'
               autoComplete='new-password'
               placeholder='At least 12 characters'

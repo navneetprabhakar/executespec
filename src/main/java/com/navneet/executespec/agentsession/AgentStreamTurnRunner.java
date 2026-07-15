@@ -14,25 +14,61 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.specchat.SpecChatService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import lombok.RequiredArgsConstructor;
-
 @Service
-@RequiredArgsConstructor
 public class AgentStreamTurnRunner {
 
   private final AgentSessionService sessionService;
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
   private final AgentAttachmentService attachmentService;
+  private final AgentEventRecorder eventRecorder;
+  private final RunCostTracker costTracker;
+
+  /** Compatibility constructor retained for focused tests and older package-local callers. */
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService) {
+    this(sessionService, specChatService, featureFlags, attachmentService, null);
+  }
+
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService,
+      AgentEventRecorder eventRecorder) {
+    this(sessionService, specChatService, featureFlags, attachmentService, eventRecorder, null);
+  }
+
+  @Autowired
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService,
+      AgentEventRecorder eventRecorder,
+      RunCostTracker costTracker) {
+    this.sessionService = sessionService;
+    this.specChatService = specChatService;
+    this.featureFlags = featureFlags;
+    this.attachmentService = attachmentService;
+    this.eventRecorder = eventRecorder;
+    this.costTracker = costTracker;
+  }
 
   public void run(
       SseEmitter emitter,
       AgentSessionService.StreamTurnContext ctx,
       AppUserDetails user,
       StreamTurnRequest request) {
+    AccumulatingSink sink = null;
+    StringBuilder fixtureText = new StringBuilder();
     try {
       send(
           emitter,
@@ -52,6 +88,22 @@ public class AgentStreamTurnRunner {
               "reason_code", ctx.decision().reasonCode(),
               "run_api_allowed", ctx.decision().policy().runApiAllowed(),
               "requires_confirmation", ctx.decision().requiresUserConfirmation()));
+      record(
+          ctx,
+          "ROUTE_DECISION",
+          Map.of(
+              "route", ctx.decision().route(),
+              "confidence", ctx.decision().confidence(),
+              "reason_code", ctx.decision().reasonCode(),
+              "run_api_allowed", ctx.decision().policy().runApiAllowed(),
+              "requires_confirmation", ctx.decision().requiresUserConfirmation()));
+
+      // Provider-free scripted stream used only by the local/dev Web release fixture. The
+      // session id is minted by WebQaFixtureController and never comes from a customer request.
+      if (ctx.sessionId().startsWith("web-qa-")) {
+        runWebQaFixtureStream(emitter, ctx, fixtureText);
+        return;
+      }
 
       if (!featureFlags.isEnabled("spec.chat.enabled")) {
         String note = "spec.chat.enabled is OFF";
@@ -77,25 +129,46 @@ public class AgentStreamTurnRunner {
         return;
       }
 
-      AccumulatingSink sink = new AccumulatingSink(emitter, sessionService, ctx);
+      sink = new AccumulatingSink(emitter, sessionService, ctx, eventRecorder);
       List<Map<String, Object>> conversation =
           AgentStreamTurnSupport.withAttachmentBlock(
               AgentStreamTurnSupport.conversationOrCurrentMessage(request),
               attachmentService.injectionBlock(ctx.sessionId(), request.attachmentIds()));
-      specChatService.runTurn(
-          sink,
-          user,
-          ctx.sessionId(),
-          ctx.projectId(),
-          ctx.runId(),
-          ctx.orgId(),
-          conversation,
-          ctx.provider(),
-          AgentStreamTurnSupport.allowedReadOnlyTools());
+      conversation =
+          attachmentService.withMediaAttachments(
+              conversation, ctx.sessionId(), request.attachmentIds());
+      if (ctx.model() == null || ctx.model().isBlank()) {
+        specChatService.runTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            null,
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId());
+      } else {
+        specChatService.runTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            ctx.model(),
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId());
+      }
       emitter.complete();
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
-        sessionService.disconnectStreamTurn(ctx);
+        String partial = sink == null ? partialText(fixtureText) : sink.partialSummary();
+        sessionService.disconnectStreamTurn(ctx, partial, latestCost(ctx));
         emitter.complete();
         return;
       }
@@ -118,6 +191,64 @@ public class AgentStreamTurnRunner {
     }
   }
 
+  private RunCostTracker.Snapshot latestCost(AgentSessionService.StreamTurnContext ctx) {
+    if (costTracker == null) return null;
+    String scope = ctx.runId() == null || ctx.runId().isBlank() ? ctx.sessionId() : ctx.runId();
+    return costTracker.snapshot(scope);
+  }
+
+  private void runWebQaFixtureStream(
+      SseEmitter emitter, AgentSessionService.StreamTurnContext ctx, StringBuilder partialText) {
+    try {
+      Thread.sleep(120);
+      appendPartial(partialText, "Fixture stream started. ");
+      send(emitter, "token", Map.of("delta", "Fixture stream started. "));
+      Thread.sleep(120);
+      send(
+          emitter,
+          "tool_call",
+          Map.of("tool", "readFile", "args", "{\"path\":\"src/app.ts\"}", "id", "web-qa-read"));
+      Thread.sleep(120);
+      send(
+          emitter,
+          "tool_result",
+          Map.of("id", "web-qa-read", "result", "{\"ok\":true,\"path\":\"src/app.ts\"}"));
+      Thread.sleep(120);
+      appendPartial(partialText, "Verification evidence is ready for review.");
+      send(emitter, "token", Map.of("delta", "Verification evidence is ready for review."));
+      sessionService.completeStreamTurn(
+          ctx,
+          "Fixture stream started. Verification evidence is ready for review.",
+          new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+      send(
+          emitter,
+          "done",
+          Map.of(
+              "session_id",
+              ctx.sessionId(),
+              "turn_id",
+              ctx.turnId(),
+              "turn_count",
+              ctx.sequence(),
+              "cost_usd",
+              0.0));
+      record(ctx, "TURN_DONE", Map.of("turn_count", ctx.sequence(), "cost_usd", 0.0));
+      emitter.complete();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      sessionService.disconnectStreamTurn(ctx, partialText(partialText));
+      emitter.complete();
+    }
+  }
+
+  private static void appendPartial(StringBuilder target, String value) {
+    if (target != null && value != null) target.append(value);
+  }
+
+  private static String partialText(StringBuilder value) {
+    return value == null || value.isEmpty() ? null : value.toString();
+  }
+
   private void finishDecisionOnlyTurn(
       SseEmitter emitter, AgentSessionService.StreamTurnContext ctx) {
     String summary = ctx.decision().assistantReply() == null ? "" : ctx.decision().assistantReply();
@@ -132,6 +263,7 @@ public class AgentStreamTurnRunner {
       payload.put("requires_confirmation", action.requiresConfirmation());
       payload.put("summary", action.confirmationPrompt());
       payload.put("spec", AgentActionArguments.stringArg(action.arguments(), "spec"));
+      record(ctx, "PROPOSAL", payload);
       send(emitter, "proposal", payload);
     }
     if (!summary.isBlank()) {
@@ -142,6 +274,17 @@ public class AgentStreamTurnRunner {
         summary,
         new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0),
         ctx.decision().requiresUserConfirmation() ? "NEEDS_CONFIRMATION" : "OK");
+    if (!summary.isBlank()) record(ctx, "TURN_TEXT", boundedTextPayload(summary));
+    record(
+        ctx,
+        "TURN_DONE",
+        Map.of(
+            "turn_count",
+            ctx.sequence(),
+            "cost_usd",
+            0.0,
+            "status",
+            ctx.decision().requiresUserConfirmation() ? "NEEDS_CONFIRMATION" : "OK"));
     send(
         emitter,
         "done",
@@ -169,6 +312,18 @@ public class AgentStreamTurnRunner {
     } catch (IOException io) {
       throw new UncheckedIOException(io);
     }
+  }
+
+  private void record(AgentSessionService.StreamTurnContext ctx, String type, Object payload) {
+    if (eventRecorder != null) {
+      eventRecorder.append(ctx.sessionId(), ctx.turnId(), type, payload);
+    }
+  }
+
+  private static Map<String, Object> boundedTextPayload(String text) {
+    final int maxChars = 16_000;
+    boolean truncated = text.length() > maxChars;
+    return Map.of("text", truncated ? text.substring(0, maxChars) : text, "truncated", truncated);
   }
 
   private static String userFacingStreamError(Throwable error, String provider) {
@@ -201,24 +356,40 @@ public class AgentStreamTurnRunner {
     private final AgentSessionService sessionService;
     private final AgentSessionService.StreamTurnContext ctx;
     private final List<String> tokens = new ArrayList<>();
+    private final AgentEventRecorder eventRecorder;
+    private final StringBuilder text = new StringBuilder();
+    private boolean textTruncated;
 
     private AccumulatingSink(
         SseEmitter emitter,
         AgentSessionService sessionService,
-        AgentSessionService.StreamTurnContext ctx) {
+        AgentSessionService.StreamTurnContext ctx,
+        AgentEventRecorder eventRecorder) {
       this.emitter = emitter;
       this.sessionService = sessionService;
       this.ctx = ctx;
+      this.eventRecorder = eventRecorder;
     }
 
     @Override
     public void token(String delta) {
-      tokens.add(delta == null ? "" : delta);
-      send(emitter, "token", Map.of("delta", delta == null ? "" : delta));
+      String safeDelta = delta == null ? "" : delta;
+      tokens.add(safeDelta);
+      final int maxChars = 16_000;
+      int remaining = maxChars - text.length();
+      if (remaining > 0) text.append(safeDelta, 0, Math.min(remaining, safeDelta.length()));
+      if (safeDelta.length() > Math.max(remaining, 0)) textTruncated = true;
+      send(emitter, "token", Map.of("delta", safeDelta));
     }
 
     @Override
     public void toolCall(String tool, String argsJson, String id) {
+      record(
+          "TOOL_CALL",
+          Map.of(
+              "tool", tool == null ? "" : tool,
+              "args", argsJson == null ? "" : argsJson,
+              "id", id == null ? "" : id));
       send(
           emitter,
           "tool_call",
@@ -230,6 +401,9 @@ public class AgentStreamTurnRunner {
 
     @Override
     public void toolResult(String id, String resultJson) {
+      record(
+          "TOOL_RESULT",
+          Map.of("id", id == null ? "" : id, "result", resultJson == null ? "" : resultJson));
       send(
           emitter,
           "tool_result",
@@ -239,6 +413,9 @@ public class AgentStreamTurnRunner {
     @Override
     public void done(int turnCount, RunCostTracker.Snapshot cost) {
       sessionService.completeStreamTurn(ctx, String.join("\n", tokens), cost);
+      if (text.length() > 0) {
+        record("TURN_TEXT", Map.of("text", text.toString(), "truncated", textTruncated));
+      }
       Map<String, Object> data = new LinkedHashMap<>();
       data.put("session_id", ctx.sessionId());
       data.put("turn_id", ctx.turnId());
@@ -247,7 +424,19 @@ public class AgentStreamTurnRunner {
       data.put("input_tokens", cost == null ? 0 : cost.inputTokens());
       data.put("output_tokens", cost == null ? 0 : cost.outputTokens());
       data.put("reasoning_tokens", cost == null ? 0 : cost.reasoningTokens());
+      record("TURN_DONE", data);
       send(emitter, "done", data);
+    }
+
+    private void record(String type, Object payload) {
+      if (eventRecorder != null) {
+        eventRecorder.append(ctx.sessionId(), ctx.turnId(), type, payload);
+      }
+    }
+
+    private String partialSummary() {
+      if (text.isEmpty()) return null;
+      return text.toString();
     }
   }
 }

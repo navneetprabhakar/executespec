@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "type": "web-fixture-cleanup-live-evidence",
+  "backendCommit": "4882e1becaca6b9f2181e02977f6cfd3a0387853",
+  "profile": "local",
+  "seeded": {
+    "successRunId": "web-qa-2bfa4244-6669-4b62-a5ca-a873c9932f25",
+    "failedRunId": "web-qa-75f54c10-af1a-4c1f-b51a-3d7f453012a4",
+    "gateRunId": "web-qa-ea2ad8d5-1dae-496a-a3d1-2db28d937574",
+    "agentSessionId": "web-qa-73fb5edd-8e94-49e4-9b5f-7c1089020022"
+  },
+  "deleteHttp": 200,
+  "deletedRuns": 3,
+  "deletedAgentSessions": 19,
+  "seedSessionStillPresent": false,
+  "claim": "Live local cleanup verification after the transactional fixture cleanup fix; no production data was modified."
+}

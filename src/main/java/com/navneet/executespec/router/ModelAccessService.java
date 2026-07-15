@@ -23,11 +23,13 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ModelAccessService {
 
-  // Sarvam is intentionally dark-launched only. Gemini is temporarily dark for buyer-facing run
-  // selection after the 2026-07-02 provider matrix: it was reachable but returned PARTIAL/37 and
-  // produced only README.md on the bounded smoke task while the other enabled providers passed.
-  // Keep enum/YAML breadcrumbs for operator evals; customer-facing selection paths fail closed.
-  private static final Set<String> DISABLED_PROVIDERS = Set.of("gemini", "google", "sarvam");
+  /**
+   * Explicit customer-facing provider deny-list. It is intentionally empty in 2.0: retired
+   * providers are removed from {@link LlmProvider} and the model matrix, while keeping this seam
+   * lets a future emergency quarantine fail closed without scattering provider checks through
+   * controllers and routing services.
+   */
+  private static final Set<String> DISABLED_PROVIDERS = Set.of();
 
   private final ModelRegistry modelRegistry;
   private final TierEnforcementService tierService;
@@ -59,6 +61,9 @@ public class ModelAccessService {
 
   /** True when the user's tier may run this model. */
   public boolean isAllowed(String userId, String modelId) {
+    if (modelId == null || modelId.isBlank() || modelRegistry.providerFor(modelId) == null) {
+      return false;
+    }
     if (isDisabledModel(modelId)) return false;
     return !userIsFreeTier(userId) || isFreeModel(modelId);
   }
@@ -79,7 +84,7 @@ public class ModelAccessService {
     }
     String normalized = modelId.trim().toLowerCase(Locale.ROOT);
     return DISABLED_PROVIDERS.stream()
-        .anyMatch(provider -> normalized.equals(provider) || normalized.contains(provider + "-"));
+        .anyMatch(provider -> normalized.equals(provider) || normalized.startsWith(provider + "-"));
   }
 
   public static void assertProviderEnabled(String provider) {
@@ -102,6 +107,9 @@ public class ModelAccessService {
       return;
     }
     String provider = modelRegistry.providerFor(modelName);
+    if (provider == null || provider.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown model: " + modelName);
+    }
     if (isDisabledProvider(provider)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,

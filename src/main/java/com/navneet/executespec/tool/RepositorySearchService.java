@@ -1,0 +1,729 @@
+package com.navneet.executespec.tool;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
+import org.springframework.stereotype.Service;
+
+/**
+ * Deterministic, workspace-confined repository search contract. This is the typed seam shared by
+ * worker tools, project chat, local-hands clients, and future optional explorers (for example
+ * FastContext). It deliberately uses a bounded Java implementation first; an rg/tree-sitter adapter
+ * can implement the same request/result contract without changing callers.
+ */
+@Service
+public class RepositorySearchService {
+
+  private static final Set<String> IGNORED_DIRS =
+      Set.of(
+          ".git",
+          "node_modules",
+          "target",
+          "build",
+          "dist",
+          ".next",
+          ".venv",
+          "__pycache__",
+          ".gradle",
+          ".idea",
+          ".vscode",
+          "worktrees");
+  private static final int MAX_HITS = 1000;
+  private static final int MAX_PREVIEW = 240;
+  private static final int HASH_BUFFER_BYTES = 64 * 1024;
+
+  /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
+  private static final int MAX_INDEXED_WORKSPACES = 4;
+
+  private final Map<Path, CachedWorkspace> workspaceIndex =
+      new LinkedHashMap<>(MAX_INDEXED_WORKSPACES, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Path, CachedWorkspace> eldest) {
+          return size() > MAX_INDEXED_WORKSPACES;
+        }
+      };
+  private long inventoryRequestSequence;
+
+  public SearchResult search(Path workspace, SearchRequest request) {
+    if (workspace == null
+        || request == null
+        || request.query() == null
+        || request.query().isBlank()) {
+      throw new IllegalArgumentException("workspace and non-blank query are required");
+    }
+    try {
+      Path root = workspace.toRealPath();
+      Path searchRoot =
+          request.relativeRoot() == null || request.relativeRoot().isBlank()
+              ? root
+              : root.resolve(request.relativeRoot()).normalize().toRealPath();
+      if (!searchRoot.startsWith(root))
+        throw new SecurityException("search root escapes workspace");
+      String repoSha = gitSha(root);
+      List<Path> files = indexedFiles(root, searchRoot);
+      Map<Path, String> contentHashes = new HashMap<>(files.size());
+      String fingerprint = fingerprint(files, contentHashes);
+      Pattern pattern = compile(request);
+      List<SearchHit> hits = new ArrayList<>();
+      for (Path file : files) {
+        if (request.fileGlob() != null
+            && !file.getFileName().toString().matches(globRegex(request.fileGlob()))) continue;
+        List<String> lines = indexedLines(root, file, contentHashes.get(file));
+        if (lines == null) continue;
+        for (int i = 0; i < lines.size(); i++) {
+          String line = lines.get(i);
+          SymbolMatch symbolMatch =
+              request.mode() == SearchMode.SYMBOL
+                  ? symbolMatch(
+                      request.query(), line, request.caseSensitive(), file.getFileName().toString())
+                  : null;
+          if (request.mode() == SearchMode.SYMBOL && symbolMatch == null) continue;
+          if (request.mode() != SearchMode.SYMBOL && !pattern.matcher(line).find()) continue;
+          Path relative = root.relativize(file);
+          hits.add(
+              new SearchHit(
+                  relative.toString(),
+                  i + 1,
+                  1,
+                  line.substring(0, Math.min(MAX_PREVIEW, line.length())),
+                  symbolMatch == null ? MatchType.TEXT : symbolMatch.type(),
+                  "CURRENT",
+                  estimate(line),
+                  symbolMatch == null ? "text match" : symbolMatch.reason(),
+                  fingerprint));
+          if (hits.size() >= MAX_HITS) break;
+        }
+        if (hits.size() >= MAX_HITS) break;
+      }
+      hits.sort(
+          Comparator.comparingInt((SearchHit hit) -> hit.matchType().rank())
+              .thenComparing(SearchHit::path)
+              .thenComparingInt(SearchHit::line));
+      int from = Math.min(request.offset(), hits.size());
+      int to = Math.min(from + request.limit(), hits.size());
+      return new SearchResult(
+          repoSha,
+          fingerprint,
+          sha256(request.query()),
+          hits.subList(from, to),
+          hits.size(),
+          to < hits.size(),
+          to,
+          "java-deterministic");
+    } catch (PatternSyntaxException e) {
+      throw new IllegalArgumentException("invalid search regex: " + e.getDescription(), e);
+    } catch (IOException e) {
+      throw new IllegalStateException("repository search failed", e);
+    }
+  }
+
+  /**
+   * Builds a bounded relationship view for one identifier from the same workspace-confined,
+   * content-fingerprinted search inventory used by {@link #search(Path, SearchRequest)}.
+   *
+   * <p>This is intentionally a deterministic lexical index slice, not a compiler-backed call graph:
+   * imports, test references, and call sites are linked to the best matching declaration when one
+   * is present. Consumers must inspect {@link RelationshipResult#repositoryFingerprint()} before
+   * reusing edges after a working-tree mutation.
+   */
+  public RelationshipResult relationships(Path workspace, RelationshipRequest request) {
+    if (workspace == null
+        || request == null
+        || request.symbol() == null
+        || request.symbol().isBlank()) {
+      throw new IllegalArgumentException("workspace and non-blank symbol are required");
+    }
+    SearchResult all = searchAllSymbolHits(workspace, request);
+    Map<String, String> declarations = new HashMap<>();
+    for (SearchHit hit : all.hits()) {
+      if (hit.matchType() == MatchType.SYMBOL_DEFINITION) {
+        declarations.putIfAbsent(hit.path(), hit.path());
+      }
+    }
+    List<RelationshipEdge> edges = new ArrayList<>();
+    for (SearchHit hit : all.hits()) {
+      RelationshipType type =
+          switch (hit.matchType()) {
+            case IMPORT -> RelationshipType.IMPORT;
+            case TEST_REFERENCE -> RelationshipType.TEST_TO_SOURCE;
+            case CALL_SITE -> RelationshipType.CALL_SITE;
+            default -> null;
+          };
+      if (type == null) continue;
+      String target = declarations.isEmpty() ? null : declarations.keySet().iterator().next();
+      edges.add(
+          new RelationshipEdge(
+              hit.path(),
+              target,
+              hit.line(),
+              hit.column(),
+              type,
+              request.symbol(),
+              hit.preview(),
+              hit.freshness(),
+              hit.repositoryFingerprint()));
+    }
+    edges.sort(
+        Comparator.comparingInt((RelationshipEdge edge) -> edge.relationshipType().rank())
+            .thenComparing(RelationshipEdge::sourcePath)
+            .thenComparingInt(RelationshipEdge::line)
+            .thenComparing(edge -> edge.targetPath() == null ? "" : edge.targetPath()));
+    int from = Math.min(request.offset(), edges.size());
+    int to = Math.min(from + request.limit(), edges.size());
+    return new RelationshipResult(
+        all.repositorySha(),
+        all.inventoryFingerprint(),
+        all.repositoryFingerprint(),
+        List.copyOf(edges.subList(from, to)),
+        edges.size(),
+        to < edges.size(),
+        to,
+        "java-deterministic-relationship-index");
+  }
+
+  private SearchResult searchAllSymbolHits(Path workspace, RelationshipRequest request) {
+    List<SearchHit> hits = new ArrayList<>();
+    SearchResult page;
+    int offset = 0;
+    do {
+      page =
+          search(
+              workspace,
+              new SearchRequest(
+                  request.symbol(),
+                  SearchMode.SYMBOL,
+                  request.caseSensitive(),
+                  request.relativeRoot(),
+                  request.fileGlob(),
+                  200,
+                  offset));
+      hits.addAll(page.hits());
+      offset = page.nextOffset();
+    } while (page.hasMore() && hits.size() < MAX_HITS);
+    return new SearchResult(
+        page.repositorySha(),
+        page.inventoryFingerprint(),
+        page.queryFingerprint(),
+        List.copyOf(hits),
+        hits.size(),
+        page.hasMore(),
+        hits.size(),
+        page.engine());
+  }
+
+  /**
+   * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
+   * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it can
+   * contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter backend
+   * can replace later without changing the search contract or callers.
+   */
+  private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
+    // Inventory discovery is intentionally outside the cache lock. A git ls-files/tree walk can
+    // take noticeable time on a large repository; holding the global LRU lock here used to block
+    // every unrelated workspace and every concurrent read-only search while that process ran.
+    long requestSequence;
+    synchronized (workspaceIndex) {
+      requestSequence = ++inventoryRequestSequence;
+    }
+    List<Path> currentFiles = inventory(root, root);
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      // Keep inventory discovery authoritative on every call (new/deleted files must be visible),
+      // while reusing decoded file lines below. This avoids stale-search bugs and still removes the
+      // expensive readAllLines allocation that dominates repeated agent search turns.
+      if (cached == null) {
+        cached = new CachedWorkspace(root, currentFiles);
+        cached.lastInventoryRequest = requestSequence;
+        workspaceIndex.put(root, cached);
+      } else if (requestSequence >= cached.lastInventoryRequest) {
+        cached.files = List.copyOf(currentFiles);
+        cached.lastInventoryRequest = requestSequence;
+      }
+      return cached.files.stream().filter(path -> path.startsWith(searchRoot)).toList();
+    }
+  }
+
+  private List<String> indexedLines(Path root, Path file, String contentHash) {
+    CachedWorkspace cached;
+    synchronized (workspaceIndex) {
+      cached = workspaceIndex.get(root);
+    }
+    // File decoding and snapshot refresh are scoped to this workspace, not the global LRU. This
+    // allows independent searches to proceed concurrently while still serializing refreshes for a
+    // single file snapshot while retaining content-based stale-file protection.
+    return cached == null ? null : cached.lines(file, contentHash);
+  }
+
+  private static final class CachedWorkspace {
+    private final Path root;
+    private List<Path> files;
+    private long lastInventoryRequest;
+    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>();
+
+    private CachedWorkspace(Path root, List<Path> files) {
+      this.root = root;
+      this.files = List.copyOf(files);
+    }
+
+    private synchronized List<String> lines(Path file, String knownContentHash) {
+      try {
+        // A workspace can be mutated between inventory discovery and decoding. Re-check symlink
+        // targets at the read boundary so a newly introduced link cannot make a search disclose
+        // content outside the workspace that was originally canonicalized.
+        if (Files.isSymbolicLink(file) && !file.toRealPath().startsWith(root)) {
+          snapshots.remove(file);
+          return null;
+        }
+        // Metadata is only a useful fast path when the filesystem guarantees a reliable
+        // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
+        // size and mtime, so compare a streaming content digest before reusing the decoded lines.
+        String contentHash = knownContentHash == null ? contentHash(file) : knownContentHash;
+        FileSnapshot previous = snapshots.get(file);
+        if (previous != null && previous.contentHash.equals(contentHash)) {
+          return previous.lines;
+        }
+        List<String> current = Files.readAllLines(file);
+        snapshots.put(file, new FileSnapshot(contentHash, current));
+        return current;
+      } catch (IOException | OutOfMemoryError e) {
+        snapshots.remove(file);
+        return null;
+      }
+    }
+  }
+
+  private record FileSnapshot(String contentHash, List<String> lines) {}
+
+  private static Pattern compile(SearchRequest request) {
+    if (request.mode() == SearchMode.SYMBOL) {
+      return Pattern.compile(
+          "(?<![A-Za-z0-9_$])" + Pattern.quote(request.query()) + "(?![A-Za-z0-9_$])",
+          request.caseSensitive() ? 0 : Pattern.CASE_INSENSITIVE);
+    }
+    return Pattern.compile(
+        request.mode() == SearchMode.EXACT ? Pattern.quote(request.query()) : request.query(),
+        request.caseSensitive() ? 0 : Pattern.CASE_INSENSITIVE);
+  }
+
+  private static List<Path> inventory(Path root, Path searchRoot) throws IOException {
+    List<Path> gitFiles = gitInventory(root, searchRoot);
+    if (gitFiles != null) return gitFiles;
+    List<Path> files = new ArrayList<>();
+    Files.walkFileTree(
+        searchRoot,
+        new SimpleFileVisitor<>() {
+          @Override
+          public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+            return dir.equals(searchRoot) || !IGNORED_DIRS.contains(dir.getFileName().toString())
+                ? FileVisitResult.CONTINUE
+                : FileVisitResult.SKIP_SUBTREE;
+          }
+
+          @Override
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            if (attrs.isRegularFile() && !isBinaryName(file)) files.add(file);
+            return FileVisitResult.CONTINUE;
+          }
+        });
+    files.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+    return files;
+  }
+
+  /**
+   * Prefer Git's tracked + non-ignored inventory when the workspace is a repository. This keeps the
+   * search contract aligned with the files a coding agent can actually commit, avoids walking
+   * generated/ignored trees on every warm search, and still includes newly-created non-ignored
+   * files through {@code --others}. A plain directory (tests, unpacked uploads, or a local-hands
+   * workspace without Git metadata) uses the bounded tree-walk fallback above.
+   */
+  private static List<Path> gitInventory(Path root, Path searchRoot) {
+    Process process = null;
+    try {
+      process =
+          new ProcessBuilder(
+                  "git",
+                  "-C",
+                  root.toString(),
+                  "ls-files",
+                  "--cached",
+                  "--others",
+                  "--exclude-standard",
+                  "-z")
+              .redirectErrorStream(false)
+              .start();
+      byte[] output = process.getInputStream().readAllBytes();
+      if (process.waitFor() != 0) return null;
+      String listing = new String(output, StandardCharsets.UTF_8);
+      List<Path> files = new ArrayList<>();
+      for (String relativeName : listing.split("\\u0000")) {
+        if (relativeName.isBlank()) continue;
+        Path file = root.resolve(relativeName).normalize();
+        if (!file.startsWith(root)
+            || !file.startsWith(searchRoot)
+            || !Files.isRegularFile(file)
+            || (Files.isSymbolicLink(file) && !isInsideRealWorkspace(root, file))
+            || isIgnoredDirectory(file, root)
+            || isBinaryName(file)) continue;
+        files.add(file);
+      }
+      files.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+      return files;
+    } catch (Exception ignored) {
+      if (process != null) process.destroyForcibly();
+      return null;
+    }
+  }
+
+  private static boolean isIgnoredDirectory(Path file, Path root) {
+    Path relative = root.relativize(file);
+    for (Path part : relative) {
+      if (IGNORED_DIRS.contains(part.toString())) return true;
+    }
+    return false;
+  }
+
+  private static boolean isInsideRealWorkspace(Path root, Path file) {
+    try {
+      return file.toRealPath().startsWith(root);
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private static boolean isBinaryName(Path path) {
+    String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+    return name.endsWith(".class")
+        || name.endsWith(".jar")
+        || name.endsWith(".zip")
+        || name.endsWith(".png")
+        || name.endsWith(".jpg")
+        || name.endsWith(".gif")
+        || name.endsWith(".pdf")
+        || name.endsWith(".gz");
+  }
+
+  private static String globRegex(String glob) {
+    StringBuilder out = new StringBuilder("^");
+    for (char c : glob.toCharArray())
+      out.append(c == '*' ? ".*" : c == '?' ? '.' : "\\.^$|()[]{}+".indexOf(c) >= 0 ? "\\" + c : c);
+    return out.append('$').toString();
+  }
+
+  private static int estimate(String value) {
+    return Math.max(1, value.length() / 4);
+  }
+
+  private static String gitSha(Path root) {
+    try {
+      Process process =
+          new ProcessBuilder("git", "-C", root.toString(), "rev-parse", "HEAD")
+              .redirectErrorStream(true)
+              .start();
+      String value =
+          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      return process.waitFor() == 0 && !value.isBlank() ? value : "WORKTREE_ONLY";
+    } catch (Exception ignored) {
+      return "WORKTREE_ONLY";
+    }
+  }
+
+  private static String fingerprint(List<Path> files) throws IOException {
+    return fingerprint(files, new HashMap<>(files.size()));
+  }
+
+  private static String fingerprint(List<Path> files, Map<Path, String> contentHashes)
+      throws IOException {
+    MessageDigest digest = digest();
+    for (Path file : files) {
+      digest.update(file.toString().getBytes(StandardCharsets.UTF_8));
+      String hash = contentHash(file);
+      contentHashes.put(file, hash);
+      digest.update(hash.getBytes(StandardCharsets.US_ASCII));
+    }
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  /**
+   * Content identity for a single file. The digest is streamed with a fixed-size buffer so a large
+   * source file never becomes a second full in-memory copy merely to detect freshness.
+   */
+  private static String contentHash(Path file) throws IOException {
+    MessageDigest digest = digest();
+    try (var input = Files.newInputStream(file)) {
+      byte[] buffer = new byte[HASH_BUFFER_BYTES];
+      int read;
+      while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
+    }
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  private static String sha256(String value) {
+    MessageDigest d = digest();
+    return HexFormat.of().formatHex(d.digest(value.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  private static MessageDigest digest() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  public enum SearchMode {
+    EXACT,
+    REGEX,
+    /** Exact identifier search with deterministic declaration classification and ranking. */
+    SYMBOL
+  }
+
+  public enum MatchType {
+    SYMBOL_DEFINITION(0),
+    IMPORT(1),
+    TEST_REFERENCE(2),
+    CALL_SITE(3),
+    SYMBOL_REFERENCE(4),
+    TEXT(5);
+
+    private final int rank;
+
+    MatchType(int rank) {
+      this.rank = rank;
+    }
+
+    int rank() {
+      return rank;
+    }
+  }
+
+  public enum RelationshipType {
+    IMPORT(0),
+    TEST_TO_SOURCE(1),
+    CALL_SITE(2);
+
+    private final int rank;
+
+    RelationshipType(int rank) {
+      this.rank = rank;
+    }
+
+    int rank() {
+      return rank;
+    }
+  }
+
+  public record RelationshipRequest(
+      String symbol,
+      boolean caseSensitive,
+      String relativeRoot,
+      String fileGlob,
+      int limit,
+      int offset) {
+    public RelationshipRequest {
+      limit = Math.max(1, Math.min(200, limit <= 0 ? 50 : limit));
+      offset = Math.max(0, offset);
+    }
+
+    public RelationshipRequest(String symbol, String relativeRoot, String fileGlob, int limit) {
+      this(symbol, true, relativeRoot, fileGlob, limit, 0);
+    }
+  }
+
+  public record RelationshipEdge(
+      String sourcePath,
+      String targetPath,
+      int line,
+      int column,
+      RelationshipType relationshipType,
+      String symbol,
+      String preview,
+      String freshness,
+      String repositoryFingerprint) {}
+
+  public record RelationshipResult(
+      String repositorySha,
+      String inventoryFingerprint,
+      String repositoryFingerprint,
+      List<RelationshipEdge> edges,
+      int totalRelationships,
+      boolean hasMore,
+      int nextOffset,
+      String engine) {}
+
+  public record SearchRequest(
+      String query,
+      SearchMode mode,
+      boolean caseSensitive,
+      String relativeRoot,
+      String fileGlob,
+      int limit,
+      int offset) {
+    public SearchRequest {
+      mode = mode == null ? SearchMode.EXACT : mode;
+      limit = Math.max(1, Math.min(200, limit <= 0 ? 50 : limit));
+      offset = Math.max(0, offset);
+    }
+  }
+
+  public record SearchHit(
+      String path,
+      int line,
+      int column,
+      String preview,
+      MatchType matchType,
+      String freshness,
+      int tokenEstimate,
+      String relevanceReason,
+      String repositoryFingerprint) {
+    /** Compatibility constructor for callers that used the original string-shaped contract. */
+    public SearchHit(
+        String path,
+        int line,
+        int column,
+        String preview,
+        String matchType,
+        String freshness,
+        int tokenEstimate) {
+      this(
+          path,
+          line,
+          column,
+          preview,
+          parseMatchType(matchType),
+          freshness,
+          tokenEstimate,
+          "text match",
+          "");
+    }
+
+    private static MatchType parseMatchType(String value) {
+      if (value == null) return MatchType.TEXT;
+      try {
+        return MatchType.valueOf(value.toUpperCase(Locale.ROOT));
+      } catch (IllegalArgumentException ignored) {
+        return MatchType.TEXT;
+      }
+    }
+  }
+
+  public record SearchResult(
+      String repositorySha,
+      String inventoryFingerprint,
+      String queryFingerprint,
+      List<SearchHit> hits,
+      int totalMatches,
+      boolean hasMore,
+      int nextOffset,
+      String engine) {
+    /** Composite fingerprint suitable for citation validation and client cache keys. */
+    public String repositoryFingerprint() {
+      return sha256(repositorySha + ":" + inventoryFingerprint);
+    }
+  }
+
+  /**
+   * Rejects citations from an inventory that changed after the search. This intentionally checks
+   * both the inventory fingerprint and the cited line, so a caller cannot reuse a path:line after a
+   * working-tree edit. It is a bounded validation helper, not a replacement for a full VCS diff.
+   */
+  public boolean isCitationCurrent(Path workspace, SearchResult result, SearchHit citation) {
+    if (workspace == null || result == null || citation == null) return false;
+    if (citation.repositoryFingerprint() == null
+        || citation.repositoryFingerprint().isBlank()
+        || !result.inventoryFingerprint().equals(citation.repositoryFingerprint())) return false;
+    try {
+      Path root = workspace.toRealPath();
+      Path file = root.resolve(citation.path()).normalize();
+      if (!file.startsWith(root)
+          || !Files.isRegularFile(file)
+          || !isInsideRealWorkspace(root, file)) return false;
+      List<Path> files = inventory(root, root);
+      if (!result.inventoryFingerprint().equals(fingerprint(files))) return false;
+      List<String> lines = Files.readAllLines(file);
+      if (citation.line() < 1 || citation.line() > lines.size()) return false;
+      String current = lines.get(citation.line() - 1);
+      String expected = citation.preview();
+      if (expected.endsWith("...")) expected = expected.substring(0, expected.length() - 3);
+      return current.startsWith(expected);
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private record SymbolMatch(MatchType type, String reason) {}
+
+  private static SymbolMatch symbolMatch(
+      String symbol, String line, boolean caseSensitive, String fileName) {
+    Pattern token =
+        Pattern.compile(
+            "(?<![A-Za-z0-9_$])" + Pattern.quote(symbol) + "(?![A-Za-z0-9_$])",
+            caseSensitive ? 0 : Pattern.CASE_INSENSITIVE);
+    if (!token.matcher(line).find()) return null;
+    String escaped = Pattern.quote(symbol);
+    String declaration =
+        "(?:^|\\s)(?:(?:public|private|protected|static|final|abstract|async|export|default|"
+            + "override|virtual|synchronized|sealed|open|internal|readonly|const|let|var)\\s+)*"
+            + "(?:class|interface|enum|record|type|function|def)\\s+"
+            + escaped
+            + "(?:\\b|\\s*\\()";
+    String assignedDeclaration = "(?:^|\\s)(?:const|let|var)\\s+" + escaped + "\\s*=.*";
+    String methodDeclaration =
+        "^\\s*(?:(?:public|private|protected|static|final|abstract|async|export|default|"
+            + "override|virtual|synchronized|sealed|open|internal|readonly)\\s+)*"
+            + "[A-Za-z_$][\\w$<>\\[\\], ?]*\\s+"
+            + escaped
+            + "\\s*\\(";
+    boolean definition =
+        Pattern.compile(declaration).matcher(line).find()
+            || Pattern.compile(assignedDeclaration).matcher(line).find()
+            || Pattern.compile(methodDeclaration).matcher(line).find()
+            || Pattern.compile("^\\s*(?:async\\s+)?(?:def|class)\\s+" + escaped + "\\b")
+                .matcher(line)
+                .find();
+    if (!definition) {
+      String normalized = line.trim().toLowerCase(Locale.ROOT);
+      if (normalized.startsWith("import ")
+          || normalized.startsWith("from ")
+          || normalized.startsWith("using ")
+          || normalized.contains("require(")) {
+        return new SymbolMatch(MatchType.IMPORT, "exact import/module reference");
+      }
+      String lowerFile = fileName.toLowerCase(Locale.ROOT);
+      if (lowerFile.contains("test")
+          || lowerFile.contains("spec")
+          || normalized.contains("@test")
+          || normalized.matches(".*\\b(describe|it|test)\\s*\\(.*")) {
+        return new SymbolMatch(MatchType.TEST_REFERENCE, "exact test reference");
+      }
+      if (Pattern.compile("\\b" + Pattern.quote(symbol) + "\\s*\\(").matcher(line).find()) {
+        return new SymbolMatch(MatchType.CALL_SITE, "exact call site");
+      }
+      return new SymbolMatch(MatchType.SYMBOL_REFERENCE, "exact symbol reference");
+    }
+    String language =
+        line.contains("def ")
+            ? "Python"
+            : line.contains("function ") || line.contains("=>")
+                ? "TypeScript/JavaScript"
+                : "Java-family";
+    return new SymbolMatch(MatchType.SYMBOL_DEFINITION, "exact " + language + " symbol definition");
+  }
+}

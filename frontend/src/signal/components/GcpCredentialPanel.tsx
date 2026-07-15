@@ -21,7 +21,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
-  const [validation, setValidation] = useState<api.ValidationResult | null>(null);
+  const [validation, setValidation] = useState<api.GcpValidationResult | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   function load() {

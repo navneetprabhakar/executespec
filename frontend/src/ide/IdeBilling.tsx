@@ -16,7 +16,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {fetchPlans, type BillingPlan} from '@/lib/billing-api';
+import {fetchPlans, type BillingPlan} from '@/lib/api/billing';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
@@ -95,29 +95,8 @@ export function IdeBilling() {
       api.getAnalyticsUsage('org', user.orgId, 30).catch(() => null),
       api.getManagedAiBalance().catch(() => null),
       api.getManagedAiEvents(5).catch(() => []),
-      // Best-effort: paymentHistory may not return a typed shape; fail soft —
-      // identical to the Signal BillingPage fetch.
-      (async () => {
-        try {
-          const raw = await fetch(
-            `/api/billing/payment-history?orgId=${encodeURIComponent(user.orgId ?? '')}`,
-            {headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`}},
-          );
-          if (!raw.ok) return [];
-          const data = (await raw.json()) as unknown;
-          if (Array.isArray(data)) return data as PaymentRowLite[];
-          if (
-            data &&
-            typeof data === 'object' &&
-            Array.isArray((data as {content?: PaymentRowLite[]}).content)
-          ) {
-            return (data as {content: PaymentRowLite[]}).content;
-          }
-          return [];
-        } catch {
-          return [];
-        }
-      })(),
+      // Best-effort: payment history is optional for accounts without billing access.
+      api.getPaymentHistory(user.orgId).catch(() => []),
     ]).then(([b, u, managed, managedEvents, p]) => {
       if (cancelled) return;
       if (b.status === 'fulfilled' && b.value) setBilling(b.value);
@@ -126,7 +105,10 @@ export function IdeBilling() {
       if (managedEvents.status === 'fulfilled' && Array.isArray(managedEvents.value)) {
         setManagedAiEvents(managedEvents.value);
       }
-      if (p.status === 'fulfilled' && Array.isArray(p.value)) setPayments(p.value);
+      if (p.status === 'fulfilled') {
+        const rows = Array.isArray(p.value) ? p.value : p.value.content;
+        setPayments(Array.isArray(rows) ? (rows as PaymentRowLite[]) : []);
+      }
       setLoaded(true);
     });
     return () => {

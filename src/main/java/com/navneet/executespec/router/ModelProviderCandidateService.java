@@ -1,6 +1,7 @@
 package com.navneet.executespec.router;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -37,6 +38,7 @@ public class ModelProviderCandidateService {
   private final ModelRegistry modelRegistry;
   private final ModelPerformanceTracker performanceTracker;
   private final BenchmarkRunRepository benchmarkRunRepository;
+  private final TaskOutcomeMetricService taskOutcomeMetricService;
   private final ModelProviderCapabilityRegistry capabilityRegistry =
       new ModelProviderCapabilityRegistry();
 
@@ -49,6 +51,9 @@ public class ModelProviderCandidateService {
   @Value("${execution.continuation.benchmark-min-sample-tasks:20}")
   private int benchmarkMinSampleTasks = 20;
 
+  @Value("${execution.continuation.outcome-min-sample-tasks:5}")
+  private int outcomeMinSampleTasks = 5;
+
   public List<ModelProviderScore> buildCandidates(ModelProviderCandidateRequest request) {
     return capabilityRegistry.scoreAll(buildSignals(request));
   }
@@ -58,6 +63,10 @@ public class ModelProviderCandidateService {
         request == null ? ModelProviderCandidateRequest.builder().build() : request;
     Set<String> allowedProviders = normalizeSet(req.providerAllowList());
     Set<String> allowedModels = normalizeSet(req.modelAllowList());
+    // Benchmark rows are a snapshot for this routing decision. Read them once instead of issuing
+    // the same repository query once per model candidate (the matrix commonly contains dozens of
+    // models, and candidate evaluation may run in parallel).
+    List<ModelProviderCapabilitySignal> externalSignals = externalSignals(req);
 
     List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries =
         modelRegistry.allModels().entrySet().stream()
@@ -77,9 +86,9 @@ public class ModelProviderCandidateService {
             .toList();
 
     if (shouldBuildSignalsInParallel(entries)) {
-      return buildSignalsParallel(entries, req);
+      return buildSignalsParallel(entries, req, externalSignals);
     }
-    return buildSignalsSequential(entries, req, false);
+    return buildSignalsSequential(entries, req, false, externalSignals);
   }
 
   private boolean shouldBuildSignalsInParallel(
@@ -89,7 +98,8 @@ public class ModelProviderCandidateService {
 
   private List<ModelProviderCapabilitySignal> buildSignalsParallel(
       List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
-      ModelProviderCandidateRequest request) {
+      ModelProviderCandidateRequest request,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     int parallelism = Math.min(entries.size(), maxParallelTasks());
     List<String> labels = entries.stream().map(this::candidateLabel).toList();
     log.info(
@@ -105,7 +115,13 @@ public class ModelProviderCandidateService {
               .map(
                   entry ->
                       executor.submit(
-                          () -> signalFor(entry.getKey(), entry.getValue(), request, true)))
+                          () ->
+                              signalFor(
+                                  entry.getKey(),
+                                  entry.getValue(),
+                                  request,
+                                  true,
+                                  externalSignals)))
               .toList();
       List<ModelProviderCapabilitySignal> out = new ArrayList<>(futures.size());
       for (Future<ModelProviderCapabilitySignal> future : futures) {
@@ -122,22 +138,26 @@ public class ModelProviderCandidateService {
       log.warn(
           "ModelProviderCandidateService parallelProviderEvaluation interrupted; falling back to"
               + " sequential");
-      return buildSignalsSequential(entries, request, false);
+      return buildSignalsSequential(entries, request, false, externalSignals);
     } catch (ExecutionException | RuntimeException ex) {
       log.warn(
           "ModelProviderCandidateService parallelProviderEvaluation failed: {}; falling back to"
               + " sequential",
           ex.getMessage());
-      return buildSignalsSequential(entries, request, false);
+      return buildSignalsSequential(entries, request, false, externalSignals);
     }
   }
 
   private List<ModelProviderCapabilitySignal> buildSignalsSequential(
       List<Map.Entry<String, ModelMatrixProperties.ModelConfig>> entries,
       ModelProviderCandidateRequest request,
-      boolean parallelEvaluation) {
+      boolean parallelEvaluation,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     return entries.stream()
-        .map(entry -> signalFor(entry.getKey(), entry.getValue(), request, parallelEvaluation))
+        .map(
+            entry ->
+                signalFor(
+                    entry.getKey(), entry.getValue(), request, parallelEvaluation, externalSignals))
         .toList();
   }
 
@@ -155,11 +175,12 @@ public class ModelProviderCandidateService {
       String model,
       ModelMatrixProperties.ModelConfig config,
       ModelProviderCandidateRequest request,
-      boolean parallelEvaluation) {
+      boolean parallelEvaluation,
+      List<ModelProviderCapabilitySignal> externalSignals) {
     String canonicalModel = modelRegistry.canonicalize(model);
     String provider = providerFor(canonicalModel, config);
     List<ModelProviderCapabilitySignal> external =
-        externalSignals(request).stream()
+        externalSignals.stream()
             .filter(signal -> matches(signal, provider, canonicalModel, request.taskCategory()))
             .toList();
 
@@ -168,6 +189,8 @@ public class ModelProviderCandidateService {
     double outputCost = pricing != null ? pricing[1] : configuredOutputCost(config);
     double localScore = performanceTracker.getScore(provider, canonicalModel);
     long localLatency = performanceTracker.getAvgLatencyMs(provider, canonicalModel);
+    TaskOutcomeMetricService.QualityPrior outcomePrior =
+        taskOutcomeMetricService == null ? null : qualityPrior(provider, canonicalModel, request);
     Boolean providerAvailable = providerAvailable(request, provider, canonicalModel, external);
     double recentFailurePenalty =
         external.stream().mapToDouble(ModelProviderCapabilitySignal::recentFailurePenalty).sum();
@@ -182,6 +205,17 @@ public class ModelProviderCandidateService {
       reasons.add("local 24h performance score unavailable or below sample threshold");
     } else {
       reasons.add(String.format(Locale.ROOT, "local 24h success score %.2f%%", localScore * 100.0));
+    }
+    if (outcomePrior == null) {
+      reasons.add("persisted task outcome prior unavailable or below sample threshold");
+    } else {
+      reasons.add(
+          String.format(
+              Locale.ROOT,
+              "persisted %s validation pass rate %.2f%% from %d tasks",
+              outcomePrior.taskCategory(),
+              outcomePrior.validationPassRate(),
+              outcomePrior.sampleSize()));
     }
     if (!external.isEmpty()) {
       reasons.add("merged " + external.size() + " external benchmark/validation signal(s)");
@@ -207,6 +241,18 @@ public class ModelProviderCandidateService {
             .findFirst()
             .orElse(localLatency > 0 ? localLatency * 2 : UNKNOWN_LATENCY_MS);
 
+    long requiredContextTokens = request.requiredContextTokens();
+    int contextWindow = modelRegistry.contextLimitFor(canonicalModel);
+    boolean contextFits = requiredContextTokens <= 0 || requiredContextTokens <= contextWindow;
+    if (!contextFits) {
+      reasons.add(
+          "required context budget "
+              + requiredContextTokens
+              + " exceeds model window "
+              + contextWindow
+              + "; candidate rejected before quality ranking");
+    }
+
     return ModelProviderCapabilitySignal.builder()
         .provider(provider)
         .model(canonicalModel)
@@ -215,7 +261,9 @@ public class ModelProviderCandidateService {
         .localSuccessRateScore(
             localScore == ModelPerformanceTracker.UNKNOWN_SCORE ? null : localScore * 100.0)
         .validationPassRateScore(
-            avg(external, ModelProviderCapabilitySignal::validationPassRateScore))
+            averageWithPersistedOutcome(
+                avg(external, ModelProviderCapabilitySignal::validationPassRateScore),
+                outcomePrior))
         .codeReviewScore(avg(external, ModelProviderCapabilitySignal::codeReviewScore))
         .toolReliabilityScore(avg(external, ModelProviderCapabilitySignal::toolReliabilityScore))
         .recentFailurePenalty(recentFailurePenalty)
@@ -229,6 +277,7 @@ public class ModelProviderCandidateService {
         .requiredQualityThreshold(request.requiredQualityThreshold())
         .fallbackQualityScore(fallbackQualityScore(config))
         .reasons(reasons)
+        .contextFitsRequestedBudget(contextFits)
         .build();
   }
 
@@ -243,6 +292,34 @@ public class ModelProviderCandidateService {
     return Math.max(1, benchmarkMinSampleTasks);
   }
 
+  private int outcomeMinSampleTasks() {
+    return Math.max(1, outcomeMinSampleTasks);
+  }
+
+  private static Double averageWithPersistedOutcome(
+      Double externalValidation, TaskOutcomeMetricService.QualityPrior outcomePrior) {
+    if (outcomePrior == null) return externalValidation;
+    if (externalValidation == null) return outcomePrior.validationPassRate();
+    return (externalValidation + outcomePrior.validationPassRate()) / 2.0;
+  }
+
+  private TaskOutcomeMetricService.QualityPrior qualityPrior(
+      String provider, String model, ModelProviderCandidateRequest request) {
+    if (request.taskComplexity() == null || "UNKNOWN".equalsIgnoreCase(request.taskComplexity())) {
+      return taskOutcomeMetricService
+          .qualityPrior(provider, model, request.taskCategory(), outcomeMinSampleTasks())
+          .orElse(null);
+    }
+    return taskOutcomeMetricService
+        .qualityPrior(
+            provider,
+            model,
+            request.taskCategory(),
+            request.taskComplexity(),
+            outcomeMinSampleTasks())
+        .orElse(null);
+  }
+
   private List<ModelProviderCapabilitySignal> benchmarkSignals(
       String taskCategory, int minSampleTasks) {
     if (benchmarkRunRepository == null) {
@@ -254,14 +331,101 @@ public class ModelProviderCandidateService {
       if (runs == null || runs.isEmpty()) {
         return List.of();
       }
-      return runs.stream()
-          .filter(run -> run != null && run.getTotalTasks() > 0)
-          .map(run -> benchmarkSignal(run, taskCategory, minSampleTasks))
-          .toList();
+      // Do not let a set of differently-sized benchmark runs distort routing by giving every run
+      // the same weight. A 5-task smoke and a 200-task evaluation must contribute in proportion
+      // to the evidence they contain. Keep below-threshold/incompatible rows as individual
+      // explanatory signals, but combine all eligible rows for a provider/model into one
+      // sample-weighted prior. This also prevents the candidate scorer from averaging stale run
+      // snapshots as if they were independent observations.
+      Map<BenchmarkAggregateKey, List<BenchmarkRun>> eligible = new LinkedHashMap<>();
+      List<ModelProviderCapabilitySignal> informational = new ArrayList<>();
+      for (BenchmarkRun run : runs) {
+        if (run == null || run.getTotalTasks() <= 0) continue;
+        // A benchmark row without a provider/model cannot influence any candidate. Ignore it
+        // rather than allowing one malformed historical row to fail closed for every route.
+        if (!hasRouteIdentity(run)) continue;
+        boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
+        boolean compatibleTaskCategory =
+            benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
+        if (enoughSample && compatibleTaskCategory) {
+          eligible
+              .computeIfAbsent(
+                  new BenchmarkAggregateKey(
+                      run.getProvider(), canonicalBenchmarkModel(run.getModel()), taskCategory),
+                  ignored -> new ArrayList<>())
+              .add(run);
+        } else {
+          informational.add(benchmarkSignal(run, taskCategory, minSampleTasks));
+        }
+      }
+      List<ModelProviderCapabilitySignal> out = new ArrayList<>(informational);
+      eligible.values().stream()
+          .map(group -> benchmarkAggregateSignal(group, taskCategory, minSampleTasks))
+          .forEach(out::add);
+      return List.copyOf(out);
     } catch (RuntimeException ex) {
       log.warn("ModelProviderCandidateService benchmark signal read failed: {}", ex.getMessage());
       return List.of();
     }
+  }
+
+  private static boolean hasRouteIdentity(BenchmarkRun run) {
+    return run.getProvider() != null
+        && !run.getProvider().isBlank()
+        && run.getModel() != null
+        && !run.getModel().isBlank();
+  }
+
+  private static ModelProviderCapabilitySignal benchmarkAggregateSignal(
+      List<BenchmarkRun> runs, String taskCategory, int minSampleTasks) {
+    BenchmarkRun first = runs.getFirst();
+    String canonicalModel = first.getModel();
+    long totalTasks = runs.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
+    long resolvedTasks = runs.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
+    double resolvedRate = totalTasks <= 0 ? 0.0 : (resolvedTasks * 100.0) / totalTasks;
+    String reason;
+    if (runs.size() == 1) {
+      reason =
+          String.format(
+              Locale.ROOT,
+              "benchmark %s/%s resolved %d/%d tasks (used as quality prior)",
+              first.getSuite(),
+              first.getDataset(),
+              first.getResolvedTasks(),
+              first.getTotalTasks());
+    } else {
+      reason =
+          String.format(
+              Locale.ROOT,
+              "benchmark aggregate %s/%s resolved %d/%d tasks across %d runs (sample-weighted;"
+                  + " minimum %d-task prior)",
+              first.getProvider(),
+              first.getModel(),
+              resolvedTasks,
+              totalTasks,
+              runs.size(),
+              minSampleTasks);
+    }
+    return ModelProviderCapabilitySignal.builder()
+        .provider(first.getProvider())
+        .model(canonicalModel)
+        .taskCategory(taskCategory)
+        .benchmarkQualityScore(resolvedRate)
+        .reasons(List.of(reason))
+        .build();
+  }
+
+  private record BenchmarkAggregateKey(String provider, String model, String taskCategory) {}
+
+  /**
+   * Canonicalise benchmark route identities before aggregation. Benchmark producers are allowed to
+   * emit legacy aliases (for example a tier label rather than the registered model id). If aliases
+   * are grouped separately, the later candidate average gives a tiny run the same weight as a large
+   * run and can materially distort the quality prior. The candidate service owns the registry, so
+   * normalize once at ingestion while preserving the original run text in reasons.
+   */
+  private String canonicalBenchmarkModel(String model) {
+    return modelRegistry.canonicalize(model);
   }
 
   private static ModelProviderCapabilitySignal benchmarkSignal(

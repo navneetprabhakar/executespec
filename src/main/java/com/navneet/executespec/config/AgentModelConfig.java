@@ -4,7 +4,6 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 
 import com.google.genai.Client;
-import com.navneet.executespec.agent.AnthropicModelOptions;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -15,6 +14,7 @@ import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.ApplicationContext;
@@ -78,32 +78,55 @@ public class AgentModelConfig {
         // 2026-05-16 (Spring Boot 3.5 upgrade) — Spring 6.2 narrows bean types by reflecting the
         // returned instance, so plannerModel + workerModel + reviewerModel all register as
         // AnthropicChatModel at runtime (whatever the declared `ChatModel` return type says).
-        // That made `ctx.getBean(AnthropicChatModel.class)` ambiguous. Qualify by the @Bean
-        // name "anthropicChatModel" so we always resolve the canonical bean.
-        AnthropicChatModel model = ctx.getBean("anthropicChatModel", AnthropicChatModel.class);
-        if (model == null) {
-          throw new IllegalStateException(
-              "Anthropic provider requested but ANTHROPIC_API_KEY not configured");
-        }
-        yield model;
+        // Use a typed provider lookup so a missing optional bean (Spring's NullBean) does not
+        // abort startup.
+        yield optionalModel(
+            "anthropic", ctx.getBeanProvider(AnthropicChatModel.class), "ANTHROPIC_API_KEY");
       }
       case "openai" -> {
-        OpenAiChatModel model = ctx.getBean("openAiChatModel", OpenAiChatModel.class);
-        if (model == null) {
-          throw new IllegalStateException(
-              "OpenAI provider requested but OPENAI_API_KEY not configured");
-        }
-        yield model;
+        yield optionalModel("openai", ctx.getBeanProvider(OpenAiChatModel.class), "OPENAI_API_KEY");
       }
       default -> throw new IllegalArgumentException("Unknown provider: " + provider);
     };
   }
 
   /**
+   * Resolve an optional system chat model without turning Spring's {@code NullBean} placeholder
+   * into a startup failure. The role beans are retained for backwards compatibility when their
+   * provider key is configured, but the V2 router can run a different provider (for example native
+   * DeepSeek) without requiring the default Anthropic/OpenAI bean to exist at boot.
+   */
+  static <T extends ChatModel> T optionalModel(
+      String provider,
+      org.springframework.beans.factory.ObjectProvider<T> modelProvider,
+      String keyName) {
+    try {
+      T model = modelProvider.getIfAvailable();
+      if (model == null) {
+        log.warn(
+            "[AgentModelConfig] {} provider unavailable ({} not configured); role bean will remain"
+                + " inactive",
+            provider,
+            keyName);
+      }
+      return model;
+    } catch (BeansException ex) {
+      // A @Bean method returning null is represented by Spring as a NullBean. Some Spring
+      // versions surface that placeholder through a typed ObjectProvider; treat it exactly like
+      // an absent provider rather than failing the whole application context.
+      log.warn(
+          "[AgentModelConfig] {} provider bean unavailable ({}); role bean will remain inactive",
+          provider,
+          ex.getMessage());
+      return null;
+    }
+  }
+
+  /**
    * System-level Anthropic bean — only created when ANTHROPIC_API_KEY is configured. Auto-config is
    * excluded (requires non-empty key at startup); we create manually so the app can start without
-   * an Anthropic key (graceful degradation on MIG restart). When absent, FallbackLlmRouter skips
-   * Anthropic in the fallback chain.
+   * an Anthropic key (graceful degradation on MIG restart). When absent, LlmRouter reports
+   * Anthropic as unavailable and applies the configured route policy.
    */
   @Bean
   public AnthropicChatModel anthropicChatModel(
@@ -118,16 +141,20 @@ public class AgentModelConfig {
     }
     log.info("[AgentModelConfig] Creating system Anthropic bean ({})", model);
     AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens);
-    if (!AnthropicModelOptions.shouldOmitTemperature(model)) options.temperature(0.0);
-    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options.build()).build();
+    // Do not set a provider-wide temperature default here. Spring AI merges the model's
+    // default options into every request, including requests that switch the model to a newer
+    // Anthropic family. Sonnet 5/Opus 4.7+ reject the otherwise harmless legacy temperature=0.0
+    // field, so a default configured for the startup model (usually Haiku) can break a per-run
+    // frontier-model override before LlmRouter has a chance to omit it.
+    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens).build();
+    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options).build();
   }
 
   /**
    * System-level OpenAI bean — only created when OPENAI_API_KEY is configured. Auto-config is
    * excluded (requires non-empty key at startup); we create manually so the app can start without
-   * an OpenAI key (graceful degradation). When absent, FallbackLlmRouter skips OpenAI in the
-   * fallback chain.
+   * an OpenAI key (graceful degradation). When absent, LlmRouter reports OpenAI as unavailable and
+   * applies the configured route policy.
    */
   @Bean
   public OpenAiChatModel openAiChatModel(@Value("${spring.ai.openai.api-key:}") String apiKey) {
@@ -142,8 +169,8 @@ public class AgentModelConfig {
 
   /**
    * System-level Google Gemini bean — only created when GOOGLE_API_KEY is configured. Used as the
-   * 3rd fallback provider in FallbackLlmRouter when no user/org key is present. When absent,
-   * FallbackLlmRouter gracefully skips Gemini in the fallback chain.
+   * 3rd provider in the configured route when no user/org key is present. When absent, LlmRouter
+   * gracefully skips Gemini in the configured failover chain.
    */
   @Bean
   public GoogleGenAiChatModel googleGenAiChatModel(

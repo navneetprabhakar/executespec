@@ -22,7 +22,7 @@ public abstract class PostgresIntegrationBase {
 
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
-      new PostgreSQLContainer<>("postgres:16-alpine")
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
           .withDatabaseName("executespec_test")
           .withUsername("test")
           .withPassword("test");

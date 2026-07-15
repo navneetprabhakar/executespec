@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.ConversationAgent;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.preview.PreviewService;
@@ -42,8 +41,6 @@ public class TestResultController {
   private final RunAccessGuard runAccessGuard;
 
   private final StateStore stateStore;
-  private final ConversationAgent conversationAgent;
-
   private final TestPreviewCoordinator testPreviewCoordinator;
 
   /**
@@ -230,8 +227,7 @@ public class TestResultController {
     // work (plan generation, plan-version increment, suggestion-task append, counter
     // increment, state-store writes) BEFORE throwing 410 Gone, which mutated data the caller
     // can't see / use. Short-circuit at the top so the 410 is the FIRST observable behaviour
-    // and no data is mutated. When V2 wires this back up, remove the throw and the work
-    // below proceeds normally.
+    // and no data is mutated.
     //
     // Auth + tenant guard run first so 401/403 fire before 410 (correct HTTP status
     // ordering) AND so AccessGuardCoverageTest ArchUnit pin still sees a guard call on this
@@ -240,103 +236,5 @@ public class TestResultController {
     runAccessGuard.requireRunWriteAccess(runId, userDetails);
     throw new org.springframework.web.server.ResponseStatusException(
         org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
-    // Original logic preserved below for the V2 wire-up follow-up. Currently unreachable.
-    /*
-    runAccessGuard.requireRunAccess(runId, userDetails);
-
-    PipelineRun run =
-        stateStore
-            .findRun(runId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
-
-    // Collect suggestions from failed tests
-    TestPlan plan = testPlanRepository.findByRunId(runId).orElse(null);
-    if (plan == null) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No test plan found for this run");
-    }
-
-    List<TestResult> failedResults =
-        testResultRepository.findByTestPlanId(plan.getId()).stream()
-            .filter(
-                r ->
-                    r.getStatus() == TestResultStatus.FAILED
-                        || r.getStatus() == TestResultStatus.ERROR)
-            .filter(r -> r.getSuggestion() != null && !r.getSuggestion().isBlank())
-            .toList();
-
-    // If a signature is provided, filter to only that root-cause group
-    if (signature != null && !signature.isBlank()) {
-      failedResults =
-          failedResults.stream()
-              .filter(
-                  r ->
-                      signature.equals(
-                          ValidationReportService.extractFailureSignature(r.getFailureMessage())))
-              .toList();
-    }
-
-    if (failedResults.isEmpty()) {
-      throw new ResponseStatusException(
-          HttpStatus.UNPROCESSABLE_ENTITY,
-          "No failed tests with fix suggestions found"
-              + (signature != null ? " for root cause: " + signature : ""));
-    }
-
-    // For root-cause groups, compile a single focused goal instead of N individual ones
-    String compiledGoal;
-    if (signature != null && failedResults.size() > 1) {
-      // Single root-cause goal — more focused than listing every test individually
-      String firstSuggestion =
-          failedResults.stream()
-              .map(TestResult::getSuggestion)
-              .filter(s -> s != null && !s.isBlank())
-              .findFirst()
-              .orElse("");
-      String methods =
-          failedResults.stream()
-              .map(TestResult::getTestMethod)
-              .limit(5)
-              .collect(Collectors.joining(", "));
-      compiledGoal =
-          failedResults.size()
-              + " tests failing with root cause '"
-              + signature
-              + "' (tests: "
-              + methods
-              + "). Fix: "
-              + firstSuggestion;
-    } else {
-      compiledGoal =
-          failedResults.stream()
-              .map(r -> "Fix test failure in " + r.getTestMethod() + ": " + r.getSuggestion())
-              .collect(Collectors.joining("\n"));
-    }
-
-    // Generate mini-plan and apply
-    TaskPlan miniPlan;
-    try {
-      miniPlan = conversationAgent.generateSuggestionPlan(run, compiledGoal);
-    } catch (ApplySuggestionTooLargeException e) {
-      return ResponseEntity.unprocessableEntity()
-          .body(Map.of("error", "too_many_tasks", "compiledGoal", e.getCompiledGoal()));
-    }
-
-    int applyIndex = run.getApplySuggestionCount() + 1;
-    stateStore.incrementPlanVersion(runId);
-    stateStore.savePlanVersion(runId, "TEST_FIX", userDetails.getUser().getId());
-    List<AgentTask> newTasks =
-        stateStore.appendSuggestionTasks(runId, miniPlan, applyIndex, ApplySource.REVIEW);
-    stateStore.incrementApplySuggestionCount(runId);
-
-    @SuppressWarnings("unused")
-    List<String> newTaskIds = newTasks.stream().map(AgentTask::getTaskId).toList();
-    log.info(
-        "[ApplyTestFixes] run={} failedTests={} tasks={} — V2 apply-suggestion not yet implemented",
-        runId,
-        failedResults.size(),
-        newTasks.size());
-    throw new org.springframework.web.server.ResponseStatusException(
-        org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
-    */
   }
 }

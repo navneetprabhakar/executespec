@@ -2,6 +2,7 @@ package com.navneet.executespec.agentsession;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 
 @ExtendWith(MockitoExtension.class)
 class AgentSessionServiceActionLifecycleTest {
@@ -210,13 +212,10 @@ class AgentSessionServiceActionLifecycleTest {
 
   @Test
   void listTurnsReturnsLatestBoundedTranscriptBeforeCursor() throws Exception {
-    when(turnRepo.findBySessionIdOrderBySequenceAsc("s1"))
-        .thenReturn(
-            List.of(
-                turn("t1", 1, "first"),
-                turn("t2", 2, "second"),
-                turn("t3", 3, "third"),
-                turn("t4", 4, "fourth")));
+    when(turnRepo.findById("t4")).thenReturn(Optional.of(turn("t4", 4, "fourth")));
+    when(turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+            eq("s1"), eq(4), any(Pageable.class)))
+        .thenReturn(List.of(turn("t3", 3, "third"), turn("t2", 2, "second")));
     when(eventRepo.findByTurnIdOrderByCreatedAtAsc("t2"))
         .thenReturn(
             List.of(

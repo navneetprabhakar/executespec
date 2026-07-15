@@ -22,6 +22,9 @@
 - `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api/projects.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected admin endpoints (create/list/revoke).
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
+  Validation-report shares include the same score summary and verification ledger as the authenticated
+  report (with deterministic, LLM-derived, and unmeasured evidence labels); no credentials or
+  internal run-goal state is exposed.
 
 ## Schema (V175)
 

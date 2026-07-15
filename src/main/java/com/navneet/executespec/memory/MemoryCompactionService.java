@@ -1,28 +1,27 @@
 package com.navneet.executespec.memory;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.memory.entity.ProjectMemorySnapshot;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -31,16 +30,43 @@ import lombok.extern.slf4j.Slf4j;
  * Non-fatal — any failure is logged and the run completes normally.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class MemoryCompactionService {
 
   static final int SNAPSHOT_CHAR_CAP = 12_000;
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final ProjectMemorySnapshotRepository snapshotRepo;
+  private final PromptAssembler promptAssembler;
+  private final ProjectProviderResolver projectProviderResolver;
+
+  @Autowired
+  public MemoryCompactionService(
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      ProjectRunLedgerRepository ledgerRepo,
+      ProjectMemorySnapshotRepository snapshotRepo,
+      PromptAssembler promptAssembler,
+      ProjectProviderResolver projectProviderResolver) {
+    this.llmRouter = llmRouter;
+    this.modelResolver = modelResolver;
+    this.ledgerRepo = ledgerRepo;
+    this.snapshotRepo = snapshotRepo;
+    this.promptAssembler = promptAssembler;
+    this.projectProviderResolver = projectProviderResolver;
+  }
+
+  /** Compatibility constructor for older unit callers. */
+  public MemoryCompactionService(
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      ProjectRunLedgerRepository ledgerRepo,
+      ProjectMemorySnapshotRepository snapshotRepo,
+      PromptAssembler promptAssembler) {
+    this(llmRouter, modelResolver, ledgerRepo, snapshotRepo, promptAssembler, null);
+  }
 
   /**
    * Force-compact every uncompacted ledger entry for a project, regardless of how many runs have
@@ -77,13 +103,10 @@ public class MemoryCompactionService {
       String newEntries =
           entries.stream().map(ProjectRunLedger::getEntry).collect(Collectors.joining("\n\n"));
 
-      String template =
-          new ClassPathResource("prompts/memory-compaction.txt")
-              .getContentAsString(StandardCharsets.UTF_8);
       String filled =
-          template
-              .replace("{{EXISTING_SNAPSHOT}}", existingContent)
-              .replace("{{NEW_ENTRIES}}", newEntries);
+          promptAssembler.assemble(
+              "memory-compaction.txt",
+              java.util.Map.of("EXISTING_SNAPSHOT", existingContent, "NEW_ENTRIES", newEntries));
 
       String compacted = callLightweightLlm(filled, projectId);
       if (compacted == null || compacted.isBlank()) {
@@ -139,23 +162,20 @@ public class MemoryCompactionService {
   }
 
   private String callLightweightLlm(String systemPrompt, String projectId) {
-    // Default provider for compaction; project's ai_provider not needed at this layer.
-    ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", LlmProvider.OPENAI);
-    Prompt prompt =
-        new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage("Emit the updated snapshot now.")));
+    LlmProvider provider =
+        projectProviderResolver == null
+            ? ProjectProviderResolver.CANONICAL_DEFAULT
+            : projectProviderResolver.resolve(projectId);
+    ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", provider);
     ChatResponse response =
-        fallbackLlmRouter.callWithFallback(
+        llmRouter.callText(
             resolved.providerName(),
             resolved.getModel(),
-            prompt,
+            List.of(
+                new SystemMessage(systemPrompt), new UserMessage("Emit the updated snapshot now.")),
             "compact-" + projectId,
             "memory-compaction",
-            FallbackLlmRouter.FallbackMode.IMMEDIATE,
-            0,
-            false);
+            "compact");
     return response.getResult().getOutput().getText();
   }
 

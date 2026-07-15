@@ -2,8 +2,12 @@ package com.navneet.executespec.tool;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Pins {@link ReadFileTool#clampFullRead} — the RL-2026-05-062 truncation fix. The old behaviour
@@ -14,6 +18,8 @@ import org.junit.jupiter.api.Test;
  */
 @DisplayName("ReadFileTool.clampFullRead")
 class ReadFileToolTest {
+
+  @TempDir Path tempDir;
 
   @Test
   void small_content_is_returned_unchanged() {
@@ -51,5 +57,27 @@ class ReadFileToolTest {
     String out = ReadFileTool.clampFullRead(huge);
     assertThat(out.length()).isLessThan(huge.length());
     assertThat(out).startsWith("xxxxx").contains("truncated");
+  }
+
+  @Test
+  void streamed_full_read_preserves_small_file_exactly() throws Exception {
+    Path file = tempDir.resolve("small.txt");
+    Files.writeString(file, "line1\nline2\n");
+
+    assertThat(ReadFileTool.readFullCapped(file)).isEqualTo("line1\nline2\n");
+  }
+
+  @Test
+  void streamed_range_does_not_materialize_or_return_unrequested_lines() throws Exception {
+    Path file = tempDir.resolve("large.txt");
+    StringBuilder content = new StringBuilder();
+    for (int i = 1; i <= 50_000; i++) content.append("line-").append(i).append('\n');
+    Files.writeString(file, content);
+
+    assertThat(ReadFileTool.readRange(file, 12_001, 12_003))
+        .isEqualTo("line-12001\nline-12002\nline-12003");
+    assertThat(ReadFileTool.readFullCapped(file))
+        .contains("truncated: showing the first 2000 of 50001 lines")
+        .doesNotContain("line-2001");
   }
 }

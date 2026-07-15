@@ -8,6 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+import java.util.Map;
+
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.project.rag.DocumentExtractor;
@@ -58,14 +61,17 @@ class AgentAttachmentServiceTest {
   }
 
   @Test
-  void rejectsImageUploads() {
+  void acceptsBoundedImageUploadsAndStoresBytes() {
     byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0};
     MultipartFile file = new MockMultipartFile("file", "shot.png", "image/png", png);
 
-    assertThatThrownBy(() -> service.validateAndStore("sess-1", file, user))
-        .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("image");
-    verify(store, never()).put(any());
+    var response = service.validateAndStore("sess-1", file, user);
+
+    assertThat(response.mimeType()).isEqualTo("image/png");
+    org.mockito.ArgumentCaptor<AgentAttachmentStore.StoredAttachment> captor =
+        org.mockito.ArgumentCaptor.forClass(AgentAttachmentStore.StoredAttachment.class);
+    verify(store).put(captor.capture());
+    assertThat(captor.getValue().rawBytes()).containsExactly(png);
     verify(extractor, never()).extract(any(), any());
   }
 
@@ -107,5 +113,28 @@ class AgentAttachmentServiceTest {
     assertThatThrownBy(() -> service.validateAndStore("sess-1", file, user))
         .isInstanceOf(ResponseStatusException.class);
     verify(store, never()).put(any());
+  }
+
+  @Test
+  void mediaLookupIsSessionScopedAndBuildsOpaqueProviderPayload() {
+    byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
+    var image =
+        AgentAttachmentStore.StoredAttachment.image(
+            "img-1", "sess-1", "shot.png", "image/png", png.length, png);
+    when(store.get("sess-1", "img-1")).thenReturn(java.util.Optional.of(image));
+
+    var conversation =
+        service.withMediaAttachments(
+            List.of(Map.of("role", "user", "content", "describe this")),
+            "sess-1",
+            List.of("img-1"));
+
+    assertThat(conversation).hasSize(1);
+    assertThat(conversation.get(0)).containsKey("mediaAttachments");
+    assertThat(String.valueOf(conversation.get(0).get("mediaAttachments")))
+        .contains("image/png")
+        .doesNotContain("[B@");
+    verify(store).get("sess-1", "img-1");
+    verify(store, never()).get("other-session", "img-1");
   }
 }

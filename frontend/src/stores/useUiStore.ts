@@ -17,8 +17,6 @@ export interface NewRunConfig {
 }
 
 // R-190 (post-cutover) — Vibe view-mode removed. 'pro' is default; 'project'
-// is session-local opt-in for multi-repo project mode.
-type ViewMode = 'pro' | 'project';
 /**
  * Theme preference. X-07 (UX audit, 2026-05-03) introduces a 'system' option
  * which defers to `prefers-color-scheme` and re-resolves whenever the OS
@@ -28,34 +26,12 @@ type ViewMode = 'pro' | 'project';
  */
 type Theme = 'dark' | 'light' | 'system';
 
-/**
- * UI chrome mode. Console is the protected app shell; the older values survive
- * only so stale persisted state and retired call sites do not break.
- */
-type UiMode = 'signal' | 'ide' | 'console';
-
 interface UiStore {
-  sidebarExpanded: boolean;
-  mobileSidebarOpen: boolean;
-  commandPaletteOpen: boolean;
-  activeTab: string;
   toasts: Toast[];
   /** Pre-filled config for NewRunModal — set by Re-run or Copilot "Iterate as New Run". */
   pendingNewRunConfig: NewRunConfig | null;
-  /** Whether the run list panel is collapsed to give more space to run detail. */
-  runListCollapsed: boolean;
-  /** Width of the run list panel in pixels (persisted). */
-  runListWidth: number;
-  /** Whether the copilot chat panel is maximized (full-width overlay). */
-  copilotMaximized: boolean;
-  /** Pro (full pipeline) or Project (multi-repo) view mode. R-190 removed
-   *  the legacy Vibe simplified mode; persisted 'vibe' values normalize to
-   *  'pro' at parse time (see lib/api.ts + the saved-value coercion below). */
-  viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
-  /** UI chrome mode for the protected shell. */
-  uiMode: UiMode;
   /**
    * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
    * viewing on a /projects/:id/dashboard route. ProjectDashboardPage sets
@@ -65,20 +41,11 @@ interface UiStore {
    */
   currentProjectName: string | null;
 
-  setSidebarExpanded: (v: boolean) => void;
-  setMobileSidebarOpen: (v: boolean) => void;
-  setCommandPaletteOpen: (v: boolean) => void;
-  setActiveTab: (t: string) => void;
   addToast: (t: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
   setPendingNewRunConfig: (config: NewRunConfig | null) => void;
-  setRunListCollapsed: (v: boolean) => void;
-  setRunListWidth: (w: number) => void;
-  setCopilotMaximized: (v: boolean) => void;
-  setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
-  setUiMode: (m: UiMode) => void;
   setCurrentProjectName: (name: string | null) => void;
 }
 
@@ -135,72 +102,13 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
   });
 }
 
-// UI chrome — Console is now the protected shell. Ignore stale local chrome
-// persistence from earlier builds so /home and protected routes start together.
-function initUiMode(): UiMode {
-  if (typeof document !== 'undefined') document.documentElement.dataset.ui = 'console';
-  return 'console';
-}
-
-// M-026 (Wave 1) — first-time users land with sidebar expanded so they can
-// see the nav labels. Returning users get whatever they last set. Persistence
-// key: es:sidebarExpanded ('true' | 'false'); absent = first-time → default true.
-function initSidebarExpanded(): boolean {
-  try {
-    const saved = localStorage.getItem('es:sidebarExpanded');
-    if (saved === 'true') return true;
-    if (saved === 'false') return false;
-    return true; // first-time default
-  } catch {
-    return true;
-  }
-}
-
 export const useUiStore = create<UiStore>((set, get) => ({
-  sidebarExpanded: initSidebarExpanded(),
-  mobileSidebarOpen: false,
-  commandPaletteOpen: false,
-  activeTab: 'overview',
   toasts: [],
   pendingNewRunConfig: null,
-  runListCollapsed: false,
-  runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
-  copilotMaximized: false,
   theme: initTheme(),
-  uiMode: initUiMode(),
   currentProjectName: null,
-  viewMode: ((): ViewMode => {
-    const saved = localStorage.getItem('es:viewMode');
-    // 'project' is a deliberate opt-in — never persist as the default session mode.
-    // R-190 (post-cutover): saved 'vibe' from V48-era users coerces to 'pro';
-    // any other value also falls through to the 'pro' default.
-    if (saved === 'pro') return 'pro';
-    return 'pro';
-  })(),
 
-  setSidebarExpanded: (v) => {
-    try {
-      localStorage.setItem('es:sidebarExpanded', String(v));
-    } catch {}
-    set({sidebarExpanded: v});
-  },
-  setMobileSidebarOpen: (v) => set({mobileSidebarOpen: v}),
-  setCommandPaletteOpen: (v) => set({commandPaletteOpen: v}),
-  setActiveTab: (t) => set({activeTab: t}),
   setPendingNewRunConfig: (config) => set({pendingNewRunConfig: config}),
-  setRunListCollapsed: (v) => set({runListCollapsed: v}),
-  setRunListWidth: (w) => {
-    localStorage.setItem('es:runListWidth', String(w));
-    set({runListWidth: w});
-  },
-  setCopilotMaximized: (v) => set({copilotMaximized: v}),
-  setViewMode: (mode) => {
-    localStorage.setItem('es:viewMode', mode);
-    // R-190 (post-cutover): both surviving modes (pro / project) start on
-    // 'overview' tab. The previous Vibe mode started on 'code'; that path
-    // is gone with the surface.
-    set({viewMode: mode, activeTab: 'overview'});
-  },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
     applyThemeAttrs(t === 'system' ? resolveSystemTheme() : t);
@@ -217,12 +125,6 @@ export const useUiStore = create<UiStore>((set, get) => ({
     applyThemeAttrs(next === 'system' ? resolveSystemTheme() : next);
     set({theme: next});
   },
-  setUiMode: (m) => {
-    localStorage.setItem('es:uiMode', m);
-    if (typeof document !== 'undefined') document.documentElement.dataset.ui = m;
-    set({uiMode: m});
-  },
-
   setCurrentProjectName: (name) => set({currentProjectName: name}),
 
   addToast: (t) => {

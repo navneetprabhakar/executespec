@@ -134,13 +134,7 @@ public class PythonToolchain implements LanguageToolchain {
                 .build());
 
     if (findResult.getOutput() == null || findResult.getOutput().trim().isEmpty()) {
-      return GateResult.builder()
-          .gate(ValidationGate.UNIT_TEST)
-          .passed(true)
-          .duration(Duration.ZERO)
-          .errors(Collections.emptyList())
-          .rawOutput("No test file found for " + fileName + " — skipping")
-          .build();
+      return GateResult.unmeasured(ValidationGate.UNIT_TEST, "No test file found for " + fileName);
     }
 
     String testFilePath = findResult.getOutput().trim().split("\n")[0];

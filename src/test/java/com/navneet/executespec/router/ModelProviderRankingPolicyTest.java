@@ -124,6 +124,30 @@ class ModelProviderRankingPolicyTest {
     assertThat(decision.reasons()).containsExactly("no candidates supplied");
   }
 
+  @Test
+  void rejectsHighQualityCandidateThatCannotFitProjectedContextBudget() {
+    ModelProviderScore oversized =
+        new ModelProviderScore(
+            "anthropic",
+            "claude-sonnet",
+            "CODE",
+            99.0,
+            1.0,
+            10,
+            20,
+            70.0,
+            true,
+            true,
+            true,
+            List.of("required context budget exceeds model window"),
+            false);
+
+    ModelProviderRankingDecision decision = policy.rank(List.of(oversized));
+
+    assertThat(decision.selected()).isEmpty();
+    assertThat(decision.rejectedBelowThreshold()).containsExactly(oversized);
+  }
+
   private static ModelProviderScore score(
       String provider,
       String model,

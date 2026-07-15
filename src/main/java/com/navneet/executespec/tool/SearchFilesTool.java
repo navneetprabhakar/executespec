@@ -9,6 +9,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -37,6 +38,12 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class SearchFilesTool implements Tool {
+
+  private final RepositorySearchService repositorySearchService;
+
+  public SearchFilesTool(RepositorySearchService repositorySearchService) {
+    this.repositorySearchService = repositorySearchService;
+  }
 
   private static final Set<String> HIDDEN_DIRS =
       Set.of(
@@ -71,11 +78,13 @@ public class SearchFilesTool implements Tool {
 
   @Override
   public String description() {
-    return "Recursively searches file contents for a regex pattern. Returns matching lines with "
-        + "file:line prefixes plus a total match count. Filter file types via filePattern (glob, "
-        + "e.g. '*.java'). Page large result sets with maxResults + offset, or narrow the pattern. "
-        + "Use this to localize the exact file:line of a symbol before reading/editing — it is "
-        + "cheaper than reading whole files. Build and VCS folders are always skipped.";
+    return "Recursively searches file contents for a regex pattern. Returns matching lines with"
+        + " file:line prefixes plus a total match count. Filter file types via filePattern"
+        + " (glob, e.g. '*.java'). Page large result sets with maxResults + offset, or"
+        + " narrow the pattern. Use this to localize the exact file:line of a symbol before"
+        + " reading/editing — it is cheaper than reading whole files. Use mode RELATIONSHIPS"
+        + " for bounded import, test-to-source, and call-site edges. Build and VCS folders"
+        + " are always skipped.";
   }
 
   @Override
@@ -86,7 +95,7 @@ public class SearchFilesTool implements Tool {
   "properties": {
     "pattern": {
       "type": "string",
-      "description": "Regular expression to search for"
+    "description": "Regular expression, or exact identifier when mode is SYMBOL"
     },
     "directory": {
       "type": "string",
@@ -95,6 +104,11 @@ public class SearchFilesTool implements Tool {
     "filePattern": {
       "type": "string",
       "description": "Optional glob to filter filenames (e.g. '*.java', '*.{ts,tsx}')"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["REGEX", "EXACT", "SYMBOL", "RELATIONSHIPS"],
+      "description": "Search mode; defaults to REGEX. SYMBOL ranks declarations; RELATIONSHIPS returns bounded import/test/call-site edges for the identifier."
     },
     "maxResults": {
       "type": "integer",
@@ -124,6 +138,92 @@ public class SearchFilesTool implements Tool {
     int maxResults = args.hasNonNull("maxResults") ? args.get("maxResults").asInt() : DEFAULT_PAGE;
     maxResults = Math.max(1, Math.min(MAX_PAGE, maxResults));
     final int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
+    String rawMode = args.path("mode").asText(null);
+    if ("RELATIONSHIPS".equalsIgnoreCase(rawMode)) {
+      try {
+        RepositorySearchService.RelationshipResult relationships =
+            repositorySearchService.relationships(
+                ctx.workspaceRoot(),
+                new RepositorySearchService.RelationshipRequest(
+                    patternStr, true, dir, filePattern, maxResults, offset));
+        if (relationships.edges().isEmpty()) return ToolResult.ok("(no relationships)");
+        StringBuilder typed =
+            new StringBuilder()
+                .append(relationships.totalRelationships())
+                .append(relationships.hasMore() ? "+" : "")
+                .append(" relationship(s); repositoryFingerprint=")
+                .append(relationships.repositoryFingerprint())
+                .append('\n');
+        for (RepositorySearchService.RelationshipEdge edge : relationships.edges()) {
+          typed
+              .append(edge.relationshipType())
+              .append(' ')
+              .append(edge.sourcePath())
+              .append(':')
+              .append(edge.line())
+              .append(" -> ")
+              .append(edge.targetPath() == null ? "?" : edge.targetPath())
+              .append(" [")
+              .append(edge.preview())
+              .append("]\n");
+        }
+        return ToolResult.ok(typed.toString().trim());
+      } catch (IllegalArgumentException e) {
+        return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+      } catch (SecurityException e) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, e.getMessage());
+      } catch (RuntimeException e) {
+        log.warn("relationship search failed", e);
+        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "relationship search failed");
+      }
+    }
+    RepositorySearchService.SearchMode mode;
+    try {
+      mode = parseMode(args.path("mode").asText(null));
+    } catch (IllegalArgumentException e) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+    }
+    try {
+      RepositorySearchService.SearchResult structured =
+          repositorySearchService.search(
+              ctx.workspaceRoot(),
+              new RepositorySearchService.SearchRequest(
+                  patternStr, mode, true, dir, filePattern, maxResults, offset));
+      if (structured.hits().isEmpty()) return ToolResult.ok("(no matches)");
+      StringBuilder typed = new StringBuilder();
+      typed
+          .append(structured.totalMatches())
+          .append(structured.hasMore() ? "+" : "")
+          .append(" match(es); repositorySha=")
+          .append(structured.repositorySha())
+          .append("; inventory=")
+          .append(structured.inventoryFingerprint())
+          .append(
+              mode == RepositorySearchService.SearchMode.SYMBOL
+                  ? "; repositoryFingerprint=" + structured.repositoryFingerprint()
+                  : "")
+          .append('\n');
+      for (RepositorySearchService.SearchHit hit : structured.hits()) {
+        typed
+            .append(hit.path())
+            .append(':')
+            .append(hit.line())
+            .append(':')
+            .append(hit.preview())
+            .append(
+                mode == RepositorySearchService.SearchMode.SYMBOL
+                    ? " [" + hit.matchType() + "] {reason=" + hit.relevanceReason() + '}'
+                    : "")
+            .append('\n');
+      }
+      return ToolResult.ok(typed.toString().trim());
+    } catch (IllegalArgumentException e) {
+      return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+    } catch (SecurityException e) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, e.getMessage());
+    } catch (RuntimeException e) {
+      log.warn("structured repository search failed; retaining compatibility fallback", e);
+    }
     Pattern regex;
     try {
       regex = Pattern.compile(patternStr);
@@ -179,6 +279,15 @@ public class SearchFilesTool implements Tool {
     }
   }
 
+  private static RepositorySearchService.SearchMode parseMode(String raw) {
+    if (raw == null || raw.isBlank()) return RepositorySearchService.SearchMode.REGEX;
+    try {
+      return RepositorySearchService.SearchMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("mode must be REGEX, EXACT, SYMBOL, or RELATIONSHIPS");
+    }
+  }
+
   /** The original Java walk + regex. The reliable fallback when ripgrep isn't usable. */
   private List<String> collectViaJavaWalk(
       Path searchRoot, PathMatcher fileMatcher, Pattern regex, Path workspaceReal)
@@ -197,6 +306,12 @@ public class SearchFilesTool implements Tool {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
+            // walkFileTree does not follow directory links, but a symlink visited as a file would
+            // otherwise be opened by readAllLines. Keep the compatibility fallback subject to the
+            // same workspace-realpath boundary as the structured search implementation.
+            if (Files.isSymbolicLink(file) && !isInsideRealWorkspace(workspaceReal, file)) {
+              return FileVisitResult.CONTINUE;
+            }
             if (fileMatcher != null && !fileMatcher.matches(file.getFileName())) {
               return FileVisitResult.CONTINUE;
             }
@@ -314,6 +429,14 @@ public class SearchFilesTool implements Tool {
 
   private static String clampLine(String line) {
     return line.length() > MAX_LINE_LEN ? line.substring(0, MAX_LINE_LEN) + "..." : line;
+  }
+
+  private static boolean isInsideRealWorkspace(Path workspaceReal, Path file) {
+    try {
+      return file.toRealPath().startsWith(workspaceReal);
+    } catch (IOException e) {
+      return false;
+    }
   }
 
   /** Lazily probes {@code rg --version} once per JVM; caches the result. */

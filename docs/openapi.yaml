@@ -9,7 +9,7 @@ info:
     marked public (webhooks, public share links, scoped SSE tokens, public
     invites preview, OAuth callback).
 
-    Provider enum: ANTHROPIC (default since 1.0.0-M1), OPENAI, GEMINI. The
+    Provider enum: ANTHROPIC (default since the initial release), OPENAI, GEMINI. The
     `GOOGLE` alias is accepted on input and rewritten to GEMINI before
     persistence (V120). YAML keys under `model-matrix` / `failover-order` use
     `gemini`.
@@ -27,7 +27,7 @@ info:
     For the human-readable endpoint inventory grouped by capability, see
     `CLAUDE.md` § API Contracts. For the frontend consumption audit, see
     `frontend-api-usage.md`.
-  version: 1.0.0-M1
+  version: 2.0.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
@@ -1300,6 +1300,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentSessionResponse"
 
+  /agent/sessions/{sessionId}/history:
+    delete:
+      tags: [Agent Sessions]
+      summary: Clear the durable transcript for one agent session
+      description: >
+        Deletes persisted turn and action-event history after ownership checks while retaining the
+        session shell and immutable usage-ledger rows. Web, CLI, and VS Code use this explicit
+        reset contract for /clear; an unavailable server must be surfaced as local-only cleanup.
+      parameters:
+        - $ref: "#/components/parameters/sessionId"
+      responses:
+        "200":
+          description: Transcript cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentHistoryClearedResponse"
+        "401": { description: Authentication required }
+        "403": { description: Session is owned by another user or organization }
+        "404": { description: Session not found }
+
   /agent/sessions/{sessionId}/events:
     get:
       tags: [Agent Sessions]
@@ -1372,10 +1393,11 @@ paths:
   /agent/sessions/{sessionId}/summary-email:
     post:
       tags: [Agent Sessions]
-      summary: Deprecated no-op session summary email route
+      summary: Retired session summary email route
       description: >
         Compatibility endpoint for older local clients. New CLI / VS Code sessions keep usage and
-        cost visibility locally and this route returns 202 without sending email.
+        cost visibility in the agent-session turn and event APIs. This route never sent email and
+        now returns 410 Gone so callers cannot mistake the retired operation for successful delivery.
       parameters:
         - $ref: "#/components/parameters/sessionId"
       requestBody:
@@ -1385,8 +1407,8 @@ paths:
             schema:
               $ref: "#/components/schemas/SessionSummaryEmailRequest"
       responses:
-        "202":
-          description: Accepted no-op
+        "410":
+          description: Session summary email is retired; use agent-session turn or event APIs.
 
   /agent/sessions/{sessionId}/turns/stream:
     post:
@@ -1841,10 +1863,57 @@ paths:
                   contentType:
                     type: string
 
+  /runs/{runId}/push-scm:
+    post:
+      tags: [Deployment]
+      summary: Push workspace to the configured source-control provider
+      parameters:
+        - $ref: "#/components/parameters/runId"
+        - name: repoUrl
+          in: query
+          schema:
+            type: string
+        - name: repoMode
+          in: query
+          schema:
+            type: string
+            enum: [NEW, EXISTING]
+            default: EXISTING
+      responses:
+        "200":
+          description: Push attempt completed; inspect status for the outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, repoUrl, prUrl, scmProvider]
+                properties:
+                  status:
+                    type: string
+                    description: Truthful result of the push attempt.
+                    enum: [PUSHED, PARTIAL, FAILED, NO_CONFIGURATION, NO_CHANGES]
+                  repoUrl:
+                    type: string
+                  prUrl:
+                    type: string
+                  scmProvider:
+                    type: string
+                  message:
+                    type: string
+                  attempted:
+                    type: string
+                  succeeded:
+                    type: string
+                  failed:
+                    type: string
+        "409":
+          description: Run is not in a pushable terminal state.
+
   /runs/{runId}/push-github:
     post:
       tags: [Deployment]
-      summary: Push workspace to GitHub (creates branch + PR)
+      summary: Deprecated GitHub push alias; use push-scm
+      deprecated: true
       parameters:
         - $ref: "#/components/parameters/runId"
         - name: repoUrl
@@ -4830,6 +4899,15 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    AgentHistoryClearedResponse:
+      type: object
+      required: [sessionId, turnsDeleted, eventsDeleted, clearedAt]
+      properties:
+        sessionId: { type: string }
+        turnsDeleted: { type: integer, format: int64 }
+        eventsDeleted: { type: integer, format: int64 }
+        clearedAt: { type: string, format: date-time }
 
     AgentActionEvent:
       type: object

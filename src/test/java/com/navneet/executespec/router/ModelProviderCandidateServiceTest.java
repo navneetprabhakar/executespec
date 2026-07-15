@@ -2,7 +2,11 @@ package com.navneet.executespec.router;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.LinkedHashMap;
@@ -21,15 +25,19 @@ class ModelProviderCandidateServiceTest {
   private final ModelRegistry modelRegistry = mock(ModelRegistry.class);
   private final ModelPerformanceTracker performanceTracker = mock(ModelPerformanceTracker.class);
   private final BenchmarkRunRepository benchmarkRunRepository = mock(BenchmarkRunRepository.class);
+  private final TaskOutcomeMetricService taskOutcomeMetricService =
+      mock(TaskOutcomeMetricService.class);
   private ModelProviderCandidateService service;
 
   @BeforeEach
   void setUp() {
     service =
         new ModelProviderCandidateService(
-            modelRegistry, performanceTracker, benchmarkRunRepository);
+            modelRegistry, performanceTracker, benchmarkRunRepository, taskOutcomeMetricService);
     when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
         .thenReturn(List.of());
+    when(taskOutcomeMetricService.qualityPrior(anyString(), anyString(), anyString(), anyInt()))
+        .thenReturn(java.util.Optional.empty());
     Map<String, ModelMatrixProperties.ModelConfig> models = new LinkedHashMap<>();
     models.put("claude-sonnet-4-6", model("anthropic", "HIGH", "CAPABLE", 3.0, 15.0, 200_000));
     models.put("gpt-5.4-mini", model("openai", "STANDARD", "UTILITY", 0.2, 0.6, 256_000));
@@ -77,6 +85,25 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
+  void marksModelsWithInsufficientContextAsIneligible() {
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .requiredContextTokens(300_000L)
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore mini = find(candidates, "openai", "gpt-5.4-mini");
+    assertThat(sonnet.contextFitsRequestedBudget()).isFalse();
+    assertThat(sonnet.reasons())
+        .anySatisfy(
+            reason -> assertThat(reason).contains("candidate rejected before quality ranking"));
+    assertThat(mini.contextFitsRequestedBudget()).isFalse();
+  }
+
+  @Test
   void evaluatesIndependentCandidatesInBoundedParallelBatchWithDeterministicOrder() {
     ReflectionTestUtils.setField(service, "parallelProviderEvaluationEnabled", true);
     ReflectionTestUtils.setField(service, "maxParallelTasks", 2);
@@ -96,6 +123,19 @@ class ModelProviderCandidateServiceTest {
             score ->
                 assertThat(score.reasons())
                     .contains("provider/model candidate evaluated in bounded parallel batch"));
+  }
+
+  @Test
+  void snapshotsBenchmarkSignalsOncePerRoutingDecision() {
+    service.buildCandidates(
+        ModelProviderCandidateRequest.builder()
+            .taskCategory("BUG_FIX")
+            .requiredQualityThreshold(60.0)
+            .build());
+
+    // Candidate evaluation may be parallel, but all candidates must consume one consistent
+    // benchmark snapshot rather than multiplying the repository read by model count.
+    verify(benchmarkRunRepository, times(1)).findTop50ByStatusOrderByCreatedAtDesc("DONE");
   }
 
   @Test
@@ -152,6 +192,56 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
+  void usesPersistedTaskValidationPriorForMatchingCategory() {
+    when(taskOutcomeMetricService.qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", 5))
+        .thenReturn(
+            java.util.Optional.of(new TaskOutcomeMetricService.QualityPrior(80.0, 10, "BUG_FIX")));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(70.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    assertThat(sonnet.qualityScore()).isEqualTo(80.0);
+    assertThat(sonnet.observedQualityEvidenceAvailable()).isTrue();
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
+    assertThat(sonnet.reasons())
+        .contains("persisted BUG_FIX validation pass rate 80.00% from 10 tasks");
+  }
+
+  @Test
+  void outcomeEvidenceWinsAndUnavailableProviderCannotReenterRanking() {
+    when(taskOutcomeMetricService.qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", 5))
+        .thenReturn(
+            java.util.Optional.of(new TaskOutcomeMetricService.QualityPrior(96.0, 10, "BUG_FIX")));
+
+    List<ModelProviderScore> candidates =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(70.0)
+                .providerAvailability(Map.of("openai", false))
+                .build());
+
+    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore unavailable = find(candidates, "openai", "gpt-5.4-mini");
+    ModelProviderRankingDecision decision = new ModelProviderRankingPolicy().rank(candidates);
+
+    assertThat(sonnet.observedQualityEvidenceAvailable()).isTrue();
+    assertThat(sonnet.qualityScore()).isEqualTo(96.0);
+    assertThat(unavailable.qualityScore()).isZero();
+    assertThat(unavailable.meetsQualityThreshold()).isFalse();
+    assertThat(unavailable.providerAvailable()).isFalse();
+    assertThat(decision.selected()).contains(sonnet);
+    assertThat(decision.rejectedBelowThreshold()).contains(unavailable);
+  }
+
+  @Test
   void mergesCompatiblePersistedBenchmarkRunsAsBenchmarkQualitySignals() {
     when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
         .thenReturn(
@@ -183,6 +273,93 @@ class ModelProviderCandidateServiceTest {
         .doesNotContain(
             "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
                 + " fallback/local/validation signals only");
+  }
+
+  @Test
+  void weightsMultipleCompatibleBenchmarkRunsByTaskEvidence() {
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-small")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-a")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(18)
+                    .status("DONE")
+                    .build(),
+                BenchmarkRun.builder()
+                    .id("bench-large")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-b")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(100)
+                    .resolvedTasks(50)
+                    .status("DONE")
+                    .build()));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(50.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    assertThat(sonnet.qualityScore()).isCloseTo(56.6667, within(0.0001));
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
+    assertThat(sonnet.reasons())
+        .contains(
+            "benchmark aggregate anthropic/claude-sonnet-4-6 resolved 68/120 tasks across 2"
+                + " runs (sample-weighted; minimum 20-task prior)");
+  }
+
+  @Test
+  void canonicalizesModelAliasesBeforeWeightingBenchmarkRuns() {
+    when(modelRegistry.canonicalize("legacy-sonnet")).thenReturn("claude-sonnet-4-6");
+    when(modelRegistry.canonicalize("claude-sonnet-4-6")).thenReturn("claude-sonnet-4-6");
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-alias-small")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-a")
+                    .provider("anthropic")
+                    .model("legacy-sonnet")
+                    .totalTasks(20)
+                    .resolvedTasks(20)
+                    .status("DONE")
+                    .build(),
+                BenchmarkRun.builder()
+                    .id("bench-canonical-large")
+                    .suite("SWE_BENCH")
+                    .dataset("lite-b")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(100)
+                    .resolvedTasks(50)
+                    .status("DONE")
+                    .build()));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(50.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    // 70/120, not the incorrect equal-run average (100% + 50%) / 2 = 75%.
+    assertThat(sonnet.qualityScore()).isCloseTo(58.3333, within(0.0001));
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
   }
 
   @Test

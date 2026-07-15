@@ -312,7 +312,7 @@ public class ReviewerAgent {
     if (buildResult instanceof ToolResult.Ok ok) {
       buildOutput = ok.content();
       buildExit = extractExitCode(buildOutput);
-      buildPassed = buildExit == 0;
+      buildPassed = isBuildVerifiedEvidence(buildOutput);
     } else if (buildResult instanceof ToolResult.Err err) {
       buildOutput = "tool error: " + err.message();
     }
@@ -354,7 +354,7 @@ public class ReviewerAgent {
       if (rebuildResult instanceof ToolResult.Ok ok2) {
         buildOutput = ok2.content();
         buildExit = extractExitCode(buildOutput);
-        buildPassed = buildExit == 0;
+        buildPassed = isBuildVerifiedEvidence(buildOutput);
       } else if (rebuildResult instanceof ToolResult.Err err2) {
         buildOutput = "tool error: " + err2.message();
         buildPassed = false;
@@ -593,8 +593,7 @@ exit=0 — the harness will reject premature completions.
       ToolResult result = buildProjectTool.execute(buildArgs, req.context());
       if (!(result instanceof ToolResult.Ok ok)) return null;
       String output = ok.content();
-      int exit = extractExitCode(output);
-      return exit == 0 ? null : output;
+      return isBuildVerifiedEvidence(output) ? null : output;
     } catch (Exception e) {
       log.debug("capturePreReviewBuildError failed: {}", e.getMessage());
       return null;
@@ -793,14 +792,36 @@ exit=0 — the harness will reject premature completions.
   }
 
   private static boolean isWriteToolName(String toolName) {
-    return "writeFile".equals(toolName)
-        || "write_file".equals(toolName)
-        || "editFile".equals(toolName)
-        || "edit_file".equals(toolName)
-        || "multiEdit".equals(toolName)
-        || "multi_edit".equals(toolName)
-        || "applyPatch".equals(toolName)
-        || "apply_patch".equals(toolName);
+    return switch (toolName) {
+      case "writeFile",
+              "write_file",
+              "editFile",
+              "edit_file",
+              "multiEdit",
+              "multi_edit",
+              "applyPatch",
+              "apply_patch",
+              "astEdit",
+              "ast_edit",
+              "move",
+              "rename",
+              "delete",
+              "deletePath",
+              "shell",
+              "bash",
+              "executeCommand",
+              "runCommand",
+              "terminalCommand",
+              "backgroundJob",
+              "background_process",
+              "installDependencies",
+              "testProject",
+              "lintProject",
+              "formatProject",
+              "gitCommit" ->
+          true;
+      default -> false;
+    };
   }
 
   /**
@@ -861,5 +882,12 @@ exit=0 — the harness will reject premature completions.
     } catch (NumberFormatException nfe) {
       return -1;
     }
+  }
+
+  /** No-op build fallbacks are not compilation evidence even when their shell exit is zero. */
+  static boolean isBuildVerifiedEvidence(String output) {
+    if (extractExitCode(output) != 0) return false;
+    return output == null
+        || (!output.contains("smokeSignal=UNAVAILABLE") && !output.contains("noOp=true"));
   }
 }

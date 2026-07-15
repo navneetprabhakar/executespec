@@ -10,7 +10,7 @@ BUDGET_USD="${BUDGET_USD:-25.00}"
 LOG="${LOG:-/tmp/hostel-e2e.log}"
 
 EMAIL="${EMAIL:-admin@executespec.ai}"
-PASSWORD="${PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
+PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 TOKEN=$(curl -fsS -X POST "$BASE_URL/api/auth/login" -H "Content-Type: application/json" \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jq -r '.accessToken // .token')
 AUTH=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")

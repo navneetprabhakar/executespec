@@ -1,5 +1,6 @@
 import {
   ApiDocsProbeResult,
+  ApiError,
   AuthUser,
   ConversationMessage,
   FileDiffPayload,
@@ -19,10 +20,13 @@ import {
   SsoProvider,
   TestGraphData,
   TimelineData,
-  UsageMetrics,
+  BASE,
+  authHeader,
+  parseErrorMessage,
   req,
   reqText,
 } from './core';
+import type {UsageMetrics} from './billing';
 
 export const getMetrics = (days = 0) =>
   req<MetricsResponse>(`/metrics${days > 0 ? `?days=${days}` : ''}`);
@@ -89,6 +93,16 @@ export const getSandboxStatus = () => req<SandboxStatus>('/onboarding/sandbox-st
 export const authRefresh = () => req<LoginResponse>('/auth/refresh', {method: 'POST'});
 
 export const authMe = () => req<AuthUser>('/auth/me');
+
+/** Download the authenticated user's GDPR export archive. */
+export const downloadUserDataExport = async (): Promise<Blob> => {
+  const response = await fetch(`${BASE}/auth/me/data-export`, {headers: {...authHeader()}});
+  if (!response.ok) {
+    const raw = await response.text().catch(() => response.statusText);
+    throw new ApiError(response.status, parseErrorMessage(response.status, raw));
+  }
+  return response.blob();
+};
 
 export const authResendVerification = (email: string) =>
   req<{message: string}>('/auth/resend-verification', {
