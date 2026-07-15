@@ -232,6 +232,43 @@ class RunLifecycleServiceCrashClaimTest {
   }
 
   @Test
+  void taskLeaseLossAfterRunClaimRefusesDuplicateResume() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("task-lease-race")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(0)
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("task-lease-race_T1")
+            .runId(run.getRunId())
+            .status("WORKING")
+            .lastActivityAt(Instant.now().minus(Duration.ofMinutes(10)))
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
+        .thenReturn(1);
+    when(taskRepo.findByRunIdAndStatusIn(run.getRunId(), List.of("WORKING", "LOCKED")))
+        .thenReturn(List.of(task));
+    when(taskRepo.claimStaleForRecovery(anyString(), any(), any())).thenReturn(0);
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo, taskRepo, null, null, null, controlPort, null, null, null, null, null, null,
+            null, null, null, null, null, null, null, null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE);
+    verify(taskRepo).claimStaleForRecovery(anyString(), any(), any());
+    verify(controlPort, never()).runPipelineForResume(any());
+  }
+
+  @Test
   void exhaustedRecoveryAttemptsTerminallyFailWithoutAnotherClaim() {
     PipelineRun run =
         PipelineRun.builder()
