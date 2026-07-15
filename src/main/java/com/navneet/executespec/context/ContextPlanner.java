@@ -161,6 +161,21 @@ public class ContextPlanner {
               ? Math.min(requestedOutputTokens, modelRegistry.maxOutputForModel(model))
               : modelRegistry.maxOutputForModel(model);
       outputReserve = Math.max(0, outputReserve);
+      // A request whose output reservation alone consumes the complete model window cannot be
+      // repaired by history compaction. Treat this as unavailable model-specific budget metadata
+      // so the caller keeps its overflow-recovery path instead of repeatedly compacting a
+      // transcript that can never fit.
+      if (outputReserve >= window) {
+        return record(
+            HeadroomDecision.unavailable(
+                provider,
+                model,
+                "output reservation exceeds model context window ("
+                    + outputReserve
+                    + " >= "
+                    + window
+                    + ")"));
+      }
       int safetyReserve = Math.max(MIN_SAFETY_TOKENS, (int) Math.ceil(window * SAFETY_RATIO));
       int toolResultReserve = reserveFromOutput(outputReserve, MIN_TOOL_RESULT_RESERVE_TOKENS);
       int verificationReserve = reserveFromOutput(outputReserve, MIN_VERIFICATION_RESERVE_TOKENS);

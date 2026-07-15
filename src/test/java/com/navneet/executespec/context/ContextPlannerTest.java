@@ -256,6 +256,16 @@ class ContextPlannerTest {
   }
 
   @Test
+  void reportsUnavailableWhenOutputReservationCannotFitTheModelWindow() {
+    knownModel("tiny-window", 8_000, 16_000);
+
+    var decision = planner.planHeadroom("deepseek", "tiny-window", 0, 16_000, List.of(), List.of());
+
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.UNAVAILABLE);
+    assertThat(decision.reason()).contains("output reservation exceeds model context window");
+  }
+
+  @Test
   void recordsBoundedHeadroomEvidenceWithoutModelCardinality() {
     var registry = new SimpleMeterRegistry();
     planner = new ContextPlanner(models, registry);
