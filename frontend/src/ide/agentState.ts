@@ -51,10 +51,18 @@ export function toolEventTimelineItem(
   const role = event.role ?? event.agent_role;
   const provider = event.provider ?? event.provider_name;
   const model = event.model ?? event.model_name;
+  const semanticTitle: Record<string, string> = {
+    handoff: 'Provider/model handoff',
+    verification: 'Verification update',
+    plan: 'Plan update',
+    diff: 'Diff update',
+    permission: 'Permission update',
+  };
   const title =
-    semantic === 'handoff' || role || provider || model
+    semanticTitle[semantic] ??
+    (role || provider || model
       ? 'Provider/model handoff'
-      : (event.name ?? event.type ?? event.kind ?? 'Agent update');
+      : (event.name ?? event.type ?? event.kind ?? 'Agent update'));
   const detail = [
     role,
     provider && model ? `${provider}/${model}` : (provider ?? model),
