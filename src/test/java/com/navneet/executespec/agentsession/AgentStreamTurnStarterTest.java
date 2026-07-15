@@ -204,7 +204,6 @@ class AgentStreamTurnStarterTest {
   @Test
   void rejectsModelProviderMismatchBeforePersistingSession() {
     AgentSession session = session();
-    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
     when(modelRegistry.providerFor("gpt-5.4-mini")).thenReturn("openai");
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
