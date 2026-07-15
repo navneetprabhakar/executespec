@@ -125,6 +125,24 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
+  void dispatch_reusesExactDurableResultAfterWorkerRestart_withoutReemittingToolCall()
+      throws Exception {
+    dispatcher.registerAfterWorkerRestart("r1");
+    when(stateService.findRestartedResult("r1", "t1", "shell", "{\"cmd\":\"touch x\"}"))
+        .thenReturn(
+            java.util.Optional.of(
+                new LocalHandsStateService.RestartedResult(
+                    "old-call", "{\"ok\":true,\"content\":\"done\"}", Instant.now())));
+
+    JsonNode result =
+        om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{\"cmd\":\"touch x\"}"));
+
+    assertThat(result.path("content").asText()).isEqualTo("done");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+    verify(stateService).findRestartedResult("r1", "t1", "shell", "{\"cmd\":\"touch x\"}");
+  }
+
+  @Test
   void complete_onUnknownSessionOrCall_isNoop() {
     assertThatCode(() -> dispatcher.complete("nope", "c1", "{}")).doesNotThrowAnyException();
     dispatcher.register("r1");

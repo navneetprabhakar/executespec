@@ -126,6 +126,11 @@ turns separately from runs.
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
   session contains the complete action stream.
+- If crash recovery resumes from a snapshot taken before a remote result was delivered, the
+  dispatcher first looks for an exact `(taskId, toolName, args)` match whose durable lifecycle is
+  `WORKER_RESTARTED -> COMPLETED`. It returns that first-writer result without emitting a second
+  client request, preventing duplicate shell/edit side effects. The match is fail-soft, exact, and
+  scoped to restart-fenced calls; it is not a general command idempotency guarantee.
 - `V264__dedupe_local_hands_completed_events.sql` adds a partial unique index over
   `(session_id, action_id)` for `LOCAL_HANDS_COMPLETED` rows (deduping historical duplicates first),
   so retried result envelopes are first-writer-wins across JVMs. `LocalHandsStateService` reports
