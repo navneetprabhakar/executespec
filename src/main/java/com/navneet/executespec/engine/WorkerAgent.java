@@ -690,6 +690,7 @@ public class WorkerAgent {
                     .stepId("worker.iteration-" + iter)
                     .temperature(req.temperature())
                     .maxTokens(req.maxTokensPerCall())
+                    .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                     .toolChoice(forcedThisCall ? "required" : null)
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
@@ -1735,6 +1736,7 @@ public class WorkerAgent {
                       toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
                   .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
@@ -1910,6 +1912,7 @@ public class WorkerAgent {
                           : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
                   .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
@@ -3033,6 +3036,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   .stepId("worker.critic-pass")
                   .temperature(0.0)
                   .maxTokens(1500)
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(List.of()) // no tools — a plain completion
                   .build());
       String verdict = resp.getResult().getOutput().getText();
