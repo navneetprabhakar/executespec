@@ -2450,15 +2450,7 @@ public class WorkerAgent {
   // public for the cross-package WorkerAgentTruncateTest after the engine relocation
   // (RL-2026-05-052)
   public static String truncate(String s, int max) {
-    if (s == null) return "";
-    if (s.length() <= max) return s;
-    int end = max - 1;
-    if (end > 0
-        && Character.isHighSurrogate(s.charAt(end - 1))
-        && Character.isLowSurrogate(s.charAt(end))) {
-      end -= 1;
-    }
-    return s.substring(0, end) + "…";
+    return WorkerHistoryPolicy.truncate(s, max);
   }
 
   /**
@@ -2507,22 +2499,7 @@ public class WorkerAgent {
    * match the stable substrings across Anthropic / OpenAI-wire / Gemini error bodies.
    */
   public static boolean isContextLengthError(Throwable e) {
-    for (Throwable t = e; t != null; t = t.getCause()) {
-      String m = t.getMessage();
-      if (m == null) continue;
-      String lower = m.toLowerCase(java.util.Locale.ROOT);
-      if (lower.contains("context length")
-          || lower.contains("context window")
-          || lower.contains("context_length_exceeded")
-          || lower.contains("maximum context")
-          || lower.contains("prompt is too long")
-          || lower.contains("input is too long")
-          || lower.contains("too many tokens")
-          || lower.contains("exceeds the maximum number of tokens")) {
-        return true;
-      }
-    }
-    return false;
+    return WorkerHistoryPolicy.isContextLengthError(e);
   }
 
   /**
@@ -2532,6 +2509,10 @@ public class WorkerAgent {
    * than losing the run.
    */
   static List<Message> hardTrimHistory(List<Message> history) {
+    return WorkerHistoryPolicy.hardTrimHistory(history);
+  }
+
+  private static List<Message> hardTrimHistoryLegacy(List<Message> history) {
     // A count-only guard leaves a recoverable overflow fatal when one tool result (or a resumed
     // short transcript) is huge.  Keep the minimum role envelope, then bound an oversized tool
     // result if there is no complete turn boundary to drop.
