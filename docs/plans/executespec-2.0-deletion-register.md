@@ -60,6 +60,7 @@ being retained under compatibility aliases.
 | Raw project-settings PATCH in `IdeProjectSettings` | DONE — migrated to typed `updateProjectSettings` with shared auth/refresh transport and full payload coverage |
 | Raw GDPR export request in `IdeMore` | DONE — migrated to typed `downloadUserDataExport` while preserving blob-download behavior; DSAR/erasure and multipart paths remain contract-specific |
 | Billing DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved cohesive pricing/usage/payment types to `billing.ts`; type re-exports preserve the stable `core` import surface |
+| Deployment/GCP DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved deployment and credential contracts to `deployTypes.ts`; type re-exports preserve the stable `core` import surface and deployment requests now depend on the deployment transport/types seam |
 | Post-review quality policy embedded in `RunOrchestrator` | DONE — extracted pure reviewer/validation quality decisions into `PostReviewQualityPolicy`; characterization tests pin the boundary |
 | Notification DTOs embedded in `frontend/src/lib/api/core.ts` | DONE — moved `NotificationItem` and `NotificationPrefRow` to `notifications.ts`; the API barrel preserves consumer compatibility |
 | Unassociated public auth form labels | DONE — login, signup, forgot-password, and reset-password labels now target stable input ids; recovery tests pin the association |

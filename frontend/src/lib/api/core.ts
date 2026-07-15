@@ -4,6 +4,16 @@ export * from './transport';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
 export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
+// Deployment/GCP DTOs live with the deployment API, but remain type-re-exported here for
+// existing `@/lib/api/core` consumers.
+export type {
+  CredentialSummary,
+  DeployAnalysisResult,
+  DeploymentSummary,
+  GcpValidationResult,
+  PermissionCheck,
+  RequiredPermission,
+} from './deployTypes';
 
 export interface RunSummary {
   runId: string;
@@ -364,81 +374,6 @@ export interface MetricsResponse {
 // v2.5.13 — TaskFeasibility + FeasibilityReport interfaces retired along with
 // FeasibilityEstimator.tsx. Backend `/api/feasibility` returns 410 Gone on V2
 // and will stay permanently 410 — use the plan-approval estimate instead.
-
-export interface DeploymentSummary {
-  id: string;
-  runId: string;
-  versionTag: string;
-  status: string;
-  strategy: string;
-  serviceUrl: string;
-  revisionName: string;
-  createdAt: string;
-  ttlExpiresAt: string;
-}
-
-export interface RequiredPermission {
-  role: string;
-  label: string;
-  reason: string;
-  required: boolean;
-}
-
-export interface PermissionCheck {
-  role: string;
-  label: string;
-  required: boolean;
-  granted: boolean;
-  detail: string;
-}
-
-export interface CredentialSummary {
-  id: string;
-  gcpProjectId: string;
-  serviceAccountEmail: string;
-  projectId: string | null;
-  createdAt: string;
-  validatedAt: string | null;
-}
-
-export interface GcpValidationResult {
-  valid: boolean;
-  issues: string[];
-  gcpProjectId: string | null;
-  permissionChecks: PermissionCheck[];
-}
-
-export interface DeployAnalysisResult {
-  manifest: {
-    projectType: string;
-    language: string;
-    framework: string;
-    buildTool: string;
-    detectedPort: number;
-    healthCheckPath: string;
-    databases: string[];
-    caches: string[];
-    queues: string[];
-    storageServices: string[];
-    envVars: string[];
-    isStateless: boolean;
-    hasHealthCheck: boolean;
-    hasDockerfile: boolean;
-    dockerfilePath: string | null;
-  };
-  decision: {
-    recommendedPath: string;
-    availablePaths: Array<{
-      path: string;
-      label: string;
-      description: string;
-      available: boolean;
-      reason: string;
-    }>;
-    reasoning: string;
-  };
-  hasGcpCredentials: boolean;
-}
 
 export interface TimelineData {
   tasks: Array<{
