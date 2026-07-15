@@ -136,7 +136,7 @@ Target:
 - Default `HARBOR_AGENT_TIMEOUT_SEC=1500` for new cohorts. Historical runs retain their recorded
   1350s setting in their evidence artifacts.
 - ExecuteSpec TB worker wall-clock is configurable via
-  `terminal-bench.worker-wall-clock-seconds`; default is now `1260s`, leaving a
+  `terminal-bench.worker-wall-clock-seconds`; default is now `1410s`, leaving a
   90s buffer under Harbor's `1500s` cap for one slow in-flight LLM/tool turn plus
   the terminal finalizer.
 - Harbor has no true live pause for an in-flight trial. To preserve benchmark
