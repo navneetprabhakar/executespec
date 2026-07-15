@@ -94,7 +94,8 @@ class ModelCapabilityProfileABTest {
             boolean.class,
             String.class);
     method.setAccessible(true);
-    Object result = method.invoke(executor, PlannedTask.Complexity.LOW, "anthropic", "fallback", false, null);
+    Object result =
+        method.invoke(executor, PlannedTask.Complexity.LOW, "anthropic", "fallback", false, null);
     var warn = result.getClass().getDeclaredField("stagnationWarnAfter");
     var force = result.getClass().getDeclaredField("stagnationForceAfter");
     warn.setAccessible(true);
