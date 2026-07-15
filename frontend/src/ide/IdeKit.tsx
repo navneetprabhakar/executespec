@@ -112,14 +112,46 @@ export function diffHunks(diff: DiffLine[], context = 3): {start: number; end: n
   }, []);
 }
 
+/**
+ * Build a review-safe request for undoing one displayed hunk.  The Web client
+ * never mutates a run workspace directly; callers send this bounded request
+ * through the normal fork/plan gate so the agent re-applies the change in a
+ * fresh run and the user can inspect the resulting diff before approval.
+ */
+export function hunkRevertRequest(filename: string, diff: DiffLine[], hunkIndex: number): string {
+  const hunks = diffHunks(diff);
+  const hunk = hunks[hunkIndex];
+  if (!hunk) return '';
+  const rows = diff.slice(hunk.start, hunk.end + 1);
+  const oldLines = rows.filter((line) => line.sign !== '+').map((line) => line.text);
+  const newLines = rows.filter((line) => line.sign !== '-').map((line) => line.text);
+  return [
+    `Revert ONLY hunk ${hunkIndex + 1} in ${filename}.`,
+    'Restore the original lines and remove the changed lines shown below.',
+    'Do not change any other hunk, file, dependency, formatting, or tests.',
+    'Preserve the surrounding context exactly, then run the smallest relevant verification.',
+    '',
+    'ORIGINAL HUNK (before the run):',
+    '```text',
+    oldLines.join('\n'),
+    '```',
+    'CURRENT HUNK (after the run):',
+    '```text',
+    newLines.join('\n'),
+    '```',
+  ].join('\n');
+}
+
 export function IdeCodeViewer({
   filename,
   content,
   diff,
+  onRevertHunk,
 }: {
   filename: string;
   content?: string;
   diff?: DiffLine[] | null;
+  onRevertHunk?: (hunkIndex: number, request: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<'content' | 'diff'>(diff && diff.length ? 'diff' : 'content');
@@ -203,6 +235,17 @@ export function IdeCodeViewer({
               ↓
             </button>
           </span>
+        )}
+        {mode === 'diff' && hunks.length > 0 && onRevertHunk && (
+          <button
+            className='ide-status btn'
+            aria-label={`Prepare revert for hunk ${activeHunk + 1}`}
+            onClick={() =>
+              onRevertHunk(activeHunk, hunkRevertRequest(filename, diff ?? [], activeHunk))
+            }
+          >
+            Revert hunk
+          </button>
         )}
         <button className='ide-status btn' onClick={() => setWrap((w) => !w)}>
           {wrap ? 'No wrap' : 'Wrap'}

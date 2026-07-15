@@ -20,6 +20,7 @@ import {
   IdeLoader,
   FileIcon,
   ResizeHandle,
+  hunkRevertRequest,
   type DiffLine,
 } from '@/ide/IdeKit';
 import {ScoreBadge} from '@/ide/ScoreBadge';
@@ -371,6 +372,30 @@ export default function IdeRunResult() {
         return 'Re-run started.';
       },
     );
+  }
+
+  function requestHunkRevert(filePath: string, diff: DiffLine[], hunkIndex: number) {
+    if (!runId || !diff.length || !run) return;
+    const request = hunkRevertRequest(filePath, diff, hunkIndex);
+    if (!request) return;
+    setConfirm({
+      title: `Prepare revert for hunk ${hunkIndex + 1}`,
+      body: 'This creates a fresh forked run containing only the requested hunk reversal. It does not mutate this run or your repository. You will review the new plan and diff before approval; run credits apply only after approval.',
+      confirmLabel: 'Create revert run',
+      onConfirm: async () => {
+        setConfirm(null);
+        setBusy('revert-hunk');
+        setMsg('Creating a reviewable revert run…');
+        try {
+          const fork = await api.forkRun(runId, {userRequest: request});
+          navigate(`/plan/${fork.runId}`);
+        } catch (e: unknown) {
+          setMsg(e instanceof Error ? e.message : 'Could not create the revert run.');
+        } finally {
+          setBusy('');
+        }
+      },
+    });
   }
 
   // Run management — fork / archive / unarchive / soft-delete (dark endpoints).
@@ -1449,6 +1474,11 @@ export default function IdeRunResult() {
                   filename={activeFile || ''}
                   content={active.content}
                   diff={active.diff}
+                  onRevertHunk={
+                    active.diff
+                      ? (hunkIndex) => requestHunkRevert(activeFile || '', active.diff!, hunkIndex)
+                      : undefined
+                  }
                 />
               ) : (
                 <div className='ide-empty'>
