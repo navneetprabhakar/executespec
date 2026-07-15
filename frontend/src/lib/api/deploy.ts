@@ -1,10 +1,10 @@
-import {
+import {req} from './transport';
+import type {
   CredentialSummary,
   DeployAnalysisResult,
   DeploymentSummary,
   GcpValidationResult,
-  req,
-} from './core';
+} from './deployTypes';
 
 // v2.5.13 — feasibility() client retired; POST /api/feasibility is permanently
 // 410 Gone on V2. Use the plan-approval cost estimate
