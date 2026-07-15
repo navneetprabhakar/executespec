@@ -3915,41 +3915,8 @@ public class RunOrchestrator implements RunControlPort {
    */
   static StatusAndReason resolveTerminalStatus(
       ExecutionResult exec, com.navneet.executespec.reviewer.ReviewerResult review) {
-    if (exec.overall() == ExecutionResult.Overall.ABORTED) {
-      return new StatusAndReason("FAILED", "EXECUTION_ABORTED");
-    }
-    com.navneet.executespec.reviewer.ReviewerResult.Overall verdict =
-        review != null ? review.overall() : null;
-    boolean buildPassed = review != null && Boolean.TRUE.equals(review.finalBuildPassed());
-    boolean anyWarn = exec.anyIntermediateWarning();
-    boolean anyTaskSucceeded = exec.tasksSuccessful() > 0;
-
-    if (buildPassed
-        && verdict != null
-        && (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.CLEAN
-            || verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.FIXED_ISSUES)) {
-      return new StatusAndReason(
-          "COMPLETE", anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.REVIEW_FAILED) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_FAILED");
-    }
-    if (review != null && !buildPassed) {
-      return new StatusAndReason("PARTIAL", "FINAL_BUILD_FAILED");
-    }
-    if (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.UNRESOLVED_ISSUES) {
-      return new StatusAndReason("PARTIAL", "REVIEWER_UNRESOLVED");
-    }
-    if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
-      return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");
-    }
-    // Defensive fallback — reached when the reviewer didn't run (review == null)
-    // or produced a verdict outside the known set. 2026-05-13 audit — the legacy
-    // "LEGACY_UNKNOWN" label was inherited from V108's backfill of pre-v2.5.10
-    // rows and conveys nothing for NEW runs. Tag the reason with what we actually
-    // know — the reviewer didn't deliver a usable verdict — so dashboards +
-    // retry logic can branch on it instead of treating it as "we have no idea".
-    return new StatusAndReason(mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
+    TerminalStatusResolver.Result result = TerminalStatusResolver.resolve(exec, review);
+    return new StatusAndReason(result.status(), result.reason());
   }
 
   /**
