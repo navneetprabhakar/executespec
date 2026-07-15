@@ -65,6 +65,12 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 
 ## Invariants
 
+- **Canonical orientation search (RL-2026-07-036).** `RepoOrientationService` delegates identifier
+  localization to `RepositorySearchService` instead of maintaining a second file walker. This
+  keeps orientation git-aware, fingerprinted, symlink-safe, and consistent with worker search;
+  directory layout and build/test command discovery remain advisory and local to the orientation
+  seam.
+
 - `CodeGenEngine` is now the active single-task codegen seam for benchmark generation and PATCH-mode
   orchestration. Keep PATCH policy in `CodeGenEngineImpl`; do not recreate a wrapper around it.
 - Keep this a **crisp contract, not a sprawling framework** (the COMPARISON caveat — clear seam, accept
