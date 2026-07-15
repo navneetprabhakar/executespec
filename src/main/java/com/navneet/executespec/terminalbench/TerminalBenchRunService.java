@@ -59,10 +59,10 @@ public class TerminalBenchRunService {
 
   /**
    * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
-   * runner sets the outer agent timeout to 1350s; keep this lower so ExecuteSpec can run its
+   * runner sets the outer agent timeout to 1500s; keep this lower so ExecuteSpec can run its
    * terminal finalizer and return a clean terminal state before Harbor kills the adapter.
    */
-  @Value("${terminal-bench.worker-wall-clock-seconds:1260}")
+  @Value("${terminal-bench.worker-wall-clock-seconds:1410}")
   private int workerWallClockSeconds;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
