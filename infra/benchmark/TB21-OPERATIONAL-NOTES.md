@@ -158,6 +158,26 @@ Target:
 
 ### 3. Bridge orphan reconciliation
 
+### 2b. Docker verifier cleanup fallback (2026-07-15)
+
+Harbor 0.13.1 can cancel an adapter while `DockerEnvironment` is awaiting
+`docker compose exec`. That cancellation bypasses the subprocess timeout and
+can leave an idle verifier container after Harbor records `AgentTimeoutError`.
+The versioned `scripts/run-tb.sh` now performs a bounded, job-scoped cleanup
+after Harbor exits: it derives task prefixes from the current job directory and
+removes only matching Docker containers with `docker rm -f`. It never runs a
+global prune or an unscoped compose teardown. This is a containment measure,
+not a replacement for the upstream Harbor fix (which must terminate cancelled
+compose subprocesses and bound `DockerEnvironment.stop`).
+
+Acceptance evidence for a future release-grade run:
+
+- inject cancellation while awaiting a fake `docker compose exec` and assert
+  the child is terminated within the bounded grace period;
+- run a synthetic `AgentTimeoutError` trial and assert no job-matching
+  containers remain after `run-tb.sh` exits;
+- preserve the original timeout/error classification in Harbor results.
+
 Problem:
 
 - The bridge can ingest the Harbor score while the corresponding backend run remains `WORKING`.

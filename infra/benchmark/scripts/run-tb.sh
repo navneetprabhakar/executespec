@@ -211,6 +211,32 @@ while kill -0 "$HARBOR_PID" 2>/dev/null; do
 done
 wait "$HARBOR_PID" || HARBOR_RC=$?
 
+# Harbor 0.13 can cancel an agent while DockerEnvironment is awaiting
+# `docker compose exec`; the cancellation bypasses its subprocess timeout and
+# leaves a task verifier alive after Harbor records AgentTimeoutError.  Clean
+# only containers whose task prefixes belong to this job (never `docker prune`
+# or an unscoped `docker compose down`).  This is a bounded fallback until the
+# upstream Harbor cancellation path is fixed.
+cleanup_harbor_task_containers(){
+  command -v docker >/dev/null 2>&1 || return 0
+  local task_dir task_name container_ids cid
+  while IFS= read -r task_dir; do
+    task_name="${task_dir%%__*}"
+    [ -n "$task_name" ] || continue
+    container_ids=$(docker ps -aq --filter "name=${task_name}__" 2>/dev/null || true)
+    for cid in $container_ids; do
+      [ -n "$cid" ] || continue
+      LOG "cleanup: removing Harbor task container $cid (task=$task_name)"
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 20 docker rm -f "$cid" >/dev/null 2>&1 || true
+      else
+        docker rm -f "$cid" >/dev/null 2>&1 || true
+      fi
+    done
+  done < <(find "$JOBS_DIR/$JOB_NAME" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+}
+cleanup_harbor_task_containers
+
 # ── 5. done: marker, final tracker tick, GCS results sync, ping ─────────────
 touch "$DONE"; sleep 6   # let the tracker write its final cycle
 if [ -n "$GCS_BUCKET" ]; then gsutil -m rsync -r "$JOBS_DIR/$JOB_NAME" "$GCS_BUCKET/$JOB_NAME/" 2>/dev/null; fi
