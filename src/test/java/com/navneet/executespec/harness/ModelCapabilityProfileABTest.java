@@ -99,8 +99,7 @@ class ModelCapabilityProfileABTest {
     FeatureFlagService enabled = mock(FeatureFlagService.class);
     when(enabled.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
 
-    assertThat(tierConfig(newExecutor(resolver, matrix, enabled)))
-        .isEqualTo(new Config(23, 49));
+    assertThat(tierConfig(newExecutor(resolver, matrix, enabled))).isEqualTo(new Config(23, 49));
   }
 
   private static ModelMatrixProperties.CapabilityProfile profile(int warn, int force) {
