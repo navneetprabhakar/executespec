@@ -1605,6 +1605,30 @@ public class ValidationReportService {
       String reviewerVerdictName,
       int unfixedCriticalCount,
       String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards,
+      BootVerification bootVerification) {
+    return ValidationReportScoreCalculator.additive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        bootVerification);
+  }
+
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
       int filesGenerated) {
     // Legacy / direct-test entry — no gaming guards, no endpoint intent.
     return computeVerifiedScoreAdditive(
@@ -1634,6 +1658,22 @@ public class ValidationReportService {
       Integer endpointCoveragePercent,
       boolean gamingGuards) {
     return computeVerifiedScoreAdditive(
+        finalBuildPassed, testsPassed, testsTotal, reviewerVerdictName, unfixedCriticalCount,
+        testCoverageLevel, filesGenerated, endpointCoveragePercent, gamingGuards, null);
+  }
+
+  /* Legacy implementation retained below for forensic comparison; the calculator is canonical. */
+  private int computeVerifiedScoreAdditiveRemoved(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards) {
+    return computeVerifiedScoreAdditive(
         finalBuildPassed,
         testsPassed,
         testsTotal,
@@ -1653,7 +1693,7 @@ public class ValidationReportService {
    * keeps the exact compile-only behaviour, so the 9-arg callers (and every existing test pin) are
    * unchanged.
    */
-  int computeVerifiedScoreAdditive(
+  private int computeVerifiedScoreAdditiveLegacyUnused(
       Boolean finalBuildPassed,
       int testsPassed,
       int testsTotal,
@@ -1956,6 +1996,21 @@ public class ValidationReportService {
    * callers + test pins are unchanged.
    */
   int computeVerifiedScoreMultiplicative(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      BootVerification bootVerification) {
+
+    return ValidationReportScoreCalculator.multiplicative(
+        finalBuildPassed, testsPassed, testsTotal, reviewerVerdictName, unfixedCriticalCount,
+        endpointCoveragePercent, testCoverageLevel, bootVerification);
+  }
+
+  private int computeVerifiedScoreMultiplicativeLegacyUnused2(
       Boolean finalBuildPassed,
       int testsPassed,
       int testsTotal,
