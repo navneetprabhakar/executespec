@@ -77,6 +77,32 @@ class ModelCapabilityProfileABTest {
     assertThat(profiled).isNotEqualTo(new Config(18, 34));
   }
 
+  @Test
+  void legacyModelAliasStillSelectsCanonicalModelProfile() throws Exception {
+    ModelMatrixProperties matrix = mock(ModelMatrixProperties.class);
+    ModelMatrixProperties.CapabilityProfile model = profile(23, 49);
+    when(matrix.getCapabilityProfiles())
+        .thenReturn(Map.of("anthropic/claude-sonnet-canonical", model));
+    when(matrix.getLegacyAliases())
+        .thenReturn(Map.of("claude-sonnet-alias", "claude-sonnet-canonical"));
+
+    ModelResolver resolver = mock(ModelResolver.class);
+    when(resolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.ANTHROPIC)
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-sonnet-alias")
+                .agentTier(AgentTier.WORKHORSE)
+                .build());
+
+    FeatureFlagService enabled = mock(FeatureFlagService.class);
+    when(enabled.isEnabled(SequentialExecutor.FLAG_CAPABILITY_PROFILES)).thenReturn(true);
+
+    assertThat(tierConfig(newExecutor(resolver, matrix, enabled)))
+        .isEqualTo(new Config(23, 49));
+  }
+
   private static ModelMatrixProperties.CapabilityProfile profile(int warn, int force) {
     var profile = new ModelMatrixProperties.CapabilityProfile();
     profile.setStagnationWarnAfter(warn);
