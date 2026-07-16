@@ -56,6 +56,10 @@ class AgentValidationReportEventBridgeTest {
             91,
             PipelineResult.PASSED,
             Instant.parse("2026-06-26T00:00:00Z"),
+            true,
+            true,
+            "PASSED",
+            "NONE",
             List.of(
                 new VerificationEvidenceDTO(
                     "build",
@@ -77,6 +81,11 @@ class AgentValidationReportEventBridgeTest {
     assertThat(event.getValue().getPayloadJson()).contains("\"runId\":\"run-1\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"reportId\":\"vr-1\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"verifiedScore\":87");
+    assertThat(event.getValue().getPayloadJson()).contains("\"executableTestsRun\":true");
+    assertThat(event.getValue().getPayloadJson()).contains("\"executableTestsPassed\":true");
+    assertThat(event.getValue().getPayloadJson())
+        .contains("\"executableVerificationStatus\":\"PASSED\"");
+    assertThat(event.getValue().getPayloadJson()).contains("\"executionFailureStage\":\"NONE\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"id\":\"build\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"source\":\"DETERMINISTIC\"");
     assertThat(event.getValue().getPayloadJson()).contains("\"runGoalDecision\"");

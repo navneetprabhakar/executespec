@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannedTask.Complexity;
+import com.navneet.executespec.engine.GaneshWorkerContinuation;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -445,6 +446,41 @@ class SequentialExecutorSoftCompletionTest {
                             .contains("completion confidence is low")
                         && ((List<?>) event.data().get("evidence"))
                             .contains("completionConfidenceLow=true")));
+  }
+
+  @Test
+  void nonRoutedGaneshPolicyStillUsesLegacySmokeGate() {
+    stubTaskRow();
+    WorkerResult legacyWorkerResult = workerHitIterLimit(3);
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    GaneshWorkerContinuation policy = mock(GaneshWorkerContinuation.class);
+    when(policy.execute(any(), any()))
+        .thenReturn(
+            new GaneshWorkerContinuation.Result(
+                legacyWorkerResult, "anthropic", "claude-sonnet-4-6", null, false, false));
+    SequentialExecutor executor = newExecutor();
+    executor.setGaneshContinuation(policy);
+
+    ExecutionRequest routedRequest =
+        ExecutionRequest.builder()
+            .plan(singleTaskPlan())
+            .provider("anthropic")
+            .model("claude-sonnet-4-6")
+            .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
+            .enableSmokeTests(true)
+            .requireConfirmationBeforeExpensiveContinuation(true)
+            .ganeshTargetFiles(List.of("solution.py"))
+            .build();
+    ExecutionResult result = executor.execute(routedRequest);
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().getFirst().status());
+    assertEquals(true, result.perTask().getFirst().smokeTestPassed());
+    ArgumentCaptor<GaneshWorkerContinuation.Request> request =
+        ArgumentCaptor.forClass(GaneshWorkerContinuation.Request.class);
+    verify(policy).execute(request.capture(), any());
+    assertTrue(request.getValue().requireConfirmationBeforeExpensiveContinuation());
+    assertEquals(List.of("solution.py"), request.getValue().targetFiles());
+    verify(buildProjectTool).execute(any(), any());
   }
 
   // 3: Single-task + iter-limit + writes + smoke FAIL → PARTIAL

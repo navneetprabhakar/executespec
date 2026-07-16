@@ -88,6 +88,11 @@ spring:
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
       api-key: ${FIREWORKS_API_KEY:}
+    ganesh:
+      # Deliberately no endpoint/token defaults: an operator must configure both explicitly.
+      base-url: ${GANESH_BASE_URL:}
+      api-key: ${GANESH_API_KEY:}
+      read-timeout-seconds: ${GANESH_READ_TIMEOUT_SECONDS:300}
 
 execution:
   continuation:

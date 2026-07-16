@@ -48,6 +48,9 @@ public class RunDetail {
   /** Durable final run-level goal proof derived from the validation-report ledger. */
   JsonNode runGoalDoneness;
 
+  /** Ordered durable Ganesh + frontier E2 attempts; empty when this worker lane was unused. */
+  List<GaneshWorkerAttemptDTO> ganeshWorkerAttempts;
+
   List<TaskSummary> tasks;
   IntegrationSource integrationSource; // null for manual runs
 

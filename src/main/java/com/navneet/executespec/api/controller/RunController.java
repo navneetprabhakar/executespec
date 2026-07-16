@@ -221,7 +221,8 @@ public class RunController {
             req.requireConfirmationBeforeExpensiveContinuation(),
             req.requireBenchmarkPriorForAutomaticContinuation(),
             req.lowComplexityWorkerStartTier(),
-            localExecutionRequested);
+            localExecutionRequested,
+            req.targetFiles());
 
     // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's

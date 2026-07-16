@@ -308,6 +308,15 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
   private int deepSeekReadTimeoutSeconds = 300;
 
+  @Value("${spring.ai.ganesh.api-key:}")
+  private String ganeshApiKey;
+
+  @Value("${spring.ai.ganesh.base-url:}")
+  private String ganeshBaseUrl;
+
+  @Value("${spring.ai.ganesh.read-timeout-seconds:300}")
+  private int ganeshReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -662,11 +671,12 @@ public class LlmRouter {
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
       case "fireworks" -> callFireworks(request, tools, apiKey);
+      case "ganesh" -> callGanesh(request, tools);
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
                   + request.provider()
-                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks)");
+                  + " (expected anthropic|openai|gemini|openrouter|deepseek|fireworks|ganesh)");
     };
   }
 
@@ -933,6 +943,45 @@ public class LlmRouter {
             .readTimeoutSeconds(deepSeekReadTimeoutSeconds)
             .baseUrl(deepSeekBaseUrl)
             .build());
+  }
+
+  private ChatResponse callGanesh(LlmRequest r, List<ToolCallback> tools) {
+    requireGaneshWorkerRole(r.agentRole());
+    if (ganeshApiKey == null
+        || ganeshApiKey.isBlank()
+        || ganeshBaseUrl == null
+        || ganeshBaseUrl.isBlank()) {
+      throw new IllegalStateException("Ganesh endpoint and platform token are not configured");
+    }
+    return openAiNativeToolClient.call(
+        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+            .model(r.model())
+            .messages(r.messages())
+            .tools(tools)
+            .temperature(r.temperature())
+            .maxCompletionTokens(r.maxTokens())
+            .toolChoice(r.toolChoice())
+            .apiKey(ganeshApiKey)
+            .readTimeoutSeconds(ganeshReadTimeoutSeconds)
+            .baseUrl(ganeshBaseUrl)
+            .extraBody(ganeshExtraBody())
+            .build());
+  }
+
+  /**
+   * Ganesh uses Gemma 4's native chat template. Worker calls must explicitly disable reasoning on
+   * every request so a server-default change cannot leak thought-channel content into code or tool
+   * arguments. Keep this override scoped to Ganesh; other OpenAI-wire providers have different
+   * request contracts.
+   */
+  static Map<String, Object> ganeshExtraBody() {
+    return Map.of("chat_template_kwargs", Map.of("enable_thinking", false));
+  }
+
+  static void requireGaneshWorkerRole(String agentRole) {
+    if (!"WorkerAgent".equals(agentRole)) {
+      throw new IllegalStateException("Ganesh transport is restricted to WorkerAgent calls");
+    }
   }
 
   /**

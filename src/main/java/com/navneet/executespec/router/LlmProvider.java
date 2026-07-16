@@ -15,7 +15,8 @@ public enum LlmProvider {
   // 2026-06-09 — Fireworks AI (api.fireworks.ai), OpenAI-wire-compatible route for Chinese open
   // models (DeepSeek / Kimi / GLM). Added to A/B against OpenRouter latency on Chinese models.
   // ENTERPRISE BYOK; final hop in the DeepSeek recovery chain (never default-selected).
-  FIREWORKS("Fast-US");
+  FIREWORKS("Fast-US"),
+  GANESH("Self-hosted");
 
   private final String tag;
 

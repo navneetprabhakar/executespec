@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V272** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V274** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -154,7 +154,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V272** in the current worktree). Applied migrations are immutable. V256 removes Sarvam from active dispatch state and clears persisted provider/model preferences while retaining historical usage/benchmark evidence; V257–V272 add coordinator-subagent, task-cost, auto-verification, routing, local-execution, replay, fail-closed cleanup, local-hands, provider-quality, capability-profile, boot-verification, and first-writer-wins safeguards. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Older migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V274** in the current worktree). Applied migrations are immutable. V256 removes Sarvam from active dispatch state and clears persisted provider/model preferences while retaining historical usage/benchmark evidence; V257–V272 add coordinator-subagent, task-cost, auto-verification, routing, local-execution, replay, fail-closed cleanup, local-hands, provider-quality, capability-profile, boot-verification, and first-writer-wins safeguards. V273 persists provider-independent executable-verification status, failure stage, and bounded evidence; V274 persists bounded Ganesh worker-attempt evidence and seeds its default-off flag. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Older migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
 
 Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
 
@@ -195,7 +195,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 
 ### Current-state corrections (2026-07-11)
 
-- The current migration head is V272; older V271/V270/V269/V268/V267/V261/V258 references in this file are historical and must not be used as release facts.
+- The current migration head is V274; older V273/V272/V271/V270/V269/V268/V267/V261/V258 references in this file are historical and must not be used as release facts.
 - `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
 - Current source-size facts are RunOrchestrator 4,084 lines, `frontend/src/lib/api/core.ts` 1,927 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 
@@ -455,7 +455,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V272; applied V-files immutable)                                                                                                                       |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V274; applied V-files immutable)                                                                                                                       |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api/` (`core.ts` + domain modules)                                                                                                                                                 |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |

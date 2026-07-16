@@ -90,19 +90,37 @@ final class ValidationVerificationLedgerBuilder {
     Integer testsTotal = entity.getTestsTotal();
     int total = testsTotal == null ? 0 : testsTotal;
     int passed = testsPassed == null ? 0 : testsPassed;
+    String executableStatus = entity.getExecutableVerificationStatus();
+    boolean executableAccepted = "PASSED".equals(executableStatus);
+    String testStatus =
+        executableStatus == null
+            ? total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL"
+            : executableAccepted ? "PASS" : "FAIL";
+    String testSummary =
+        executableStatus == null
+            ? total <= 0
+                ? "No concrete test execution was captured."
+                : passed + "/" + total + " tests passed."
+            : executableAccepted
+                ? passed + "/" + total + " tests passed."
+                : "Executable verification failed at "
+                    + entity.getExecutionFailureStage()
+                    + " with status "
+                    + executableStatus
+                    + ".";
     out.add(
         evidence(
             "tests",
             "Tests",
             "TESTS",
-            total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
+            testStatus,
             "DETERMINISTIC",
-            total <= 0 ? "MEDIUM" : "HIGH",
+            executableStatus == null && total <= 0 ? "MEDIUM" : "HIGH",
             "Generated or workspace tests passed.",
-            total <= 0
-                ? "No concrete test execution was captured."
-                : passed + "/" + total + " tests passed.",
-            "validation_report.tests_passed/tests_total",
+            testSummary,
+            executableStatus == null
+                ? "validation_report.tests_passed/tests_total"
+                : "validation_report.executable_evidence_json",
             total <= 0 ? null : passed,
             total <= 0 ? null : total));
 

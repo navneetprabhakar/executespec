@@ -15,6 +15,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private final FeatureFlagService featureFlagService;
   private final PromptAssembler promptAssembler;
   private final RunCostTracker costTracker;
+  private GaneshWorkerContinuation ganeshContinuation;
+
+  @Autowired
+  void setGaneshContinuation(GaneshWorkerContinuation ganeshContinuation) {
+    this.ganeshContinuation = ganeshContinuation;
+  }
 
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final RepoOrientationService repoOrientationService;
@@ -76,12 +83,52 @@ public class CodeGenEngineImpl implements CodeGenEngine {
           .build();
     }
 
-    WorkerTaskRequest workerReq = workerRequest(request, ctx);
-    WorkerResult wr = workerAgent.run(workerReq);
+    GaneshWorkerContinuation.Result attempted =
+        ganeshContinuation == null
+            ? new GaneshWorkerContinuation.Result(
+                workerAgent.run(
+                    workerRequest(request, ctx, request.provider(), request.model(), null)),
+                request.provider(),
+                request.model(),
+                null,
+                false,
+                false)
+            : ganeshContinuation.execute(
+                new GaneshWorkerContinuation.Request(
+                    request.runId(),
+                    ctx.taskId(),
+                    ctx.workspaceRoot(),
+                    "PATCH",
+                    request.provider(),
+                    request.model(),
+                    request.targetFiles(),
+                    Boolean.TRUE.equals(
+                        request.requireConfirmationBeforeExpensiveContinuation())),
+                (provider, model, priorEvidence) ->
+                    workerAgent.run(workerRequest(request, ctx, provider, model, priorEvidence)));
+    WorkerResult wr = attempted.workerResult();
+
+    EngineVerification verification = engineVerification(attempted.verification());
+    if (!attempted.accepted()) {
+      return EngineResult.builder()
+          .diff(captureDiff(workspace))
+          .verification(verification)
+          .transcript(wr.toolCallLog() == null ? List.of() : wr.toolCallLog())
+          .cost(costOf(request.runId()))
+          .outcome(EngineOutcome.ERROR)
+          .iterations(wr.iterations())
+          .toolCalls(wr.toolCallsDispatched())
+          .summary(
+              attempted.frontierRetried()
+                  ? "Executable verification failed after the bounded frontier retry"
+                  : "Ganesh executable verification failed; automatic frontier retry requires"
+                      + " confirmation")
+          .build();
+    }
 
     return EngineResult.builder()
         .diff(captureDiff(workspace))
-        .verification(EngineVerification.none()) // Phase 2: not gathered (the contract allows null)
+        .verification(verification)
         .transcript(wr.toolCallLog() == null ? List.of() : wr.toolCallLog())
         .cost(costOf(request.runId()))
         .outcome(mapOutcome(wr.outcome()))
@@ -91,18 +138,23 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .build();
   }
 
-  private WorkerTaskRequest workerRequest(EngineRequest request, ExecutionContext ctx) {
+  private WorkerTaskRequest workerRequest(
+      EngineRequest request,
+      ExecutionContext ctx,
+      String provider,
+      String model,
+      com.navneet.executespec.smoketest.ExecutableVerification priorEvidence) {
     int maxIterations =
         request.budget() != null && request.budget().iterCap() != null
             ? request.budget().iterCap()
-            : iterCapFor(request.provider());
+            : iterCapFor(provider);
     int stagnationDisabled = maxIterations;
 
     return WorkerTaskRequest.builder()
-        .provider(request.provider())
-        .model(request.model())
-        .systemPrompt(buildSystemPrompt(request.provider()))
-        .userPrompt(withOrientation(request.taskSpec(), ctx))
+        .provider(provider)
+        .model(model)
+        .systemPrompt(buildSystemPrompt(provider))
+        .userPrompt(withOrientation(retryPrompt(request.taskSpec(), priorEvidence), ctx))
         .context(ctx)
         .maxIterations(maxIterations)
         .temperature(0.0)
@@ -122,6 +174,29 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         // injection — the schema-free replacement for the reverted V209/V217 pair.
         .autoVerify(featureFlagService.isEnabled("worker.auto-verify.enabled"))
         .build();
+  }
+
+  private static String retryPrompt(
+      String taskSpec, com.navneet.executespec.smoketest.ExecutableVerification evidence) {
+    if (evidence == null) return taskSpec;
+    return taskSpec
+        + "\n\n"
+        + "The previous Ganesh worker attempt failed executable verification. Repair the existing"
+        + " workspace. E2 status="
+        + evidence.status()
+        + ", stage="
+        + evidence.failureStage()
+        + ". Evidence: "
+        + (evidence.detail() == null ? "" : evidence.detail());
+  }
+
+  private static EngineVerification engineVerification(
+      com.navneet.executespec.smoketest.ExecutableVerification evidence) {
+    if (evidence == null) return EngineVerification.none();
+    Integer passed = evidence.summary() == null ? null : evidence.summary().getPassed();
+    Integer total = evidence.summary() == null ? null : evidence.summary().getTotalTests();
+    return new EngineVerification(
+        evidence.accepted(), passed, total, evidence.status() + ": " + evidence.detail());
   }
 
   /**

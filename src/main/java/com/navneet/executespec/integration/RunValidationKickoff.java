@@ -200,17 +200,30 @@ class RunValidationKickoff {
       // the cleanroom container where one exists. Empty → the scorer falls back to LLM coverage, so
       // this can only ever make the TESTS slot more honest, never break report generation.
       com.navneet.executespec.testgen.model.TestExecutionSummary testSummary = null;
-      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
-        try {
-          Path testWorkspace =
-              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
-          testSummary = workspaceTestRunner.runTests(runId, testWorkspace).orElse(null);
-        } catch (Exception e) {
-          log.warn(
-              "RunOrchestrator run={} workspace test execution failed (fallback to coverage): {}",
-              runId,
-              e.getMessage());
-        }
+      com.navneet.executespec.smoketest.ExecutableVerification executableVerification = null;
+      try {
+        Path testWorkspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+        executableVerification = workspaceTestRunner.verify(runId, testWorkspace);
+        testSummary = executableVerification.summary();
+      } catch (Exception e) {
+        log.warn(
+            "RunOrchestrator run={} workspace executable verification failed: {}",
+            runId,
+            e.getMessage());
+        executableVerification =
+            new com.navneet.executespec.smoketest.ExecutableVerification(
+                com.navneet.executespec.smoketest.ExecutableVerification.Status.EXECUTION_ERROR,
+                com.navneet.executespec.smoketest.ExecutableVerification.FailureStage.EXECUTION,
+                false,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                "",
+                "Executable verification failed before producing evidence.");
       }
       // RL-2026-05-066 (verifyBoot) — feed a deterministic boot verdict into the BUILD slot. Reads
       // the run-recipe + boots in the hardened sandbox; fail-open (empty → null → compile-only
@@ -234,7 +247,17 @@ class RunValidationKickoff {
       }
       ReportInput input =
           new ReportInput(
-              run, workerReports, review, compile, tasks, testSummary, List.of(), bootVerification);
+              run,
+              workerReports,
+              review,
+              compile,
+              tasks,
+              testSummary,
+              List.of(),
+              false,
+              null,
+              bootVerification,
+              executableVerification);
       // RL-2026-05-041 (audit #19 + E#37) — the old OPENAI→ANTHROPIC reroute (which mutated
       // run.aiProvider in-memory around this call) is removed. ValidationReportGenerator runs
       // through LlmRouter.callText, which dispatches OpenAI via

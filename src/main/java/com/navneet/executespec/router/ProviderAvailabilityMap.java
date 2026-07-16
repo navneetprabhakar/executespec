@@ -40,6 +40,7 @@ public final class ProviderAvailabilityMap {
       case OPENROUTER -> Set.of("openrouter");
       case DEEPSEEK -> Set.of("deepseek");
       case FIREWORKS -> Set.of("fireworks");
+      case GANESH -> Set.of("ganesh");
     };
   }
 

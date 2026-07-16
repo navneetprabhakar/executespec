@@ -15,6 +15,10 @@ public record ValidationReportEvidenceEvent(
     Integer rubricScore,
     PipelineResult pipelineResult,
     Instant createdAt,
+    Boolean executableTestsRun,
+    Boolean executableTestsPassed,
+    String executableVerificationStatus,
+    String executionFailureStage,
     List<VerificationEvidenceDTO> verificationLedger,
     GoalDonenessDecision runGoalDecision) {
 
@@ -36,6 +40,10 @@ public record ValidationReportEvidenceEvent(
       Integer rubricScore,
       PipelineResult pipelineResult,
       Instant createdAt,
+      Boolean executableTestsRun,
+      Boolean executableTestsPassed,
+      String executableVerificationStatus,
+      String executionFailureStage,
       List<VerificationEvidenceDTO> verificationLedger) {
     this(
         runId,
@@ -44,6 +52,33 @@ public record ValidationReportEvidenceEvent(
         rubricScore,
         pipelineResult,
         createdAt,
+        executableTestsRun,
+        executableTestsPassed,
+        executableVerificationStatus,
+        executionFailureStage,
+        verificationLedger,
+        null);
+  }
+
+  public ValidationReportEvidenceEvent(
+      String runId,
+      String reportId,
+      Integer verifiedScore,
+      Integer rubricScore,
+      PipelineResult pipelineResult,
+      Instant createdAt,
+      List<VerificationEvidenceDTO> verificationLedger) {
+    this(
+        runId,
+        reportId,
+        verifiedScore,
+        rubricScore,
+        pipelineResult,
+        createdAt,
+        null,
+        null,
+        null,
+        null,
         verificationLedger,
         null);
   }
@@ -64,6 +99,10 @@ public record ValidationReportEvidenceEvent(
         report == null ? null : report.getRubricScore(),
         report == null ? null : report.getPipelineResult(),
         report == null ? null : report.getCreatedAt(),
+        report == null ? null : report.getExecutableTestsRun(),
+        report == null ? null : report.getExecutableTestsPassed(),
+        report == null ? null : report.getExecutableVerificationStatus(),
+        report == null ? null : report.getExecutionFailureStage(),
         ledger,
         runGoalDecision);
   }

@@ -569,6 +569,19 @@
   </dependencies>
 
   <build>
+    <!--
+      Local runtime credentials are intentionally stored in the ignored
+      src/main/resources/application-local.yml. Never copy that file into target/classes or the
+      executable jar: local runs must load it explicitly as an external mode-0600 config file.
+    -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <excludes>
+          <exclude>application-local.yml</exclude>
+        </excludes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>

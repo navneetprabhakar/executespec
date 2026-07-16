@@ -125,6 +125,26 @@ public class ValidationReport {
   @Column(name = "tests_total")
   private Integer testsTotal;
 
+  /** E2: true only when a resolver-derived executable verifier process actually started. */
+  @Column(name = "executable_tests_run")
+  private Boolean executableTestsRun;
+
+  /** E2: true only when at least one concrete test ran and every test passed. */
+  @Column(name = "executable_tests_passed")
+  private Boolean executableTestsPassed;
+
+  /** E2 executable verdict, for example PASSED, TIMEOUT, or MISSING_EVIDENCE. */
+  @Column(name = "executable_verification_status", length = 40)
+  private String executableVerificationStatus;
+
+  /** E2 failure stage, for example TEST_ASSERTION, COMPILE, TOOLCHAIN, or EVIDENCE. */
+  @Column(name = "execution_failure_stage", length = 40)
+  private String executionFailureStage;
+
+  /** Bounded command/output/runtime evidence retained for audit and client projection. */
+  @Column(name = "executable_evidence_json", columnDefinition = "TEXT")
+  private String executableEvidenceJson;
+
   /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
   @Column(name = "reviewer_verdict", length = 32)
   private String reviewerVerdict;

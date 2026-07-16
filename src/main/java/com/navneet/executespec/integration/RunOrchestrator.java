@@ -246,6 +246,8 @@ public class RunOrchestrator implements RunControlPort {
   /** Submit-time handoff used to stamp local intent before the async pipeline can start. */
   private final ThreadLocal<Boolean> submitLocalExecutionIntent = new ThreadLocal<>();
 
+  private final ThreadLocal<List<String>> submitGaneshTargetFiles = new ThreadLocal<>();
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -383,8 +385,11 @@ public class RunOrchestrator implements RunControlPort {
       Boolean requireConfirmationBeforeExpensiveContinuation,
       Boolean requireBenchmarkPriorForAutomaticContinuation,
       String lowComplexityWorkerStartTier,
-      boolean localExecutionRequested) {
+      boolean localExecutionRequested,
+      List<String> ganeshTargetFiles) {
     submitLocalExecutionIntent.set(localExecutionRequested);
+    submitGaneshTargetFiles.set(
+        ganeshTargetFiles == null ? List.of() : List.copyOf(ganeshTargetFiles));
     try {
       return submitRun(
           userRequest,
@@ -412,6 +417,7 @@ public class RunOrchestrator implements RunControlPort {
           lowComplexityWorkerStartTier);
     } finally {
       submitLocalExecutionIntent.remove();
+      submitGaneshTargetFiles.remove();
     }
   }
 
@@ -907,6 +913,7 @@ public class RunOrchestrator implements RunControlPort {
             .figmaUrl(figmaUrl)
             .selectedRepoIds(serializeRepoIds(selectedRepoIds))
             .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
+            .ganeshTargetFilesJson(writeJson(submitGaneshTargetFiles.get()))
             .build();
     run = runRepo.save(run);
 
@@ -1368,7 +1375,14 @@ public class RunOrchestrator implements RunControlPort {
         PipelineRun modeProbe = runRepo.findById(runId).orElse(null);
         if (modeProbe != null
             && com.navneet.executespec.state.RunMode.isPatch(modeProbe.getRunMode())) {
-          runPatchPipeline(runId, provider, modeProbe, userRequest, rootCtx, startedAt);
+          runPatchPipeline(
+              runId,
+              provider,
+              modeProbe,
+              userRequest,
+              rootCtx,
+              startedAt,
+              requireContinuationConfirmation);
           return;
         }
       }
@@ -1775,6 +1789,7 @@ public class RunOrchestrator implements RunControlPort {
                         requireContinuationBenchmarkPrior)
                     .routePinned(routePinned)
                     .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
+                    .ganeshTargetFiles(ganeshTargetFilesForRun(runId))
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -2050,6 +2065,8 @@ public class RunOrchestrator implements RunControlPort {
       Optional<ValidationReport> validationReport =
           validationKickoff.generateValidationReport(
               runId, execResult, reviewResult, plan, contractBreakingIssues);
+      sr = applyExecutableVerification(sr, validationReport.orElse(null));
+      stampRunStatusReason(runId, sr);
       Optional<PostReviewContinuation> postValidationContinuation =
           maybeEmitPostValidationContinuationDecision(
               runId,
@@ -2087,13 +2104,17 @@ public class RunOrchestrator implements RunControlPort {
         Optional<ValidationReport> rerunValidationReport =
             validationKickoff.generateValidationReport(
                 runId, execResult, reviewResult, plan, contractBreakingIssues);
-        if (validationReportQualityFailed(
-            rerunValidationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+        sr = applyExecutableVerification(sr, rerunValidationReport.orElse(null));
+        stampRunStatusReason(runId, sr);
+        if (!isExecutableVerificationFailure(sr)
+            && validationReportQualityFailed(
+                rerunValidationReport.orElse(null), postReviewRequiredQualityThreshold)) {
           sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
           stampRunStatusReason(runId, sr);
         }
-      } else if (validationReportQualityFailed(
-          validationReport.orElse(null), postReviewRequiredQualityThreshold)) {
+      } else if (!isExecutableVerificationFailure(sr)
+          && validationReportQualityFailed(
+              validationReport.orElse(null), postReviewRequiredQualityThreshold)) {
         sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
         stampRunStatusReason(runId, sr);
       }
@@ -2292,7 +2313,8 @@ public class RunOrchestrator implements RunControlPort {
       PipelineRun run,
       String userRequest,
       ExecutionContext rootCtx,
-      Instant startedAt) {
+      Instant startedAt,
+      boolean requireContinuationConfirmation) {
 
     // 2026-05-08 — BYOK cost-cap exemption. When the run's user is on an OWN_KEYS org
     // (pure BYOK — they're paying their own API bill), skip the platform's default $4 cap. We
@@ -2374,6 +2396,9 @@ public class RunOrchestrator implements RunControlPort {
                   .model(model)
                   .runId(runId)
                   .taskId(rootCtx.taskId())
+                  .targetFiles(readStringList(run.getGaneshTargetFilesJson()))
+                  .requireConfirmationBeforeExpensiveContinuation(
+                      requireContinuationConfirmation)
                   .verifyMode(VerifyMode.HARD_GATE)
                   .build());
     } catch (Exception e) {
@@ -3319,6 +3344,7 @@ public class RunOrchestrator implements RunControlPort {
                   .initialProviderSwitchesUsed(seededUsage.providerSwitches())
                   .initialModelStepUpsUsed(seededUsage.modelStepUps())
                   .initialModelStepDownsUsed(seededUsage.modelStepDowns())
+                  .ganeshTargetFiles(ganeshTargetFilesForRun(runId))
                   .designBlock(designBlock)
                   .projectId(projectId)
                   .workspaceSummary(
@@ -3917,6 +3943,53 @@ public class RunOrchestrator implements RunControlPort {
       ExecutionResult exec, com.navneet.executespec.reviewer.ReviewerResult review) {
     TerminalStatusResolver.Result result = TerminalStatusResolver.resolve(exec, review);
     return new StatusAndReason(result.status(), result.reason());
+  }
+
+  /** E2: executable evidence is authoritative over clean textual/reviewer completion. */
+  static StatusAndReason applyExecutableVerification(
+      StatusAndReason current, ValidationReport report) {
+    if (report == null || report.getExecutableVerificationStatus() == null) {
+      return new StatusAndReason("FAILED", "EXECUTABLE_VERIFICATION_FAILED:MISSING_EVIDENCE");
+    }
+    if ("PASSED".equals(report.getExecutableVerificationStatus())
+        && Boolean.TRUE.equals(report.getExecutableTestsRun())
+        && Boolean.TRUE.equals(report.getExecutableTestsPassed())) {
+      return current;
+    }
+    return new StatusAndReason(
+        "FAILED", "EXECUTABLE_VERIFICATION_FAILED:" + report.getExecutableVerificationStatus());
+  }
+
+  private String writeJson(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value == null ? List.of() : value);
+    } catch (Exception e) {
+      throw new IllegalStateException("Could not persist bounded Ganesh target declaration", e);
+    }
+  }
+
+  private List<String> readStringList(String json) {
+    if (json == null || json.isBlank()) return List.of();
+    try {
+      return objectMapper.readValue(
+          json, objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+    } catch (Exception e) {
+      throw new IllegalStateException("Invalid persisted Ganesh target declaration", e);
+    }
+  }
+
+  private List<String> ganeshTargetFilesForRun(String runId) {
+    return runRepo
+        .findById(runId)
+        .map(PipelineRun::getGaneshTargetFilesJson)
+        .map(this::readStringList)
+        .orElseGet(List::of);
+  }
+
+  private static boolean isExecutableVerificationFailure(StatusAndReason status) {
+    return status != null
+        && status.reason() != null
+        && status.reason().startsWith("EXECUTABLE_VERIFICATION_FAILED:");
   }
 
   /**

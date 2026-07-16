@@ -31,6 +31,7 @@ import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.harness.entity.GateRecord;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelResolver;
@@ -83,6 +84,14 @@ class RunLifecycleServiceContinuationApprovalTest {
   void setUp() {
     agentProps.setWorkspace(tempDir.toString());
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    when(validationKickoff.generateValidationReport(any(), any(), any(), any()))
+        .thenReturn(
+            Optional.of(
+                ValidationReport.builder()
+                    .executableVerificationStatus("PASSED")
+                    .executableTestsRun(true)
+                    .executableTestsPassed(true)
+                    .build()));
     service =
         new RunLifecycleService(
             runRepo,
@@ -275,6 +284,58 @@ class RunLifecycleServiceContinuationApprovalTest {
         task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     assertApprovedContinuationEvent(RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
+  }
+
+  @Test
+  void approveContinuation_executableFailureOverridesCleanTerminal() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {"planTitle":"Retry","tasks":[{"id":"T1","title":"Fix","description":""}]}
+                """)
+            .aiProvider("openai")
+            .workerModel("gpt-5.4")
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .continuationDecisionJson(
+                """
+{"decision":"STOP_BLOCKED","selectedCandidate":{"provider":"openai","model":"gpt-5.4"},"policy":{"requireConfirmationBeforeExpensiveContinuation":true,"proposedAction":"CHANGE_PROVIDER"}}
+""")
+            .build();
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+    when(validationKickoff.generateValidationReport(any(), any(), any(), any()))
+        .thenReturn(
+            Optional.of(
+                ValidationReport.builder()
+                    .executableVerificationStatus("ASSERTION_FAILED")
+                    .executableTestsRun(true)
+                    .executableTestsPassed(false)
+                    .build()));
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    verify(controlPort)
+        .terminate(
+            eq(RUN_ID),
+            eq("FAILED"),
+            eq("EXECUTABLE_VERIFICATION_FAILED:ASSERTION_FAILED"),
+            any(),
+            any());
   }
 
   @Test

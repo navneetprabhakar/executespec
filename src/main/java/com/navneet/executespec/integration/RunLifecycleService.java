@@ -870,12 +870,20 @@ public class RunLifecycleService {
 
       contextComposer.ensureReadme(
           runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
-      validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
+      var validationReport =
+          validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
 
       String userRequest = row.getUserRequest();
       String prReviewComments = null; // not threaded for resumed runs
       finalizeRunAfterResume(
-          runId, plan, execResult, reviewResult, startedAt, upperProvider, model);
+          runId,
+          plan,
+          execResult,
+          reviewResult,
+          validationReport.orElse(null),
+          startedAt,
+          upperProvider,
+          model);
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
@@ -899,6 +907,7 @@ public class RunLifecycleService {
       com.navneet.executespec.agent.Plan plan,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
+      com.navneet.executespec.report.entity.ValidationReport validationReport,
       Instant startedAt,
       String upperProvider,
       String model) {
@@ -914,6 +923,7 @@ public class RunLifecycleService {
                 .build()
             : execResult;
     var terminal = RunOrchestrator.resolveTerminalStatus(effectiveExec, reviewResult);
+    terminal = RunOrchestrator.applyExecutableVerification(terminal, validationReport);
     controlPort.terminate(
         runId,
         terminal.status(),
@@ -1074,18 +1084,19 @@ public class RunLifecycleService {
                         ? runReviewerAfterApprovedPostReviewContinuation(
                             runId, plan, rootCtx, provider, model, result, afterRetry)
                         : null;
-                if (override != null && override.postReview()) {
-                  try {
-                    validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
-                  } catch (Exception e) {
-                    log.warn(
-                        "approved post-review continuation validation failed run={}: {}",
-                        runId,
-                        e.getMessage());
-                  }
+                java.util.Optional<com.navneet.executespec.report.entity.ValidationReport>
+                    validationReport = java.util.Optional.empty();
+                try {
+                  validationReport =
+                      validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
+                } catch (Exception e) {
+                  log.warn("retry validation failed run={}: {}", runId, e.getMessage());
                 }
 
                 var terminal = RunOrchestrator.resolveTerminalStatus(result, reviewResult);
+                terminal =
+                    RunOrchestrator.applyExecutableVerification(
+                        terminal, validationReport.orElse(null));
                 controlPort.terminate(
                     runId,
                     terminal.status(),
@@ -1546,8 +1557,11 @@ public class RunLifecycleService {
 
     ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);
 
+    java.util.Optional<com.navneet.executespec.report.entity.ValidationReport> validationReport =
+        java.util.Optional.empty();
     try {
-      validationKickoff.generateValidationReport(runId, null, reviewResult, null);
+      validationReport =
+          validationKickoff.generateValidationReport(runId, null, reviewResult, null);
     } catch (Exception e) {
       log.warn(
           "RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());
@@ -1555,6 +1569,7 @@ public class RunLifecycleService {
 
     RunOrchestrator.StatusAndReason terminal =
         RunOrchestrator.resolveTerminalStatus(execResult, reviewResult);
+    terminal = RunOrchestrator.applyExecutableVerification(terminal, validationReport.orElse(null));
     var refreshed = runRepo.findById(runId).orElse(run);
     refreshed.setStatus(terminal.status());
     refreshed.setStatusReason(terminal.reason());

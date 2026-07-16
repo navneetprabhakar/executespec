@@ -8,7 +8,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
@@ -40,8 +42,8 @@ import lombok.extern.slf4j.Slf4j;
  * com.navneet.executespec.tool.BuildProjectTool} exactly.
  *
  * <p><b>Fail-safe.</b> Any path that can't produce a trustworthy count — no recognized runner, a
- * blocked command, a timeout, an IO error, or unparseable output — returns {@link Optional#empty()}
- * so the caller falls back to LLM-judged coverage. A wrong hard count is worse than no count.
+ * blocked command, a timeout, an IO error, or unparseable output — returns an explicit rejected
+ * verification verdict. The legacy optional view remains available for non-acceptance consumers.
  */
 @Component
 @Slf4j
@@ -66,6 +68,16 @@ public class WorkspaceTestRunner {
 
   static final int DETAIL_TAIL_CHARS = 3_000;
 
+  private static final Pattern COMPILE_FAILURE =
+      Pattern.compile(
+          "(?is)(compilation error|compilation failed|cannot find symbol|compile(?:r)? error|"
+              + "typescript error|syntaxerror:|build failed|build failure|could not compile|"
+              + "undefined:|error\\[e\\d+\\]|package .+ is not in std|javac.+error)");
+  private static final Pattern MISSING_TOOLCHAIN =
+      Pattern.compile(
+          "(?is)((?:/bin/)?(?:sh|bash):.*(?:command )?not found|"
+              + "(?:exec|spawn).*?(?:enoent|no such file or directory))");
+
   /**
    * Resolve, validate, run, and parse the workspace test suite. Never throws — every failure mode
    * collapses to {@link Optional#empty()}.
@@ -76,13 +88,51 @@ public class WorkspaceTestRunner {
 
   /** Detailed sibling of {@link #runTests} — same fail-safe contract. */
   public Optional<DetailedResult> runTestsDetailed(String runId, Path workspaceRoot) {
-    if (workspaceRoot == null) return Optional.empty();
+    ExecutableVerification verification = verify(runId, workspaceRoot);
+    if (verification.summary() == null) return Optional.empty();
+    return Optional.of(
+        new DetailedResult(
+            verification.summary(),
+            verification.outputTail(),
+            verification.command(),
+            verification.exitCode()));
+  }
+
+  /**
+   * Run the workspace verifier and return one explicit fail-closed terminal verdict. This is the E2
+   * acceptance seam; callers must accept only {@link ExecutableVerification.Status#PASSED}.
+   */
+  public ExecutableVerification verify(String runId, Path workspaceRoot) {
+    if (workspaceRoot == null) {
+      return verdict(
+          ExecutableVerification.Status.MISSING_EVIDENCE,
+          ExecutableVerification.FailureStage.EVIDENCE,
+          false,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0,
+          "",
+          "Workspace path is absent.");
+    }
 
     Optional<TestCommand> resolved = resolver.resolve(workspaceRoot);
     if (resolved.isEmpty()) {
-      log.debug(
-          "WorkspaceTestRunner run={} no recognized test runner — fallback to coverage", runId);
-      return Optional.empty();
+      log.warn("WorkspaceTestRunner run={} no recognized executable verifier", runId);
+      return verdict(
+          ExecutableVerification.Status.MISSING_EVIDENCE,
+          ExecutableVerification.FailureStage.EVIDENCE,
+          false,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0,
+          "",
+          "No recognized test runner was found.");
     }
     TestCommand cmd = resolved.get();
 
@@ -96,7 +146,18 @@ public class WorkspaceTestRunner {
           runId,
           cmd.command(),
           v.reason());
-      return Optional.empty();
+      return verdict(
+          ExecutableVerification.Status.BLOCKED,
+          ExecutableVerification.FailureStage.SANDBOX,
+          false,
+          null,
+          cmd,
+          null,
+          null,
+          null,
+          0,
+          "",
+          "Resolved verifier command was blocked by the sandbox: " + v.reason());
     }
 
     String containerId = null;
@@ -117,13 +178,24 @@ public class WorkspaceTestRunner {
     }
 
     Instant start = Instant.now();
+    Process proc = null;
+    FutureTask<byte[]> outputRead = null;
+    String containerPidFile = null;
     try {
       ProcessBuilder pb;
       if (containerId != null) {
+        containerPidFile = containerPidFile(runId);
         pb =
             new ProcessBuilder(
                 List.of(
-                    "docker", "exec", "-w", workdir, containerId, "/bin/sh", "-c", cmd.command()));
+                    "docker",
+                    "exec",
+                    "-w",
+                    workdir,
+                    containerId,
+                    "/bin/sh",
+                    "-c",
+                    wrapContainerCommand(cmd.command(), containerPidFile)));
       } else {
         pb = new ProcessBuilder(List.of("/bin/sh", "-c", cmd.command()));
         pb.directory(workspaceRoot.toFile());
@@ -131,18 +203,50 @@ public class WorkspaceTestRunner {
       hardenEnv(pb);
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
+      try {
+        proc = pb.start();
+      } catch (IOException e) {
+        log.warn("WorkspaceTestRunner run={} process did not start: {}", runId, e.getMessage());
+        return verdict(
+            ExecutableVerification.Status.EXECUTION_ERROR,
+            ExecutableVerification.FailureStage.EXECUTION,
+            false,
+            false,
+            cmd,
+            null,
+            null,
+            null,
+            Duration.between(start, Instant.now()).toMillis(),
+            "",
+            "Verifier process could not be started: " + e.getClass().getSimpleName());
+      }
+      Process startedProcess = proc;
+      outputRead = new FutureTask<>(() -> startedProcess.getInputStream().readAllBytes());
+      Thread.ofVirtual().name("workspace-verifier-output-" + runId).start(outputRead);
       boolean finished = proc.waitFor(cmd.timeoutSeconds(), TimeUnit.SECONDS);
       if (!finished) {
-        proc.destroyForcibly();
+        cleanupContainerProcess(containerId, containerPidFile);
+        destroyProcessTree(proc);
+        String timeoutOutput = readOutput(outputRead);
         log.warn(
-            "WorkspaceTestRunner run={} test command exceeded {}s — fallback to coverage: {}",
+            "WorkspaceTestRunner run={} test command exceeded {}s: {}",
             runId,
             cmd.timeoutSeconds(),
             cmd.command());
-        return Optional.empty();
+        return verdict(
+            ExecutableVerification.Status.TIMEOUT,
+            ExecutableVerification.FailureStage.TIMEOUT,
+            true,
+            false,
+            cmd,
+            null,
+            null,
+            tail(timeoutOutput),
+            Duration.between(start, Instant.now()).toMillis(),
+            tail(timeoutOutput),
+            "Verifier exceeded " + cmd.timeoutSeconds() + " seconds; process tree terminated.");
       }
-      String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      String output = new String(outputRead.get(5, TimeUnit.SECONDS), StandardCharsets.UTF_8);
       int exit = proc.exitValue();
 
       Optional<TestExecutionSummary> parsed = TestOutputParser.parse(cmd.framework(), output, exit);
@@ -153,8 +257,8 @@ public class WorkspaceTestRunner {
         // tests FAILED was scored UNKNOWN (no penalty, no failed-tests cap). RL-2026-06-049.
         parsed = parseXmlReports(workspaceRoot);
       }
-      parsed.ifPresent(
-          s -> s.setExecutionDurationMs(Duration.between(start, Instant.now()).toMillis()));
+      long durationMs = Duration.between(start, Instant.now()).toMillis();
+      parsed.ifPresent(s -> s.setExecutionDurationMs(durationMs));
       log.info(
           "WorkspaceTestRunner run={} framework={} source={} → {}",
           runId,
@@ -162,20 +266,239 @@ public class WorkspaceTestRunner {
           cmd.source(),
           parsed
               .map(s -> s.getPassed() + "/" + s.getTotalTests() + " passed")
-              .orElse("unparseable (fallback to LLM coverage)"));
-      final String tail =
-          output.length() <= DETAIL_TAIL_CHARS
-              ? output
-              : "... [head omitted] ...\n" + output.substring(output.length() - DETAIL_TAIL_CHARS);
-      return parsed.map(s -> new DetailedResult(s, tail, cmd.command(), exit));
-    } catch (IOException e) {
-      log.warn(
-          "WorkspaceTestRunner run={} IO error — fallback to coverage: {}", runId, e.getMessage());
-      return Optional.empty();
+              .orElse("unparseable"));
+      final String tail = tail(output);
+      if (exit == 127 || MISSING_TOOLCHAIN.matcher(output.strip()).find()) {
+        return verdict(
+            ExecutableVerification.Status.MISSING_TOOLCHAIN,
+            ExecutableVerification.FailureStage.TOOLCHAIN,
+            true,
+            false,
+            cmd,
+            null,
+            exit,
+            tail,
+            durationMs,
+            tail,
+            "Required test toolchain is unavailable.");
+      }
+      // A runner can print a partial test summary before compilation fails in another module.
+      // Compilation therefore owns the verdict before parsed assertion counts are considered.
+      if (exit != 0 && COMPILE_FAILURE.matcher(output).find()) {
+        return verdict(
+            ExecutableVerification.Status.COMPILE_FAILED,
+            ExecutableVerification.FailureStage.COMPILE,
+            true,
+            false,
+            cmd,
+            parsed.orElse(null),
+            exit,
+            tail,
+            durationMs,
+            tail,
+            "Compilation failed before executable tests completed.");
+      }
+      if (parsed.isPresent()) {
+        TestExecutionSummary summary = parsed.get();
+        if (summary.getTotalTests() <= 0) {
+          return verdict(
+              ExecutableVerification.Status.EMPTY_TESTS,
+              ExecutableVerification.FailureStage.TEST_DISCOVERY,
+              true,
+              false,
+              cmd,
+              summary,
+              exit,
+              tail,
+              durationMs,
+              tail,
+              "Verifier ran but discovered zero tests.");
+        }
+        if (summary.getPassed() == 0 && summary.getFailed() == 0 && summary.getErrors() == 0) {
+          return verdict(
+              ExecutableVerification.Status.EMPTY_TESTS,
+              ExecutableVerification.FailureStage.TEST_DISCOVERY,
+              true,
+              false,
+              cmd,
+              summary,
+              exit,
+              tail,
+              durationMs,
+              tail,
+              "Verifier ran but no test assertion executed (all tests were skipped).");
+        }
+        if (exit == 0
+            && summary.getPassed() > 0
+            && summary.getFailed() == 0
+            && summary.getErrors() == 0) {
+          return verdict(
+              ExecutableVerification.Status.PASSED,
+              ExecutableVerification.FailureStage.NONE,
+              true,
+              true,
+              cmd,
+              summary,
+              exit,
+              tail,
+              durationMs,
+              tail,
+              summary.getPassed() + "/" + summary.getTotalTests() + " tests passed.");
+        }
+        return verdict(
+            ExecutableVerification.Status.ASSERTION_FAILED,
+            ExecutableVerification.FailureStage.TEST_ASSERTION,
+            true,
+            false,
+            cmd,
+            summary,
+            exit,
+            tail,
+            durationMs,
+            tail,
+            summary.getPassed() + "/" + summary.getTotalTests() + " tests passed.");
+      }
+      return verdict(
+          ExecutableVerification.Status.MALFORMED_OUTPUT,
+          ExecutableVerification.FailureStage.OUTPUT_PARSE,
+          true,
+          false,
+          cmd,
+          null,
+          exit,
+          tail,
+          durationMs,
+          tail,
+          "Verifier output did not contain trustworthy test counts.");
+    } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+      log.warn("WorkspaceTestRunner run={} IO error: {}", runId, e.getMessage());
+      return verdict(
+          ExecutableVerification.Status.EXECUTION_ERROR,
+          ExecutableVerification.FailureStage.EXECUTION,
+          true,
+          false,
+          cmd,
+          null,
+          null,
+          null,
+          Duration.between(start, Instant.now()).toMillis(),
+          "",
+          "Verifier process could not be executed: " + e.getClass().getSimpleName());
+    } catch (InterruptedException e) {
+      cleanupContainerProcess(containerId, containerPidFile);
+      if (proc != null) destroyProcessTree(proc);
+      if (outputRead != null) outputRead.cancel(true);
+      Thread.currentThread().interrupt();
+      return verdict(
+          ExecutableVerification.Status.INTERRUPTED,
+          ExecutableVerification.FailureStage.INTERRUPTED,
+          true,
+          false,
+          cmd,
+          null,
+          null,
+          null,
+          Duration.between(start, Instant.now()).toMillis(),
+          "",
+          "Verifier execution was interrupted.");
+    }
+  }
+
+  private static ExecutableVerification verdict(
+      ExecutableVerification.Status status,
+      ExecutableVerification.FailureStage stage,
+      boolean testsRun,
+      Boolean testsPassed,
+      TestCommand cmd,
+      TestExecutionSummary summary,
+      Integer exitCode,
+      String ignored,
+      long durationMs,
+      String outputTail,
+      String detail) {
+    return new ExecutableVerification(
+        status,
+        stage,
+        testsRun,
+        testsPassed,
+        summary,
+        cmd == null ? null : cmd.framework().name(),
+        cmd == null ? null : cmd.source(),
+        cmd == null ? null : cmd.command(),
+        exitCode,
+        durationMs,
+        outputTail,
+        detail);
+  }
+
+  private static void destroyProcessTree(Process proc) {
+    proc.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+    proc.destroyForcibly();
+    try {
+      proc.waitFor(5, TimeUnit.SECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return Optional.empty();
     }
+  }
+
+  static String containerPidFile(String runId) {
+    String safe = runId == null ? "unknown" : runId.replaceAll("[^A-Za-z0-9._-]", "_");
+    return "/tmp/executespec-verifier-" + safe + ".pid";
+  }
+
+  static String wrapContainerCommand(String command, String pidFile) {
+    return "echo $$ > "
+        + shellQuote(pidFile)
+        + "; trap \"rm -f "
+        + shellQuote(pidFile)
+        + "\" EXIT; /bin/sh -c "
+        + shellQuote(command);
+  }
+
+  private static void cleanupContainerProcess(String containerId, String pidFile) {
+    if (containerId == null || pidFile == null) return;
+    String script =
+        "kill_tree() { for child in $(ps -eo pid=,ppid= | awk -v p=\"$1\" '$2 == p {print $1}'); do"
+            + " kill_tree \"$child\"; done; kill -KILL \"$1\" 2>/dev/null || true; }; if [ -f "
+            + shellQuote(pidFile)
+            + " ]; then "
+            + "pid=$(cat "
+            + shellQuote(pidFile)
+            + "); "
+            + "kill_tree \"$pid\"; rm -f "
+            + shellQuote(pidFile)
+            + "; fi";
+    try {
+      Process cleanup =
+          new ProcessBuilder("docker", "exec", containerId, "/bin/sh", "-c", script)
+              .redirectErrorStream(true)
+              .start();
+      if (!cleanup.waitFor(5, TimeUnit.SECONDS)) cleanup.destroyForcibly();
+    } catch (IOException e) {
+      log.warn("Unable to clean verifier process in container {}: {}", containerId, e.getMessage());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private static String shellQuote(String value) {
+    return "'" + value.replace("'", "'\"'\"'") + "'";
+  }
+
+  private static String readOutput(FutureTask<byte[]> outputRead) {
+    try {
+      return new String(outputRead.get(5, TimeUnit.SECONDS), StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      outputRead.cancel(true);
+      return "";
+    }
+  }
+
+  private static String tail(String output) {
+    if (output == null || output.isEmpty()) return "";
+    return output.length() <= DETAIL_TAIL_CHARS
+        ? output
+        : "... [head omitted] ...\n" + output.substring(output.length() - DETAIL_TAIL_CHARS);
   }
 
   /**

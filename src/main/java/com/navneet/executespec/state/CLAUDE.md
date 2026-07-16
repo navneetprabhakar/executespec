@@ -31,6 +31,8 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - V60.1: Cost-proportional credits (`credits_charged`, `hard_cap_usd` on `pipeline_run`; `cached_input_cost_per_1m` on `model_pricing`; new `run_cost_log` audit table)
 - V61: Batch execution support (`approved_execution_mode`, `batch_id`, `batch_provider`, `batch_progress_*`, `batch_submitted_at`, `batch_credits`, `batch_available`, `credit_savings` on `pipeline_run`; new `notification` table)
 - V106 (v2.5.10): `validation_report` gains `final_build_passed`, `tests_passed`, `tests_total`, `reviewer_verdict`, `verified_score` columns + seeds `scoring.v2-verified` feature flag. Deterministic-score foundation for the v3 validation rollout.
+- V273: `validation_report` gains provider-independent executable-verification status,
+  `executable_tests_run`, `executable_tests_passed`, failure stage, and bounded evidence JSON.
 - V107 (v2.5.10): `pipeline_run.status_reason VARCHAR(80)` — explicit reason for the terminal status (see entity doc above).
 - V108 (v2.5.10): one-shot backfill that reclassifies historical PARTIAL runs. Runs with `final_build_passed=TRUE` + reviewer `CLEAN|FIXED_ISSUES` + tests passing → COMPLETE + `CLEAN_WITH_INTERMEDIATE_WARNINGS`. Build-failed → stay PARTIAL + `FINAL_BUILD_FAILED`. Everything else → PARTIAL + `LEGACY_UNKNOWN`.
 - V109 (v2.5.11): `pipeline_run.plan_requirements_json TEXT` + `agent_task.meets_requirements_json TEXT` + seeds `validation.v3-strict` feature flag (default OFF). Planner requirement graph for Validation v3 / Pillar 1.

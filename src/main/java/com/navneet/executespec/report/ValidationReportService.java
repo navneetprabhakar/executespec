@@ -220,6 +220,11 @@ public class ValidationReportService {
               filesGenerated,
               input.bootVerification());
 
+      // E2: executable evidence owns acceptance. A clean reviewer or textual completion cannot
+      // vouch for a workspace whose executable verifier failed or produced no trustworthy proof.
+      verifiedScore =
+          enforceExecutableVerificationScore(verifiedScore, input.executableVerification());
+
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
       // headline. The rubric awards points dimension-by-dimension so a run that compiled
@@ -233,6 +238,19 @@ public class ValidationReportService {
               unfixedCritical,
               endpointCoveragePercent,
               testCoverageLevel);
+      rubricScore = enforceExecutableVerificationScore(rubricScore, input.executableVerification());
+
+      String executableEvidenceJson = null;
+      if (input.executableVerification() != null) {
+        try {
+          executableEvidenceJson = objectMapper.writeValueAsString(input.executableVerification());
+        } catch (Exception evidenceEx) {
+          log.warn(
+              "Failed to serialize executable verification evidence for run={}: {}",
+              runId,
+              evidenceEx.getMessage());
+        }
+      }
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -277,6 +295,23 @@ public class ValidationReportService {
               .finalBuildPassed(finalBuildPassed)
               .testsPassed(ts != null ? testsPassedCount : null)
               .testsTotal(ts != null ? testsTotalCount : null)
+              .executableTestsRun(
+                  input.executableVerification() == null
+                      ? null
+                      : input.executableVerification().testsRun())
+              .executableTestsPassed(
+                  input.executableVerification() == null
+                      ? null
+                      : input.executableVerification().testsPassed())
+              .executableVerificationStatus(
+                  input.executableVerification() == null
+                      ? null
+                      : input.executableVerification().status().name())
+              .executionFailureStage(
+                  input.executableVerification() == null
+                      ? null
+                      : input.executableVerification().failureStage().name())
+              .executableEvidenceJson(executableEvidenceJson)
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
@@ -451,6 +486,17 @@ public class ValidationReportService {
             criticals,
             accuracy.endpointCoverage(),
             concreteCoverageLevel));
+
+    // E2 is an acceptance gate, not another score input. A later concrete-test rescore must never
+    // turn a persisted fail-closed executable verdict back into a passing-looking report.
+    if (report.getExecutableVerificationStatus() != null
+        && !("PASSED".equals(report.getExecutableVerificationStatus())
+            && Boolean.TRUE.equals(report.getExecutableTestsRun())
+            && Boolean.TRUE.equals(report.getExecutableTestsPassed()))) {
+      report.setVerifiedScore(0);
+      report.setRubricScore(0);
+      report.setPipelineResult(PipelineResult.FAILED);
+    }
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
@@ -688,6 +734,9 @@ public class ValidationReportService {
   }
 
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
+    if (input.executableVerification() != null && !input.executableVerification().accepted()) {
+      return PipelineResult.FAILED;
+    }
     PipelineResult heuristic = computeResultHeuristic(issues, input);
     // R-09 (UX audit, 2026-05-04) — reconcile against the run's
     // authoritative status_reason. Pre-fix, the heuristic above could
@@ -700,6 +749,11 @@ public class ValidationReportService {
     // ValidationReportPanel.tsx). With the reconciliation below, the two
     // signals agree at write time so the UI special case can go.
     return reconcileWithRunStatus(heuristic, input);
+  }
+
+  static int enforceExecutableVerificationScore(
+      int candidate, com.navneet.executespec.smoketest.ExecutableVerification verification) {
+    return verification != null && !verification.accepted() ? 0 : candidate;
   }
 
   /**
@@ -849,6 +903,11 @@ public class ValidationReportService {
         entity.getFinalBuildPassed(),
         entity.getTestsPassed(),
         entity.getTestsTotal(),
+        entity.getExecutableTestsRun(),
+        entity.getExecutableTestsPassed(),
+        entity.getExecutableVerificationStatus(),
+        entity.getExecutionFailureStage(),
+        entity.getExecutableEvidenceJson(),
         entity.getReviewerVerdict(),
         entity.getVerifiedScore(),
         verificationLedger,
@@ -924,6 +983,10 @@ public class ValidationReportService {
         entity.getFinalBuildPassed(),
         entity.getTestsPassed(),
         entity.getTestsTotal(),
+        entity.getExecutableTestsRun(),
+        entity.getExecutableTestsPassed(),
+        entity.getExecutableVerificationStatus(),
+        entity.getExecutionFailureStage(),
         entity.getReviewerVerdict(),
         verificationLedger);
   }

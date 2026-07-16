@@ -333,6 +333,15 @@ to boot — skip it for those.""";
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
+  /** Shared BUILD/PATCH Ganesh route; setter keeps legacy unit constructors source-compatible. */
+  private com.navneet.executespec.engine.GaneshWorkerContinuation ganeshContinuation;
+
+  @Autowired
+  void setGaneshContinuation(
+      com.navneet.executespec.engine.GaneshWorkerContinuation ganeshContinuation) {
+    this.ganeshContinuation = ganeshContinuation;
+  }
+
   /**
    * 2026-05-04 — used by the resume path to load saved worker conversation snapshots. The
    * non-resume execute path doesn't touch this field; ContextStore writes happen inside {@link
@@ -1886,7 +1895,46 @@ to boot — skip it for those.""";
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
     // ride a 24h Redis TTL and are written every 5 worker iters.
-    WorkerResult primary = worker.run(workerReq, resumeFrom);
+    com.navneet.executespec.engine.GaneshWorkerContinuation.Result ganeshAttempt = null;
+    WorkerResult primary;
+    if (ganeshContinuation != null) {
+      ganeshAttempt =
+          ganeshContinuation.execute(
+              new com.navneet.executespec.engine.GaneshWorkerContinuation.Request(
+                  runId,
+                  task.id(),
+                  taskCtx.workspaceRoot(),
+                  "BUILD",
+                  cfg.provider,
+                  cfg.model,
+                  ganeshTargetFiles(req, plan, task),
+                  requireConfirmationBeforeExpensiveContinuation(runId)),
+              (provider, model, priorEvidence) -> {
+                WorkerTaskRequest routed =
+                    workerReq.toBuilder()
+                        .provider(provider)
+                        .model(model)
+                        .userPrompt(
+                            priorEvidence == null
+                                ? workerReq.userPrompt()
+                                : workerReq.userPrompt()
+                                    + "\n\nRepair the existing workspace after failed executable"
+                                    + " verification. E2 status="
+                                    + priorEvidence.status()
+                                    + ", stage="
+                                    + priorEvidence.failureStage()
+                                    + ". Evidence: "
+                                    + (priorEvidence.detail() == null
+                                        ? ""
+                                        : priorEvidence.detail()))
+                        .build();
+                return worker.run(routed, priorEvidence == null ? resumeFrom : null);
+              });
+      primary = ganeshAttempt.workerResult();
+      cfg = cfg.withProviderModel(ganeshAttempt.provider(), ganeshAttempt.model());
+    } else {
+      primary = worker.run(workerReq, resumeFrom);
+    }
 
     // 2026-05-04 — emit a worker-summary log line right after the worker returns so the user
     // sees outcome + iters without waiting for the smoke test to finish or scrolling back to
@@ -1931,6 +1979,51 @@ to boot — skip it for those.""";
         primary.iterations(),
         primary.toolCallsDispatched(),
         countFileWrites(primary.toolCallLog()));
+
+    if (ganeshAttempt != null && ganeshAttempt.ganeshRouted()) {
+      if (!ganeshAttempt.accepted()
+          || (primary.outcome() != WorkerResult.Outcome.COMPLETED
+              && countFileWrites(primary.toolCallLog()) == 0)) {
+        String reason =
+            "GANESH_EXECUTABLE_VERIFICATION_FAILED:"
+                + (ganeshAttempt.verification() == null
+                    ? "MISSING_EVIDENCE"
+                    : ganeshAttempt.verification().status());
+        persistTaskStatus(runId, task.id(), "FAILED", reason);
+        broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
+        return TaskOutcome.builder()
+            .taskId(task.id())
+            .taskTitle(task.title())
+            .status(TaskOutcome.Status.WORKER_FAILED)
+            .workerOutcome(primary)
+            .retryAttempted(ganeshAttempt.frontierRetried())
+            .retryWorkerOutcome(ganeshAttempt.frontierRetried() ? primary : null)
+            .smokeTestPassed(false)
+            .totalLatencyMs(System.currentTimeMillis() - taskStart)
+            .toolCallsDispatched(primary.toolCallsDispatched())
+            .dispatchedProvider(ganeshAttempt.provider())
+            .dispatchedModel(ganeshAttempt.model())
+            .build();
+      }
+      persistTaskStatus(runId, task.id(), "COMPLETE");
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      return TaskOutcome.builder()
+          .taskId(task.id())
+          .taskTitle(task.title())
+          .status(
+              ganeshAttempt.frontierRetried()
+                  ? TaskOutcome.Status.SUCCESS_AFTER_RETRY
+                  : TaskOutcome.Status.SUCCESS)
+          .workerOutcome(primary)
+          .retryAttempted(ganeshAttempt.frontierRetried())
+          .retryWorkerOutcome(ganeshAttempt.frontierRetried() ? primary : null)
+          .smokeTestPassed(true)
+          .totalLatencyMs(System.currentTimeMillis() - taskStart)
+          .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(ganeshAttempt.provider())
+          .dispatchedModel(ganeshAttempt.model())
+          .build();
+    }
 
     // Worker didn't reach COMPLETED. Check whether it still wrote files — if so
     // the task produced real output and shouldn't be marked FAILED outright.
@@ -3272,6 +3365,19 @@ to boot — skip it for those.""";
   private boolean requireConfirmationBeforeExpensiveContinuation(String runId) {
     return continuationConfirmationRequiredByRun.getOrDefault(
         runId, requireConfirmationBeforeExpensiveContinuation);
+  }
+
+  private static List<String> ganeshTargetFiles(
+      ExecutionRequest request, Plan plan, PlannedTask task) {
+    List<String> declared = request.ganeshTargetFiles();
+    if (declared == null || declared.size() != 1 || plan.tasks().size() != 1) {
+      return List.of();
+    }
+    List<String> plannerHints = task.touchesFiles();
+    if (plannerHints != null && !plannerHints.isEmpty() && !plannerHints.equals(declared)) {
+      return List.of();
+    }
+    return declared;
   }
 
   private boolean requireBenchmarkPriorForAutomaticContinuation(String runId) {

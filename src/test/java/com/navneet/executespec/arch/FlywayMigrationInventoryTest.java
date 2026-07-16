@@ -23,9 +23,9 @@ class FlywayMigrationInventoryTest {
     List<MigrationFile> migrations = readMigrations();
 
     // V119 is an applied historical migration and must remain on the classpath.
-    // V60_1 is fractional, so V1..V272 contains 273 migration files.
-    assertThat(migrations).hasSize(273);
-    assertThat(migrations.getLast().version()).isEqualTo("272");
+    // V60_1 is fractional, so V1..V274 contains 275 migration files.
+    assertThat(migrations).hasSize(275);
+    assertThat(migrations.getLast().version()).isEqualTo("274");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

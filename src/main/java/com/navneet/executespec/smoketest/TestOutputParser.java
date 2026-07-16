@@ -79,7 +79,7 @@ public final class TestOutputParser {
     Integer failed = firstInt(PYTEST_FAILED, out);
     Integer errors = firstInt(PYTEST_ERROR, out);
     Integer skipped = firstInt(PYTEST_SKIPPED, out);
-    if (passed == null && failed == null && errors == null) {
+    if (passed == null && failed == null && errors == null && skipped == null) {
       // "no tests ran" is a real, parseable pytest outcome → 0/0, not empty.
       if (out.contains("no tests ran")) return Optional.of(zero());
       return Optional.empty();

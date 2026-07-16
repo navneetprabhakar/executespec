@@ -149,7 +149,7 @@ import lombok.Builder;
  *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
  *     allow-listed fallback instead. Null/false preserves normal routing.
  */
-@Builder
+@Builder(toBuilder = true)
 public record WorkerTaskRequest(
     String provider,
     String model,

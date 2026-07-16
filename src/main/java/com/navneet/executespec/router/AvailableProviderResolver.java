@@ -135,6 +135,7 @@ public class AvailableProviderResolver {
       case OPENROUTER -> "openrouter";
       case DEEPSEEK -> "deepseek";
       case FIREWORKS -> "fireworks";
+      case GANESH -> "ganesh";
     };
   }
 

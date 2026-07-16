@@ -64,6 +64,19 @@ public record RunEvent(
         data == null ? Map.of() : Map.copyOf(data));
   }
 
+  /** Ordered executable evidence for a Ganesh worker attempt or its sole frontier retry. */
+  public static RunEvent ganeshExecutableAttempt(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    Map<String, Object> sanitized = new LinkedHashMap<>();
+    if (data != null)
+      data.forEach(
+          (key, value) -> {
+            if (value != null) sanitized.put(key, value);
+          });
+    return new RunEvent(
+        "GANESH_E2_ATTEMPT", runId, taskId, summary, Instant.now(), 1, Map.copyOf(sanitized));
+  }
+
   /**
    * Machine-readable evidence for the route selected for a task's first worker attempt. The legacy
    * payload is intentionally a short human summary; structured clients can use the typed fields to

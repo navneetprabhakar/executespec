@@ -49,13 +49,22 @@ public class GcsWorkspaceStore {
       DeploymentProperties props, @Value("${spring.profiles.active:dev}") String environment) {
     this.props = props;
     this.environment = environment;
+    String configuredBucket = props.workspace() == null ? null : props.workspace().gcsBucket();
+    if (props.workspace() == null
+        || !props.workspace().gcsEnabled()
+        || configuredBucket == null
+        || configuredBucket.isBlank()) {
+      log.info("[GcsWorkspaceStore] Disabled by configuration — no GCS client created");
+      this.storage = null;
+      return;
+    }
     Storage s = null;
     try {
       s = StorageOptions.getDefaultInstance().getService();
       // Verify bucket exists — if not, disable GCS operations to prevent
       // repeated 404 upload failures that spam logs every 5 minutes.
-      String b = bucket();
-      if (b != null && !b.isBlank() && s.get(b) == null) {
+      String b = configuredBucket;
+      if (s.get(b) == null) {
         log.warn(
             "[GcsWorkspaceStore] Bucket '{}' does not exist — disabling GCS workspace operations. "
                 + "Create the bucket or set GCS_WORKSPACE_BUCKET='' to silence this.",

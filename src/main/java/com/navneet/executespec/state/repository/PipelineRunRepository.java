@@ -45,7 +45,7 @@ public interface PipelineRunRepository
    * cancellation observes a terminal status and cannot replace it, and once cancellation wins the
    * update returns zero.
    */
-  @Modifying
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Transactional
   @Query(
       "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "
@@ -60,7 +60,7 @@ public interface PipelineRunRepository
       @Param("failureReason") String failureReason,
       @Param("completedAt") Instant completedAt);
 
-  @Modifying
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Transactional
   @Query(
       "UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL, "

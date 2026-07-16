@@ -21,8 +21,13 @@ compatibility seam used by report projections and scoring/rescore flows.
 - Missing endpoint coverage is explicitly `UNKNOWN` in the ledger and receives neutral midpoint
   rubric credit (8/15), never full endpoint points. This prevents a public/shared score from being
   inflated by absent evidence while preserving partial credit for non-HTTP or unmeasurable work.
+- V273 persists E2 executable-verification status, `TESTS_RUN`, `TESTS_PASSED`, failure stage, and
+  bounded command/output evidence. Any non-passing verdict forces the pipeline result to FAILED and
+  both score summaries to zero; `CLEAN_COMPLETION` cannot override executable failure.
 
 ## Migration
 
 - `V270__persist_validation_boot_evidence.sql` adds nullable provenance columns. Historical rows remain
   valid and compile-only reports retain their prior scoring behavior.
+- `V273__persist_executable_verification_evidence.sql` adds nullable E2 evidence columns. Null keeps
+  historical report behavior; new BUILD runs receive an explicit pass or fail-closed verdict.

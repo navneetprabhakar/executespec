@@ -1,6 +1,7 @@
 package com.navneet.executespec.arch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -143,11 +144,11 @@ class FailoverOrderEnumAlignmentTest {
     // tests should keep passing — but if someone REMOVES one, the
     // failover-order test above will catch it via the yaml check.
     assertEquals(
-        6,
+        7,
         LlmProvider.values().length,
-        "Unexpected LlmProvider enum size — if you added a new provider, update application.yml's"
-            + " failover-order + model-matrix.providers to include it. If you removed one, update"
-            + " the same two yaml sections to drop references. (OPENROUTER added 2026-05-21 —"
+        "Unexpected LlmProvider enum size — public run providers belong in application.yml's"
+            + " failover-order/model-matrix; an internal-only provider needs an explicit exclusion"
+            + " invariant like Ganesh below. (OPENROUTER added 2026-05-21 —"
             + " model-matrix.providers.openrouter is set; it is an enterprise gateway,"
             + " intentionally NOT in failover-order.) (DEEPSEEK added 2026-05-28, RL-2026-05-052 —"
             + " model-matrix.providers.deepseek is set; native api.deepseek.com route, Enterprise"
@@ -155,5 +156,24 @@ class FailoverOrderEnumAlignmentTest {
             + " model-matrix.providers.fireworks is set; aggregator route, Enterprise BYOK,"
             + " (agent.provider-pools was removed"
             + " 2026-05-26, RL-2026-05-041 — no longer a section to update.)");
+  }
+
+  @Test
+  void ganeshIsInternalWorkerOnlyAndAbsentFromPublicProviderSelection() throws Exception {
+    Map<String, Object> root = loadApplicationYaml();
+    @SuppressWarnings("unchecked")
+    Map<String, Object> modelMatrix = (Map<String, Object>) root.get("model-matrix");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> providers = (Map<String, Object>) modelMatrix.get("providers");
+    @SuppressWarnings("unchecked")
+    Map<String, List<String>> failoverOrder =
+        (Map<String, List<String>>) modelMatrix.get("failover-order");
+
+    assertEquals(LlmProvider.GANESH, LlmProvider.valueOf("GANESH"));
+    assertFalse(providers.containsKey("ganesh"), "Ganesh must not become a run-level provider");
+    assertFalse(failoverOrder.containsKey("ganesh"), "Ganesh must not become a planner fallback");
+    assertFalse(
+        failoverOrder.values().stream().flatMap(List::stream).anyMatch("ganesh"::equalsIgnoreCase),
+        "Ganesh must not become a planner/reviewer fallback");
   }
 }

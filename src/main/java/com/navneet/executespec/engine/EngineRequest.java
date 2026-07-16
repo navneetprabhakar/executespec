@@ -1,6 +1,7 @@
 package com.navneet.executespec.engine;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import lombok.Builder;
 
@@ -28,4 +29,8 @@ public record EngineRequest(
     EngineBudget budget,
     VerifyMode verifyMode,
     String runId,
-    String taskId) {}
+    String taskId,
+    /** Exact target-file declaration required for the bounded Ganesh single-file route. */
+    List<String> targetFiles,
+    /** True blocks the E2-triggered frontier retry until a user confirms more spend. */
+    Boolean requireConfirmationBeforeExpensiveContinuation) {}

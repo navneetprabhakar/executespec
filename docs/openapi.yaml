@@ -2584,6 +2584,26 @@ paths:
                     type: integer
                     nullable: true
                     description: "v2.5.10 (V106) — count of all TestResult rows for this run."
+                  executableTestsRun:
+                    type: boolean
+                    nullable: true
+                    description: "E2 — true only when a resolver-derived executable verifier process started."
+                  executableTestsPassed:
+                    type: boolean
+                    nullable: true
+                    description: "E2 — true only when at least one concrete test ran and all tests passed."
+                  executableVerificationStatus:
+                    type: string
+                    nullable: true
+                    description: "E2 fail-closed verdict; only PASSED is acceptance evidence."
+                  executionFailureStage:
+                    type: string
+                    nullable: true
+                    description: "E2 failure boundary such as TEST_ASSERTION, COMPILE, TIMEOUT, TOOLCHAIN, OUTPUT_PARSE, or EVIDENCE."
+                  executableEvidenceJson:
+                    type: string
+                    nullable: true
+                    description: "Bounded retained command, output-tail, timing, counts, and verdict evidence."
                   reviewerVerdict:
                     type: string
                     nullable: true
@@ -4277,6 +4297,14 @@ components:
             proxied to the caller's machine; clone / smoke / reviewer / auto-push skipped).
             PAT-only and gated by the `worker.local-hands.enabled` flag; rejected for browser/JWT
             sessions (403) and when the flag is off (409). Transient (not persisted). Default false.
+        targetFiles:
+          type: array
+          maxItems: 1
+          items:
+            type: string
+          description: >
+            Explicit single-file target declaration. Required before a PATCH worker can be
+            considered for the disabled-by-default Ganesh route; never inferred from prose.
         requireConfirmationBeforeExpensiveContinuation:
           type: boolean
           description: >
@@ -4389,6 +4417,21 @@ components:
           type: object
           nullable: true
           description: Durable final run-level goal proof derived from the validation-report ledger.
+        ganeshWorkerAttempts:
+          type: array
+          description: Ordered durable E2 evidence for the Ganesh attempt and sole frontier retry.
+          items:
+            type: object
+            required: [taskId, attempt, provider, model, verificationStatus, failureStage, evidence]
+            properties:
+              taskId: { type: string }
+              attempt: { type: integer, minimum: 1, maximum: 2 }
+              provider: { type: string }
+              model: { type: string }
+              verificationStatus: { type: string }
+              failureStage: { type: string }
+              evidence: { type: object }
+              createdAt: { type: string, format: date-time }
         createdAt:
           type: string
           format: date-time

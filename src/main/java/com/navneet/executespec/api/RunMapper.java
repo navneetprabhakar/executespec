@@ -7,6 +7,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.api.dto.GaneshWorkerAttemptDTO;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.api.dto.TaskSummary;
@@ -16,6 +17,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.engine.GaneshWorkerAttemptRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -23,6 +25,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -39,6 +42,12 @@ public class RunMapper {
   private final ValidationReportRepository validationReportRepository;
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final ObjectMapper objectMapper;
+  private GaneshWorkerAttemptRepository ganeshWorkerAttemptRepository;
+
+  @Autowired
+  void setGaneshWorkerAttemptRepository(GaneshWorkerAttemptRepository repository) {
+    this.ganeshWorkerAttemptRepository = repository;
+  }
 
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
@@ -236,6 +245,7 @@ public class RunMapper {
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
         .runGoalDoneness(parseJson(r.getRunGoalDonenessJson()))
+        .ganeshWorkerAttempts(ganeshAttempts(r.getRunId()))
         .tasks(
             tasks.stream()
                 .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
@@ -376,6 +386,23 @@ public class RunMapper {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  private List<GaneshWorkerAttemptDTO> ganeshAttempts(String runId) {
+    if (ganeshWorkerAttemptRepository == null) return List.of();
+    return ganeshWorkerAttemptRepository.findByRunIdOrderByTaskIdAscAttemptAsc(runId).stream()
+        .map(
+            a ->
+                new GaneshWorkerAttemptDTO(
+                    a.getTaskId(),
+                    a.getAttempt(),
+                    a.getProvider(),
+                    a.getModel(),
+                    a.getVerificationStatus(),
+                    a.getFailureStage(),
+                    parseJson(a.getEvidenceJson()),
+                    a.getCreatedAt()))
+        .toList();
   }
 
   /**

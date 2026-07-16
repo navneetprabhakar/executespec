@@ -41,6 +41,11 @@ public record ValidationReportDTO(
     Boolean finalBuildPassed,
     Integer testsPassed,
     Integer testsTotal,
+    Boolean executableTestsRun,
+    Boolean executableTestsPassed,
+    String executableVerificationStatus,
+    String executionFailureStage,
+    String executableEvidenceJson,
     String reviewerVerdict, // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
     Integer verifiedScore, // 0-100 deterministic score; primary UI badge
     /**

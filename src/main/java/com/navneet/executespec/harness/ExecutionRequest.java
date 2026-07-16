@@ -1,5 +1,7 @@
 package com.navneet.executespec.harness;
 
+import java.util.List;
+
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -65,6 +67,12 @@ public record ExecutionRequest(
     Integer initialProviderSwitchesUsed,
     Integer initialModelStepUpsUsed,
     Integer initialModelStepDownsUsed,
+    /**
+     * Explicit API-declared single-file target for the bounded Ganesh worker lane. This is
+     * persisted by the orchestrator and is authoritative only when the plan also contains exactly
+     * one compatible task; planner-generated file hints alone never authorize Ganesh routing.
+     */
+    List<String> ganeshTargetFiles,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
@@ -103,6 +111,8 @@ public record ExecutionRequest(
     if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
     if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;
     if (initialModelStepDownsUsed == null) initialModelStepDownsUsed = 0;
+    if (ganeshTargetFiles == null) ganeshTargetFiles = List.of();
+    else ganeshTargetFiles = List.copyOf(ganeshTargetFiles);
     initialProviderSwitchesUsed = Math.max(0, initialProviderSwitchesUsed);
     initialModelStepUpsUsed = Math.max(0, initialModelStepUpsUsed);
     initialModelStepDownsUsed = Math.max(0, initialModelStepDownsUsed);

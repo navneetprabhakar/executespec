@@ -346,6 +346,10 @@ public class PipelineRun {
   @Column(name = "key_source")
   private String keySource;
 
+  /** V274 — explicit submit-time target declaration; never inferred from prose. */
+  @Column(name = "ganesh_target_files_json", columnDefinition = "TEXT")
+  private String ganeshTargetFilesJson;
+
   /**
    * User's subscription tier at run creation time — FREE | PRO | ENTERPRISE. Used for async
    * budget/model enforcement.

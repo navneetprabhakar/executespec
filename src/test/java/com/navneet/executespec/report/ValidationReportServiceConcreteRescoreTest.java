@@ -108,4 +108,48 @@ class ValidationReportServiceConcreteRescoreTest {
     assertTrue(
         service.rescoreAfterConcreteTests("missing", TestExecutionSummary.empty()).isEmpty());
   }
+
+  @Test
+  void concreteRescoreCannotInflatePersistedExecutableFailure() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-e2")
+            .runId("run-e2")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.FAILED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(0)
+            .rubricScore(0)
+            .executableVerificationStatus("ASSERTION_FAILED")
+            .executableTestsRun(true)
+            .executableTestsPassed(false)
+            .issuesJson("[]")
+            .accuracyJson("{\"testCoverageLevel\":\"FULL\"}")
+            .build();
+    when(repository.findByRunId("run-e2")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            null,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            null,
+            flags,
+            mock(org.springframework.context.ApplicationEventPublisher.class));
+
+    service.rescoreAfterConcreteTests(
+        "run-e2", TestExecutionSummary.builder().totalTests(10).passed(10).build());
+
+    assertEquals(0, report.getVerifiedScore());
+    assertEquals(0, report.getRubricScore());
+    assertEquals(PipelineResult.FAILED, report.getPipelineResult());
+    assertEquals("ASSERTION_FAILED", report.getExecutableVerificationStatus());
+  }
 }

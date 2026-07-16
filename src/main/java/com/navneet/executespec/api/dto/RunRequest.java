@@ -160,4 +160,6 @@ public record RunRequest(
      * The shipped CLI sends this on {@code run local}; older backends drop it (default false →
      * today's remote execution). Inert unless the feature flag is on.
      */
-    Boolean localExecution) {}
+    Boolean localExecution,
+    /** Explicit single-file target required before PATCH work may enter the Ganesh worker lane. */
+    @Size(max = 1, message = "targetFiles supports exactly one file for bounded routing") List<@NotBlank String> targetFiles) {}
