@@ -60,3 +60,18 @@ This document is the restart point for the next ExecuteSpec session. It records 
 - Keep backend, CLI, and docs changes traceable; update documentation in the same commit as architectural/API/migration changes.
 - Do not release or open a PR until adversarial review, provider feature testing, cross-surface parity checks, and project feature tests are complete or explicitly accepted as deferred.
 
+## Original-goal coverage checklist
+
+These items were part of the original broad request and must remain visible even when they are not immediate release blockers:
+
+- **CLI implementation strategy:** complete the Rust-vs-TypeScript decision with measured startup, install, binary size, streaming, local-tool, plugin, and maintenance comparisons. Current direction remains TypeScript for the existing v1.0 release; Rust is a future performance/productivity investigation, not an unapproved rewrite.
+- **Repository strategy:** do not fork the repository merely to escape technical debt. Revisit a fork/new-major-version only if release isolation, compatibility, or governance requires it; document the decision.
+- **Performance and agent tuning:** benchmark model-specific latency, tool-call reliability, context consumption, retry behavior, cost, and quality. Tune prompts, iteration limits, tool schemas, context budgets, and routing per model only after cohort evidence.
+- **Prompt optimization:** run the planned prompt audit/eval against the baseline harness, including planning, coding, verification, recovery, and handoff prompts. Report independently judged quality and regression results; the target is at least parity with the chosen SOTA harness, not a self-reported score.
+- **Subagents/context:** validate bounded subagent spawning, cancellation, result synthesis, local-file search, FastContext containment, context headroom, compaction, and project-memory behavior. Measure whether subagents improve outcomes rather than only adding parallelism.
+- **TUI/Web quality surface:** maintain a concrete parity matrix for CLI/TUI/Web/VS Code covering navigation, run control, plan gates, streaming, reconnect, diffs, tests, errors, themes/keybindings, project management, and evidence. Current UX signoff does not replace this functional parity test.
+- **Large-repository retrieval:** use a Django issue/repository task and measure search recall, grounding citations, context size, patch correctness, and test outcome. Include large-file behavior and local/remote search limits.
+- **Open-source competition / Graphify:** the Graphify repository pro/con utilisation review is deferred to the end as requested; record whether it materially improves repository graphing/retrieval before adopting anything.
+- **Website/manual/recordings:** refresh website copy and current Web + CLI recordings only after feature and adversarial testing; then produce the user manual and release evidence pack.
+- **Benchmark scope:** TB v2.1 all-89-task run is the next meaningful benchmark cohort; x86 SOTA comparison remains a separate follow-up and is not a release blocker.
+- **Provider policy:** DeepSeek route order is native → OpenRouter → Fireworks. Other providers may be tested within approved budgets; Gemini is currently ignored by user direction; Sarvam stays removed from production and can only be a disposable P1-last experiment.
