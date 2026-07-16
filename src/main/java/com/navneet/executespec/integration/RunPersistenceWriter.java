@@ -127,14 +127,26 @@ class RunPersistenceWriter {
    * + timestamps. Task IDs are prefixed with the run's first 8 chars so we reconstruct the DB id
    * from {@code PlannedTask.id}.
    */
+  @org.springframework.transaction.annotation.Transactional
   void applyExecutionResultToTasks(String runId, ExecutionResult result) {
     String prefix = runId.substring(0, 8) + "_";
     for (TaskOutcome outcome : result.perTask()) {
       String taskId = prefix + outcome.taskId();
       taskRepo
-          .findById(taskId)
+          .findByIdForUpdate(taskId)
           .ifPresent(
               t -> {
+                // SequentialExecutor already persists terminal state.  If this late aggregate
+                // write observes a terminal row, preserve it: a result arriving from an older
+                // JVM must not clobber the recovery worker's newer evidence.  Non-terminal rows
+                // are still repaired here when the worker died before its first status flush.
+                if (isTerminal(t.getStatus())) {
+                  log.info(
+                      "Skipping late task aggregate overwrite task={} currentStatus={}",
+                      taskId,
+                      t.getStatus());
+                  return;
+                }
                 t.setStatus(mapTaskStatusToV1(outcome.status()));
                 t.setCompletedAt(Instant.now());
                 if (outcome.totalLatencyMs() > 0) {

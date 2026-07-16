@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "type": "hero-recording-provenance",
+  "recordedAgainst": {
+    "backendCommit": "7ccfe1a53376fe588c5d77df563e0280cc486e56",
+    "cliCommit": "c58cc990d41443c73908909d5226d3673916e070",
+    "webFrontendSha": "7ccfe1a53376fe588c5d77df563e0280cc486e56"
+  },
+  "currentCandidate": {
+    "backendCommit": "7ccfe1a53376fe588c5d77df563e0280cc486e56",
+    "backendTree": "c3965f7db330ed98455e61e46cd668d20196556f",
+    "cliCommit": "c58cc990d41443c73908909d5226d3673916e070",
+    "cliTree": "ecf050a6a966e46866d6f683e88f1f4f936df92c",
+    "webFrontendSha": "7ccfe1a53376fe588c5d77df563e0280cc486e56"
+  },
+  "currentTupleMatch": true,
+  "asset": "website/media/hero.webm",
+  "sha256": "cdd78e58d1b016fa119bcc8b60f15d849d8789f2af087c45a5ed9bfbc0dbdeb6",
+  "durationSeconds": 54.0,
+  "scenes": ["agent", "plan-gate", "working-task", "verdict", "code-diff", "terminal-outcome"],
+  "fixtureIds": {
+    "gateRunId": "web-qa-1bcca9f9-15ba-40b8-a18c-00814c633b21",
+    "agentSessionId": "web-qa-7853f63c-a5d9-41a9-a81c-a3ac4fb1e63a"
+  },
+  "providerCalls": 0,
+  "externalSpendUsd": 0,
+  "independentHumanReview": "PENDING",
+  "claim": "Provider-free synthetic hero recording regenerated against the current candidate tuple. It is illustrative website media only, not a live customer run, provider-quality benchmark, SOTA claim, or independent UX sign-off."
+}

@@ -2,6 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {CostProgressBar} from '@/signal/components/CostProgressBar';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -293,13 +294,7 @@ export function IdeWelcome() {
                 <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
                 {/* Lead with the verified score — the product's signature metric
                     (review/11 §4) — instead of provider internals. */}
-                {typeof r.verifiedScore === 'number' && (
-                  <IdeBadge
-                    kind={r.verifiedScore >= 85 ? 'ok' : r.verifiedScore >= 70 ? 'warn' : 'bad'}
-                  >
-                    {r.verifiedScore}
-                  </IdeBadge>
-                )}
+                {typeof r.verifiedScore === 'number' && <ScoreBadge score={r.verifiedScore} />}
                 {isSuperAdmin && typeof r.actualCostUsd === 'number' && (
                   <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
                     ${r.actualCostUsd.toFixed(2)}
@@ -593,9 +588,9 @@ export function IdeCompose() {
     return labels;
   }, [modelLabels, providerOptions]);
 
-  const providerModels = modelsByProvider[provider.toLowerCase()] || [];
-  const modelPickerOptions = useMemo<ModelPickerOption[]>(
-    () => [
+  const modelPickerOptions = useMemo<ModelPickerOption[]>(() => {
+    const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+    return [
       {
         value: '',
         label: 'Recommended',
@@ -608,9 +603,8 @@ export function IdeCompose() {
         provider,
         helper: m,
       })),
-    ],
-    [modelLabelById, provider, providerModels],
-  );
+    ];
+  }, [modelLabelById, modelsByProvider, provider]);
   const managedAiMessage =
     managedAi && hasUnlimitedAiCredits(managedAi)
       ? formatManagedAiPlanMessage(managedAi)

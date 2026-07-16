@@ -162,16 +162,6 @@ class CommandToolConfiguration {
   }
 
   @Bean
-  Tool spawnSubagentSnakeTool() {
-    return new SpawnSubagentFallbackTool("spawn_subagent");
-  }
-
-  @Bean
-  Tool spawnSubagentTool() {
-    return new SpawnSubagentFallbackTool("spawnSubagent");
-  }
-
-  @Bean
   Tool updatePlanSnakeTool() {
     return new PlanStateTool("update_plan");
   }

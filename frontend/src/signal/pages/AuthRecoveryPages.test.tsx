@@ -56,6 +56,22 @@ describe('AuthRecoveryPages', () => {
     expect((host.querySelector('input[type="email"]') as HTMLInputElement).value).toBe('');
   });
 
+  it('associates recovery labels with their inputs', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter
+          initialEntries={['/forgot-password']}
+          future={{v7_relativeSplatPath: true, v7_startTransition: true}}
+        >
+          <ForgotPasswordPage />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(host.querySelector('label[for="recovery-email"]')?.textContent).toBe('Email');
+    expect(host.querySelector('#recovery-email')).not.toBeNull();
+  });
+
   it('validates reset-password input before calling the API', async () => {
     await renderReset('/reset-password?token=t1');
 
@@ -66,6 +82,8 @@ describe('AuthRecoveryPages', () => {
 
     expect(host.textContent).toContain('Password must be at least 12 characters.');
     expect(api.authResetPassword).not.toHaveBeenCalled();
+    expect(host.querySelector('label[for="reset-password"]')?.textContent).toBe('New password');
+    expect(host.querySelector('#reset-password-confirm')).not.toBeNull();
   });
 
   it('submits a valid reset token and navigates to sign in', async () => {

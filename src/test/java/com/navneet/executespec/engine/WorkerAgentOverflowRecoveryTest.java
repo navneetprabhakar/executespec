@@ -37,6 +37,14 @@ class WorkerAgentOverflowRecoveryTest {
   }
 
   @Test
+  void callSignatureIsTextSafe() {
+    String signature =
+        WorkerAgent.callSignature(
+            new AssistantMessage.ToolCall("id", "function", "readFile", "{\"path\":\"x\"}"));
+    assertThat(signature).doesNotContain("\u0000").isEqualTo("readFile|{\"path\":\"x\"}");
+  }
+
+  @Test
   void hardTrimKeepsSystemTaskAndRecentTailAtAssistantBoundary() {
     List<Message> h = new ArrayList<>();
     h.add(new SystemMessage("sys"));
@@ -68,7 +76,34 @@ class WorkerAgentOverflowRecoveryTest {
     List<Message> h = new ArrayList<>();
     h.add(new SystemMessage("sys"));
     h.add(new UserMessage("task"));
-    for (int i = 0; i < 4; i++) h.add(AssistantMessage.builder().content("t" + i).build());
+    h.add(AssistantMessage.builder().content("t0").build());
     assertThat(WorkerAgent.hardTrimHistory(h)).isNull();
+  }
+
+  @Test
+  void hardTrimBoundsHugeToolResultInShortHistory() {
+    String huge = "x".repeat(50_000);
+    List<Message> h = new ArrayList<>();
+    h.add(new SystemMessage("sys"));
+    h.add(new UserMessage("the task"));
+    h.add(
+        AssistantMessage.builder()
+            .content("read the file")
+            .toolCalls(List.of(new AssistantMessage.ToolCall("id", "function", "readFile", "{}")))
+            .build());
+    h.add(
+        ToolResponseMessage.builder()
+            .responses(List.of(new ToolResponseMessage.ToolResponse("id", "readFile", huge)))
+            .build());
+
+    List<Message> out = WorkerAgent.hardTrimHistory(h);
+
+    assertThat(out).isNotNull().isNotSameAs(h).hasSize(4);
+    assertThat(out.get(2)).isInstanceOf(AssistantMessage.class);
+    assertThat(out.get(3)).isInstanceOf(ToolResponseMessage.class);
+    ToolResponseMessage response = (ToolResponseMessage) out.get(3);
+    assertThat(response.getResponses().get(0).responseData())
+        .hasSizeLessThan(huge.length())
+        .contains("context overflow trim");
   }
 }

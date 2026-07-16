@@ -101,24 +101,33 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
           </>
         )}
 
-        {surface.kind === 'VALIDATION_REPORT' && (
-          <ScoreCard
-            verdict={verdictFor(surface.report.verifiedScore ?? 0, undefined).label}
-            score={Math.round(surface.report.verifiedScore ?? 0)}
-            label='Verified score'
-            cells={[
-              {
-                v:
-                  surface.report.testsTotal != null
-                    ? `${surface.report.testsPassed ?? 0}/${surface.report.testsTotal}`
-                    : '—',
-                l: 'Tests',
-              },
-              {v: surface.report.finalBuildPassed ? 'pass' : '—', l: 'Build'},
-              {v: surface.report.reviewerVerdict || '—', l: 'Review'},
-            ]}
-          />
-        )}
+        {surface.kind === 'VALIDATION_REPORT' &&
+          (surface.report.verifiedScore != null ? (
+            <ScoreCard
+              verdict={`${verdictFor(surface.report.verifiedScore, undefined).label} · unverified`}
+              score={Math.round(surface.report.verifiedScore)}
+              label='Verified score · unverified'
+              cells={[
+                {
+                  v:
+                    surface.report.testsTotal != null
+                      ? `${surface.report.testsPassed ?? 0}/${surface.report.testsTotal}`
+                      : '—',
+                  l: 'Tests',
+                },
+                {v: surface.report.finalBuildPassed ? 'pass' : '—', l: 'Build'},
+                {v: surface.report.reviewerVerdict || '—', l: 'Review'},
+              ]}
+            />
+          ) : (
+            <Card>
+              <strong>Verified score unavailable</strong>
+              <p style={{margin: '8px 0 0', color: 'var(--signal-text-mute)'}}>
+                This shared report does not contain a deterministic score. No score is inferred from
+                legacy assessment fields.
+              </p>
+            </Card>
+          ))}
 
         {surface.kind === 'CODE_REVIEW' && (
           <>
@@ -278,14 +287,11 @@ export function SharedPage() {
     );
   }
 
-  const score =
-    (data as unknown as {verifiedScore?: number; score?: number}).verifiedScore ??
-    (data as unknown as {score?: number}).score ??
-    0;
+  const score = (data as unknown as {verifiedScore?: number | null}).verifiedScore ?? null;
   // Shared verdict helper — was inline ≥90 here, which disagreed with the
   // canonical ≥85 band used everywhere else. Shared report has no run status,
   // so pass undefined and let the score drive the verdict.
-  const verdict = verdictFor(score, undefined).label;
+  const verdict = score == null ? null : `${verdictFor(score, undefined).label} · unverified`;
   const userRequest = (data as unknown as {userRequest?: string}).userRequest || '—';
   const prUrl =
     (data as unknown as {prUrl?: string; githubPrUrl?: string}).prUrl ||
@@ -306,21 +312,31 @@ export function SharedPage() {
           </div>
         </Card>
 
-        <ScoreCard
-          verdict={verdict}
-          score={Math.round(score)}
-          label='Verified score'
-          cells={[
-            {
-              v: tests
-                ? `${(data as unknown as {testsPassed?: number}).testsPassed ?? 0}/${tests}`
-                : '—',
-              l: 'Tests',
-            },
-            {v: cost != null ? `$${cost.toFixed(2)}` : '—', l: 'Cost'},
-            {v: prUrl ? 'open' : '—', l: 'PR'},
-          ]}
-        />
+        {score != null ? (
+          <ScoreCard
+            verdict={verdict as string}
+            score={Math.round(score)}
+            label='Verified score · unverified'
+            cells={[
+              {
+                v: tests
+                  ? `${(data as unknown as {testsPassed?: number}).testsPassed ?? 0}/${tests}`
+                  : '—',
+                l: 'Tests',
+              },
+              {v: cost != null ? `$${cost.toFixed(2)}` : '—', l: 'Cost'},
+              {v: prUrl ? 'open' : '—', l: 'PR'},
+            ]}
+          />
+        ) : (
+          <Card>
+            <strong>Verified score unavailable</strong>
+            <p style={{margin: '8px 0 0', color: 'var(--signal-text-mute)'}}>
+              This shared report has no deterministic score. Legacy score fields are not treated as
+              verified evidence.
+            </p>
+          </Card>
+        )}
 
         <SectionHeader>Spec</SectionHeader>
         <Card>

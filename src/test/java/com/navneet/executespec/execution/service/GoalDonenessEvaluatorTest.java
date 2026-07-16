@@ -110,6 +110,23 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void contradictoryPositiveValidationWithoutAttemptCannotBecomeDone() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .goalCriteriaSatisfied(true)
+                .validationAttempted(false)
+                .validationPassed(true)
+                .requiredOutputsPresent(true)
+                .constraintsRespected(true)
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.recommendedDecision())
+        .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+  }
+
+  @Test
   void lowCompletionConfidenceWithProgressAllowsModelEscalationEvenWhenValidationPasses() {
     GoalDonenessDecision decision =
         evaluator.evaluate(

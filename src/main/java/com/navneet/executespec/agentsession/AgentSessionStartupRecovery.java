@@ -1,0 +1,147 @@
+package com.navneet.executespec.agentsession;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.UUID;
+
+import com.navneet.executespec.agentsession.entity.AgentSession;
+import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Reconciles child-agent sessions left READY or RUNNING when the previous JVM disappeared.
+ *
+ * <p>A model turn is not resumable after a process restart: the in-memory provider call and its
+ * tool loop are gone. Leaving the durable child in READY or RUNNING would nevertheless reserve its
+ * descendant budget forever and make a parent appear to have an active child that can never
+ * complete. Marking it CANCELLED is deliberately conservative; the parent can request a fresh,
+ * bounded child after reconnect, and the durable recovery event explains why the old child ended.
+ */
+@Component
+@Slf4j
+public class AgentSessionStartupRecovery {
+
+  private static final String RUNNING = "RUNNING";
+  private static final String READY = "READY";
+  private static final String SUBAGENT = "SUBAGENT";
+  private static final String CANCELLED = "CANCELLED";
+  private static final long STALE_AFTER_SECONDS = 120;
+
+  private final AgentSessionRepository sessionRepository;
+  private final AgentEventRecorder eventRecorder;
+  private final MeterRegistry meterRegistry;
+
+  public AgentSessionStartupRecovery(
+      AgentSessionRepository sessionRepository,
+      AgentEventRecorder eventRecorder,
+      MeterRegistry meterRegistry) {
+    this.sessionRepository = sessionRepository;
+    this.eventRecorder = eventRecorder;
+    this.meterRegistry = meterRegistry;
+  }
+
+  @EventListener(ApplicationReadyEvent.class)
+  @Transactional
+  public void reconcileOnStartup() {
+    reconcileRunningSessions();
+  }
+
+  /** Visible for deterministic unit/integration tests and operator recovery checks. */
+  int reconcileRunningSessions() {
+    Timer.Sample sample = Timer.start(meterRegistry);
+    // One boot pass can reconcile both lifecycle states. Keep a shared correlation id so operators
+    // can distinguish one startup sweep from a later JVM sweep when reading the durable events.
+    String recoveryBatchId = UUID.randomUUID().toString();
+    int reconciled =
+        reconcileStatus(RUNNING, recoveryBatchId) + reconcileStatus(READY, recoveryBatchId);
+    Counter.builder("executespec.agent_session.startup_recovery.sweeps")
+        .description("Startup subagent-session recovery sweeps")
+        .register(meterRegistry)
+        .increment();
+    Counter.builder("executespec.agent_session.startup_recovery.cancelled")
+        .description("Subagent sessions cancelled by startup recovery")
+        .register(meterRegistry)
+        .increment(reconciled);
+    sample.stop(
+        Timer.builder("executespec.agent_session.startup_recovery.duration")
+            .description("Duration of a startup subagent-session recovery sweep")
+            .register(meterRegistry));
+    return reconciled;
+  }
+
+  private int reconcileStatus(String status, String recoveryBatchId) {
+    // The agent_session table also stores parent/web conversations.  Only the SUBAGENT surface
+    // has READY/RUNNING lifecycle rows that this boot-time reconciler is authorised to cancel.
+    List<AgentSession> sessions = sessionRepository.findByStatusAndClientSurface(status, SUBAGENT);
+    if (sessions == null || sessions.isEmpty()) {
+      increment("empty", status);
+      return 0;
+    }
+    int reconciled = 0;
+    Instant staleBefore = Instant.now().minusSeconds(STALE_AFTER_SECONDS);
+    for (AgentSession session : sessions) {
+      if (session == null || !status.equals(session.getStatus())) {
+        increment("snapshot_status_changed", status);
+        continue;
+      }
+      // Rolling restarts can execute this hook concurrently. Re-read each candidate under a row
+      // lock so a peer's terminal transition wins and cannot be overwritten by this stale snapshot.
+      AgentSession locked = sessionRepository.findByIdForUpdate(session.getId()).orElse(null);
+      if (locked == null || !status.equals(locked.getStatus())) {
+        increment("row_lock_status_changed", status);
+        continue;
+      }
+      session = locked;
+      // A delayed ApplicationReadyEvent must not cancel a session that this JVM (or a peer) is
+      // still actively updating. Older rows may have no heartbeat timestamp; those remain
+      // fail-closed and are treated as stale so they cannot reserve budget forever.
+      Instant updatedAt = session.getUpdatedAt();
+      if (updatedAt != null && updatedAt.isAfter(staleBefore)) {
+        increment("fresh_skipped", status);
+        continue;
+      }
+      session.setStatus(CANCELLED);
+      session.setUpdatedAt(Instant.now());
+      sessionRepository.save(session);
+      var payload = new LinkedHashMap<String, Object>();
+      payload.put("reason", "SERVER_RESTART");
+      payload.put("previousStatus", status);
+      payload.put("clientSurface", SUBAGENT);
+      payload.put("staleAfterSeconds", STALE_AFTER_SECONDS);
+      payload.put("staleTimestampPresent", updatedAt != null);
+      payload.put("recoveryBatchId", recoveryBatchId);
+      payload.put("reconciledAt", session.getUpdatedAt().toString());
+      eventRecorder.appendAction(
+          session.getId(),
+          "startup-recovery:" + recoveryBatchId + ":" + session.getId(),
+          "SUBAGENT_RECOVERY",
+          payload);
+      increment("cancelled", status);
+      reconciled++;
+    }
+    log.warn(
+        "Agent-session startup recovery cancelled {} stale {} child session(s)",
+        reconciled,
+        status);
+    return reconciled;
+  }
+
+  private void increment(String outcome, String previousStatus) {
+    Counter.builder("executespec.agent_session.startup_recovery.outcomes")
+        .description("Outcomes observed while reconciling stale subagent sessions")
+        .tag("outcome", outcome)
+        .tag("previous_status", previousStatus)
+        .register(meterRegistry)
+        .increment();
+  }
+}

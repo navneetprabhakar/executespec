@@ -1,12 +1,6 @@
 import {create} from 'zustand';
 import {errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
-import {useUiStore} from '@/stores/useUiStore';
-
-// Inlined from the retired `@/components/billing/UsageBadge` — fire a window event
-// for usage-badge consumers (legacy UsageBadge is gone after the 2026-05-16
-// chrome cleanup; the event is harmless without a listener).
-const refreshUsageBadge = () => window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
 
 interface RunStore {
   runs: api.RunSummary[];
@@ -106,7 +100,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   setActiveRunId: (id) => {
     set({activeRunId: id, activeRun: null});
-    useUiStore.getState().setActiveTab('overview');
     if (id) get().fetchRun(id);
   },
 
@@ -167,8 +160,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
   approveRun: async (id, approved, creditsConfirmed?, executionMode?) => {
     await api.approveRun(id, approved, creditsConfirmed, executionMode);
     await get().fetchRun(id);
-    // Credits were charged — refresh sidebar usage badge
-    if (approved) refreshUsageBadge();
   },
 
   retryTask: async (runId, taskId) => {

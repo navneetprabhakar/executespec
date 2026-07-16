@@ -49,7 +49,8 @@ public class WorkerTestController {
   @GetMapping("/worker")
   public Map<String, Object> testWorker(
       @RequestParam(defaultValue = "anthropic") String provider,
-      @RequestParam(defaultValue = "claude-haiku-4-5-20251001") String model)
+      @RequestParam(defaultValue = "claude-haiku-4-5-20251001") String model,
+      @RequestParam(defaultValue = "worker-test-run") String runId)
       throws IOException {
     Path workspace = Files.createTempDirectory("v2-worker-test-");
     try {
@@ -57,7 +58,7 @@ public class WorkerTestController {
       Files.writeString(workspace.resolve("numbers.txt"), "10\n20\n30\n");
 
       ExecutionContext ctx =
-          new ExecutionContext("worker-test-run", "worker-test-task", workspace.toRealPath());
+          new ExecutionContext(runId, "worker-test-task", workspace.toRealPath());
 
       String systemPrompt =
           """

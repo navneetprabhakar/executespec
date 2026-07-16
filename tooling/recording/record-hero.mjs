@@ -55,7 +55,8 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 const APP = process.env.APP_URL || 'http://localhost:5173';
 const API = process.env.API_URL || 'http://localhost:8080';
 const EMAIL = process.env.ES_EMAIL || 'admin@executespec.ai';
-const PASSWORD = process.env.ES_PASSWORD || 'REDACTED_FOR_PUBLIC_RELEASE';
+const PASSWORD = process.env.ES_PASSWORD;
+if (!PASSWORD) throw new Error('Set ES_PASSWORD');
 
 // The single use case — the tictactoe project. The whole story is THIS project +
 // ONE fresh run against it.
@@ -84,6 +85,7 @@ const H = 800;
 const RAW_DIR = resolve(__dirname, '.video-out'); // Playwright writes raw phase .webms here
 const OUT_DIR = resolve(REPO_ROOT, 'website', 'media');
 const OUT_FILE = resolve(OUT_DIR, 'hero.webm');
+const PHASE_B_ONLY_FILE = resolve(OUT_DIR, 'hero-phase-b-only.webm');
 const RAW_A = resolve(RAW_DIR, 'phaseA.webm');
 const RAW_B = resolve(RAW_DIR, 'phaseB.webm');
 
@@ -912,21 +914,30 @@ async function main() {
     // PHASE B — verdict + code beats for the SAME run.
     await recordPhaseB(browser, token, runId);
 
-    // STITCH (cutting Phase A's planning dead-air span).
-    if (!existsSync(RAW_A) || !existsSync(RAW_B)) {
+    // Reuse mode intentionally records only the verdict/code phase.  Do not make the
+    // documented ES_RUN_ID + ES_SKIP_PHASE_A path fail by requiring a nonexistent Phase A clip.
+    if (REUSE_RUN_ID && SKIP_PHASE_A && !existsSync(RAW_A)) {
+      if (!existsSync(RAW_B)) throw new Error('Phase B recording did not produce phaseB.webm.');
+      copyFileSync(RAW_B, PHASE_B_ONLY_FILE);
+      console.log(`[rig] REUSE MODE → ${PHASE_B_ONLY_FILE} (Phase B only; no plan/gate claim)`);
+    } else if (!existsSync(RAW_A) || !existsSync(RAW_B)) {
       throw new Error(`missing phase clip(s): A=${existsSync(RAW_A)} B=${existsSync(RAW_B)}`);
+    } else {
+      // STITCH (cutting Phase A's planning dead-air span).
+      stitch(deadAir);
     }
-    stitch(deadAir);
 
-    // Fit the final clip to the duration budget (mild speed-up only if over).
-    fitDuration();
+    // Fit only the complete stitched hero. A Phase-B-only verdict clip is deliberately
+    // left at its native duration and must never be mistaken for the full hero asset.
+    if (!(REUSE_RUN_ID && SKIP_PHASE_A && !existsSync(RAW_A))) fitDuration();
 
     if (!process.env.KEEP_RAW) rmSync(RAW_DIR, {recursive: true, force: true});
 
-    const finalSize = (statSync(OUT_FILE).size / 1e6).toFixed(2);
-    const dur = ffprobeDuration(OUT_FILE);
+    const outputFile = REUSE_RUN_ID && SKIP_PHASE_A ? PHASE_B_ONLY_FILE : OUT_FILE;
+    const finalSize = (statSync(outputFile).size / 1e6).toFixed(2);
+    const dur = ffprobeDuration(outputFile);
     console.log('\n──────────────────────────────────────────────');
-    console.log(`[rig] DONE → ${OUT_FILE}`);
+    console.log(`[rig] DONE${REUSE_RUN_ID && SKIP_PHASE_A ? ' (Phase-B-only)' : ''} → ${outputFile}`);
     console.log(`[rig] runId=${runId}  finalStatus=${status}`);
     console.log(`[rig] size=${finalSize} MB   duration=${isFinite(dur) ? dur.toFixed(1) : '?'}s`);
     console.log('──────────────────────────────────────────────');

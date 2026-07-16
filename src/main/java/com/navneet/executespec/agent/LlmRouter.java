@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -26,6 +27,7 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -70,12 +72,13 @@ import lombok.extern.slf4j.Slf4j;
  * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
  * is exhausted, the router walks the primary model's YAML failover chain ({@link
  * com.navneet.executespec.router.ModelRegistry#fallbackChainFor}) and tries each different provider
- * once (each with its own transient retry). Gated by {@link #FAILOVER_FLAG} (default OFF until
- * validated). BYOK-safe: a run on a customer key only fails over to a provider the customer also
- * keyed (never silently to a platform key); {@code deepseek}/{@code openrouter} are never targets.
- * A dedicated {@code ProviderHealthTracker} circuit breaker on this path is still future work (the
- * legacy {@link FallbackLlmRouter} has one); tier-based model resolution happens upstream in {@code
- * ModelResolver}.
+ * once (each with its own transient retry). Graduated ON by V266 and gated by {@link
+ * #FAILOVER_FLAG} so operators can disable it during incident response. BYOK-safe: a run on a
+ * customer key only fails over to a provider the customer also keyed (never silently to a platform
+ * key). DeepSeek has an explicit provider-local recovery chain (native -> OpenRouter -> Fireworks);
+ * other providers use their configured tier chain. Provider health and tier-based model resolution
+ * happen in the canonical routing seams upstream in {@code ModelResolver}; this router owns the
+ * actual provider dispatch and bounded retry.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
@@ -102,21 +105,173 @@ public class LlmRouter {
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
+  /** Model-specific Anthropic clients whose defaults never include deprecated temperature. */
+  private final Cache<String, AnthropicChatModel> anthropicDeprecatedModelCache =
+      Caffeine.newBuilder().maximumSize(256).expireAfterAccess(Duration.ofHours(1)).build();
+
+  @Value("${spring.ai.anthropic.api-key:}")
+  private String platformAnthropicApiKey;
+
+  /**
+   * Provider-transport kill switch. Maven test forks force this off; live tests must opt in
+   * explicitly after reserving provider budget. Initialized true so constructor-only unit tests
+   * that use mocked transports remain unchanged outside a Spring context.
+   */
+  @Value("${executespec.live-llm.enabled:true}")
+  private boolean liveLlmEnabled = true;
+
+  @Value("${executespec.live-llm.test-mode:false}")
+  private boolean liveLlmTestMode;
+
+  @Value("${executespec.live-llm.reservation-id:}")
+  private String liveLlmReservationId;
+
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
    * exhausted, fail over to the next provider(s) in the model's YAML failover chain. Gated by this
-   * flag (seeded default OFF, V226 — flip ON once validated) so production is byte-identical until
-   * enabled. BYOK-safe: a run already using a customer key for the primary only fails over to a
-   * provider the customer ALSO has a key for (never silently crosses to a platform key), and the
-   * enterprise-BYOK providers (deepseek / openrouter) are never failover targets.
+   * flag (graduated ON by V266; operators may disable it for incident response). BYOK-safe: a run
+   * already using a customer key for the primary only fails over to a provider the customer ALSO
+   * has a key for (never silently crosses to a platform key). DeepSeek's recovery path is native
+   * DeepSeek -> OpenRouter -> Fireworks, subject to key and policy availability.
    */
   static final String FAILOVER_FLAG = "router.failover.enabled";
 
   /**
-   * Providers that are intentionally never failover targets (enterprise BYOK, picked on purpose).
+   * Dispatch a text-only request through the canonical V2 provider transport.
+   *
+   * <p>This is the canonical seam for text-only callers. The same bounded retry and flag-gated
+   * failover policy apply, while transport, BYOK resolution, managed-AI accounting, and telemetry
+   * stay in one router. An empty tool override is important here; text callers must not bind the
+   * mutable worker tool registry just to make a request.
+   *
+   * @param provider resolved provider identifier
+   * @param model resolved model identifier
+   * @param messages system/user (or other text) messages
+   * @param runId run/session identifier used for key and usage attribution
+   * @param agentRole stable producer role for usage attribution
+   * @param stepId stable producer step for usage attribution
    */
-  private static final Set<String> FAILOVER_EXCLUDED_PROVIDERS =
-      Set.of("deepseek", "openrouter", "fireworks");
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId) {
+    return callText(provider, model, messages, runId, agentRole, stepId, null);
+  }
+
+  /** Text seam with strict provider pinning; transient failures never fail over cross-provider. */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId) {
+    return callTextStrict(provider, model, messages, runId, agentRole, stepId, null);
+  }
+
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens) {
+    return call(
+        LlmRequest.builder()
+            .provider(provider)
+            .model(model)
+            .messages(messages)
+            .context(
+                new com.navneet.executespec.tool.ExecutionContext(
+                    (runId == null || runId.isBlank())
+                        ? "text-" + Integer.toHexString(messages.hashCode())
+                        : runId,
+                    (agentRole == null || agentRole.isBlank())
+                        ? "__text__"
+                        : "__text__-" + agentRole,
+                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
+                        .toAbsolutePath()
+                        .normalize()))
+            .toolsOverride(List.of())
+            .agentRole(agentRole)
+            .stepId(stepId)
+            .maxTokens(maxTokens)
+            .strictProvider(true)
+            .build());
+  }
+
+  /** Text seam with an explicit output cap for compatibility surfaces with a bounded contract. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT);
+  }
+
+  /**
+   * Text seam with an explicit output cap and provider-neutral prompt-cache intent. The cache
+   * strategy is consumed only by providers that support it; all other transports retain their
+   * existing request shape.
+   */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy) {
+    String effectiveRunId =
+        (runId == null || runId.isBlank())
+            ? "text-" + Integer.toHexString(messages.hashCode())
+            : runId;
+    String taskId =
+        (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
+    // Anthropic's current API requires an explicit max_tokens field even for text-only calls.
+    // Resolve the model's YAML output cap here so compatibility callers cannot accidentally emit
+    // an invalid request when they omit the optional argument. Mock/unknown registries return 0;
+    // preserve the transport default in that case.
+    Integer effectiveMaxTokens = maxTokens;
+    if (effectiveMaxTokens == null && modelRegistry != null) {
+      int configuredMaxTokens = modelRegistry.maxOutputForModel(model);
+      if (configuredMaxTokens > 0) effectiveMaxTokens = configuredMaxTokens;
+    }
+    return call(
+        LlmRequest.builder()
+            .provider(provider)
+            .model(model)
+            .messages(messages)
+            .context(
+                new com.navneet.executespec.tool.ExecutionContext(
+                    effectiveRunId,
+                    taskId,
+                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
+                        .toAbsolutePath()
+                        .normalize()))
+            .toolsOverride(List.of())
+            .agentRole(agentRole)
+            .stepId(stepId)
+            .maxTokens(effectiveMaxTokens)
+            .promptCacheStrategy(promptCacheStrategy)
+            .build());
+  }
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -149,6 +304,10 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
   private String deepSeekBaseUrl;
 
+  /** Native DeepSeek thinking/tool responses can take longer than other OpenAI-wire providers. */
+  @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
+  private int deepSeekReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -157,14 +316,6 @@ public class LlmRouter {
 
   @Value("${spring.ai.fireworks.base-url:https://api.fireworks.ai/inference/v1}")
   private String fireworksBaseUrl;
-
-  // 2026-06-26 — Sarvam is disabled/dark only. Keep config bindings for stale-env compatibility;
-  // dispatch still fails closed until quality evals pass.
-  @Value("${spring.ai.sarvam.api-key:}")
-  private String sarvamApiKey;
-
-  @Value("${spring.ai.sarvam.base-url:https://api.sarvam.ai/v1}")
-  private String sarvamBaseUrl;
 
   /**
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
@@ -182,6 +333,15 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
+    if (!liveLlmEnabled) {
+      throw new IllegalStateException(
+          "Live LLM transport is disabled. Explicitly authorize the live-llm-test profile and"
+              + " reserve provider budget before dispatch.");
+    }
+    if (liveLlmTestMode) {
+      ProviderTestBudgetGuard.authorize(
+          liveLlmReservationId, request.provider(), request.model(), request.context().runId());
+    }
     // If the caller supplied an explicit tool list (e.g. the planner restricting
     // to just submitPlan), honor it; otherwise bind every registered V2 tool.
     List<ToolCallback> tools =
@@ -342,7 +502,7 @@ public class LlmRouter {
    * <p>BYOK rule (the discussed mechanism): if the primary call used a customer key ({@code source
    * != PLATFORM}) we only fail over to a provider the customer ALSO keyed — never silently fall to
    * a platform key for a BYOK run. Platform-key runs (FREE/PRO on system keys) may fail over
-   * freely. {@code deepseek}/{@code openrouter} are never targets.
+   * freely. The configured DeepSeek chain is native -> OpenRouter -> Fireworks.
    */
   private ChatResponse maybeFailover(
       LlmRequest request,
@@ -350,12 +510,15 @@ public class LlmRouter {
       RunKeyContext keys,
       RunKeyContext.Source source,
       RuntimeException primaryError) {
-    if (!featureFlagService.isEnabled(FAILOVER_FLAG)) return null;
+    if (request.strictProvider() || !featureFlagService.isEnabled(FAILOVER_FLAG)) return null;
     if (!isTransientError(primaryError)) return null;
 
     String primaryProvider = request.provider().toLowerCase(Locale.ROOT);
     boolean primaryUsedCustomerKey = source != RunKeyContext.Source.PLATFORM;
-    List<String[]> chain = modelRegistry.fallbackChainFor(request.model());
+    List<String[]> chain =
+        "deepseek".equalsIgnoreCase(primaryProvider)
+            ? modelRegistry.fallbackChainFor(request.model(), primaryProvider)
+            : modelRegistry.fallbackChainFor(request.model());
     if (chain == null || chain.isEmpty()) return null;
 
     for (String[] entry : chain) {
@@ -363,8 +526,6 @@ public class LlmRouter {
       String altModel = entry[1];
       if (altProvider.isEmpty() || altModel == null) continue;
       if (altProvider.equals(primaryProvider)) continue;
-      if (FAILOVER_EXCLUDED_PROVIDERS.contains(altProvider)) continue;
-
       String altKey = (keys == null) ? null : keys.keyFor(altProvider);
       // Don't cross a BYOK run onto a platform key for a provider it never keyed.
       if (primaryUsedCustomerKey && altKey == null) {
@@ -501,8 +662,6 @@ public class LlmRouter {
       case "openrouter" -> callOpenRouter(request, tools, apiKey);
       case "deepseek" -> callDeepSeek(request, tools, apiKey);
       case "fireworks" -> callFireworks(request, tools, apiKey);
-      case "sarvam" ->
-          throw new IllegalStateException("Sarvam provider is disabled until quality eval passes");
       default ->
           throw new IllegalArgumentException(
               "Unknown provider: "
@@ -515,10 +674,15 @@ public class LlmRouter {
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
+    boolean deprecatedTemperatureModel =
+        ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
+            || AnthropicModelOptions.shouldOmitTemperature(r.model());
     AnthropicChatModel model =
-        (apiKey != null && !apiKey.isBlank())
-            ? perKeyAnthropicModel(apiKey)
-            : anthropicModelProvider.getIfAvailable();
+        deprecatedTemperatureModel
+            ? modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), apiKey)
+            : ((apiKey != null && !apiKey.isBlank())
+                ? perKeyAnthropicModel(apiKey)
+                : anthropicModelProvider.getIfAvailable());
     if (model == null) throw new IllegalStateException("Anthropic model not configured");
     // RL-2026-05-059 — FORCED tool-choice salvage. Spring AI's AnthropicChatOptions can't set
     // tool_choice, so when the WorkerAgent Lever-B salvage requests it (toolChoice="required"),
@@ -546,24 +710,30 @@ public class LlmRouter {
     // Per-key models get their own per-key prompt cache on Anthropic's
     // side (cache scope = API account), which is the correct isolation
     // for BYOK — Customer A's cached prompts never leak to Customer B.
+    AnthropicCacheStrategy cacheStrategy =
+        switch (r.promptCacheStrategy()) {
+          case SYSTEM_ONLY -> AnthropicCacheStrategy.SYSTEM_ONLY;
+          case CONVERSATION_HISTORY, DEFAULT -> AnthropicCacheStrategy.CONVERSATION_HISTORY;
+          case NONE -> null;
+        };
     AnthropicCacheOptions cache =
-        AnthropicCacheOptions.builder()
-            .strategy(AnthropicCacheStrategy.CONVERSATION_HISTORY)
-            .contentLengthFunction(s -> s == null ? 0 : s.length() / 4) // ~chars→tokens
-            .messageTypeMinContentLength(MessageType.SYSTEM, 256)
-            .messageTypeMinContentLength(MessageType.USER, 512)
-            .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
-            .messageTypeMinContentLength(MessageType.TOOL, 512)
-            .build();
-    boolean dropTemperature =
-        ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model())
-            || AnthropicModelOptions.shouldOmitTemperature(r.model());
+        cacheStrategy == null
+            ? null
+            : AnthropicCacheOptions.builder()
+                .strategy(cacheStrategy)
+                .contentLengthFunction(s -> s == null ? 0 : s.length() / 4) // ~chars→tokens
+                .messageTypeMinContentLength(MessageType.SYSTEM, 256)
+                .messageTypeMinContentLength(MessageType.USER, 512)
+                .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
+                .messageTypeMinContentLength(MessageType.TOOL, 512)
+                .build();
+    boolean dropTemperature = deprecatedTemperatureModel;
     var b =
         AnthropicChatOptions.builder()
             .model(r.model())
             .toolCallbacks(tools)
-            .cacheOptions(cache)
             .internalToolExecutionEnabled(false);
+    if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
     if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
     try {
@@ -575,15 +745,45 @@ public class LlmRouter {
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      AnthropicChatModel retryModel =
+          modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), apiKey);
+      if (retryModel != null) model = retryModel;
       var retry =
           AnthropicChatOptions.builder()
               .model(r.model())
               .toolCallbacks(tools)
-              .cacheOptions(cache)
               .internalToolExecutionEnabled(false);
+      if (cache != null) retry.cacheOptions(cache);
       if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
       return model.call(new Prompt(r.messages(), retry.build()));
     }
+  }
+
+  /**
+   * Build a cached Anthropic model with no temperature default. Spring AI merges model defaults
+   * into request options, so the shared Haiku-configured bean cannot safely serve Sonnet 5/Opus
+   * 4.7+ requests.
+   */
+  private AnthropicChatModel modelWithoutDeprecatedDefaults(
+      String model, Integer maxTokens, String apiKeyOverride) {
+    String key =
+        (apiKeyOverride != null && !apiKeyOverride.isBlank())
+            ? apiKeyOverride
+            : platformAnthropicApiKey;
+    if (key == null || key.isBlank()) return null;
+    String cacheKey =
+        sha256Hex(key) + ":" + model + ":" + (maxTokens == null ? "default" : maxTokens);
+    return anthropicDeprecatedModelCache.get(
+        cacheKey,
+        ignored -> {
+          AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
+          AnthropicChatOptions.Builder options = AnthropicChatOptions.builder().model(model);
+          if (maxTokens != null && maxTokens > 0) options.maxTokens(maxTokens);
+          return AnthropicChatModel.builder()
+              .anthropicApi(api)
+              .defaultOptions(options.build())
+              .build();
+        });
   }
 
   /**
@@ -730,6 +930,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .readTimeoutSeconds(deepSeekReadTimeoutSeconds)
             .baseUrl(deepSeekBaseUrl)
             .build());
   }
@@ -757,40 +958,6 @@ public class LlmRouter {
             .toolChoice(r.toolChoice())
             .apiKey(key)
             .baseUrl(fireworksBaseUrl)
-            .build());
-  }
-
-  /**
-   * Disabled Sarvam dispatcher breadcrumb (2026-06-26). OpenAI-wire-compatible Indian-language
-   * provider (api.sarvam.ai). Reuses {@link OpenAiNativeToolClient} with a per-call base-URL like
-   * DeepSeek/Fireworks; Sarvam's model ids ({@code sarvam-105b} / {@code sarvam-30b}) are its own
-   * API names, so they pass straight through (no slug map).
-   *
-   * <p>Sarvam documents {@code max_tokens} (not OpenAI's newer {@code max_completion_tokens}), so
-   * the output budget is sent via {@code extraBody.max_tokens} — otherwise Sarvam falls back to its
-   * 2048-token default and truncates worker file writes. Verified live 2026-06-21: Bearer auth →
-   * 200, native tool_calls in OpenAI schema, {@code max_tokens} + {@code tool_choice:"auto"}
-   * accepted, and Sarvam returns {@code reasoning_content} (already captured + round-tripped by
-   * OpenAiNativeToolClient). Do not route here while the dispatch switch rejects provider=sarvam.
-   */
-  private ChatResponse callSarvam(LlmRequest r, List<ToolCallback> tools, String apiKey) {
-    String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : sarvamApiKey;
-    if (key == null || key.isBlank()) {
-      throw new IllegalStateException(
-          "Sarvam api-key not configured (org BYOK key or spring.ai.sarvam.api-key)");
-    }
-    Map<String, Object> extra =
-        (r.maxTokens() != null) ? Map.of("max_tokens", r.maxTokens()) : Map.of();
-    return openAiNativeToolClient.call(
-        OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
-            .model(r.model())
-            .messages(r.messages())
-            .tools(tools)
-            .temperature(r.temperature())
-            .toolChoice(r.toolChoice())
-            .apiKey(key)
-            .baseUrl(sarvamBaseUrl)
-            .extraBody(extra)
             .build());
   }
 

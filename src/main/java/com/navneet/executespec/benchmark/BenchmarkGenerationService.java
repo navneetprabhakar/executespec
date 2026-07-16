@@ -62,8 +62,6 @@ import lombok.extern.slf4j.Slf4j;
 public class BenchmarkGenerationService {
 
   private static final ObjectMapper JSON = new ObjectMapper();
-  private static final double DEFAULT_HARD_CAP_USD = 8.0;
-
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
@@ -109,6 +107,7 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
+    double hardCapUsd = validatedHardCapUsd();
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);
@@ -144,7 +143,7 @@ public class BenchmarkGenerationService {
               .executionMode("PROTOTYPE")
               .createdByUserId(props.getBenchUserId())
               .orgId(props.getBenchOrgId())
-              .hardCapUsd(DEFAULT_HARD_CAP_USD)
+              .hardCapUsd(hardCapUsd)
               .build();
       runRepo.save(row);
 
@@ -223,6 +222,16 @@ public class BenchmarkGenerationService {
     }
   }
 
+  private double validatedHardCapUsd() {
+    double value = props.getHardCapUsd();
+    if (!Double.isFinite(value) || value <= 0.0) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR,
+          "swebench.hard-cap-usd must be a finite positive value");
+    }
+    return value;
+  }
+
   void acquireGenerationSlot(String instanceId) {
     int limit = Math.max(1, props.getMaxConcurrentRuns());
     Semaphore slots;
@@ -276,10 +285,16 @@ public class BenchmarkGenerationService {
       String runId,
       SwebenchInstanceLoader.SwebenchInstance instance) {
     String workdir = workdirFor(instance);
-    boolean present = run("docker image inspect " + image, 30).exit() == 0;
-    if (!present && run("docker pull " + image, 1800).exit() != 0) {
-      throw new ResponseStatusException(
-          HttpStatus.INTERNAL_SERVER_ERROR, "docker pull failed for " + image);
+    ShellResult inspect =
+        run("docker image inspect " + image, props.getImageInspectTimeoutSeconds());
+    boolean present = inspect.exit() == 0;
+    if (!present) {
+      ShellResult pull = run("docker pull " + image, props.getImagePullTimeoutSeconds());
+      if (pull.exit() != 0) {
+        throw new ResponseStatusException(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            dockerImageFailure("pull", image, pull, props.getImagePullTimeoutSeconds()));
+      }
     }
     String tempName = "bench-gen-prep-" + UUID.randomUUID().toString().substring(0, 8);
     if (run("docker create --name " + tempName + " " + image + " sleep 1", 60).exit() != 0) {
@@ -323,6 +338,23 @@ public class BenchmarkGenerationService {
     }
     containerStore.put(runId, cid, workdir);
     log.info("benchmark-gen container {} ({}) ready for {} ({})", containerName, cid, runId, image);
+  }
+
+  static String dockerImageFailure(
+      String operation, String image, ShellResult result, int timeout) {
+    String detail = result.output() == null ? "" : result.output().trim().replaceAll("\\s+", " ");
+    if (detail.length() > 600) detail = detail.substring(0, 600) + "…";
+    String reason = result.exit() == -1 ? "timed out" : "exit=" + result.exit();
+    return "docker image "
+        + operation
+        + " failed for "
+        + image
+        + " ("
+        + reason
+        + ", timeout="
+        + timeout
+        + "s)"
+        + (detail.isBlank() ? "" : ": " + detail);
   }
 
   /** Capture the agent's {@code git diff} against the base commit, excluding run-infra noise. */
@@ -555,7 +587,7 @@ public class BenchmarkGenerationService {
     return (instance.isSweBenchPro() || props.isSweBenchPro()) ? "/app" : "/testbed";
   }
 
-  private record ShellResult(int exit, String output) {}
+  record ShellResult(int exit, String output) {}
 
   private ShellResult run(String command, int timeoutSec) {
     try {

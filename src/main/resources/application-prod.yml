@@ -3,6 +3,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Activate with: --spring.profiles.active=prod
 # Stricter concurrency limits, full observability
+
+# Production databases are expected to be Flyway-managed. Do not silently
+# baseline an unmanaged/non-empty database or accept out-of-order history in
+# the release path; recovery must be an explicit operator action.
 #
 # ┌─────────────────────────────────────────────────────────────────────────────┐
 # │ ENVIRONMENT VARIABLES (all have safe defaults — app starts without them)   │
@@ -38,6 +42,9 @@
 
 # ── LLM Provider Keys ────────────────────────────────────────────────────────
 spring:
+  flyway:
+    baseline-on-migrate: false
+    out-of-order: false
   data:
     redis:
       host: ${REDIS_HOST:localhost}

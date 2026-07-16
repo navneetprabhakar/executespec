@@ -59,17 +59,26 @@ public class TerminalBenchRunService {
 
   /**
    * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
-   * runner sets the outer agent timeout to 1350s; keep this lower so ExecuteSpec can run its
+   * runner sets the outer agent timeout to 1500s; keep this lower so ExecuteSpec can run its
    * terminal finalizer and return a clean terminal state before Harbor kills the adapter.
    */
-  @Value("${terminal-bench.worker-wall-clock-seconds:1260}")
+  @Value("${terminal-bench.worker-wall-clock-seconds:1410}")
   private int workerWallClockSeconds;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
   private static final int TB_STAGNATION_FORCE_AFTER = 64;
   private static final int TB_ARTIFACT_DEADLINE_AFTER = 32;
-  private static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
+
+  /**
+   * Terminal-Bench has its own provider prompt fragments (the DeepSeek fragment, in particular,
+   * prevents reasoning-only turns). Keep this operator-only lane enabled by default without
+   * changing the BUILD/PATCH flag, while still allowing a live A/B or emergency rollback.
+   */
+  private static final String FLAG_TB_PROVIDER_TUNING =
+      "terminal-bench.provider-prompt-tuning.enabled";
+
+  private static final String ENV_TB_PROVIDER_TUNING = "ES_TB_PROVIDER_PROMPT_TUNING";
 
   /**
    * RL-2026-06 — terminal-mode enforced-verify gate (see {@code
@@ -326,7 +335,18 @@ iterating needlessly.
   }
 
   String systemPromptForProvider(String provider) {
-    if (featureFlagService == null || !featureFlagService.isEnabled(FLAG_PROVIDER_TUNING)) {
+    // Terminal-Bench is an operator-only benchmark lane. Its terminal fragments are deliberately
+    // default-on because they encode model-specific tool-call failure modes; BUILD/PATCH retain
+    // the existing worker.provider-prompt-tuning.enabled default-off behavior. The dedicated flag
+    // is read through getString with a true fallback so older databases (without the new key) get
+    // the safe benchmark default. An environment opt-out is available before a restart when an
+    // operator needs a quick A/B or rollback.
+    if ("false".equalsIgnoreCase(System.getenv(ENV_TB_PROVIDER_TUNING))) {
+      return TB_SYSTEM_PROMPT;
+    }
+    if (featureFlagService != null
+        && "false"
+            .equalsIgnoreCase(featureFlagService.getString(FLAG_TB_PROVIDER_TUNING, "true"))) {
       return TB_SYSTEM_PROMPT;
     }
     String fragment = loadTerminalProviderFragment(provider);

@@ -1,0 +1,279 @@
+package com.navneet.executespec.agentsession;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.Instant;
+import java.util.List;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.entity.AgentActionEvent;
+import com.navneet.executespec.agentsession.entity.AgentSession;
+import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
+import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+class LocalHandsStateServiceTest {
+
+  private final ObjectMapper objectMapper = new ObjectMapper();
+  private AgentSessionRepository sessionRepo;
+  private AgentActionEventRepository eventRepo;
+  private AgentEventRecorder recorder;
+  private LocalHandsStateService service;
+
+  @BeforeEach
+  void setUp() {
+    sessionRepo = mock(AgentSessionRepository.class);
+    eventRepo = mock(AgentActionEventRepository.class);
+    recorder = mock(AgentEventRecorder.class);
+    service = new LocalHandsStateService(sessionRepo, eventRepo, recorder, objectMapper);
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(AgentSession.builder().id("session-1").build()));
+  }
+
+  @Test
+  void record_appendsExplicitStateToAgentSessionActionStream() {
+    service.record(
+        "run-1",
+        "call-1",
+        LocalHandsState.AWAITING_CLIENT,
+        "task-1",
+        "readFile",
+        "read",
+        "{\"callId\":\"call-1\"}");
+
+    ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+    verify(recorder)
+        .appendAction(
+            eq("session-1"), eq("call-1"), eq("LOCAL_HANDS_AWAITING_CLIENT"), payload.capture());
+    assertThat(objectMapper.valueToTree(payload.getValue()).path("state").asText())
+        .isEqualTo("AWAITING_CLIENT");
+    assertThat(objectMapper.valueToTree(payload.getValue()).path("frame").path("callId").asText())
+        .isEqualTo("call-1");
+  }
+
+  @Test
+  void pending_reconstructsOnlyCallsWhoseLatestStateNeedsClient() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                event("call-1", LocalHandsState.AWAITING_CLIENT, 1),
+                event("call-2", LocalHandsState.AWAITING_CLIENT, 2),
+                event("call-2", LocalHandsState.COMPLETED, 3),
+                event("call-3", LocalHandsState.CLIENT_RECONNECTED, 4)));
+
+    assertThat(service.pending("run-1"))
+        .extracting(LocalHandsStateService.PendingCall::callId)
+        .containsExactly("call-1", "call-3");
+  }
+
+  @Test
+  void pending_mergesAllActiveSessionsWhenReconnectRacesSessionRetirement() {
+    AgentSession older = AgentSession.builder().id("session-older").build();
+    AgentSession newer = AgentSession.builder().id("session-newer").build();
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenReturn(List.of(newer, older));
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-newer"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.CLIENT_RECONNECTED, 2)));
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-older"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    assertThat(service.pending("run-1"))
+        .extracting(LocalHandsStateService.PendingCall::callId)
+        .containsExactly("call-1");
+    assertThat(service.pending("run-1").get(0).state())
+        .isEqualTo(LocalHandsState.CLIENT_RECONNECTED);
+  }
+
+  @Test
+  void pending_prefersDatabaseCursorWhenTransitionsShareClockTimestamp() {
+    Instant sameTimestamp = Instant.parse("2026-07-10T00:00:00Z");
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                event("call-1", LocalHandsState.AWAITING_CLIENT, sameTimestamp, 101L),
+                event("call-1", LocalHandsState.COMPLETED, sameTimestamp, 102L)));
+
+    assertThat(service.pending("run-1")).isEmpty();
+  }
+
+  @Test
+  void pending_reconstructsFromDurableEventsAfterStateServiceRecreation() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    // A new service instance represents a fresh JVM component with no in-memory dispatcher
+    // state. The append-only agent-action stream remains sufficient to show what the client owes.
+    LocalHandsStateService restartedService =
+        new LocalHandsStateService(sessionRepo, eventRepo, recorder, objectMapper);
+
+    assertThat(restartedService.pending("run-1"))
+        .singleElement()
+        .satisfies(
+            pending -> {
+              assertThat(pending.callId()).isEqualTo("call-1");
+              assertThat(pending.state()).isEqualTo(LocalHandsState.AWAITING_CLIENT);
+              assertThat(pending.frameJson()).contains("call-1");
+            });
+  }
+
+  @Test
+  void closeForWorkerRestart_marksOldCallUnreplayable() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.AWAITING_CLIENT, 1)));
+
+    assertThat(service.closeForWorkerRestart("run-1")).isEqualTo(1);
+
+    verify(recorder)
+        .appendAction(eq("session-1"), eq("call-1"), eq("LOCAL_HANDS_WORKER_RESTARTED"), any());
+  }
+
+  @Test
+  void acceptRestartedResult_persistsLateResultAgainstOriginalCall() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(List.of(event("call-1", LocalHandsState.WORKER_RESTARTED, 1)));
+
+    assertThat(
+            service.acceptRestartedResult("run-1", "call-1", "{\"ok\":true,\"content\":\"late\"}"))
+        .isTrue();
+
+    ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+    verify(recorder)
+        .appendAction(
+            eq("session-1"), eq("call-1"), eq("LOCAL_HANDS_COMPLETED"), payload.capture());
+    assertThat(objectMapper.valueToTree(payload.getValue()).path("result").path("content").asText())
+        .isEqualTo("late");
+  }
+
+  @Test
+  void findRestartedResult_matchesExactFrameForReplayWithoutDuplicateExecution() {
+    String restartedPayload =
+        "{\"state\":\"WORKER_RESTARTED\",\"runId\":\"run-1\","
+            + "\"callId\":\"call-1\",\"taskId\":\"task-1\",\"toolName\":\"shell\","
+            + "\"permissionKind\":\"shell\",\"frame\":{\"taskId\":\"task-1\","
+            + "\"name\":\"shell\",\"args\":{\"cmd\":\"touch x\"}}}";
+    String completedPayload =
+        "{\"state\":\"COMPLETED\",\"runId\":\"run-1\","
+            + "\"callId\":\"call-1\",\"taskId\":\"task-1\",\"toolName\":\"shell\","
+            + "\"permissionKind\":\"shell\",\"frame\":{\"taskId\":\"task-1\","
+            + "\"name\":\"shell\",\"args\":{\"cmd\":\"touch x\"}},"
+            + "\"result\":{\"ok\":true,\"content\":\"done\"}}";
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                AgentActionEvent.builder()
+                    .id("restart")
+                    .sessionId("session-1")
+                    .actionId("call-1")
+                    .type("LOCAL_HANDS_WORKER_RESTARTED")
+                    .payloadJson(restartedPayload)
+                    .createdAt(Instant.parse("2026-07-10T00:00:01Z"))
+                    .build(),
+                AgentActionEvent.builder()
+                    .id("complete")
+                    .sessionId("session-1")
+                    .actionId("call-1")
+                    .type("LOCAL_HANDS_COMPLETED")
+                    .payloadJson(completedPayload)
+                    .createdAt(Instant.parse("2026-07-10T00:00:02Z"))
+                    .build()));
+
+    assertThat(service.findRestartedResult("run-1", "task-1", "shell", "{ \"cmd\": \"touch x\" }"))
+        .get()
+        .satisfies(
+            result -> {
+              assertThat(result.callId()).isEqualTo("call-1");
+              assertThat(result.resultEnvelope()).contains("done");
+            });
+  }
+
+  @Test
+  void acceptRestartedResult_rejectsMarkerOutsideBoundedRecoveryWindow() {
+    when(eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(eq("session-1"), any()))
+        .thenReturn(
+            List.of(
+                event("call-1", LocalHandsState.WORKER_RESTARTED, Instant.now().minusSeconds(10))));
+
+    assertThat(
+            service.acceptRestartedResult(
+                "run-1", "call-1", "{\"ok\":true}", /* maxAgeMillis= */ 1_000L))
+        .isFalse();
+    verify(recorder, org.mockito.Mockito.never())
+        .appendAction(any(), any(), eq("LOCAL_HANDS_COMPLETED"), any());
+  }
+
+  @Test
+  void completedResult_reportsFalse_whenDatabaseFirstWriterWinsElsewhere() {
+    org.mockito.Mockito.doThrow(new IllegalStateException("duplicate terminal event"))
+        .when(recorder)
+        .appendAction(any(), any(), eq("LOCAL_HANDS_COMPLETED"), any());
+
+    assertThat(
+            service.recordCompleted(
+                "run-1", "call-1", "task-1", "readFile", "read", "{}", "{\"ok\":true}"))
+        .isFalse();
+  }
+
+  @Test
+  void persistenceFailure_isFailSoftForWorkerPath() {
+    when(sessionRepo.findByRunIdAndStatusOrderByUpdatedAtDesc("run-1", "ACTIVE"))
+        .thenThrow(new IllegalStateException("database unavailable"));
+
+    service.record("run-1", "call-1", LocalHandsState.CLIENT_TIMEOUT, null, "shell", "shell", "{}");
+
+    verify(recorder, org.mockito.Mockito.never()).appendAction(any(), any(), any(), any());
+  }
+
+  private AgentActionEvent event(String callId, LocalHandsState state, int second) {
+    String payload =
+        "{\"state\":\""
+            + state.name()
+            + "\",\"runId\":\"run-1\",\"callId\":\""
+            + callId
+            + "\",\"toolName\":\"readFile\",\"permissionKind\":\"read\","
+            + "\"frame\":{\"callId\":\""
+            + callId
+            + "\"}}";
+    return AgentActionEvent.builder()
+        .id("event-" + callId + "-" + second)
+        .sessionId("session-1")
+        .actionId(callId)
+        .type("LOCAL_HANDS_" + state.name())
+        .payloadJson(payload)
+        .createdAt(Instant.parse("2026-07-10T00:00:0" + second + "Z"))
+        .build();
+  }
+
+  private AgentActionEvent event(String callId, LocalHandsState state, Instant createdAt) {
+    return event(callId, state, createdAt, null);
+  }
+
+  private AgentActionEvent event(
+      String callId, LocalHandsState state, Instant createdAt, Long streamSequence) {
+    String payload =
+        "{\"state\":\""
+            + state.name()
+            + "\",\"runId\":\"run-1\",\"callId\":\""
+            + callId
+            + "\",\"toolName\":\"readFile\",\"permissionKind\":\"read\","
+            + "\"frame\":{\"callId\":\""
+            + callId
+            + "\"}}";
+    return AgentActionEvent.builder()
+        .id("event-" + callId + "-bounded")
+        .sessionId("session-1")
+        .actionId(callId)
+        .type("LOCAL_HANDS_" + state.name())
+        .payloadJson(payload)
+        .createdAt(createdAt)
+        .streamSequence(streamSequence)
+        .build();
+  }
+}

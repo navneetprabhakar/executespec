@@ -19,7 +19,10 @@ public record ModelProviderScore(
     long latencyP95Ms,
     double requiredQualityThreshold,
     boolean benchmarkQualityPriorAvailable,
-    List<String> reasons) {
+    boolean observedQualityEvidenceAvailable,
+    boolean providerAvailable,
+    List<String> reasons,
+    boolean contextFitsRequestedBudget) {
 
   public ModelProviderScore {
     if (provider == null || provider.isBlank()) {
@@ -52,7 +55,74 @@ public record ModelProviderScore(
         latencyP95Ms,
         requiredQualityThreshold,
         false,
-        reasons);
+        false,
+        providerAvailability(reasons),
+        reasons,
+        true);
+  }
+
+  /**
+   * Compatibility constructor for callers that already provide benchmark-prior state.
+   *
+   * <p>Compatibility callers do not have enough structured information to assert observed quality
+   * evidence. They must migrate to the canonical constructor; human-readable reasons are never
+   * interpreted as quality proof.
+   */
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      boolean benchmarkQualityPriorAvailable,
+      List<String> reasons) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        benchmarkQualityPriorAvailable,
+        false,
+        providerAvailability(reasons),
+        reasons,
+        true);
+  }
+
+  /** Compatibility constructor retaining the pre-context-budget score shape. */
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      boolean benchmarkQualityPriorAvailable,
+      boolean observedQualityEvidenceAvailable,
+      boolean providerAvailable,
+      List<String> reasons) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        benchmarkQualityPriorAvailable,
+        observedQualityEvidenceAvailable,
+        providerAvailable,
+        reasons,
+        true);
   }
 
   public boolean meetsQualityThreshold() {
@@ -61,5 +131,12 @@ public record ModelProviderScore(
 
   public String label() {
     return provider + "/" + model;
+  }
+
+  private static boolean providerAvailability(List<String> reasons) {
+    if (reasons == null) return true;
+    return reasons.stream()
+        .map(reason -> reason == null ? "" : reason.toLowerCase(java.util.Locale.ROOT))
+        .noneMatch(reason -> reason.contains("provider unavailable"));
   }
 }

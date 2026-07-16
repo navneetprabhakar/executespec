@@ -48,7 +48,7 @@ The result: the core agent loop is roughly a 2024-era SWE-agent with guillotines
 
 - `SYSTEM_PROMPT_BASE` demands tests ("Untested code is an INCOMPLETE task") — but the in-loop test tool (`runWorkspaceTests`, V217) and the build-time test gate (V209) are **OFF**, reverted 2026-06-01 because their schemas stalled native DeepSeek (RL-2026-05-061).
 - `runTests` is **pytest-only** (`RunTestsTool.java:314-340`) — useless for Go/JS/TS/Rust/Java repos, while its schema tells the model to prefer it over shell.
-- VBC (verify-before-complete, ON since V239) server-runs the suite at `completeTask` — but as a *refusal gate* (3 bounded refusals, fail-open), not a repair loop: the model gets "tests do not pass," not the failing output to fix against.
+- VBC (verify-before-complete, ON since V239) server-runs the suite at `completeTask`. **Pre-`af00f2bbc` observation:** it was a *refusal gate* (3 bounded refusals, fail-open) that returned only counts. **Current behavior:** one bounded server-owned repair refusal carries structured `failedTests` candidates plus a bounded `outputTail`, then the next completion attempt fails open; no tool schema was added.
 - The reviewer (`ReviewerAgent.java`) never runs tests at all — general pass, wiring pass, formatter, one build smoke. Its verdict never loops back to a worker except the fix-build third pass.
 - Nothing enforces even a compile check per edit except the Python-only `worker.edit-diagnostics` (`py_compile`).
 
@@ -171,12 +171,12 @@ The TB review's own admission: k=1 noise was ±3–5 tasks and "six months of tu
 
 ## Item 3 — Server-side auto test-run + failure injection; VBC → repair loop
 
-**Today:** VBC (`worker.verify-before-complete.enabled`, ON via V239) server-runs the suite at first `completeTask` and refuses up to 3× (`WorkerAgent:939-956`), but the refusal message is only counts ("failed=N, errors=M") — the runner's failure detail is discarded (`:2358-2405`). The in-loop levers (V209 gate, V217 tool) are OFF since RL-2026-05-061 because *adding the tool to the schema* stalled native DeepSeek. The reviewer never runs tests.
+**Historical baseline (pre-`af00f2bbc`):** VBC (`worker.verify-before-complete.enabled`, ON via V239) server-ran the suite at first `completeTask` and refused up to 3× (`WorkerAgent:939-956`), with a counts-only refusal; the runner's failure detail was discarded (`:2358-2405`). **Current behavior:** VBC permits one bounded server-owned repair pass and injects structured `failedTests` candidates plus bounded output tail before fail-open. The in-loop levers (V209 gate, V217 tool) remain OFF since RL-2026-05-061 because *adding the tool to the schema* stalled native DeepSeek. The reviewer never runs tests.
 
 **Change:**
 1. **Schema-free auto-verify hook** in the worker loop: after every K successful write/edit iterations (K≈5, profile-configurable) — and always on completion intent — the server runs the resolved test command itself (module-targeted when derivable from touched files' nearest test dir/package; else a bounded quick suite; skip + cache when the workspace hash is unchanged since the last run).
 2. **Inject the observation** as a structured user-message block: pass/fail counts, first N failing tests with truncated assertion output, spill path for the full log. No new tool in the schema → sidesteps the RL-2026-05-061 stall class entirely; every provider benefits.
-3. **Upgrade VBC from gate to repair loop:** the refusal carries the failing test names + tracebacks + "fix these, re-verify, then completeTask." Keep the 3-refusal bound and fail-open semantics.
+3. **Upgrade VBC from gate to repair loop:** **implemented in `af00f2bbc`** as one bounded refusal carrying structured failure candidates + output tail and "fix these, re-verify, then completeTask" guidance. Remaining work is empirical evaluation of repair quality; do not reintroduce an unbounded refusal loop.
 4. Flag `worker.auto-verify.enabled`, default per provider profile; K and module-targeting depth configurable.
 5. Give the **reviewer** the same server-run capability so `UNRESOLVED_ISSUES` verdicts are grounded in executed tests, not reading.
 
@@ -573,7 +573,7 @@ Run the **ablation matrix first** ({guards new/old} × {compaction on/off} × {a
 | Step | What | Item |
 |---|---|---|
 | 2.1 | Server-side auto-verify: run the resolved test command after edit bursts / on completion intent; inject counts + first-N failures + spill path as an observation; no schema change | 3 |
-| 2.2 | VBC → repair loop: refusals carry failing test names + tracebacks + "fix and re-verify"; keep 3-refusal bound, fail-open | 3 |
+| 2.2 | VBC → repair loop: **implemented in `af00f2bbc`** with one bounded refusal, structured failure candidates/output, and fail-open completion; measure repair quality and avoid reintroducing a multi-refusal loop | 3 |
 | 2.3 | Window-aware compaction: 0.75× trigger from YAML window, token-budgeted tail, **structured dossier** summary (verbatim-copy rules for errors/expected outputs); flip `worker.history-compaction.enabled` per ablation result | 4 |
 | 2.4 | Context-overflow handler: classify per-provider 400 → compact → retry → hard-trim → retry → only then ERROR (ships in the same change as 2.3) | 4 |
 | 2.5 | Reviewer gets the test runner; `UNRESOLVED_ISSUES` may dispatch one bounded worker fix pass | 3 |

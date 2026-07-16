@@ -61,7 +61,9 @@ class AgentOrchestratorTurnService {
                 AgentText.firstNonBlank(request.message(), ""),
                 projectId,
                 toRepoContext(request),
-                toClientCapabilities(request)));
+                toClientCapabilities(request)),
+            session.getDefaultProvider(),
+            session.getDefaultModel());
     OrchestratorDecision decision = applyRequestPolicy(rawDecision, request);
     OrchestratorTurnResponse response =
         new OrchestratorTurnResponse(

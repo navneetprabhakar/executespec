@@ -685,18 +685,11 @@ function AdminOpsSection({ok, bad}: SectionProps) {
   };
   const doReconcile = async () => {
     setBusy('reconcile');
-    try {
-      const r = await fetch('/api/admin/executions/reconcile', {
-        method: 'POST',
-        headers: {Authorization: `Bearer ${localStorage.getItem('access_token') ?? ''}`},
-      });
-      if (!r.ok) throw new Error(`Reconcile failed (${r.status}).`);
-      ok('Reconcile dispatched.');
-    } catch (e: unknown) {
-      bad(e);
-    } finally {
-      setBusy(null);
-    }
+    await api
+      .adminReconcileExecutions()
+      .then(() => ok('Reconcile dispatched.'))
+      .catch(bad)
+      .finally(() => setBusy(null));
   };
   const verifyChain = () => {
     setBusy('chain');

@@ -1,0 +1,135 @@
+package com.navneet.executespec.context;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.stereotype.Component;
+
+/**
+ * Deterministically budgets optional handoff evidence without reordering a worker transcript. Goal,
+ * diff, reviewer and decision text are mandatory invariants; only independently repeatable list
+ * entries are planner-selected. This is deliberately separate from tool-message compaction.
+ */
+@Component
+public class ContextEvidenceAssembler {
+
+  static final int DEFAULT_OPTIONAL_TOKEN_BUDGET = 6_000;
+
+  /** Keep planner estimates aligned with the bundle writer's per-entry output cap. */
+  static final int MAX_ITEM_CHARS = 1_000;
+
+  private final ContextPlanner planner;
+
+  public ContextEvidenceAssembler(ContextPlanner planner) {
+    this.planner = planner;
+  }
+
+  public Selection select(ContextAgentInput input) {
+    if (input == null) return new Selection(List.of(), List.of(), List.of());
+    List<ContextPlanner.Item> items = itemsFor(input);
+    ContextPlanner.Plan plan =
+        planner.plan(
+            new ContextPlanner.Window(DEFAULT_OPTIONAL_TOKEN_BUDGET, 0, 0, 0, 0, 0), items);
+    List<String> packages = selectedValues(plan, "package", input.newPackagesDetected());
+    List<String> files = selectedValues(plan, "file", input.newFilesDetected());
+    List<String> workers = selectedValues(plan, "worker", input.workerReportSummaries());
+    return new Selection(packages, files, workers);
+  }
+
+  /** Package-visible lane inventory used by deterministic contract tests and diagnostics. */
+  List<ContextPlanner.Item> itemsFor(ContextAgentInput input) {
+    if (input == null) return List.of();
+    List<ContextPlanner.Item> items = new ArrayList<>();
+    add(
+        items,
+        "package",
+        input.newPackagesDetected(),
+        ContextPlanner.Kind.PROJECT_BASELINE,
+        80,
+        "ORIENTATION",
+        "context-agent:package-index");
+    add(
+        items,
+        "file",
+        input.newFilesDetected(),
+        ContextPlanner.Kind.WORKING_SET,
+        70,
+        "WORKING_SET",
+        "context-agent:file-index");
+    add(
+        items,
+        "worker",
+        input.workerReportSummaries(),
+        ContextPlanner.Kind.TASK_EVIDENCE,
+        90,
+        "TASK_EVIDENCE",
+        "context-agent:worker-report");
+    return List.copyOf(items);
+  }
+
+  private static void add(
+      List<ContextPlanner.Item> out,
+      String prefix,
+      List<String> values,
+      ContextPlanner.Kind kind,
+      int priority,
+      String taskPhase,
+      String provenance) {
+    if (values == null) return;
+    // The bundle writer deduplicates values as a final serialization guard. Do it before
+    // planning as well: spending budget on repeated search hits makes the planner look
+    // headroom-aware while silently starving distinct evidence. Keep the first occurrence so
+    // source ordering remains stable and the selected-value mapping stays deterministic.
+    var seen = new java.util.LinkedHashSet<String>();
+    for (int i = 0; i < values.size(); i++) {
+      String value = values.get(i);
+      if (value == null || value.isBlank()) continue;
+      // Canonicalize before deduplication. ContextEvidenceBundleWriter applies the same cap
+      // while serializing; deduping the uncapped values here would spend planner budget twice on
+      // entries that collapse to one persisted value (for example two long search hits sharing
+      // their first 1,000 characters).
+      String bounded = canonicalize(value);
+      if (!seen.add(bounded)) continue;
+      out.add(
+          new ContextPlanner.Item(
+              prefix + ":" + i,
+              kind,
+              "context-agent",
+              null,
+              kind == ContextPlanner.Kind.WORKING_SET ? bounded : null,
+              Math.max(1, (bounded.length() + 3) / 4),
+              priority,
+              true,
+              provenance,
+              kind == ContextPlanner.Kind.WORKING_SET ? "full" : null,
+              taskPhase,
+              prefix + ":" + i));
+    }
+  }
+
+  private static List<String> selectedValues(
+      ContextPlanner.Plan plan, String prefix, List<String> values) {
+    return plan.selected().stream()
+        .filter(item -> item.id().startsWith(prefix + ":"))
+        .map(item -> item.id().substring(prefix.length() + 1))
+        .map(Integer::parseInt)
+        .sorted()
+        .filter(i -> i >= 0 && i < values.size())
+        // Return the exact bounded representation charged by the planner and persisted by the
+        // bundle writer. Returning raw values here would make the selected evidence appear larger
+        // than the budget that admitted it.
+        .map(i -> canonicalize(values.get(i)))
+        .toList();
+  }
+
+  static String canonicalize(String value) {
+    if (value == null) return "";
+    String stripped = value.strip();
+    return stripped.length() <= MAX_ITEM_CHARS
+        ? stripped
+        : stripped.substring(0, MAX_ITEM_CHARS) + "\n[truncated]";
+  }
+
+  public record Selection(
+      List<String> packageIndexes, List<String> fileIndexes, List<String> workerIndexes) {}
+}

@@ -4,8 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.AnthropicModelOptions;
-import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
@@ -14,15 +13,11 @@ import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
 
-import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
-import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -52,7 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AccuracyAssessmentService {
 
-  private final FallbackLlmRouter fallbackLlmRouter;
+  private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final FileSystemTool fileSystemTool;
   private final StateStore stateStore;
@@ -215,33 +210,14 @@ SCORE COMPUTATION GUIDANCE:
       messages.add(new SystemMessage(SYSTEM_PROMPT));
       messages.add(new UserMessage(userMessage));
 
-      AnthropicChatOptions opts = null;
-      if ("ANTHROPIC".equalsIgnoreCase(provider)) {
-        var optsBuilder =
-            AnthropicChatOptions.builder()
-                .cacheOptions(
-                    AnthropicCacheOptions.builder()
-                        .strategy(AnthropicCacheStrategy.SYSTEM_ONLY)
-                        .build());
-        if (!AnthropicModelOptions.shouldOmitTemperature(model.getModel())) {
-          optsBuilder.temperature(0.0);
-        }
-        opts = optsBuilder.build();
-      }
-      Prompt prompt = opts != null ? new Prompt(messages, opts) : new Prompt(messages);
-
-      FallbackLlmRouter.LlmResponse lr =
-          fallbackLlmRouter.callWithFallbackTracked(
+      ChatResponse response =
+          llmRouter.callText(
               provider,
               model.getModel(),
-              prompt,
+              messages,
               runId,
-              "accuracy-assessment",
-              FallbackLlmRouter.FallbackMode.IMMEDIATE,
-              0,
-              false);
-
-      ChatResponse response = lr.response();
+              "AccuracyAssessmentService",
+              "assessment");
 
       // Track tokens
       try {
@@ -282,17 +258,15 @@ SCORE COMPUTATION GUIDANCE:
                 "Your response was not valid JSON. Return ONLY a valid JSON object matching the"
                     + " required format. No markdown, no explanation."));
         try {
-          FallbackLlmRouter.LlmResponse retryLr =
-              fallbackLlmRouter.callWithFallbackTracked(
+          ChatResponse retryResponse =
+              llmRouter.callText(
                   provider,
                   model.getModel(),
-                  opts != null ? new Prompt(messages, opts) : new Prompt(messages),
+                  messages,
                   runId,
-                  "accuracy-assessment-retry",
-                  FallbackLlmRouter.FallbackMode.IMMEDIATE,
-                  1,
-                  false);
-          String retryText = retryLr.response().getResult().getOutput().getText();
+                  "AccuracyAssessmentService",
+                  "assessment-retry");
+          String retryText = retryResponse.getResult().getOutput().getText();
           String retryCleaned = stripMarkdownFences(retryText).trim();
           report = mapper.readValue(retryCleaned, AccuracyReport.class);
         } catch (Exception e2) {

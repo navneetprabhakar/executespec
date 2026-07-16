@@ -1,0 +1,303 @@
+package com.navneet.executespec.context;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+
+import com.navneet.executespec.router.ModelRegistry;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+class ContextPlannerTest {
+
+  private final ModelRegistry models = mock(ModelRegistry.class);
+  private ContextPlanner planner;
+
+  @BeforeEach
+  void setUp() {
+    planner = new ContextPlanner(models);
+  }
+
+  @Test
+  void reservesOutputVerificationAndHandoffBeforeSelectingEvidence() {
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(1000, 200, 100, 100, 100, 100),
+            List.of(
+                new ContextPlanner.Item(
+                    "goal", ContextPlanner.Kind.GOAL, "user", "sha", null, 100, 100, true),
+                new ContextPlanner.Item(
+                    "evidence",
+                    ContextPlanner.Kind.TASK_EVIDENCE,
+                    "search",
+                    "sha",
+                    "src/A.java",
+                    250,
+                    80,
+                    true),
+                new ContextPlanner.Item(
+                    "old",
+                    ContextPlanner.Kind.EXTERNAL_ARTIFACT,
+                    "log",
+                    "sha",
+                    "build.log",
+                    300,
+                    10,
+                    false)));
+
+    assertThat(plan.usableInputTokens()).isEqualTo(400);
+    assertThat(plan.selected())
+        .extracting(ContextPlanner.Item::id)
+        .containsExactly("goal", "evidence");
+    assertThat(plan.omitted()).extracting(ContextPlanner.Item::id).containsExactly("old");
+    assertThat(plan.remainingTokens()).isEqualTo(50);
+    assertThat(plan.omittedTokens()).isEqualTo(300);
+  }
+
+  @Test
+  void equalPriorityEvidenceUsesStableFreshKindAndIdTieBreakers() {
+    var stale =
+        new ContextPlanner.Item(
+            "z-stale", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, false);
+    var freshZ =
+        new ContextPlanner.Item(
+            "z-fresh", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, true);
+    var freshA =
+        new ContextPlanner.Item(
+            "a-fresh", ContextPlanner.Kind.GOAL, "search", "sha", null, 100, 50, true);
+
+    var plan =
+        planner.plan(new ContextPlanner.Window(500, 0, 0, 0, 0, 0), List.of(stale, freshZ, freshA));
+
+    assertThat(plan.selected())
+        .extracting(ContextPlanner.Item::id)
+        .containsExactly("a-fresh", "z-fresh", "z-stale");
+  }
+
+  @Test
+  void preservesLaneProvenanceAndSupportsLegacyItemConstruction() {
+    var legacy =
+        new ContextPlanner.Item(
+            "legacy", ContextPlanner.Kind.JOURNAL, "journal", "sha", null, 10, 5, true);
+    assertThat(legacy.provenance()).isEqualTo("journal");
+    assertThat(legacy.taskPhase()).isEqualTo("JOURNAL");
+    assertThat(legacy.reloadHandle()).isEqualTo("legacy");
+
+    var item =
+        new ContextPlanner.Item(
+            "file:0",
+            ContextPlanner.Kind.WORKING_SET,
+            "context-agent",
+            "sha",
+            "src/A.java",
+            12,
+            70,
+            true,
+            "context-agent:file-index",
+            "1-20",
+            "WORKING_SET",
+            "context-agent:file:0");
+    assertThat(
+            planner.plan(new ContextPlanner.Window(100, 0, 0, 0, 0, 0), List.of(item)).selected())
+        .singleElement()
+        .satisfies(
+            selected -> {
+              assertThat(selected.provenance()).isEqualTo("context-agent:file-index");
+              assertThat(selected.range()).isEqualTo("1-20");
+              assertThat(selected.taskPhase()).isEqualTo("WORKING_SET");
+              assertThat(selected.reloadHandle()).isEqualTo("context-agent:file:0");
+            });
+  }
+
+  @Test
+  void omitsEvidenceFromAnOldRepositoryRevisionButKeepsItAuditable() {
+    var stale =
+        new ContextPlanner.Item(
+            "old-file",
+            ContextPlanner.Kind.WORKING_SET,
+            "search",
+            "old-sha",
+            "src/A.java",
+            20,
+            100,
+            true,
+            "search:index",
+            "1-10",
+            "WORKING_SET",
+            "reload:old-file");
+    var current =
+        new ContextPlanner.Item(
+            "current-file",
+            ContextPlanner.Kind.WORKING_SET,
+            "search",
+            "new-sha",
+            "src/A.java",
+            20,
+            10,
+            true,
+            "search:index",
+            "1-10",
+            "WORKING_SET",
+            "reload:current-file");
+
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(50, 0, 0, 0, 0, 0), List.of(stale, current), "new-sha");
+
+    assertThat(plan.selected()).extracting(ContextPlanner.Item::id).containsExactly("current-file");
+    assertThat(plan.omitted()).extracting(ContextPlanner.Item::id).containsExactly("old-file");
+  }
+
+  @Test
+  void explicitLanePriorityProtectsTaskEvidenceOverLowerValueExternalArtifacts() {
+    var artifact =
+        new ContextPlanner.Item(
+            "log",
+            ContextPlanner.Kind.EXTERNAL_ARTIFACT,
+            "logs",
+            "sha",
+            "build.log",
+            40,
+            100,
+            true);
+    var evidence =
+        new ContextPlanner.Item(
+            "failure", ContextPlanner.Kind.TASK_EVIDENCE, "test", "sha", "src/A.java", 40, 1, true);
+
+    var plan =
+        planner.plan(
+            new ContextPlanner.Window(40, 0, 0, 0, 0, 0), List.of(artifact, evidence), "sha");
+
+    assertThat(plan.selected()).extracting(ContextPlanner.Item::id).containsExactly("failure");
+    assertThat(plan.omitted()).extracting(ContextPlanner.Item::id).containsExactly("log");
+  }
+
+  @Test
+  void unknownModelPreservesCallerFallback() {
+    when(models.isKnownModel("future-model")).thenReturn(false);
+
+    var decision =
+        planner.planHeadroom(
+            "provider", "future-model", 90_000, 8_000, List.of(new UserMessage("goal")), List.of());
+
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.UNAVAILABLE);
+    assertThat(decision.reason()).contains("not registered");
+  }
+
+  @Test
+  void continuesWhenOutputAndSafetyReservesFitModelWindow() {
+    knownModel("model-128k", 128_000, 16_000);
+
+    var decision =
+        planner.planHeadroom(
+            "deepseek", "model-128k", 80_000, 8_000, List.of(new UserMessage("goal")), List.of());
+
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.CONTINUE);
+    assertThat(decision.contextWindowTokens()).isEqualTo(128_000);
+    assertThat(decision.outputReserveTokens()).isEqualTo(8_000);
+    assertThat(decision.safetyReserveTokens()).isEqualTo(10_240);
+    assertThat(decision.futureToolReserveTokens()).isEqualTo(2_048);
+    assertThat(decision.verificationReserveTokens()).isEqualTo(2_048);
+    assertThat(decision.handoffReserveTokens()).isEqualTo(2_000);
+    assertThat(decision.availableHeadroomTokens()).isEqualTo(23_664);
+  }
+
+  @Test
+  void compactsBeforeReservedOutputCanOverflowSmallerWindow() {
+    knownModel("model-64k", 64_000, 16_000);
+
+    var decision = planner.planHeadroom("openai", "model-64k", 52_000, 8_000, List.of(), List.of());
+
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.COMPACT);
+    assertThat(decision.availableHeadroomTokens()).isEqualTo(-7_216);
+    assertThat(decision.safetyReserveTokens()).isEqualTo(5_120);
+  }
+
+  @Test
+  void currentMessagesAndToolSchemasProtectHeadroomWhenProviderUsageIsMissing() {
+    knownModel("tiny-model", 10_000, 4_000);
+    ToolCallback tool = mock(ToolCallback.class);
+    when(tool.getToolDefinition())
+        .thenReturn(
+            DefaultToolDefinition.builder()
+                .name("largeTool")
+                .description("d".repeat(2_000))
+                .inputSchema("s".repeat(12_000))
+                .build());
+
+    var decision =
+        planner.planHeadroom(
+            "provider",
+            "tiny-model",
+            0,
+            4_000,
+            List.of(new UserMessage("m".repeat(8_000))),
+            List.of(tool));
+
+    assertThat(decision.estimatedInputTokens()).isGreaterThan(5_000);
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.COMPACT);
+  }
+
+  @Test
+  void outputReserveNeverExceedsModelCapability() {
+    knownModel("model", 32_000, 4_000);
+
+    var decision = planner.planHeadroom("provider", "model", 1_000, 50_000, List.of(), List.of());
+
+    assertThat(decision.outputReserveTokens()).isEqualTo(4_000);
+  }
+
+  @Test
+  void reportsUnavailableWhenOutputReservationCannotFitTheModelWindow() {
+    knownModel("tiny-window", 8_000, 16_000);
+
+    var decision = planner.planHeadroom("deepseek", "tiny-window", 0, 16_000, List.of(), List.of());
+
+    assertThat(decision.action()).isEqualTo(ContextPlanner.HeadroomAction.UNAVAILABLE);
+    assertThat(decision.reason()).contains("output reservation exceeds model context window");
+  }
+
+  @Test
+  void recordsBoundedHeadroomEvidenceWithoutModelCardinality() {
+    var registry = new SimpleMeterRegistry();
+    planner = new ContextPlanner(models, registry);
+    knownModel("metric-model", 64_000, 8_000);
+
+    planner.planHeadroom("DeepSeek", "metric-model", 52_000, 8_000, List.of(), List.of());
+    planner.planHeadroom("DeepSeek", "metric-model", 1_000, 8_000, List.of(), List.of());
+
+    assertThat(
+            registry
+                .get("executespec.context.headroom.decisions")
+                .tag("action", "compact")
+                .tag("provider", "deepseek")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(
+            registry
+                .get("executespec.context.headroom.decisions")
+                .tag("action", "continue")
+                .tag("provider", "deepseek")
+                .counter()
+                .count())
+        .isEqualTo(1);
+    assertThat(registry.find("executespec.context.headroom.decisions").meters())
+        .extracting(meter -> meter.getId().getTag("model"))
+        .containsOnlyNulls();
+  }
+
+  private void knownModel(String model, int window, int maxOutput) {
+    when(models.isKnownModel(model)).thenReturn(true);
+    when(models.contextLimitFor(model)).thenReturn(window);
+    when(models.maxOutputForModel(model)).thenReturn(maxOutput);
+  }
+}

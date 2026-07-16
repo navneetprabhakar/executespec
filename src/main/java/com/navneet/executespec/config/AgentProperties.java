@@ -72,29 +72,6 @@ public class AgentProperties {
 
     /** Maximum credits a FREE-tier user can consume per run. */
     private int maxCreditsFree = 1;
-
-    /** Batch execution config. */
-    private Batch batch = new Batch();
-  }
-
-  @Data
-  public static class Batch {
-    private boolean enabled = true;
-
-    /** Polling interval for pending batch runs (seconds). */
-    private int pollIntervalSeconds = 30;
-
-    /** Max hours to wait for a batch to complete before timing out. */
-    private int maxWaitHours = 4;
-
-    /** Universal batch discount (0.50 = 50% off). */
-    private double discount = 0.50;
-
-    /** Batch tasks get this multiplier on max_output_tokens. */
-    private double maxOutputTokenMultiplier = 1.5;
-
-    /** Google batch: use inline requests for tasks below this limit, JSONL above. */
-    private int googleInlineTaskLimit = 10;
   }
 
   @Data

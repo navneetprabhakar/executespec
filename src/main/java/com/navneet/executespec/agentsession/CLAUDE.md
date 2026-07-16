@@ -30,9 +30,54 @@ turns separately from runs.
   here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
 - CLI and VS Code should consume the same `/api/agent/**` protocol instead of implementing separate
   agents.
+- `DELETE /api/agent/sessions/{sessionId}/history` is the canonical explicit transcript reset for
+  Web, CLI, and VS Code. It verifies session ownership, deletes durable events and turns while
+  retaining the session shell and immutable usage ledger, and is idempotent when repeated.
+- Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
+  (bounded read-only role-contract execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
+  (side-effect-free deterministic parent-coordinator decision),
+  `POST /api/agent/sessions/{parentSessionId}/subagents/coordinator` (explicit, feature-flagged
+  coordinator-triggered automatic execution), and
+  `POST /api/agent/sessions/{parentSessionId}/subagents/cancel` (parent cancellation propagation).
+  Both the decision and spawn paths require the authenticated session owner; child execution is
+  read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
+  transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
+  The canonical chat turn exposes the bounded `spawn_subagent` and `spawn_subagents` tools to the
+  model; both use the same service/protocol seam and return structured child evidence. The batch
+  tool accepts one to four independent role-contract requests, reserves every child before
+  execution, and returns partial results/failures without granting write, shell, run, or approval
+  authority. The REST endpoints are
+  compatibility/control-plane surfaces rather than a second execution implementation.
+  When the operator enables `agent.subagents.coordinator-auto.enabled`, that model-requested tool
+  path upgrades to the coordinator reservation boundary and emits the same atomic
+  `SUBAGENT_COORDINATOR_ACCEPTED` audit event; the default-off path remains backward compatible.
+  The coordinator endpoint additionally requires `automatic=true`, `trigger=COORDINATOR`, a fresh
+  eligible decision, and `agent.subagents.coordinator-auto.enabled=true`; it never grants write or
+  run authority. Child reservation and `SUBAGENT_COORDINATOR_ACCEPTED` parent activity are written
+  in one transaction with the actual child id, so a stale eligibility probe cannot leave a false
+  acceptance event when another coordinator wins the slot.
+
+  Tree turn/cost budget exhaustion is returned as HTTP 422 with the typed
+  `SUBAGENT_*_BUDGET_EXHAUSTED` error code; it is a client-correctable outcome, not an opaque 500.
+  `POST /api/agent/sessions/{parentSessionId}/subagents/batch` is the bounded fan-out surface: it
+  accepts at most four unique requests for the same parent, reserves every child before model
+  execution, consumes those exact persisted child handles (no second spawn), then runs the children concurrently on a fixed pool. A sibling failure cancels active
+  children through the parent protocol and the response preserves successful results plus explicit
+  request/child failure records. When `agent.subagents.coordinator-auto.enabled` is enabled, the
+  batch path performs a fresh eligibility preflight for every request and reserves through
+  `spawnAndRecordCoordinator`, so every accepted child has the same atomic
+  `SUBAGENT_COORDINATOR_ACCEPTED` audit event as single-child delegation. This is real server-side
+  concurrency, not a client-side loop or model-prompt claim; all child turns still pass the normal
+  budget and read-only route checks. The flag remains default-off.
 - Provider choice is cross-surface account state, not a client-local default. Session creation and
   turns must use `AiProviderPreferenceService`: explicit provider input updates
   `app_user.preferred_ai_provider`; omitted input resolves from that preference.
+- Migration `V257__seed_coordinator_subagent_flag.sql` seeds the coordinator-triggered execution
+  flag OFF; enabling it remains an explicit operator decision and does not grant child write/run
+  authority.
+- Web/CLI/VS Code streaming turns may also send an explicit `modelOverride`. The server resolves
+  its provider from the model registry, enforces `ModelAccessService` and provider/model
+  compatibility, persists the session default, and applies the override only to that next turn.
 - Common chat is not only a run launcher. When an `agent_session` has a `projectId`, the streaming
   turn path binds `ProjectChatTools` through `SpecChatService` so CLI and VS Code can answer
   project/code questions with the same architecture, memory, document, tech-debt, and source-search
@@ -43,7 +88,11 @@ turns separately from runs.
   uploads go through `AgentAttachmentService` (`POST /api/agent/sessions/{id}/attachments`): every
   file is type/size/extract/injection-validated and stored sanitized in `AgentAttachmentStore`
   (Redis), then injected server-side as untrusted-delimited context via
-  `StreamTurnRequest.attachmentIds` — never the raw bytes, never client-controlled delimiting.
+  `StreamTurnRequest.attachmentIds` — never client-controlled delimiting. PNG/JPEG/GIF/WebP
+  uploads stay capped at 10 MB and are retained as short-lived raw bytes for provider-native image
+  parts; OpenAI-wire, Gemini, and Anthropic forced-tool requests receive the bytes as image data,
+  while unsupported binary formats remain rejected. Image bytes never enter textual logs or the
+  untrusted text block.
 - Run-scoped web agent sessions persist `agent_session.run_id` (V246). Creation must validate the
   run through `RunAccessGuard`; if the caller also sends `projectId`, it must match the run's
   project. Streaming turns pass the scoped run id into `SpecChatService` as context instead of
@@ -51,6 +100,53 @@ turns separately from runs.
 - Action events that belong to a local/terminal action must persist the first-class
   `agent_action_event.action_id` (V247), not only a nested payload field, so CLI/web clients can
   correlate permission prompts and action results after reload.
+- Child agents use the bounded `subagent/SubagentProtocolService` seam. A child is a persisted
+  `agent_session` with parent/depth/role/turn-budget/cost-budget metadata in append-only
+  `agent_action_event` rows. Executors must call `authorizeNextTurn` before every child turn;
+  `start` must explicitly claim a READY child before execution, and completion is accepted only
+  from RUNNING; verifier completion requires nonblank citation-and-summary evidence. Each admitted child turn refreshes the session
+  heartbeat in the admission transaction, so a long-running model call is not mistaken for a stale
+  child by startup recovery. Spawn also reserves against the complete descendant
+  tree (48 turns / $8 requested-cost ceiling rooted at one parent), so nested fan-out cannot
+  multiply an otherwise valid per-child budget. The foundation does not dispatch a model itself.
+  The future write-capable path has a separate, fail-closed authority seam: `reserveWriter` uses a
+  pessimistic parent-session lock and append-only `SUBAGENT_WRITER_RESERVED` /
+  `SUBAGENT_WRITER_RELEASED` events to permit at most one active reservation per explicit workspace
+  scope. `authorizeWriter` must be called before every mutation and `releaseWriter` is
+  terminal/idempotent. `ImplementerMutationService` is the deliberately narrow opt-in execution
+  seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
+  sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
+  `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded WORKHORSE model loop
+  behind that seam: read/search/diff plus file mutation and build/test tools are allowlisted, the
+  reservation is rechecked before every round and mutation, checkpoints are persisted before and
+  after the pass, terminal turns are recorded, and the reservation is released on success/failure.
+  It remains disabled by default and WEB sessions are rejected. Read-only child behavior remains
+  unchanged.
+- Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
+  for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
+  session is being retired and a replacement session reconnects; callers must not assume the newest
+  session contains the complete action stream.
+- If crash recovery resumes from a snapshot taken before a remote result was delivered, the
+  dispatcher first looks for an exact `(taskId, toolName, args)` match whose durable lifecycle is
+  `WORKER_RESTARTED -> COMPLETED`. It returns that first-writer result without emitting a second
+  client request, preventing duplicate shell/edit side effects. The match is fail-soft, exact, and
+  scoped to restart-fenced calls; it is not a general command idempotency guarantee.
+- `V264__dedupe_local_hands_completed_events.sql` adds a partial unique index over
+  `(session_id, action_id)` for `LOCAL_HANDS_COMPLETED` rows (deduping historical duplicates first),
+  so retried result envelopes are first-writer-wins across JVMs. `LocalHandsStateService` reports
+  whether the terminal insert was accepted; a duplicate is an expected idempotent retry.
+- `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
+  means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
+  evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the
+  old worker. Persisted calls older than the remote lease are returned as `staleCallIds` and must
+  not be replayed. Crash recovery now uses the persisted worker context/task checkpoint path: it
+  binds a fresh remote session, marks old call ids `WORKER_RESTARTED`, and lets the resumed worker
+  issue a new call from the last clean tool-response boundary. This is bounded checkpoint recovery,
+  not JVM hot-resume; the old provider future is never claimed to be rebound.
+- Startup recovery reconciles persisted child sessions left in `RUNNING` after a JVM restart to
+  `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
+  and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale
+  child releases its reserved descendant budget and lets the parent request a fresh bounded child.
 
 ## Key Files
 
@@ -61,13 +157,18 @@ turns separately from runs.
 | `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. Confirmed submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override.                              |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
+| `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
 | `AgentSessionService.java`                 | Session access checks, high-level orchestration, and API-facing service delegation.                                                                                                                                 |
 | `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, stored trace hydration, and latest linked-run summary hydration for reloadable operator UIs.       |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |
 | `AgentOrchestratorTurnService.java`        | Creates structured orchestrator turns: idempotent replay, request policy downgrade, project read check, turn persistence, trace event append, and session title/timestamp update.                                   |
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
-| `AgentRecordedTurnService.java`            | Persists legacy recorded turns: deterministic intent/orchestrator route evaluation, initial turn row, session title/timestamp update, `INTENT` event append, and response assembly.                                 |
+| `AgentRecordedTurnService.java`            | Persists legacy recorded turns from one canonical orchestrator decision; adapts that decision to the legacy DTO without a second classifier call, then writes the turn, title/timestamp, `INTENT` event, and response. |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
+| `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned role contracts (read-only SCOUT/VERIFIER/REPRODUCER/REVIEWER/DOCS_SCOUT plus disabled-by-default IMPLEMENTER_V1), depth/child/turn/cost guards, explicit start, completion handoff, cancellation propagation, and single-writer reservation events. |
+| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, ownership, local-hands surface, workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerExecutionService.java` | Disabled-by-default bounded WORKHORSE IMPLEMENTER loop; binds the allowlisted read/edit/build/test tools, routes mutations through the reservation seam, persists checkpoints and terminal turn evidence, and releases the reservation on terminal paths. |
+| `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
 | `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |
@@ -78,13 +179,13 @@ turns separately from runs.
 | `AgentTurnReadModel.java`                  | Hydrates reloadable turn DTOs and idempotent orchestrator replay responses from stored trace events.                                                                                                                |
 | `AgentTurnRecorder.java`                   | Creates initial `AgentTurn` rows with consistent sequence, transcript fields, proposed-action JSON, and status.                                                                                                     |
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
-| `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior.                                                                                                |
-| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. |
+| `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior. Disconnects retain a capped partial assistant summary plus any latest usage snapshot in the turn row, usage ledger, and `STREAM_DISCONNECTED` event. |
+| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. Client disconnects pass the accumulated bounded text to the lifecycle so replay retains partial progress. |
 | `AgentStreamTurnSupport.java`              | Package-local stream support policy: read-only tool allowlist (incl. `web_search`/`web_fetch`), conversation fallback, server-side attachment-block injection, and client-disconnect detection.                     |
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
 | `AgentText.java`                           | Package-local string helper for repeated blank, fallback, trim, and path-leaf handling across agent-session services.                                                                                               |
-| `AgentIntentService.java`                  | Conservative deterministic pre-router. LLM intent routing can replace/augment this later, but must preserve typed routes, policy, typed actions, and confirmations.                                                 |
+| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; the effective session provider/model is passed into the classifier (legacy callers retain the Anthropic default); malformed/unavailable output fails closed to the non-run fallback. |
 | `AgentIntentDecisions.java`                | Package-local decision/policy construction and billing-impact mapping helper for deterministic route outputs.                                                                                                       |
 | `AgentGuardIntents.java`                   | Package-local pre-routing guard for empty input, unsafe requests, and explicit no-edit/chat-only instructions.                                                                                                      |
 | `AgentCodeChangeIntents.java`              | Package-local code-change router for local code tasks, missing-project implementation proposals, and confirmation-gated cloud-run proposals.                                                                        |
@@ -111,13 +212,21 @@ turns separately from runs.
   reloadable `/runs/{runId}/agent` sessions.
 - `V247__agent_action_event_action_id.sql` adds `agent_action_event.action_id` for reloadable
   action lifecycle correlation across permission prompts, local tool events, and action results.
+- `V262__agent_event_replay_cursor.sql` adds a durable database-assigned `stream_sequence` cursor
+  and replay index. `/events` remains the compatibility list; `/events/replay?after=` returns a
+  cursor envelope for stream interruption and visibility-resume backfill.
+- `V265__dedupe_local_hands_restart_events.sql` deduplicates historical
+  `LOCAL_HANDS_WORKER_RESTARTED` transitions and adds a partial first-writer-wins index, so two
+  JVMs observing the same stale worker cannot publish competing restart handoff records.
 
 ## Tests
 
 - `AgentIntentServiceTest` pins the route matrix and billing/confirmation safety contract:
   explanation, review, planning, "find the bug", chat-only patch requests, local git actions, and
   destructive requests must not create cloud runs; explicit implementation can only produce a
-  confirmation-required `create_cloud_run` proposal.
+  confirmation-required `create_cloud_run` proposal. Structured classifier tests must also pin
+  ambiguous quoted mutation language, strict JSON success, malformed output, and unavailable
+  provider fallback.
 - `AgentIntentLegacyAdapterTest` pins legacy DTO compatibility for `interpret()` callers:
   cloud-run proposals map to `CREATE_RUN`, lifecycle actions map to gate intents, read-only routes
   map to legacy `CHAT`, and confirmation prompts/responses keep the old nullability contract.
@@ -182,6 +291,8 @@ turns separately from runs.
   rejection.
 - `AgentActionLifecycleServiceTest` pins planned-action event payloads, generic action events,
   result status normalization, touched files, verification payloads, and session timestamp updates.
+  Terminal `ACTION_RESULT` retries are first-writer-wins: a Web disconnect followed by a CLI attach
+  returns the original status/summary without appending a duplicate row (V272 partial unique fence).
 - `AgentOrchestratorTurnServiceTest` pins structured turn creation, read-only permission downgrade,
   idempotent replay, conflicting turn-id rejection, project read checks, and trace event append.
 - `AgentRunConfirmationServiceTest` pins confirmed run-submission wrapping: non-run rejection,
@@ -215,10 +326,13 @@ turns separately from runs.
   session title updates, initial `STREAMING` turn persistence, trace events, and returned
   `StreamTurnContext`.
 - `AgentStreamTurnLifecycleTest` pins completion/failure/disconnect persistence, including usage
-  ledger rows, terminal stream events, and the rule that disconnect does not overwrite completed
-  turns.
+  ledger rows, terminal stream events, partial-summary retention, and the rule that disconnect does
+  not overwrite completed turns.
 - `AgentStreamTurnSupportTest` pins stream support policy: read-only tool allowlist,
   conversation fallback behavior, and client-disconnect detection.
+- `SubagentChatToolsTest` pins eligibility fail-closed behavior, default legacy execution, strict
+  batch schema/budget validation, structured partial batch results, and the feature-flagged
+  coordinator audit lane.
 - `OrchestratorRoutingPromptCatalogTest` and `OrchestratorRoutingPromptEvalRunnerTest` pin shared
   prompt schemas and fail-closed model-eval scoring without requiring live credentials.
 - `OrchestratorControllerTest`, `AgentOrchestratorTurnServiceTest`,

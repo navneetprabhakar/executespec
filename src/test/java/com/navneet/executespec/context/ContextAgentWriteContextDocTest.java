@@ -16,7 +16,16 @@ class ContextAgentWriteContextDocTest {
 
   @Test
   void malformedLlmResponseWritesRejectedSidecarWithoutOverwritingContextDoc() throws Exception {
-    ContextAgent agent = new ContextAgent(null, null, null, null, null, null, new ObjectMapper());
+    ContextAgent agent =
+        new ContextAgent(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new ObjectMapper(),
+            new ContextEvidenceBundleWriter(new ObjectMapper()));
     Path contextDir = tempDir.resolve(".agent-context");
     Files.createDirectories(contextDir);
     Path contextDoc = contextDir.resolve("CODEBASE_CONTEXT.md");

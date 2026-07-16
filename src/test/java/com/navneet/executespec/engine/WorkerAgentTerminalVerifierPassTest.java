@@ -22,6 +22,23 @@ class WorkerAgentTerminalVerifierPassTest {
   }
 
   @Test
+  void noOpBuildEvidenceCannotSatisfyBuildVerificationGate() {
+    String noOp =
+        "{\"ok\":true,\"content\":\"command=true\\nsource=fallback:no-op"
+            + "\\nsmokeSignal=UNAVAILABLE\\nnoOp=true\\nexit=0\\noutput:\\n\"}";
+    String executed =
+        "{\"ok\":true,\"content\":\"command=npm run build\\nsource=inferred:npm"
+            + "\\nsmokeSignal=EXECUTED\\nnoOp=false\\nexit=0\\noutput:\\n\"}";
+    String legacy =
+        "{\"ok\":true,\"content\":\"command=npm run build\\nsource=inferred:npm"
+            + "\\nexit=0\\noutput:\\n\"}";
+
+    assertThat(WorkerAgent.isSuccessfulBuildEnvelope(noOp)).isFalse();
+    assertThat(WorkerAgent.isSuccessfulBuildEnvelope(executed)).isTrue();
+    assertThat(WorkerAgent.isSuccessfulBuildEnvelope(legacy)).isTrue();
+  }
+
+  @Test
   void terminalVerifierCommandRejectsExplorationAndTrivialSmokeCommands() {
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /app")).isFalse();
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /tests/")).isFalse();

@@ -21,21 +21,13 @@ class AiProviderPreferenceServiceTest {
   }
 
   @Test
-  void normalizeProviderRejectsTemporarilyDisabledGeminiAndGoogleAlias() {
-    assertEquals(
-        400,
-        assertThrows(ResponseStatusException.class, () -> service.normalizeProvider("gemini"))
-            .getStatusCode()
-            .value());
-    assertEquals(
-        400,
-        assertThrows(ResponseStatusException.class, () -> service.normalizeProvider("google"))
-            .getStatusCode()
-            .value());
+  void normalizeProviderAllowsGeminiAndGoogleAlias() {
+    assertEquals("GEMINI", service.normalizeProvider("gemini"));
+    assertEquals("GEMINI", service.normalizeProvider("google"));
   }
 
   @Test
-  void preferredProviderRejectsStaleDisabledStoredProvider() {
+  void preferredProviderAllowsGeminiStoredProvider() {
     AppUser user =
         AppUser.builder()
             .id("u1")
@@ -47,12 +39,6 @@ class AiProviderPreferenceServiceTest {
             .preferredAiProvider("GEMINI")
             .build();
 
-    assertEquals(
-        400,
-        assertThrows(
-                ResponseStatusException.class,
-                () -> service.preferredProvider(new AppUserDetails(user, null)))
-            .getStatusCode()
-            .value());
+    assertEquals("GEMINI", service.preferredProvider(new AppUserDetails(user, null)));
   }
 }

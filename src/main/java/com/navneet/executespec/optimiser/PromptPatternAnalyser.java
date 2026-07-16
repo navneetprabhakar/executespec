@@ -9,7 +9,6 @@ import java.util.stream.Collectors;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
-import com.navneet.executespec.state.repository.RunRecoveryRepository;
 
 import org.springframework.stereotype.Component;
 
@@ -20,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 public class PromptPatternAnalyser {
 
   private final StateStore stateStore;
-  private final RunRecoveryRepository recoveryRepository;
   private final PromptOptimiserProperties props;
 
   public PromptPatterns analyse() {
@@ -33,42 +31,9 @@ public class PromptPatternAnalyser {
 
     Map<String, List<String>> patternsByPrompt = new LinkedHashMap<>();
 
-    List<String> workerPatterns = new ArrayList<>();
-
-    long loopCount =
-        recoveryRepository.findByClassificationIn(java.util.List.of("LLM_LOOP"), runIds).size();
-    if (loopCount >= props.getPatternMinOccurrences()) {
-      workerPatterns.add("LLM_LOOP detected " + loopCount + " times — worker looping on same tool");
-    }
-
-    long lockViolations =
-        recentRuns.stream()
-            .flatMap(r -> stateStore.getTasksForRun(r.getRunId()).stream())
-            .filter(
-                t -> t.getLastLlmFailure() != null && t.getLastLlmFailure().contains("FILE_LOCK"))
-            .count();
-    if (lockViolations >= props.getPatternMinOccurrences()) {
-      workerPatterns.add(
-          "Worker not checking file-locks before editing " + "(" + lockViolations + " violations)");
-    }
-
-    long boundaryViolations =
-        recentRuns.stream()
-            .flatMap(r -> stateStore.getTasksForRun(r.getRunId()).stream())
-            .filter(t -> "BOUNDARY_VIOLATION".equals(t.getLastLlmFailure()))
-            .count();
-    if (boundaryViolations >= props.getPatternMinOccurrences()) {
-      workerPatterns.add("Worker exceeding task boundary in " + boundaryViolations + " tasks");
-    }
-
-    // Audit 2026-05-12 review item F #42: prompt filenames had bit-rotted to `.txt` when the
-    // canonical V2 prompts moved to `.md`. The V1 worker.txt still exists (legacy archive)
-    // but V2's worker prompt is composed via `PromptAssembler` from fragments, so this
-    // optimiser only meaningfully targets the planner+reviewer for now. Pointed at the V2
-    // canonical files so `Files.exists(resolvePromptPath(...))` is true for them.
-    if (!workerPatterns.isEmpty()) {
-      patternsByPrompt.put("worker.txt", workerPatterns); // V1 legacy worker — still in classpath
-    }
+    // The worker prompt is assembled from Java constants and provider fragments; the old
+    // `worker.txt` compatibility resource was removed. Worker-specific pattern optimisation is
+    // intentionally not emitted until the optimiser has a writable, versioned prompt target.
 
     List<String> plannerPatterns = new ArrayList<>();
 

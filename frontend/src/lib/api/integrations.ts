@@ -5,7 +5,7 @@ import {
   RunSummary,
   SlackChannel,
   SlackStatus,
-  ValidationResult,
+  IntegrationValidationResult,
   req,
 } from './core';
 
@@ -104,14 +104,14 @@ export const validateBitbucket = (
   workspace: string,
   repoSlug: string,
 ) =>
-  req<ValidationResult>('/auth/settings/bitbucket/validate', {
+  req<IntegrationValidationResult>('/auth/settings/bitbucket/validate', {
     method: 'POST',
     body: JSON.stringify({username, appPassword, workspace, repoSlug}),
   });
 
 /** Tests a GitHub PAT by calling the GitHub API. */
 export const validateGitHub = (pat: string) =>
-  req<ValidationResult>('/auth/settings/github/validate', {
+  req<IntegrationValidationResult>('/auth/settings/github/validate', {
     method: 'POST',
     body: JSON.stringify({pat}),
   });
@@ -122,14 +122,14 @@ export const uninstallGitHubApp = () => req<void>('/auth/github-app/install', {m
 
 /** Tests JIRA credentials by calling the JIRA REST API. */
 export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
-  req<ValidationResult>('/auth/settings/jira/validate', {
+  req<IntegrationValidationResult>('/auth/settings/jira/validate', {
     method: 'POST',
     body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 /** Tests Confluence credentials by calling the Confluence REST API. */
 export const validateConfluence = (baseUrl: string, email: string, apiToken: string) =>
-  req<ValidationResult>('/auth/settings/confluence/validate', {
+  req<IntegrationValidationResult>('/auth/settings/confluence/validate', {
     method: 'POST',
     body: JSON.stringify({baseUrl, email, apiToken}),
   });

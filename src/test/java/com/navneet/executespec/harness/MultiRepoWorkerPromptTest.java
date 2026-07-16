@@ -110,6 +110,16 @@ class MultiRepoWorkerPromptTest {
   }
 
   @Test
+  void worker_prompt_requires_search_first_and_preserves_context_headroom() {
+    String prompt = newExecutor().composeSystemPrompt(task(), null, null, null, null);
+
+    assertTrue(prompt.contains("REPOSITORY LOCALIZATION AND CONTEXT BUDGET"));
+    assertTrue(prompt.contains("Search first; do not recursively dump a repository into context"));
+    assertTrue(prompt.contains("Keep the remaining context headroom"));
+    assertTrue(prompt.contains("Never\n  invent a symbol, path, API, or test command"));
+  }
+
+  @Test
   void local_hands_mode_adds_exact_file_scope_prompt_guard() {
     String prompt =
         newExecutor().composeSystemPrompt(task(), null, null, null, null, "deepseek", true);

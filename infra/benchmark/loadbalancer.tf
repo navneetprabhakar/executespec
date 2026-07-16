@@ -1,9 +1,9 @@
 # ── Public HTTP(S) Load Balancer ─────────────────────────────────────────────
-# Cloudflare points benchmark.executespec.ai at this global static IP. The VM
+# Cloudflare points the configured benchmark domain at this global static IP. The VM
 # stays private; GFE/LB health checks reach the app on port 8080.
 
 locals {
-  benchmark_domain = "benchmark.executespec.ai"
+  benchmark_domain = var.benchmark_domain
 }
 
 resource "google_compute_global_address" "lb" {

@@ -5,10 +5,14 @@ import {chromium} from 'playwright';
 
 const APP = process.env.APP_URL || 'http://localhost:5173';
 const API = process.env.API_URL || 'http://localhost:8080';
-const EMAIL = process.env.ES_EMAIL || 'admin@executespec.ai';
-const PASSWORD = process.env.ES_PASSWORD || 'REDACTED_FOR_PUBLIC_RELEASE';
-const RUN_ID = 'cd2d6807-e696-4db9-bedd-9595f19b816d';
-const PROJECT_ID = '6119f4b2-7622-48c3-a56f-a999b826d5c2';
+const EMAIL = process.env.ES_EMAIL;
+const PASSWORD = process.env.ES_PASSWORD;
+const RUN_ID = process.env.ES_RUN_ID;
+const PROJECT_ID = process.env.ES_PROJECT_ID;
+
+for (const [name, value] of Object.entries({ES_EMAIL: EMAIL, ES_PASSWORD: PASSWORD})) {
+  if (!value) throw new Error(`${name} is required; pass disposable local QA credentials via the environment`);
+}
 
 async function mintToken() {
   const r = await fetch(`${API}/api/auth/login`, {
@@ -59,14 +63,16 @@ async function probe(path, waitSel) {
 let ok = true;
 ok = (await probe('/home', '.ide-activitybar, .ide-root, [class*="ide"]')) && ok;
 ok = (await probe('/compose', 'textarea.ide-textarea')) && ok;
-ok = (await probe(`/result/${RUN_ID}`, '.ide-rtab')) && ok;
-ok = (await probe(`/projects/${PROJECT_ID}/architecture`, '.ide-rtab')) && ok;
+if (RUN_ID) ok = (await probe(`/result/${RUN_ID}`, '.ide-rtab')) && ok;
+if (PROJECT_ID) ok = (await probe(`/projects/${PROJECT_ID}/architecture`, '.ide-rtab')) && ok;
 
 // Inspect run-result tabs + arch content quickly.
-await page.goto(`${APP}/result/${RUN_ID}`, {waitUntil: 'domcontentloaded'});
-await page.waitForSelector('.ide-rtab', {timeout: 8000}).catch(() => {});
-const tabs = await page.$$eval('.ide-rtab', (els) => els.map((e) => e.textContent?.trim()));
-console.log('run-result tabs:', JSON.stringify(tabs));
+if (RUN_ID) {
+  await page.goto(`${APP}/result/${RUN_ID}`, {waitUntil: 'domcontentloaded'});
+  await page.waitForSelector('.ide-rtab', {timeout: 8000}).catch(() => {});
+  const tabs = await page.$$eval('.ide-rtab', (els) => els.map((e) => e.textContent?.trim()));
+  console.log('run-result tabs:', JSON.stringify(tabs));
+}
 
 await browser.close();
 console.log(ok ? '\nSMOKE PASS — IDE loads authenticated.' : '\nSMOKE FAIL — see WARN/✗ above.');

@@ -764,7 +764,7 @@ export function IdeMoreMenu() {
           marginTop: 28,
         }}
       >
-        ExecuteSpec · v1.0.0-M1
+        ExecuteSpec · v2.0.0
       </p>
     </div>
   );

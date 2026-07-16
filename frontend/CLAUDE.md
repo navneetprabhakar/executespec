@@ -1,6 +1,6 @@
 # `frontend/` — React + Vite dashboard
 
-> Last reviewed: 2026-06-20 (1.0.0-M1).
+> Last reviewed: 2026-07-10 (2.0.0).
 
 React 18 + Vite 5 + Tailwind CSS 4 + TypeScript 5.3. **Console (`frontend/src/console/`) is the default and only protected web chrome** since 2026-06-12 (RL-2026-06-027). `App.tsx` mounts `ConsoleShell` for every protected route; the old `localStorage es:console='1'` opt-in path and `ide/IdeWorkspace.tsx` shell are deleted. The `ide/` package remains the route-level implementation layer for runs, projects, billing, org settings, benchmark tracking, etc.; it is no longer a mounted VS Code-style workspace shell. The production **Signal** chrome shell was retired and, as of the **2026-05-23 cleanup**, its dead shell (`Shell.tsx`) + all rebuilt **pages** were deleted. The only `signal/pages/*` left are the standalone **public** pages (auth/login, marketing/pricing, legal, shared) + `MiscPages` (whose `AdminPage` backs the `/admin/*` deep links) — none have protected chrome by design. Shared-link routes live in `SharedPages.tsx` so they do not pull the admin page chunk. The shared `signal/components/` primitives + `signal.css` are reused by protected surfaces and stay. The legacy V2 sidebar + V3 top-bar shells (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`); only `signal/`, `ide/`, `console/`, `hooks/`, `lib/`, `stores/`, `types/`, `design-system/` remain under `src/`. Single Vite build into the Spring Boot JAR at `src/main/resources/static/`. (The "## Top-level layout" + "## Chrome + routing" sections below carry the full structure + routing model.)
 
@@ -29,7 +29,7 @@ frontend/
 ├── .eslintrc.cjs · .prettierrc.json · .pa11yci.json · A11Y.md
 ├── public/                          # manifest.webmanifest · sw.js (PWA) · trust-pack.pdf
 └── src/
-    ├── main.tsx                     # app entry + pre-paint theme/chrome + PostHog init
+    ├── main.tsx                     # app entry + theme/chrome reconciliation + PostHog init
     ├── App.tsx                      # routes — ConsoleShell for every protected route
     ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
     ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
@@ -70,6 +70,8 @@ The default chrome is the **Console shell** (`console/ConsoleShell`). `App.tsx` 
 - Operator routes are double-gated: `ConsoleShell` only links Admin/Benchmarks for `SUPER_ADMIN`, and `App.tsx` wraps `/admin`, `/admin/*`, and `/benchmark` in `SuperAdminOnly` so a direct URL redirects non-superadmins to `/home` before the operator shell renders.
 - Admin user/org tier, role, and status select writes must open `ConfirmModal` before calling admin APIs in both admin implementations (`signal/pages/MiscPages.tsx` and `ide/IdeSettings.tsx`). Keep confirmation copy in `signal/pages/adminSafety.ts`, pin dangerous cases such as SUPER_ADMIN role changes and suspension in `adminSafety.test.ts`, pin both-source wiring with `frontend/scripts/assert-admin-write-guards.mjs`, and keep non-destructive UI proof in `adminWriteConfirmationUi.test.tsx` that select changes do not call write APIs until the modal confirm action runs.
 - Protected route page titles use semantic `h1.ide-h1` headings. The chat-first `/agent` route uses a visually hidden `h1` via `.ide-sr-only` because its visible hero is conditional; do not regress to `div.ide-h1` page titles when adding new protected surfaces.
+
+- Project chat canonicalization: `/projects/:projectId/agent` is the single project-scoped agent-session surface. The historical `/projects/:projectId/chat` URL is compatibility-only and redirects to the agent route; new navigation must not point at the legacy `IdeProjectChat` shell.
 - **The only Signal page reachable from the protected tree** is `MiscPages`' `AdminPage` at `/admin/*` (deep links with no IDE surface). Bare no-id `/live` + `/result` redirect to `/runs`. The **2026-05-23 cleanup** deleted the 22 orphaned `signal/pages` files (run-loop + `projects/` + `account/`, incl. billing/plans) plus the dead `signal/components/Shell.tsx`, once the Signal-removal waves had ported them IDE-native (`ide/IdeBilling.tsx`, `ide/IdeOrg.tsx`, `ide/IdeSystem.tsx`, `ide/IdeDiscovery.tsx`). The **2026-06-20 public-page cleanup** reduced `ExtraPages.tsx`, `LegalPages.tsx`, and `MiscPages.tsx` to only their routed public/admin exports, then split shared-link routes into `SharedPages.tsx`. Surviving `signal/pages/`: `AuthPages` · `AuthCallbackPage` · `AuthRecoveryPages` (forgot/reset password) · `ExtraPages` (accept-invite/pricing/trust) · `LegalPages` (terms/privacy/DPA) · `SharedPages` (shared report/project links) · `MiscPages` (Admin).
 - `LegacyRedirect` collapses old prefixes (`/v3/*`, `/v4/*`, `/signal/*`, `/p/*`, `/dashboard`, `/org/*`, `/exec`, `/team`, …) to canonical paths.
 
@@ -92,9 +94,9 @@ JetBrainsMono variable font is the single typeface for the entire app (PR #108, 
 
 ## API client
 
-`frontend/src/lib/api/` is the primary API client. `core.ts` owns `BASE`, auth headers, `ApiError`, error parsing, and the shared `req<T>` / `reqText` helpers; domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, etc.) export endpoint helpers through `index.ts`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
+`frontend/src/lib/api/` is the primary API client. `transport.ts` owns `BASE`, auth headers, `ApiError`, error parsing, token refresh, and the shared `req<T>` / `reqText` helpers; `core.ts` preserves the stable import surface while owning shared cross-domain DTO/type contracts. Domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, `billing.ts`, etc.) export endpoint helpers through `index.ts`; billing plans and managed-AI/payment APIs are co-located in `billing.ts` (the removed standalone `billing-api.ts` must not be reintroduced), and notification DTOs/preferences live in `notifications.ts`. Project settings updates, including target-branch and branch-naming fields, must use `projects.ts:updateProjectSettings` rather than a component-level `fetch`; GDPR archive downloads use `misc.ts:downloadUserDataExport`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
 
-For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md).
+For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md). The agent POST-SSE client treats `done`/`error` as explicit terminal events and rejects a transport EOF after a partial stream, so a dropped connection cannot be rendered as a completed answer; callers can then refresh durable turns and retry.
 
 ## Build + lint gates
 
@@ -205,7 +207,8 @@ The reusable surface lives in `signal/components/` and is enumerated in the **"S
 
 ### Theme
 
-- `useUiStore.ts` — theme slice with `setTheme(t)` / `toggleTheme()`, pre-paint `<html data-theme>` apply + localStorage persistence.
+- `public/theme-bootstrap.js` — CSP-compatible pre-paint theme bootstrap; `useUiStore.ts` reconciles the
+  same `<html data-theme>` state through `setTheme(t)` / `toggleTheme()` and localStorage persistence.
 
 ## SSE event handling
 

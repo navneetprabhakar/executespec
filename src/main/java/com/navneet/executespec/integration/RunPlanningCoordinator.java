@@ -17,7 +17,9 @@ import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannerRequest;
 import com.navneet.executespec.agent.SmartClassifierAgent;
 import com.navneet.executespec.agent.TaskExpanderAgent;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.RepoOrientationService;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -57,6 +59,16 @@ class RunPlanningCoordinator {
   private final TaskExpanderAgent taskExpander;
   private final CoherencePlannerAgent coherencePlanner;
   private final PipelineExecutorPool pool;
+
+  /**
+   * Deterministic, zero-LLM repository orientation shared by the planner and worker paths. The
+   * worker already consumes this under {@code worker.localization.enabled}; keeping the same
+   * bounded block in the planner prevents the first planner call from inventing a repository map
+   * that the worker later has to rediscover.
+   */
+  private final RepoOrientationService repoOrientationService;
+
+  private final FeatureFlagService featureFlagService;
 
   PlanStrategy runClassifierShadow(
       String runId,
@@ -162,9 +174,10 @@ class RunPlanningCoordinator {
    * fall back to the legacy planner.
    */
   Plan runOutlinePhase(String runId, PlannerRequest req, OutlinePlannerAgent.Mode mode) {
+    PlannerRequest effectiveReq = preparePlannerRequest(req);
     RunCostTracker.Snapshot before = costTracker.snapshot(runId);
     try {
-      Plan plan = outlinePlanner.plan(req, mode);
+      Plan plan = outlinePlanner.plan(effectiveReq, mode);
       RunCostTracker.Snapshot after = costTracker.snapshot(runId);
 
       long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
@@ -206,6 +219,44 @@ class RunPlanningCoordinator {
   }
 
   /**
+   * Add the deterministic repository orientation to the planner's cold-start context. This is
+   * deliberately flag-gated and fail-open: when localization is disabled, the request is returned
+   * byte-for-byte unchanged; when scanning fails, normal planner context is preserved. The worker
+   * performs the same orientation step before its first turn, so both phases share one explicit
+   * evidence contract instead of independently guessing where to start.
+   */
+  PlannerRequest preparePlannerRequest(PlannerRequest req) {
+    if (req == null
+        || req.context() == null
+        || repoOrientationService == null
+        || featureFlagService == null
+        || !featureFlagService.isEnabled("worker.localization.enabled")) {
+      return req;
+    }
+    String existing = req.workspaceSummary() == null ? "" : req.workspaceSummary();
+    if (existing.contains("# REPO ORIENTATION (advisory")) return req;
+    String orientation = repoOrientationService.orient(req.context().workspaceRoot(), req.spec());
+    if (orientation == null || orientation.isBlank()) return req;
+    String summary = existing.isBlank() ? orientation : existing + "\n\n" + orientation;
+    return PlannerRequest.builder()
+        .spec(req.spec())
+        .classification(req.classification())
+        .planStrategy(req.planStrategy())
+        .provider(req.provider())
+        .model(req.model())
+        .context(req.context())
+        .workspaceSummary(summary)
+        .projectMemory(req.projectMemory())
+        .projectBrief(req.projectBrief())
+        .referenceDocs(req.referenceDocs())
+        .contracts(req.contracts())
+        .projectAdrs(req.projectAdrs())
+        .tddMode(req.tddMode())
+        .prReviewComments(req.prReviewComments())
+        .build();
+  }
+
+  /**
    * v2.6.2 slice 3 — LARGE pipeline. Drives:
    *
    * <ol>
@@ -223,7 +274,8 @@ class RunPlanningCoordinator {
    */
   Plan runLargePipeline(
       String runId, PlannerRequest req, ExecutionContext rootCtx, boolean enableEpicRecursion) {
-    Plan skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+    PlannerRequest effectiveReq = preparePlannerRequest(req);
+    Plan skeleton = runOutlinePhase(runId, effectiveReq, OutlinePlannerAgent.Mode.SKELETON_ONLY);
     if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
       throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
     }
@@ -253,12 +305,13 @@ class RunPlanningCoordinator {
               () -> {
                 try {
                   if (enableEpicRecursion && t.taskType() == PlannedTask.TaskType.EPIC) {
-                    List<PlannedTask> children = expandEpic(runId, t, skeleton, req, rootCtx);
+                    List<PlannedTask> children =
+                        expandEpic(runId, t, skeleton, effectiveReq, rootCtx);
                     expanded.put(t.id(), children);
                   } else {
                     ExecutionContext taskCtx =
                         new ExecutionContext(runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
-                    PlannedTask full = taskExpander.expand(t, skeleton, req, taskCtx);
+                    PlannedTask full = taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
                     expanded.put(t.id(), List.of(full));
                   }
                 } catch (Throwable ex) {
@@ -341,7 +394,7 @@ class RunPlanningCoordinator {
         new ExecutionContext(runId, "_coherence_", rootCtx.workspaceRoot());
     CoherencePlannerAgent.PatchResult patchResult;
     try {
-      patchResult = coherencePlanner.patchIfNeeded(assembled, req, coherenceCtx);
+      patchResult = coherencePlanner.patchIfNeeded(assembled, effectiveReq, coherenceCtx);
     } catch (Exception coherenceEx) {
       log.warn(
           "V2 run={} coherence pass failed (non-fatal — using unpatched plan): {}",

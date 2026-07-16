@@ -7,6 +7,27 @@
 > Method: each prompt file was read alongside the code that assembles it (variable substitution,
 > `{{include:...}}` resolution, tool bindings, output parsers). Findings are contract-drift-first:
 > almost every HIGH item is a seam between a prompt and its caller.
+
+## Current-status revalidation (2026-07-15)
+
+This document is a historical audit snapshot, not a statement that every finding still exists in
+the current release. The following items were rechecked against backend tuple `37d72b311`:
+
+| Finding | Current status | Evidence |
+|---|---|---|
+| H1 planner classification split-brain | **RESOLVED** | `PlannerRequest.promptClassification()` / `plannerMaxTasks()` prefer `PlanStrategy`; `OutlinePlannerAgent` passes those values and `PlannerOutputUtils` caps with the strategy when present. |
+| H2 orphan project-quality fragments | **RESOLVED** | `SequentialExecutor.loadProjectTypeFragments()` selects and injects the project-type fragments at worker prompt composition; `MultiRepoWorkerPromptTest` covers the selection boundary. |
+| H3 test-planner → test-worker methods | **RESOLVED** | `TestWorkerAgent.plannedTestMethodsJson()` reads `TestPlan.planJson`; retry prompt preserves `apiProbeResults`. |
+| H4 validation-report closing claims | **RESOLVED** | `validation-report.txt` makes claims conditional on checks/`[AUTO-FIXED]`; `ValidationReportGenerator.buildReviewSection()` records only checks actually run and passed. |
+| H5 PR-review phantom `readFile` | **RESOLVED** | `pr-review-agent.md` limits the model to the supplied diff and `submitReview`; no unbound `readFile` instruction remains. |
+| H6 execution-planner tool/dependency contract | **RESOLVED** | `execution_planner.txt` requires a JSON object and explicitly mirrors `dependsOn` into `dependencyEdges`; caller parses text through `LlmRouter.callTextStrict`. |
+| H7 compactor preservation/cap semantics | **PARTIAL** | Length-truncated responses fail closed and raw output is retained; `readFile` remains compactable, so byte-exact edit safety still needs a dedicated gate before enabling compaction. |
+| H8–H12 injection, context fallback, API-test, report join, and ledger stat | **RESOLVED** | Current PR/code-review trust delimiters, ContextAgent rejected sidecar, API prompt fence handling, class+method join, and bounded git `diffStat()` were rechecked in source. |
+| H13 classifier/planner bands | **RESOLVED** | `classifier.md`, `PlanStrategy`, and `SmartClassifierAgent.defaultTaskCount()` use the five-value strategy taxonomy and caps. |
+| H14–H15 routing-eval and code-review schema | **NOT REVALIDATED** | These evaluation-only prompt contracts were not used by the customer run path in this audit; retain as follow-up before promoting routing evals. |
+
+Earlier sections remain useful as the original evidence and remediation rationale. Do not use their
+unqualified “HIGH”/“MEDIUM” labels as current release status without consulting this table.
 >
 > Status legend: **HIGH** = likely causing failures / silent quality loss today. **MEDIUM** =
 > quality/consistency risk. **LOW** = polish. Each item lists evidence + the concrete fix.
@@ -286,15 +307,14 @@ Ranked next steps (impact ÷ effort):
    The 20-slice is noise-dominated: ±1 task = ±5pp, and the 100-floor experiment "improved" 2
    tasks while regressing 2. Full-89 gives the per-task failure taxonomy every other decision
    needs, at ~$2-4/model on DS rates.
-2. **Append the DeepSeek provider fragment to the TB path — verified gap.**
-   `TerminalBenchRunService` passes `TB_SYSTEM_PROMPT` raw (`.systemPrompt(TB_SYSTEM_PROMPT)`,
-   :291); unlike BUILD (`SequentialExecutor:4048-4055`) and PATCH (`CodeGenEngineImpl:130-135`),
-   no `provider/<p>/*.md` fragment is appended. TB DeepSeek therefore runs **without** "EMIT A
-   TOOL CALL ON EVERY TURN / ACT, DON'T JUST EXPLORE" — the directives written for DeepSeek's
-   documented reasoning-only stall mode (RL-2026-05-061), the same failure class the TB
-   checkpoints/finalizers exist to mop up. ~10-line change mirroring
-   `CodeGenEngineImpl.loadProviderPatchFragment` (consider a terminal-flavored
-   `provider/<p>/terminal.md` if patch.md's repo-diff language doesn't fit).
+2. **Provider fragments are now wired into the TB path (fixed 2026-07-11).**
+   `TerminalBenchRunService.systemPromptForProvider` appends the terminal-specific
+   `provider/<p>/terminal.md` fragment by default. The operator-only
+   `terminal-bench.provider-prompt-tuning.enabled` flag and `ES_TB_PROVIDER_PROMPT_TUNING=false`
+   environment override provide explicit A/B/rollback controls. BUILD/PATCH retain their
+   existing `worker.provider-prompt-tuning.enabled` default-off behavior. DeepSeek therefore gets
+   the "EMIT A TOOL CALL ON EVERY TURN / ACT, DON'T JUST EXPLORE" guidance for the lane where
+   reasoning-only stalls were measured.
 3. **Confirm the native DeepSeek route end-to-end.** Phase-1's 12/20 was `deepseek-v4-pro` **via
    OpenRouter** (`p1-ds-pro` row). The runbook correctly targets `deepseek-v4-pro-native` — this
    matters twice: ~3-4× lower per-call latency (more iterations inside the wall clock) and real

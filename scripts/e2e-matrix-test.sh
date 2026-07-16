@@ -14,7 +14,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://dev.executespec.ai}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 POLL_INTERVAL=10
 REPORT_WAIT=120      # seconds to wait for validation report
 

@@ -145,7 +145,7 @@ class RunValidationKickoff {
       // back with accuracyScore=null. Call it here so the report gets populated.
       try {
         // RL-2026-05-041 (audit #19) — no OPENAI→ANTHROPIC reroute. AccuracyAssessmentService runs
-        // through FallbackLlmRouter.callWithFallbackTracked, which routes OpenAI via
+        // through LlmRouter.callText, which routes OpenAI via
         // OpenAiNativeToolClient (not Spring AI's OpenAiChatModel), so the extra_body 400 can't
         // occur on this path. OpenAI runs now assess on OpenAI (correct provider attribution).
         LlmProvider provider = providerForAccuracy(run.getAiProvider());
@@ -237,7 +237,7 @@ class RunValidationKickoff {
               run, workerReports, review, compile, tasks, testSummary, List.of(), bootVerification);
       // RL-2026-05-041 (audit #19 + E#37) — the old OPENAI→ANTHROPIC reroute (which mutated
       // run.aiProvider in-memory around this call) is removed. ValidationReportGenerator runs
-      // through FallbackLlmRouter.callWithFallbackTracked, which dispatches OpenAI via
+      // through LlmRouter.callText, which dispatches OpenAI via
       // OpenAiNativeToolClient — NOT Spring AI's OpenAiChatModel. The Spring AI `extra_body` 400 is
       // structurally impossible on that path (it's the bug the native client was built to bypass),
       // so the reroute guarded a code path that isn't taken for OpenAI while introducing a

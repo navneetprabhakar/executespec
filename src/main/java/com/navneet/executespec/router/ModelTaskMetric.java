@@ -73,6 +73,10 @@ public class ModelTaskMetric {
   @Column(name = "iteration_count")
   private int iterationCount;
 
+  /** Actual provider-reported/price-derived USD cost for the task's worker calls. */
+  @Column(name = "actual_cost_usd")
+  private double actualCostUsd;
+
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();

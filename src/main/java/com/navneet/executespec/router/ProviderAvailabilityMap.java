@@ -12,12 +12,10 @@ public final class ProviderAvailabilityMap {
 
   public static Map<String, Boolean> fromAvailableProviders(
       Set<LlmProvider> availableProviders, Iterable<String> knownProviderNames) {
-    if (availableProviders == null || availableProviders.isEmpty()) {
-      return Map.of();
-    }
-
     Set<String> availableAliases = new LinkedHashSet<>();
-    availableProviders.forEach(provider -> availableAliases.addAll(aliases(provider)));
+    if (availableProviders != null) {
+      availableProviders.forEach(provider -> availableAliases.addAll(aliases(provider)));
+    }
 
     Map<String, Boolean> out = new LinkedHashMap<>();
     if (knownProviderNames != null) {
@@ -42,7 +40,6 @@ public final class ProviderAvailabilityMap {
       case OPENROUTER -> Set.of("openrouter");
       case DEEPSEEK -> Set.of("deepseek");
       case FIREWORKS -> Set.of("fireworks");
-      case SARVAM -> Set.of("sarvam");
     };
   }
 

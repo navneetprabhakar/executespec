@@ -165,13 +165,7 @@ class AccessGuardCoverageTest {
               // bind; tier-gating is per-row in the response body. C2 — audit 2026-05-29.
               "com.navneet.executespec.readymade.controller.ReadymadeController#detail",
               "com.navneet.executespec.migration.controller.MigrationController#detail",
-              // RL-2026-05-052 (design §10 defect #5) — CLI/Plugin chat surface. `chat` is a
-              // PAT/JWT-authenticated SSE endpoint that binds no run/project id from the URL; the
-              // per-run WRITE authz for the governance actions (approve/reject/cancel) is enforced
-              // inside ProjectChatActionTools via requireRunWriteAccess. `getAudit` reads a
-              // per-user audit row gated by an inline caller-userId equality check (no tenant-id
-              // bind). They are in scope only because the surface is now pinned above.
-              "com.navneet.executespec.specchat.SpecChatController#chat",
+              // Session id is not a tenant id; getAudit enforces exact caller-user ownership.
               "com.navneet.executespec.specchat.SpecChatController#getAudit"));
 
   /**

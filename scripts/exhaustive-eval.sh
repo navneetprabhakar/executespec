@@ -25,7 +25,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${E2E_EMAIL:-admin@executespec.ai}"
-PASSWORD="${E2E_PASSWORD:-REDACTED_FOR_PUBLIC_RELEASE}"
+PASSWORD="${E2E_PASSWORD:?E2E_PASSWORD environment variable is required}"
 PROVIDERS="${PROVIDERS:-ANTHROPIC OPENAI GOOGLE}"
 SKIP_REPORT="${SKIP_REPORT:-0}"
 # START_SPEC: if set, skip all specs before this one (allows resuming mid-suite)
@@ -469,7 +469,9 @@ fetch_report() {
     resp=$(echo "$resp" | sed 's/__CODE__:[0-9]*//')
     if [[ "$code" == "200" ]]; then
       local score
-      score=$(echo "$resp" | jq -r '.accuracyScore // "null"' 2>/dev/null || echo "null")
+      # accuracyScore is an LLM self-assessment. Do not let it make an
+      # evaluator report look ready; verifiedScore is the operational gate.
+      score=$(echo "$resp" | jq -r '.verifiedScore // "null"' 2>/dev/null || echo "null")
       if [[ "$score" != "null" ]]; then
         echo "$resp"; return 0
       fi
@@ -566,8 +568,8 @@ run_single_spec() {
   tasks_partial=$(jq -r '[.tasks[]? | select(.status=="PARTIAL")] | length' "$tmp_file" 2>/dev/null || echo "0")
 
   # Accuracy
-  local acc_score acc_grade issues_total build_br review_fail issues_json report_status
-  acc_score="N/A"; acc_grade="N/A"; issues_total="0"
+  local acc_score acc_grade legacy_acc_score legacy_acc_grade issues_total build_br review_fail issues_json report_status
+  acc_score="N/A"; acc_grade="N/A"; legacy_acc_score="N/A"; legacy_acc_grade="N/A"; issues_total="0"
   build_br="0"; review_fail="0"; issues_json="[]"; report_status="SKIPPED"
 
   if [[ "$SKIP_REPORT" == "0" && ( "$status" == "COMPLETE" || "$status" == "PARTIAL" ) ]]; then
@@ -575,15 +577,17 @@ run_single_spec() {
     local report_json
     report_json=$(fetch_report "$run_id")
 
-    acc_score=$(echo "$report_json"    | jq -r '.accuracyScore  // "N/A"')
+    acc_score=$(echo "$report_json"    | jq -r '.verifiedScore  // "N/A"')
+    legacy_acc_score=$(echo "$report_json" | jq -r '.accuracyScore // "N/A"')
+    legacy_acc_grade=$(echo "$report_json" | jq -r '.accuracyGrade // "N/A"')
     if [[ "$acc_score" != "N/A" && "$acc_score" != "null" ]]; then
       report_status="COMPLETE"
-      acc_grade=$(echo "$report_json"    | jq -r '.accuracyGrade  // "N/A"')
+      acc_grade=$(echo "$report_json"    | jq -r '.verifiedScoreGrade  // "N/A"')
       issues_total=$(echo "$report_json" | jq -r '.issuesCaught   // 0')
       build_br=$(echo "$report_json"     | jq -r '.buildBreakers  // 0')
       review_fail=$(echo "$report_json"  | jq -r '.reviewFailures // 0')
       issues_json=$(echo "$report_json"  | jq -c '[.issues[]? | {severity,description,file}]' 2>/dev/null || echo "[]")
-      ok "[$provider/$spec_name] Report: score=$acc_score ($acc_grade), issues=$issues_total (build=$build_br review=$review_fail)"
+      ok "[$provider/$spec_name] Report: verifiedScore=$acc_score, legacyAccuracy=$legacy_acc_score, issues=$issues_total (build=$build_br review=$review_fail)"
     else
       report_status="PENDING"
       warn "[$provider/$spec_name] Report not ready within ${REPORT_WAIT}s"
@@ -627,8 +631,10 @@ run_single_spec() {
     --argjson tasks_done "$tasks_done" \
     --argjson tasks_failed "$tasks_failed" \
     --argjson tasks_partial "$tasks_partial" \
-    --arg acc_score "$acc_score" \
-    --arg acc_grade "$acc_grade" \
+        --arg acc_score "$acc_score" \
+        --arg acc_grade "$acc_grade" \
+        --arg legacy_acc_score "$legacy_acc_score" \
+        --arg legacy_acc_grade "$legacy_acc_grade" \
     --argjson issues_total "$issues_total" \
     --argjson build_br "$build_br" \
     --argjson review_fail "$review_fail" \
@@ -646,6 +652,8 @@ run_single_spec() {
                     tasks_total: $tasks_total, tasks_done: $tasks_done,
                     tasks_failed: $tasks_failed, tasks_partial: $tasks_partial },
       accuracy: { score: $acc_score, grade: $acc_grade,
+                  source: (if $acc_score != "N/A" then "verified" else "missing" end),
+                  legacy_score: $legacy_acc_score, legacy_grade: $legacy_acc_grade,
                   issues_total: $issues_total, build_breakers: $build_br,
                   review_failures: $review_fail, report_status: $report_status,
                   issues: $issues_json }
@@ -665,7 +673,7 @@ append_error_result() {
     '{provider:$provider,spec_name:$spec_name,spec_type:$spec_type,language:$lang,
       run_id:$run_id,timestamp:$ts,status:$error,worker_model:"",failover_detected:false,
       time:{wall_seconds:0},cost:{actual_usd:"null"},efficiency:{tasks_total:0},
-      accuracy:{score:"N/A",grade:"N/A",issues_total:0,report_status:"SKIPPED",issues:[]}}' \
+      accuracy:{score:"N/A",grade:"N/A",source:"missing",legacy_score:"N/A",legacy_grade:"N/A",issues_total:0,report_status:"SKIPPED",issues:[]}}' \
     >> "$RESULTS_JSONL"
 }
 

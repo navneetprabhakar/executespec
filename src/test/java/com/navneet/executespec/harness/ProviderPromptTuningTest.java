@@ -160,4 +160,28 @@ class ProviderPromptTuningTest {
         .doesNotContain("patch SOURCE ONLY")
         .doesNotContain("scratch reproduction");
   }
+
+  @Test
+  @DisplayName("flag ON + model fixture: model-specific fragment is appended after provider notes")
+  void flagOn_modelFragment_appended() {
+    FeatureFlagService ffs = mock(FeatureFlagService.class);
+    when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
+    String prompt =
+        newExecutor(ffs)
+            .composeSystemPrompt(
+                task(), null, null, null, null, "deepseek", "deepseek-v4-pro-native", false);
+
+    assertThat(prompt).contains("MODEL-SPECIFIC BUILD NOTES (fixture)");
+  }
+
+  @Test
+  @DisplayName("model overlay key is sanitized and missing models fail closed")
+  void modelFragment_missingOrUnsafe_failsClosed() {
+    FeatureFlagService ffs = mock(FeatureFlagService.class);
+    when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
+    SequentialExecutor executor = newExecutor(ffs);
+
+    assertThat(executor.loadModelFragment("deepseek", "../../secret")).isEmpty();
+    assertThat(executor.loadModelFragment("deepseek", "unknown-model")).isEmpty();
+  }
 }

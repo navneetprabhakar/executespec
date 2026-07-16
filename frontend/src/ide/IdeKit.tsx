@@ -81,19 +81,89 @@ function cls(t: Seg['t']): string {
 // ───────── code viewer ─────────
 export type DiffLine = {sign: ' ' | '+' | '-'; text: string};
 
+/**
+ * Return the visible ranges around changed lines in a line diff.
+ *
+ * The run-detail API returns a compact line diff rather than unified-diff
+ * metadata. Keeping hunk calculation client-side lets the viewer provide the
+ * familiar review affordances without inventing line numbers or mutating the
+ * run workspace. Adjacent context windows are merged so a dense edit is one
+ * hunk, not a row of tiny navigation targets.
+ */
+export function diffHunks(diff: DiffLine[], context = 3): {start: number; end: number}[] {
+  if (!diff.length) return [];
+  const safeContext = Math.max(0, Math.floor(context));
+  const changed = diff
+    .map((line, index) => (line.sign === '+' || line.sign === '-' ? index : -1))
+    .filter((index) => index >= 0);
+  if (!changed.length) return [];
+  return changed.reduce<{start: number; end: number}[]>((hunks, index) => {
+    const next = {
+      start: Math.max(0, index - safeContext),
+      end: Math.min(diff.length - 1, index + safeContext),
+    };
+    const previous = hunks[hunks.length - 1];
+    if (previous && next.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, next.end);
+    } else {
+      hunks.push(next);
+    }
+    return hunks;
+  }, []);
+}
+
+/**
+ * Build a review-safe request for undoing one displayed hunk.  The Web client
+ * never mutates a run workspace directly; callers send this bounded request
+ * through the normal fork/plan gate so the agent re-applies the change in a
+ * fresh run and the user can inspect the resulting diff before approval.
+ */
+export function hunkRevertRequest(filename: string, diff: DiffLine[], hunkIndex: number): string {
+  const hunks = diffHunks(diff);
+  const hunk = hunks[hunkIndex];
+  if (!hunk) return '';
+  const rows = diff.slice(hunk.start, hunk.end + 1);
+  const oldLines = rows.filter((line) => line.sign !== '+').map((line) => line.text);
+  const newLines = rows.filter((line) => line.sign !== '-').map((line) => line.text);
+  return [
+    `Revert ONLY hunk ${hunkIndex + 1} in ${filename}.`,
+    'Restore the original lines and remove the changed lines shown below.',
+    'Do not change any other hunk, file, dependency, formatting, or tests.',
+    'Preserve the surrounding context exactly, then run the smallest relevant verification.',
+    '',
+    'ORIGINAL HUNK (before the run):',
+    '```text',
+    oldLines.join('\n'),
+    '```',
+    'CURRENT HUNK (after the run):',
+    '```text',
+    newLines.join('\n'),
+    '```',
+  ].join('\n');
+}
+
 export function IdeCodeViewer({
   filename,
   content,
   diff,
+  onRevertHunk,
 }: {
   filename: string;
   content?: string;
   diff?: DiffLine[] | null;
+  onRevertHunk?: (hunkIndex: number, request: string) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<'content' | 'diff'>(diff && diff.length ? 'diff' : 'content');
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [activeHunk, setActiveHunk] = useState(0);
   const hasDiff = !!(diff && diff.length);
+  const hunks = useMemo(() => diffHunks(diff ?? []), [diff]);
+
+  useEffect(() => {
+    setActiveHunk(0);
+  }, [filename, diff]);
 
   const contentLines = useMemo(() => (content ?? '').replace(/\n$/, '').split('\n'), [content]);
 
@@ -115,6 +185,14 @@ export function IdeCodeViewer({
           klass: d.sign === '+' ? 'add' : d.sign === '-' ? 'del' : '',
         }))
       : contentLines.map((text, idx) => ({n: idx + 1, text, klass: ''}));
+
+  function jumpHunk(delta: number) {
+    if (!hunks.length) return;
+    const next = (activeHunk + delta + hunks.length) % hunks.length;
+    setActiveHunk(next);
+    const target = scrollRef.current?.querySelector<HTMLElement>(`[data-diff-hunk="${next}"]`);
+    target?.scrollIntoView({block: 'start'});
+  }
 
   return (
     <div className='ide-code'>
@@ -139,6 +217,36 @@ export function IdeCodeViewer({
             </button>
           </>
         )}
+        {mode === 'diff' && hunks.length > 0 && (
+          <span className='ide-status' aria-label={`${hunks.length} changed hunks`}>
+            Hunk {activeHunk + 1}/{hunks.length}
+            <button
+              className='ide-status btn'
+              aria-label='Previous changed hunk'
+              onClick={() => jumpHunk(-1)}
+            >
+              ↑
+            </button>
+            <button
+              className='ide-status btn'
+              aria-label='Next changed hunk'
+              onClick={() => jumpHunk(1)}
+            >
+              ↓
+            </button>
+          </span>
+        )}
+        {mode === 'diff' && hunks.length > 0 && onRevertHunk && (
+          <button
+            className='ide-status btn'
+            aria-label={`Prepare revert for hunk ${activeHunk + 1}`}
+            onClick={() =>
+              onRevertHunk(activeHunk, hunkRevertRequest(filename, diff ?? [], activeHunk))
+            }
+          >
+            Revert hunk
+          </button>
+        )}
         <button className='ide-status btn' onClick={() => setWrap((w) => !w)}>
           {wrap ? 'No wrap' : 'Wrap'}
         </button>
@@ -146,24 +254,35 @@ export function IdeCodeViewer({
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <div className='ide-code-scroll'>
+      <div className='ide-code-scroll' ref={scrollRef}>
         <table className='ide-code-table'>
           <tbody>
-            {rows.map((r) => (
-              <tr className={`ide-code-row ${r.klass}`} key={r.n}>
-                <td className='ide-code-gutter'>{r.n}</td>
-                <td
-                  className='ide-code-line'
-                  style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word'} : undefined}
+            {rows.map((r, rowIndex) => {
+              const hunkIndex =
+                mode === 'diff'
+                  ? hunks.findIndex((hunk) => rowIndex >= hunk.start && rowIndex <= hunk.end)
+                  : -1;
+              const hunkStart = hunkIndex >= 0 && rowIndex === hunks[hunkIndex].start;
+              return (
+                <tr
+                  className={`ide-code-row ${r.klass}`}
+                  data-diff-hunk={hunkStart ? hunkIndex : undefined}
+                  key={r.n}
                 >
-                  {tokenizeLine(r.text).map((s, k) => (
-                    <span key={k} className={cls(s.t)}>
-                      {s.v}
-                    </span>
-                  ))}
-                </td>
-              </tr>
-            ))}
+                  <td className='ide-code-gutter'>{r.n}</td>
+                  <td
+                    className='ide-code-line'
+                    style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word'} : undefined}
+                  >
+                    {tokenizeLine(r.text).map((s, k) => (
+                      <span key={k} className={cls(s.t)}>
+                        {s.v}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

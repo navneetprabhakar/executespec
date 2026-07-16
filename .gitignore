@@ -218,6 +218,11 @@ sa-key.json
 
 # Eval output (generated at runtime)
 eval-reports/
+
+# Obsolete worktree-local location from the initial control draft. The canonical goal ledger lives
+# outside every repository under ~/.local/state/executespec/goals/executespec-2.0-cli-1.0/.
+/output/executespec-2.0/provider-spend-ledger.json
+/output/executespec-2.0/provider-spend-ledger.json.lock
 eval-outputs/
 outputs/
 

@@ -15,15 +15,41 @@ import lombok.Builder;
 @Builder
 public record ModelProviderCandidateRequest(
     String taskCategory,
+    String taskComplexity,
     double requiredQualityThreshold,
     List<String> providerAllowList,
     List<String> modelAllowList,
     List<ModelProviderCapabilitySignal> externalSignals,
     Map<String, Boolean> providerAvailability,
-    List<String> providerPreferenceOrder) {
+    List<String> providerPreferenceOrder,
+    long requiredContextTokens) {
+
+  /** Compatibility constructor for callers that do not yet project a context budget. */
+  public ModelProviderCandidateRequest(
+      String taskCategory,
+      String taskComplexity,
+      double requiredQualityThreshold,
+      List<String> providerAllowList,
+      List<String> modelAllowList,
+      List<ModelProviderCapabilitySignal> externalSignals,
+      Map<String, Boolean> providerAvailability,
+      List<String> providerPreferenceOrder) {
+    this(
+        taskCategory,
+        taskComplexity,
+        requiredQualityThreshold,
+        providerAllowList,
+        modelAllowList,
+        externalSignals,
+        providerAvailability,
+        providerPreferenceOrder,
+        0L);
+  }
 
   public ModelProviderCandidateRequest {
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
+    taskComplexity =
+        taskComplexity == null || taskComplexity.isBlank() ? "UNKNOWN" : taskComplexity;
     requiredQualityThreshold = Math.max(0.0, Math.min(100.0, requiredQualityThreshold));
     providerAllowList = providerAllowList == null ? List.of() : List.copyOf(providerAllowList);
     modelAllowList = modelAllowList == null ? List.of() : List.copyOf(modelAllowList);
@@ -32,5 +58,6 @@ public record ModelProviderCandidateRequest(
         providerAvailability == null ? Map.of() : Map.copyOf(providerAvailability);
     providerPreferenceOrder =
         providerPreferenceOrder == null ? List.of() : List.copyOf(providerPreferenceOrder);
+    requiredContextTokens = Math.max(0L, requiredContextTokens);
   }
 }

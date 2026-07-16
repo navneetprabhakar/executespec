@@ -39,18 +39,20 @@ public class StateStoreIntegrationTest extends PostgresIntegrationBase {
   class RunLifecycle {
 
     @Test
-    @DisplayName("createRun persists run in PENDING status")
-    void createRunPending() {
+    @DisplayName("createRun persists run in PLANNING status")
+    void createRunPlanning() {
       Optional<PipelineRun> found = stateStore.findRun(run.getRunId());
       assertThat(found).isPresent();
-      assertThat(found.get().getStatus()).isEqualTo("PENDING");
+      // PLANNING is the lifecycle entry state; PENDING is reserved for agent tasks.
+      assertThat(found.get().getStatus()).isEqualTo("PLANNING");
     }
 
     @Test
-    @DisplayName("markApproved transitions run to APPROVED")
+    @DisplayName("markApproved transitions run to WORKING")
     void markApproved() {
       stateStore.markApproved(run.getRunId());
-      assertThat(stateStore.findRun(run.getRunId()).get().getStatus()).isEqualTo("APPROVED");
+      // Approval clears the plan gate and admits the run to execution immediately.
+      assertThat(stateStore.findRun(run.getRunId()).get().getStatus()).isEqualTo("WORKING");
     }
 
     @Test

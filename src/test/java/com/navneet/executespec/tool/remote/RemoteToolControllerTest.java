@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -41,7 +42,7 @@ class RemoteToolControllerTest {
   }
 
   @Test
-  void submitToolResult_turnsMalformedEnvelopeIntoInternalError() throws Exception {
+  void submitToolResult_rejectsMalformedEnvelopeAndUnblocksPendingCall() throws Exception {
     when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
 
     var body =
@@ -49,11 +50,8 @@ class RemoteToolControllerTest {
 
     var response = controller.submitToolResult(null, "run-1", body);
 
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
-    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
-    verify(dispatcher).complete(eq("run-1"), eq("call-2"), envelope.capture());
-    assertThat(om.readTree(envelope.getValue()).toString())
-        .isEqualTo("{\"ok\":false,\"kind\":\"INTERNAL\",\"message\":\"malformed tool result\"}");
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    verify(dispatcher).rejectMalformed("run-1", "call-2");
   }
 
   @Test
@@ -65,5 +63,24 @@ class RemoteToolControllerTest {
             new RemoteToolController.ToolResultBody(" ", om.createObjectNode().put("ok", true)));
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void reconnectStatus_exposesRestartBoundaryToClient() {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    when(dispatcher.reconnectStatus("run-1"))
+        .thenReturn(
+            new RemoteToolDispatcher.ReconnectStatus(
+                "RESTART_REQUIRES_NEW_RUN",
+                false,
+                java.util.List.<LocalHandsStateService.PendingCall>of(),
+                java.util.List.of("call-1")));
+
+    var response = controller.reconnectStatus(null, "run-1");
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody().state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(response.getBody().workerWaitRebound()).isFalse();
+    assertThat(response.getBody().staleCallIds()).containsExactly("call-1");
   }
 }
