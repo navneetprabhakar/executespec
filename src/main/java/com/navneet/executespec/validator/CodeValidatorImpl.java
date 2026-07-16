@@ -3,6 +3,7 @@ package com.navneet.executespec.validator;
 import static com.navneet.executespec.config.CustomMetricsConfig.VALIDATION_TOTAL;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -50,8 +51,12 @@ public class CodeValidatorImpl implements CodeValidator {
   public ValidationResult validateFile(ValidateFileRequest request) {
     LanguageToolchain toolchain = toolchainMap.get(request.getLanguage());
     if (toolchain == null || !toolchain.isAvailable()) {
-      log.warn("No toolchain for {} — skipping validation", request.getLanguage());
-      return ValidationResult.pass();
+      String reason =
+          toolchain == null
+              ? "No validator toolchain registered for " + request.getLanguage()
+              : "Validator toolchain unavailable for " + request.getLanguage();
+      log.warn("{} — validation is NOT_VERIFIED", reason);
+      return ValidationResult.unmeasured(reason);
     }
     log.info(
         "Validating file: {} [{}] level={}",
@@ -65,7 +70,10 @@ public class CodeValidatorImpl implements CodeValidator {
             request.getFilePath(),
             request.getLevel(),
             request.getTimeout());
-    String validationResult = result.getVerdict() == ValidationVerdict.FAIL ? "fail" : "pass";
+    String validationResult =
+        result.getVerdict() == ValidationVerdict.FAIL
+            ? "fail"
+            : result.getVerdict() == ValidationVerdict.UNMEASURED ? "unmeasured" : "pass";
     Counter.builder(VALIDATION_TOTAL)
         .tag("result", validationResult)
         .tag("gate", request.getLanguage().name())
@@ -76,7 +84,9 @@ public class CodeValidatorImpl implements CodeValidator {
         request.getFilePath(),
         result.getVerdict(),
         result.getErrors().size(),
-        result.getTotalTime().toMillis());
+        result.getTotalTime() == null
+            ? Duration.ZERO.toMillis()
+            : result.getTotalTime().toMillis());
     return result;
   }
 
@@ -85,11 +95,18 @@ public class CodeValidatorImpl implements CodeValidator {
     Path root = request.getProjectRoot();
     Language lang = detectPrimaryLanguage(root);
     if (lang == null) {
-      return ValidationResult.pass();
+      String reason = "Primary language could not be detected; validation is NOT_VERIFIED";
+      log.warn(reason + " root={}", root);
+      return ValidationResult.unmeasured(reason);
     }
     LanguageToolchain toolchain = toolchainMap.get(lang);
     if (toolchain == null || !toolchain.isAvailable()) {
-      return ValidationResult.pass();
+      String reason =
+          toolchain == null
+              ? "No validator toolchain registered for " + lang
+              : "Validator toolchain unavailable for " + lang;
+      log.warn("{} — validation is NOT_VERIFIED", reason);
+      return ValidationResult.unmeasured(reason);
     }
     return gateChain.execute(
         toolchain, root, Path.of("."), request.getLevel(), request.getTimeout());

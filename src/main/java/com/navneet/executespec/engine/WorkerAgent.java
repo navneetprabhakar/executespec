@@ -127,8 +127,8 @@ public class WorkerAgent {
   /**
    * VBC verify-before-complete (RL-2026-06-…) — server-runs the project's own test suite at the
    * {@code completeTask} boundary when {@link WorkerTaskRequest#verifyBeforeComplete()} is set
-   * (flag {@code worker.verify-before-complete.enabled}, V235, default OFF). Unlike the
-   * model-dependent {@code requireTestVerification}/{@code requireBuildVerification} soft gates
+   * (flag {@code worker.verify-before-complete.enabled}, V235, graduated ON by V239/V259). Unlike
+   * the model-dependent {@code requireTestVerification}/{@code requireBuildVerification} soft gates
    * (which only check whether the MODEL recently called runTests/buildProject), this RUNS the tests
    * itself, server-side — so a worker that never verifies is still caught. Called DIRECTLY (not via
    * the flag-gated {@code runWorkspaceTests} TOOL) so VBC is decoupled from {@code
@@ -250,14 +250,13 @@ public class WorkerAgent {
   public static final int DELIVERABLE_GATE_MAX_REFUSALS = 2;
 
   /**
-   * VBC verify-before-complete gate — how many times the server-run test gate may refuse {@code
+   * VBC verify-before-complete gate — how many server-owned repair passes may refuse {@code
    * completeTask} (tests red) before it YIELDS and lets the run complete anyway. Bounded +
-   * fail-open (mirrors {@link #DELIVERABLE_GATE_MAX_REFUSALS}): the gate can nudge the worker to
-   * fix failing tests for a few rounds but can NEVER permanently block a legitimately-complete run.
-   * 3 (vs the deliverable gate's 2) gives an extra round because fixing a real test failure usually
-   * needs one read + one edit + one re-verify.
+   * fail-open: exactly one refusal gives the model one repair turn with structured failure
+   * evidence; a second completion attempt cannot trigger another server-side test run. This keeps
+   * the repair continuation from consuming unbounded iterations, tokens, or test-suite time.
    */
-  public static final int VBC_GATE_MAX_REFUSALS = 3;
+  public static final int VBC_GATE_MAX_REFUSALS = 1;
 
   /**
    * Terminal visible-test gate — how many times {@code completeTask} may be refused when a remote
@@ -428,7 +427,7 @@ public class WorkerAgent {
     // v2: PATCH pre-first-edit exploration ceiling (total iterations; see constant javadoc).
     final int explorationNudgeAfter =
         Math.max(PROGRESS_V2_EXPLORATION_NUDGE_AFTER, progressWarnAfter * 3);
-    // auto-verify (harness-resolution Phase 2, flag worker.auto-verify.enabled, default OFF):
+    // auto-verify (harness-resolution Phase 2, flag worker.auto-verify.enabled, default ON):
     // server-run tests after each edit burst; result injected as an observation. Schema-free.
     final boolean autoVerifyOn =
         Boolean.TRUE.equals(req.autoVerify())
@@ -650,9 +649,15 @@ public class WorkerAgent {
         }
       }
 
-      // RL-2026-05-052 follow-up — compact the oldest turns once the previous call's input crossed
-      // the threshold, BEFORE building this request. Flag-gated + default OFF → returns the same
-      // `history` reference (byte-identical loop). Null-guarded for test call sites that pass null.
+      // Bind once so context planning measures the exact schema set that the request will send.
+      // Reusing the same list also prevents headroom accounting from drifting from dispatch.
+      List<org.springframework.ai.tool.ToolCallback> workerTools =
+          toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
+
+      // ExecuteSpec 2.0 context headroom: before request assembly, reserve output + safety against
+      // the provider model's window and proactively compact only when the remaining headroom is
+      // unsafe. If planner metadata/dependency is unavailable, WorkerHistoryCompactor preserves
+      // the previous flag-gated 75% trigger exactly.
       if (workerHistoryCompactor != null) {
         history =
             workerHistoryCompactor.compactIfNeeded(
@@ -661,7 +666,9 @@ public class WorkerAgent {
                 req.model(),
                 req.context(),
                 lastInputTokens,
-                req.userPrompt());
+                req.userPrompt(),
+                req.maxTokensPerCall(),
+                workerTools);
       }
 
       // progress-v2 — one-shot tool_choice=required after a repeated text-only stop. Consumed
@@ -683,10 +690,11 @@ public class WorkerAgent {
                     .stepId("worker.iteration-" + iter)
                     .temperature(req.temperature())
                     .maxTokens(req.maxTokensPerCall())
+                    .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                     .toolChoice(forcedThisCall ? "required" : null)
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
-                    .toolsOverride(toolRegistry.bindForWorker(req.context(), req.provider()))
+                    .toolsOverride(workerTools)
                     // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
                     // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
                     // (thinking model) regularly takes 60-90s on dense tool-call iterations,
@@ -918,6 +926,11 @@ public class WorkerAgent {
       // Dispatch every tool call. completeTask short-circuits the loop.
       List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
       String completionSummary = null;
+      // Count only writes that actually reached the workspace.  A rejected write (stale read,
+      // forbidden path, etc.) is not an edit burst and must not trigger an expensive server-side
+      // test run.  The broader progress watchdog still records the attempted tool call below so
+      // a model cannot hide a stuck loop behind repeated failed writes.
+      int successfulEditsThisIter = 0;
       // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
       // call for the next LLM turn; its output is the most likely to be re-referenced by the
       // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
@@ -1060,6 +1073,37 @@ public class WorkerAgent {
                   missing);
               continue;
             }
+          }
+          // Harness-resolution Phase 2: completion intent is an edit-burst boundary too.  When
+          // auto-verify is enabled, do one bounded server-side suite run before accepting the
+          // first completion after edits, even when the model did not give us an intervening
+          // read/shell turn.  This closes the "write -> completeTask" hole without changing the
+          // tool schema.  Fail-open on no runner/remote/zero tests and yield after the shared cap;
+          // VBC remains an independent hard-ish gate when explicitly enabled.
+          if (autoVerifyOn
+              && editsSinceAutoVerify > 0
+              && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
+            autoVerifyRuns++;
+            String autoVerifyFailure = autoVerifyCompletionFailure(req.context());
+            if (autoVerifyFailure != null) {
+              String refused = errEnvelope("VERIFY_FAILED", autoVerifyFailure);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (auto-verify: " + autoVerifyFailure + ")");
+              log.info(
+                  "WorkerAgent completeTask AUTO_VERIFY-GATED run={} task={} iter={}"
+                      + " runsUsed={}/{}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  autoVerifyRuns,
+                  AUTO_VERIFY_MAX_RUNS_PER_TASK);
+              continue;
+            }
+            // A green/unavailable result closes this burst.  Keep the edit marker on RED so a
+            // model cannot immediately call completeTask again without either fixing the tests
+            // or exhausting the bounded auto-verify refusal budget.
+            editsSinceAutoVerify = 0;
           }
           // #VBC verify-before-complete (RL-2026-06-…, worker.verify-before-complete.enabled,
           // V235).
@@ -1247,6 +1291,9 @@ public class WorkerAgent {
             parallelReads.containsKey(safeId(tc.id()))
                 ? parallelReads.get(safeId(tc.id()))
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
+        if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
+          successfulEditsThisIter++;
+        }
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
         // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
@@ -1268,10 +1315,7 @@ public class WorkerAgent {
         // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
         // avoid false-positive on output text that happens to contain "exit=0" without the
         // newline framing (e.g. compiler messages quoting source).
-        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name())
-            && envelope != null
-            && envelope.startsWith("{\"ok\":true")
-            && envelope.contains("\\nexit=0\\n")) {
+        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
           lastBuildPassIter = iter;
         }
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
@@ -1357,12 +1401,9 @@ public class WorkerAgent {
       // did not — so the model gets ground truth exactly when it has (implicitly) moved on to the
       // next thing. Bounded per task; green results are one line, red results carry the failing
       // tail so the fix is grounded in real output, not a re-guess.
-      final boolean rawWriteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
       if (autoVerifyOn) {
-        if (rawWriteThisIter) {
-          for (AssistantMessage.ToolCall tc : calls) {
-            if (isWriteTool(tc.name())) editsSinceAutoVerify++;
-          }
+        if (successfulEditsThisIter > 0) {
+          editsSinceAutoVerify += successfulEditsThisIter;
         } else if (lastIterHadWrite
             && editsSinceAutoVerify > 0
             && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
@@ -1381,7 +1422,10 @@ public class WorkerAgent {
                 AUTO_VERIFY_MAX_RUNS_PER_TASK);
           }
         }
-        lastIterHadWrite = rawWriteThisIter;
+        // A failed write does not close a successful edit burst.  Keep the marker tied to actual
+        // workspace mutation so the next non-write iteration observes and verifies the prior
+        // successful edits instead of running tests after a failed attempt.
+        lastIterHadWrite = successfulEditsThisIter > 0;
       }
       // v2 — worst current same-signature failure streak (0 when off/empty).
       final int worstFailureStreak =
@@ -1692,6 +1736,7 @@ public class WorkerAgent {
                       toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
                   .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
@@ -1867,6 +1912,7 @@ public class WorkerAgent {
                           : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter)
                   .temperature(0.0)
                   .maxTokens(req.maxTokensPerCall())
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
                   .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
@@ -1990,7 +2036,7 @@ public class WorkerAgent {
   }
 
   private List<ToolCallback> terminalFinalizerTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
     if (!restrict) return all;
     java.util.Set<String> allow =
         java.util.Set.of("writeFile", "editFile", "shell", CompleteTaskTool.NAME);
@@ -2008,7 +2054,7 @@ public class WorkerAgent {
    * change).
    */
   private List<ToolCallback> salvageTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context());
+    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
     if (!restrict) return all;
     java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
     List<ToolCallback> filtered =
@@ -2407,15 +2453,7 @@ public class WorkerAgent {
   // public for the cross-package WorkerAgentTruncateTest after the engine relocation
   // (RL-2026-05-052)
   public static String truncate(String s, int max) {
-    if (s == null) return "";
-    if (s.length() <= max) return s;
-    int end = max - 1;
-    if (end > 0
-        && Character.isHighSurrogate(s.charAt(end - 1))
-        && Character.isLowSurrogate(s.charAt(end))) {
-      end -= 1;
-    }
-    return s.substring(0, end) + "…";
+    return WorkerHistoryPolicy.truncate(s, max);
   }
 
   /**
@@ -2464,22 +2502,7 @@ public class WorkerAgent {
    * match the stable substrings across Anthropic / OpenAI-wire / Gemini error bodies.
    */
   public static boolean isContextLengthError(Throwable e) {
-    for (Throwable t = e; t != null; t = t.getCause()) {
-      String m = t.getMessage();
-      if (m == null) continue;
-      String lower = m.toLowerCase(java.util.Locale.ROOT);
-      if (lower.contains("context length")
-          || lower.contains("context window")
-          || lower.contains("context_length_exceeded")
-          || lower.contains("maximum context")
-          || lower.contains("prompt is too long")
-          || lower.contains("input is too long")
-          || lower.contains("too many tokens")
-          || lower.contains("exceeds the maximum number of tokens")) {
-        return true;
-      }
-    }
-    return false;
+    return WorkerHistoryPolicy.isContextLengthError(e);
   }
 
   /**
@@ -2489,16 +2512,37 @@ public class WorkerAgent {
    * than losing the run.
    */
   static List<Message> hardTrimHistory(List<Message> history) {
-    if (history == null || history.size() < 12) return null;
+    return WorkerHistoryPolicy.hardTrimHistory(history);
+  }
+
+  private static List<Message> hardTrimHistoryLegacy(List<Message> history) {
+    // A count-only guard leaves a recoverable overflow fatal when one tool result (or a resumed
+    // short transcript) is huge.  Keep the minimum role envelope, then bound an oversized tool
+    // result if there is no complete turn boundary to drop.
+    if (history == null || history.size() < 4) return null;
+    if (history.size() < 8
+        && history.stream().noneMatch(message -> message instanceof ToolResponseMessage)) {
+      return null;
+    }
     final int n = history.size();
     int cut = -1;
-    for (int i = n - 8; i >= 3; i--) {
+    for (int i = Math.max(3, n - 8); i >= 3; i--) {
       if (history.get(i) instanceof AssistantMessage) {
         cut = i;
         break;
       }
     }
-    if (cut <= 2) return null;
+    // Malformed/resumed histories may have a non-assistant tail. Search older boundaries before
+    // giving up; the retained suffix still starts at a complete assistant/tool turn.
+    if (cut < 0) {
+      for (int i = Math.min(n - 1, n - 9); i >= 3; i--) {
+        if (history.get(i) instanceof AssistantMessage) {
+          cut = i;
+          break;
+        }
+      }
+    }
+    if (cut < 0) return truncateOversizedToolResponses(history);
     List<Message> out = new ArrayList<>(n - cut + 2);
     out.add(history.get(0)); // system
     String task =
@@ -2516,13 +2560,51 @@ public class WorkerAgent {
   }
 
   /**
+   * Bounds a huge tool envelope when a short transcript has no safe assistant boundary to drop.
+   * Tool calls remain paired with their response; the next worker turn can reload the full output
+   * from the tool-output spill file when the envelope carries one.
+   */
+  private static List<Message> truncateOversizedToolResponses(List<Message> history) {
+    final int maxResponseChars = 8_000;
+    List<Message> out = new ArrayList<>(history.size());
+    boolean changed = false;
+    for (Message message : history) {
+      if (!(message instanceof ToolResponseMessage responses)
+          || responses.getResponses() == null
+          || responses.getResponses().isEmpty()) {
+        out.add(message);
+        continue;
+      }
+      List<ToolResponseMessage.ToolResponse> bounded = new ArrayList<>();
+      boolean responseChanged = false;
+      for (ToolResponseMessage.ToolResponse response : responses.getResponses()) {
+        String data = response.responseData();
+        if (data != null && data.length() > maxResponseChars) {
+          data = data.substring(0, maxResponseChars) + "\n[context overflow trim]";
+          responseChanged = true;
+        }
+        bounded.add(new ToolResponseMessage.ToolResponse(response.id(), response.name(), data));
+      }
+      if (responseChanged) {
+        out.add(ToolResponseMessage.builder().responses(bounded).build());
+        changed = true;
+      } else {
+        out.add(message);
+      }
+    }
+    return changed ? out : null;
+  }
+
+  /**
    * progress-v2 — stable identity of a tool call for novelty + repetition tracking: name +
    * whitespace-normalized raw arguments. Trailing/duplicate whitespace differences do not make a
    * call "new"; any real argument change does.
    */
   public static String callSignature(AssistantMessage.ToolCall tc) {
     String args = tc.arguments() == null ? "" : tc.arguments().replaceAll("\\s+", " ").trim();
-    return tc.name() + " " + args;
+    // Keep the signature safe for text logs, JSON, and persisted evidence; a NUL separator can
+    // silently truncate files and makes the source itself binary-hostile.
+    return tc.name() + "|" + args;
   }
 
   /**
@@ -2537,6 +2619,21 @@ public class WorkerAgent {
     if (head.startsWith("{\"ok\":false")) return true;
     java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
     return m.find() && !"0".equals(m.group(1));
+  }
+
+  /**
+   * Returns true only when a build envelope reports exit zero without the resolver's explicit no-op
+   * marker. A no-op fallback provides no compilation or repair evidence even though the shell
+   * command exits successfully. Legacy envelopes without the marker remain accepted.
+   */
+  static boolean isSuccessfulBuildEnvelope(String envelope) {
+    if (envelope == null
+        || !envelope.startsWith("{\"ok\":true")
+        || !envelope.contains("\\nexit=0\\n")) {
+      return false;
+    }
+    return !envelope.contains("\\nsmokeSignal=UNAVAILABLE\\n")
+        && !envelope.contains("\\nnoOp=true\\n");
   }
 
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
@@ -2716,14 +2813,9 @@ public class WorkerAgent {
       TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0) return null; // nothing ran → fail-open
       if (s.getFailed() == 0 && s.getErrors() == 0) return null; // green
-      // Harness-resolution task 8: the refusal is a REPAIR message, not a bare gate — carry the
-      // failing output so the worker can fix against the actual failures instead of re-guessing.
-      String tail = opt.get().outputTail();
-      String detailTail =
-          tail == null || tail.isBlank()
-              ? ""
-              : "\n\nTest output (tail):\n"
-                  + (tail.length() > 1_500 ? tail.substring(tail.length() - 1_500) : tail);
+      // Harness-resolution task 8: the refusal is a REPAIR message, not a bare gate — carry
+      // structured failing-test evidence so the worker can fix against the actual failures
+      // instead of re-guessing. No tool schema change is needed.
       return s.getFailed()
           + " failed / "
           + s.getErrors()
@@ -2732,7 +2824,7 @@ public class WorkerAgent {
           + " tests (command: "
           + opt.get().command()
           + ")"
-          + detailTail;
+          + verificationFailureEvidence(opt.get());
     } catch (Exception e) {
       log.debug("VBC gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
       return null; // fail-open
@@ -2762,12 +2854,6 @@ public class WorkerAgent {
             + s.getTotalTests()
             + " passed (exit 0). Tests are green — continue.";
       }
-      String tail = opt.get().outputTail();
-      String detail =
-          tail == null || tail.isBlank()
-              ? ""
-              : "\nFailing output (tail):\n"
-                  + (tail.length() > 1_200 ? tail.substring(tail.length() - 1_200) : tail);
       return "AUTO-VERIFY — the platform ran `"
           + opt.get().command()
           + "` after your last "
@@ -2779,11 +2865,43 @@ public class WorkerAgent {
           + " errored of "
           + s.getTotalTests()
           + "."
-          + detail
+          + verificationFailureEvidence(opt.get())
           + "\nFix these failures (or, if one is genuinely pre-existing and unrelated to your"
           + " change, say so explicitly) before moving on.";
     } catch (Exception e) {
       log.debug("auto-verify failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * Completion-intent sibling of {@link #autoVerifyObservation}. It deliberately returns only a
+   * refusal detail: green, unavailable, remote, zero-test, and parser-error outcomes all fail open
+   * so enabling the flag cannot turn an otherwise-completable task into a false failure.
+   */
+  private String autoVerifyCompletionFailure(ExecutionContext ctx) {
+    try {
+      Optional<com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult> opt =
+          workspaceTestRunner.runTestsDetailed(ctx.runId(), ctx.workspaceRoot());
+      if (opt.isEmpty()) return null;
+      TestExecutionSummary s = opt.get().summary();
+      if (s.getTotalTests() == 0 || (s.getFailed() == 0 && s.getErrors() == 0)) return null;
+      return "completeTask refused — auto-verify ran `"
+          + opt.get().command()
+          + "` and found "
+          + s.getFailed()
+          + " failed / "
+          + s.getErrors()
+          + " errored of "
+          + s.getTotalTests()
+          + " tests. Fix the failing tests or the code they exercise, then call completeTask"
+          + " again."
+          + verificationFailureEvidence(opt.get());
+    } catch (Exception e) {
+      log.debug(
+          "auto-verify completion check failed (fail-open) run={}: {}",
+          ctx.runId(),
+          e.getMessage());
       return null;
     }
   }
@@ -2814,7 +2932,41 @@ public class WorkerAgent {
         + "). The platform ran your test suite and it is RED. Fix the failing test(s) — or the code"
         + " they exercise — then call completeTask again. A run that completes with failing tests"
         + " ships a broken deliverable. If a failure is genuinely pre-existing and unrelated to"
-        + " your change, note that in completionNotes; the gate yields after a few attempts.";
+        + " your change, note that in completionNotes; the gate yields after this one repair pass.";
+  }
+
+  /**
+   * Render bounded, structured evidence for a server-owned verification repair pass. The runner
+   * already caps {@code outputTail} at 3,000 chars; this method keeps the model-visible payload
+   * smaller and extracts the conventional failure-name lines emitted by pytest/JUnit/Jest.
+   */
+  public static String verificationFailureEvidence(
+      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult result) {
+    String output = result.outputTail() == null ? "" : result.outputTail();
+    List<String> names =
+        output
+            .lines()
+            .map(String::trim)
+            .filter(line -> !line.isBlank())
+            .filter(WorkerAgent::looksLikeFailureLine)
+            .distinct()
+            .limit(12)
+            .toList();
+    String tail = output.length() > 1_200 ? output.substring(output.length() - 1_200) : output;
+    StringBuilder evidence = new StringBuilder("\n\nFailure evidence (server-collected):\n");
+    evidence.append("failedTests: ").append(names.isEmpty() ? "[]" : names).append('\n');
+    evidence.append("outputTail:\n");
+    evidence.append(tail.isBlank() ? "<empty>" : tail);
+    return evidence.toString();
+  }
+
+  private static boolean looksLikeFailureLine(String line) {
+    String lower = line.toLowerCase(java.util.Locale.ROOT);
+    return lower.contains("failed")
+        || lower.contains("failure")
+        || lower.contains("error")
+        || lower.startsWith("e ")
+        || lower.startsWith("at ");
   }
 
   static String terminalVisibleTestsMessage() {
@@ -2884,6 +3036,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   .stepId("worker.critic-pass")
                   .temperature(0.0)
                   .maxTokens(1500)
+                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(List.of()) // no tools — a plain completion
                   .build());
       String verdict = resp.getResult().getOutput().getText();

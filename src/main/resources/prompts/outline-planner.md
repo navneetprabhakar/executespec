@@ -20,7 +20,7 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 
 1. **Sequential execution.** One worker agent executes the tasks you produce in the order you list them. There is no parallelism. Do not try to split work for "parallel speed".
 
-2. **Single-responsibility, not single-file — do NOT over-decompose.** Each task is ONE cohesive, independently-verifiable unit of work (a feature slice or a layer — e.g. "add the User model + its repository + a happy-path test"), NOT one file. The worker that executes each task has a large per-task iteration budget and can read and write many files in a single task. Prefer the FEWEST cohesive tasks: splitting a coherent feature across several one-file tasks multiplies fixed per-task overhead (a fresh worker context + a build smoke for every task) and slows the run with no quality gain. As a guide, a typical bounded backend feature is ~3–6 tasks, not 10+. Group CRUD endpoints that share a model into one task; group a service and its unit test into one task.
+2. **Single-responsibility, not single-file — do NOT over-decompose.** Each task is ONE cohesive, independently-verifiable unit of work (a feature slice or a layer — e.g. "add the User model + its repository + a happy-path test"), NOT one file. The worker that executes each task has a large per-task iteration budget and can read and write many files in a single task. Prefer the FEWEST cohesive tasks: splitting a coherent feature across several one-file tasks multiplies fixed per-task overhead (a fresh worker context + a build smoke for every task) and slows the run with no quality gain. Use classification as a decomposition signal: SMALL usually needs 2–4 cohesive tasks; a MEDIUM spec with several independent surfaces (auth, data, API, UI, background work, or docs) should normally land at 7–10 tasks, while one cohesive MEDIUM surface may use fewer. Do not collapse independent deliverables into three vague umbrella tasks just to minimize the count. Group CRUD endpoints that share a model into one task; group a service and its unit test into one task.
 
 3. **Unit tests are required.** Every task that adds or changes production code MUST either add unit tests for that code in the same task, or include a follow-up test task immediately after. Rules of thumb:
    - New endpoint / route → at least one test hitting it (happy path + 1 error case).
@@ -49,7 +49,20 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
    - `SINGLE_SHOT`: 1 task (you won't be called for this — handled directly)
    - `SMALL`: at most 4 tasks
    - `MEDIUM`: at most {{MAX_TASKS}} tasks (normally 10). Every task must have real, distinct work; the cap is a ceiling, not a target.
-   - `LARGE` and `LEGACY`: handled by skeleton mode, not this full-plan prompt.
+    - `LARGE` and `LEGACY`: handled by skeleton mode, not this full-plan prompt.
+
+12. **Compact structured output.** Call `submitOutline` exactly once and emit no narrative outside
+    that tool call. Keep each requirement to one sentence, each task description to at most 80
+    words, and each `hardConstraints` entry to one line. Do not repeat the full spec, explain your
+    reasoning, or add prose fields not present in the schema. The complete `tasks` array is
+    mandatory; trim wording before risking a truncated tool call.
+
+13. **MEDIUM decomposition floor and final checklist.** When classification is `MEDIUM` and the
+    spec names at least three independent deliverable surfaces or five distinct feature bullets,
+    emit at least 7 tasks (normally 7–10), with one cohesive task per surface/layer and explicit
+    dependencies where needed. Before calling `submitOutline`, verify that every `R*` requirement
+    is cited by at least one task's `meetsRequirements`, every hard constraint is propagated, and
+    the task array is complete. Do not merge independent surfaces merely to reduce task count.
 
 7. **Order matters.** Tasks run top-to-bottom. Foundational work (types, interfaces, schema, package setup) comes before work that depends on it.
 

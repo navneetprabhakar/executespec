@@ -1,15 +1,16 @@
 package com.navneet.executespec.tool;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
+import com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -56,7 +57,15 @@ public class ReadFileTool implements Tool {
 
   private final ProjectWorkspaceService projectWorkspace;
   private final PipelineRunRepository pipelineRunRepo;
-  private final ProjectArchitectureService projectArchService;
+
+  /**
+   * Read-only DB fallback for architecture documents. Keep this dependency at the repository
+   * boundary: injecting {@code ProjectArchitectureService} here creates a bean cycle through the
+   * canonical {@code LlmRouter} (router -> tools -> readFile -> architecture -> project brief ->
+   * router).
+   */
+  private final ProjectArchitectureDocRepository projectArchRepo;
+
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectRepoLinkRepository repoLinkRepo;
   private final ProjectRepoRepository repoRepo;
@@ -76,7 +85,8 @@ public class ReadFileTool implements Tool {
   public String description() {
     return "Reads a file's contents. Supports optional line-range slicing — provide startLine and"
         + " endLine (1-indexed, inclusive) to read a portion of a large file without"
-        + " consuming tokens on irrelevant content.";
+        + " consuming tokens on irrelevant content. Legacy offset (0-indexed) + limit are"
+        + " accepted as aliases; startLine/endLine take precedence.";
   }
 
   @Override
@@ -98,6 +108,16 @@ public class ReadFileTool implements Tool {
                  "type": "integer",
                  "description": "Optional 1-indexed last line to include (inclusive)",
                  "minimum": 1
+               },
+               "offset": {
+                 "type": "integer",
+                 "description": "Legacy alias: skip this many lines (0-indexed)",
+                 "minimum": 0
+               },
+               "limit": {
+                 "type": "integer",
+                 "description": "Legacy alias: maximum lines to return with offset",
+                 "minimum": 1
                }
              },
              "required": ["path"],
@@ -114,6 +134,12 @@ public class ReadFileTool implements Tool {
     }
     Integer start = args.hasNonNull("startLine") ? args.get("startLine").asInt() : null;
     Integer end = args.hasNonNull("endLine") ? args.get("endLine").asInt() : null;
+    if (start == null && end == null && (args.hasNonNull("offset") || args.hasNonNull("limit"))) {
+      int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
+      int limit = args.hasNonNull("limit") ? Math.max(1, args.get("limit").asInt()) : 200;
+      start = offset + 1;
+      end = start + limit - 1;
+    }
     if (start != null && end != null && start > end) {
       return ToolResult.err(
           ToolResult.ErrorKind.INVALID_ARGS, "startLine (" + start + ") > endLine (" + end + ")");
@@ -136,6 +162,15 @@ public class ReadFileTool implements Tool {
         if (content == null) {
           return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
         }
+        if (start != null || end != null) {
+          String[] lines = content.split("\\R", -1);
+          int s = start == null ? 1 : Math.max(1, start);
+          int e = end == null ? lines.length : Math.min(end, lines.length);
+          if (s > lines.length) {
+            return ToolResult.ok("(file has " + lines.length + " lines; range starts past EOF)");
+          }
+          return ToolResult.ok(String.join("\n", java.util.Arrays.copyOfRange(lines, s - 1, e)));
+        }
         return ToolResult.ok(clampFullRead(content));
       } catch (IllegalArgumentException iae) {
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, iae.getMessage());
@@ -154,19 +189,12 @@ public class ReadFileTool implements Tool {
       // staleness. Covers both range + full reads — any read grounds the worker on this file.
       readState.recordReadFromDisk(ctx.runId(), resolved);
       if (start != null || end != null) {
-        List<String> lines = Files.readAllLines(resolved);
         int s = start == null ? 1 : start;
-        int e = end == null ? lines.size() : Math.min(end, lines.size());
-        if (s > lines.size()) {
-          return ToolResult.ok("(file has " + lines.size() + " lines; range starts past EOF)");
-        }
         // Range reads are byte-exact and untruncated — this is how the model pages through a file
         // too large to return whole, and the slice it sees is exactly editable via editFile.
-        String slice = String.join("\n", lines.subList(s - 1, e));
-        return ToolResult.ok(slice);
+        return ToolResult.ok(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
       }
-      String content = Files.readString(resolved);
-      return ToolResult.ok(clampFullRead(content));
+      return ToolResult.ok(readFullCapped(resolved));
     } catch (NoSuchFileException nsfe) {
       return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
     } catch (SecurityException se) {
@@ -216,6 +244,76 @@ public class ReadFileTool implements Tool {
         + " startLine/endLine.]...";
   }
 
+  /**
+   * Stream a disk-backed file so a multi-megabyte source file never has to be materialised just to
+   * return the bounded full-read preview. The in-memory {@link #clampFullRead(String)} helper is
+   * retained for project/DB-backed content and unit tests.
+   */
+  static String readFullCapped(Path path) throws IOException {
+    StringBuilder prefix = new StringBuilder(MAX_FULL_READ_CHARS);
+    long totalChars = 0;
+    int newlines = 0;
+    try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+      char[] buffer = new char[8192];
+      int read;
+      while ((read = reader.read(buffer)) >= 0) {
+        if (read == 0) continue;
+        int remaining = MAX_FULL_READ_CHARS - prefix.length();
+        if (remaining > 0) {
+          prefix.append(buffer, 0, Math.min(remaining, read));
+        }
+        for (int i = 0; i < read; i++) if (buffer[i] == '\n') newlines++;
+        totalChars += read;
+      }
+    }
+    int totalLines = totalChars == 0 ? 0 : newlines + 1;
+    if (totalChars <= MAX_FULL_READ_CHARS && totalLines <= MAX_FULL_READ_LINES) {
+      return prefix.toString();
+    }
+    int cut = prefix.length();
+    int lineCut = nthNewlineIndex(prefix.toString(), MAX_FULL_READ_LINES);
+    if (lineCut >= 0 && lineCut < cut) cut = lineCut;
+    if (cut == MAX_FULL_READ_CHARS) {
+      int boundary = prefix.lastIndexOf("\n", cut - 1);
+      if (boundary >= 0) cut = boundary;
+    }
+    String head = prefix.substring(0, cut);
+    int shownLines = countLines(head);
+    return head
+        + "\n\n...[truncated: showing the first "
+        + shownLines
+        + " of "
+        + totalLines
+        + " lines ("
+        + head.length()
+        + " of "
+        + totalChars
+        + " chars). The content above is byte-exact and editable as-is; read the rest with"
+        + " startLine/endLine.]...";
+  }
+
+  /** Stream only the requested line window; do not read the complete file into a list first. */
+  static String readRange(Path path, int startLine, int endLine) throws IOException {
+    int start = Math.max(1, startLine);
+    int end = Math.max(start, endLine);
+    StringBuilder out = new StringBuilder();
+    int lineNumber = 0;
+    try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        lineNumber++;
+        if (lineNumber < start) continue;
+        if (lineNumber > end) break;
+        if (out.length() > 0) out.append('\n');
+        out.append(line);
+      }
+    }
+    if (lineNumber < start) {
+      return "(file has " + lineNumber + " lines; range starts past EOF)";
+    }
+    return out.toString();
+  }
+
   /** Index of the {@code n}-th newline (1-indexed), or -1 if the file has fewer than {@code n}. */
   private static int nthNewlineIndex(String s, int n) {
     int idx = -1;
@@ -243,8 +341,8 @@ public class ReadFileTool implements Tool {
   private String readFromDbFallback(String projectId, String rel) {
     if (rel == null) return null;
     if (rel.equals("architecture.md")) {
-      return projectArchService
-          .latest(projectId)
+      return projectArchRepo
+          .findFirstByProjectIdOrderByVersionDesc(projectId)
           .map(ProjectArchitectureDoc::getContent)
           .orElse(null);
     }

@@ -23,6 +23,7 @@ class AgentRunEventBridge {
   private static final Map<String, String> EVENT_TYPES =
       Map.ofEntries(
           Map.entry("TASK_WAVE_PLAN", "RUN_TASK_WAVE_PLAN"),
+          Map.entry("INITIAL_ROUTING_DECISION", "RUN_INITIAL_ROUTING_DECISION"),
           Map.entry("GOAL_DECISION", "RUN_GOAL_DECISION"),
           Map.entry("CONTINUATION_DECISION", "RUN_CONTINUATION_DECISION"),
           Map.entry("CONTINUATION_ACTION", "RUN_CONTINUATION_ACTION"),

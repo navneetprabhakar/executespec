@@ -1,5 +1,5 @@
 """
-ExecuteSpec Harbor agent — runs ExecuteSpec's OWN worker on Terminal-Bench 2.0.
+ExecuteSpec Harbor agent — runs ExecuteSpec's OWN worker on Terminal-Bench 2.1.
 
 Model: "remote brain / local hands". The ExecuteSpec server (localhost) runs the worker loop (the
 brain); every tool call is emitted as a TOOL_CALL SSE event; THIS adapter executes it inside the
@@ -12,7 +12,7 @@ tool-execution backend swapped from local subprocess/fs to the Harbor `environme
 Invoke (from ~/tbench, with the backend running on localhost:8080):
     ES_PROVIDER=deepseek ES_MODEL=deepseek-v4-flash-native \
     ES_ADMIN_EMAIL=... ES_ADMIN_PW=... \
-    harbor run --dataset terminal-bench@2.0 \
+    harbor run --dataset terminal-bench/terminal-bench-2-1 \
         --agent-import-path es_harbor_agent:ExecuteSpecAgent --model deepseek/deepseek-v4-flash
 
 Config (env vars):

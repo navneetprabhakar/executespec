@@ -137,12 +137,14 @@ class SpecChatServiceTest {
     when(contextSanitizer.sanitizeInput(any(), any())).thenAnswer(inv -> inv.getArgument(0));
     WebSearchChatTools webSearchChatTools =
         new WebSearchChatTools(new com.fasterxml.jackson.databind.ObjectMapper(), contextSanitizer);
+    SubagentChatTools subagentChatTools = mock(SubagentChatTools.class);
 
     return new SpecChatService(
         router,
         modelResolver,
         actionTools,
         webSearchChatTools,
+        subagentChatTools,
         projectTools,
         props,
         costTracker,
@@ -169,6 +171,60 @@ class SpecChatServiceTest {
     assertThat(sink.toolCalls).isEmpty();
     assertThat(sink.toolResults).isEmpty();
     assertThat(sink.doneTurnCount).isEqualTo(1);
+  }
+
+  @Test
+  void runScopedTurnUsesRunIdForCostAndProviderAuthorizationScope() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("answer"));
+    SpecChatService svc = newService(router, List.of());
+
+    svc.runTurn(
+        new RecordingSink(),
+        mock(AppUserDetails.class),
+        "session-1",
+        null,
+        "run-1",
+        "org-1",
+        List.of(Map.of("role", "user", "content", "hi")),
+        "deepseek",
+        "deepseek-v4-flash-native",
+        Set.of());
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(request.capture());
+    assertThat(request.getValue().context().runId()).isEqualTo("run-1");
+  }
+
+  @Test
+  void promptAdvertisesOnlyCallbacksBoundForCurrentTurn() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("answer"));
+    SpecChatService svc = newService(router, List.of(fakeTool("list_recent_runs", "{}")));
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-tools",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "hi")),
+        null);
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(request.capture());
+    String availability =
+        request.getValue().messages().stream()
+            .filter(message -> message instanceof SystemMessage)
+            .map(message -> ((SystemMessage) message).getText())
+            .filter(text -> text.contains("Tool availability for this turn"))
+            .findFirst()
+            .orElseThrow();
+    String inventory =
+        availability.substring(availability.indexOf("Tool availability for this turn"));
+    assertThat(inventory).contains("list_recent_runs");
+    assertThat(inventory).doesNotContain("search_repo_files", "search_code");
   }
 
   @Test

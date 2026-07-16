@@ -7,6 +7,7 @@ import java.nio.file.Path;
 
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 import com.navneet.executespec.smoketest.TestCommandResolver;
+import com.navneet.executespec.tool.RepositorySearchService;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,7 +18,8 @@ class RepoOrientationServiceTest {
   @TempDir Path ws;
 
   private RepoOrientationService service() {
-    return new RepoOrientationService(new BuildCommandResolver(), new TestCommandResolver());
+    return new RepoOrientationService(
+        new BuildCommandResolver(), new TestCommandResolver(), new RepositorySearchService());
   }
 
   @Test
@@ -59,5 +61,33 @@ class RepoOrientationServiceTest {
                 + " `config.yaml` handling in ConfigLoader");
     assertThat(ids).contains("FluxGuard", "retry_count", "MaxRetries", "ConfigLoader");
     assertThat(ids).doesNotContain("method", "fails");
+  }
+
+  @Test
+  void identifierMatchesUseGitAwareRepositorySearchInventory() throws Exception {
+    runGit("init", "-q");
+    Files.writeString(ws.resolve(".gitignore"), ".generated/\n");
+    Files.createDirectories(ws.resolve(".generated"));
+    Files.writeString(ws.resolve(".generated/Ignored.java"), "class IgnoredOrientationSymbol {}\n");
+    Files.writeString(ws.resolve("tracked.java"), "class Tracked {}\n");
+    runGit("add", ".gitignore", "tracked.java");
+
+    String block = service().orient(ws, "Investigate IgnoredOrientationSymbol");
+
+    assertThat(block).contains("REPO ORIENTATION");
+    assertThat(block).doesNotContain("IgnoredOrientationSymbol", ".generated/Ignored.java");
+  }
+
+  private void runGit(String... args) throws Exception {
+    Process process =
+        new ProcessBuilder("git", "-C", ws.toString())
+            .command(
+                java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of("git", "-C", ws.toString()),
+                        java.util.Arrays.stream(args))
+                    .toList())
+            .redirectErrorStream(true)
+            .start();
+    assertThat(process.waitFor()).isZero();
   }
 }

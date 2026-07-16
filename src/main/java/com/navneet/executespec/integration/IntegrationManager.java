@@ -103,7 +103,8 @@ public class IntegrationManager {
         runnerUserId,
         runnerOrgId,
         /* projectId */ null,
-        "PROTOTYPE");
+        "PROTOTYPE",
+        /* selectedRepoIds */ List.of());
   }
 
   /**

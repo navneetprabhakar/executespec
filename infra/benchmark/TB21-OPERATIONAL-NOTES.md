@@ -32,10 +32,17 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
 ### One-pass internal runner
 
 - `infra/benchmark/scripts/run-tb.sh` is locked to internal `k=1` by default.
+- The runner selects a portable Java 21 home on macOS/Linux and starts the backend with
+  `ES_PROFILE=benchmark` by default; set `ES_PROFILE=local` only for a deliberately local run.
 - `SUBMIT_TB` is refused unless it stays `off`; leaderboard submission is intentionally manual and
   outside this internal campaign.
 - `CONCURRENCY` defaults to `4` for a single model run.
 - `BRIDGE=on` is the default so `/benchmark` receives task-level events.
+- The runner waits for a real 2xx health response and aborts before Harbor if the admin login
+  cannot produce a token; this prevents startup races from spending provider tokens.
+- After a restart, the runner waits for a real 2xx health response (not merely an HTTP 503 body)
+  and aborts before Harbor if SUPER_ADMIN login cannot produce a token. Startup or auth failures
+  therefore cannot spend provider tokens or create an unattributed benchmark row.
 
 ### Internal matrix runner
 
@@ -48,6 +55,14 @@ This is for internal ExecuteSpec harness validation, not leaderboard submission.
 - The in-app benchmark bridge records one `TASK_SCORED` event per Harbor trial.
 - `/benchmark` is the operator view for score, cost, tokens, and per-task pass/fail status.
 - Harbor trial `result.json` and `reward.txt` remain the authoritative raw scoring artifacts.
+- The bridge also inspects each trial's sibling `exception.txt` before trusting the reward. Harbor
+  can write `AgentTimeoutError` there while leaving a stale or even positive verifier reward in
+  `result.json`; those trials are posted as `TIMEOUT`, not `PASSED`, and must be excluded from
+  model-quality denominators. Final reports must reconcile `result.json`, `exception.txt`, and
+  the ExecuteSpec run id rather than relying on the aggregate Harbor mean alone.
+- For a reproducible offline report, run `python3 infra/benchmark/scripts/reconcile-tb-result.py
+  <job-dir>`. The JSON output separates valid ExecuteSpec passes, ordinary verifier failures,
+  timeout artifacts, and positive rewards with no ExecuteSpec run.
 
 ### Docker image preflight and contaminated-run guard
 
@@ -118,10 +133,11 @@ Target:
 - Keep ExecuteSpec TB worker wall-clock lower than Harbor's agent timeout.
 - `infra/benchmark/scripts/run-tb.sh` now emits Harbor `agents[].override_timeout_sec`
   and `agents[].max_timeout_sec`.
-- Default `HARBOR_AGENT_TIMEOUT_SEC=1350`.
+- Default `HARBOR_AGENT_TIMEOUT_SEC=1500` for new cohorts. Historical runs retain their recorded
+  1350s setting in their evidence artifacts.
 - ExecuteSpec TB worker wall-clock is configurable via
-  `terminal-bench.worker-wall-clock-seconds`; default is now `1260s`, leaving a
-  90s buffer under Harbor's `1350s` cap for one slow in-flight LLM/tool turn plus
+  `terminal-bench.worker-wall-clock-seconds`; default is now `1410s`, leaving a
+  90s buffer under Harbor's `1500s` cap for one slow in-flight LLM/tool turn plus
   the terminal finalizer.
 - Harbor has no true live pause for an in-flight trial. To preserve benchmark
   progress when changing server values, stop the Harbor launcher/bridge, keep the
@@ -150,6 +166,26 @@ Target:
 - Cleanup must not hide the original Harbor exception.
 
 ### 3. Bridge orphan reconciliation
+
+### 2b. Docker verifier cleanup fallback (2026-07-15)
+
+Harbor 0.13.1 can cancel an adapter while `DockerEnvironment` is awaiting
+`docker compose exec`. That cancellation bypasses the subprocess timeout and
+can leave an idle verifier container after Harbor records `AgentTimeoutError`.
+The versioned `scripts/run-tb.sh` now performs a bounded, job-scoped cleanup
+after Harbor exits: it derives task prefixes from the current job directory and
+removes only matching Docker containers with `docker rm -f`. It never runs a
+global prune or an unscoped compose teardown. This is a containment measure,
+not a replacement for the upstream Harbor fix (which must terminate cancelled
+compose subprocesses and bound `DockerEnvironment.stop`).
+
+Acceptance evidence for a future release-grade run:
+
+- inject cancellation while awaiting a fake `docker compose exec` and assert
+  the child is terminated within the bounded grace period;
+- run a synthetic `AgentTimeoutError` trial and assert no job-matching
+  containers remain after `run-tb.sh` exits;
+- preserve the original timeout/error classification in Harbor results.
 
 Problem:
 

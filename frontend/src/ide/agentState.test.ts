@@ -12,6 +12,7 @@ import {
   runPhaseLabel,
   runProgress,
   sessionTitle,
+  toolEventTimelineItem,
   toMessages,
 } from './agentState';
 import type * as api from '@/lib/api';
@@ -66,6 +67,55 @@ const turn: api.AgentTurnResponse = {
 };
 
 describe('agentState', () => {
+  it('keeps semantic provider handoff events visible on live and replay paths', () => {
+    const item = toolEventTimelineItem(
+      {
+        semantic: 'handoff',
+        role: 'worker',
+        provider: 'deepseek',
+        model: 'deepseek-v4-pro-native',
+        status: 'selected',
+        detail: 'quality escalation',
+      },
+      'event:handoff:1',
+      21,
+    );
+    expect(item).toMatchObject({
+      id: 'event:handoff:1',
+      streamSequence: 21,
+      type: 'system',
+      title: 'Provider/model handoff',
+      detail: 'worker · deepseek/deepseek-v4-pro-native · selected · quality escalation',
+    });
+    const hydrated = agentReducer(initialAgentState, {
+      type: 'events:hydrate',
+      events: [
+        {
+          id: 'persisted-handoff',
+          sessionId: 'session-1',
+          turnId: 'turn-2',
+          actionId: null,
+          type: 'TOOL_EVENT',
+          payloadJson: JSON.stringify({
+            semantic: 'handoff',
+            role: 'worker',
+            provider: 'deepseek',
+            model: 'deepseek-v4-pro-native',
+            status: 'selected',
+            detail: 'quality escalation',
+          }),
+          createdAt: '2026-07-15T00:00:00Z',
+          streamSequence: 21,
+        },
+      ],
+    });
+    expect(hydrated.streamEvents).toHaveLength(1);
+    expect(hydrated.streamEvents[0]).toMatchObject({
+      type: 'system',
+      title: 'Provider/model handoff',
+    });
+  });
+
   it('tracks route and proposal transitions in the reducer', () => {
     const streaming = agentReducer(initialAgentState, {
       type: 'stream:start',
@@ -106,6 +156,54 @@ describe('agentState', () => {
     });
     expect(proposed.status).toBe('confirmationRequired');
     expect(proposed.pendingAction?.action.type).toBe('create_cloud_run');
+  });
+
+  it('hydrates semantic POST-SSE replay frames through the live reducer path and dedupes cursors', () => {
+    const events: api.AgentActionEvent[] = [
+      {
+        id: 'route-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'ROUTE_DECISION',
+        payloadJson: JSON.stringify({
+          route: 'CHAT_ONLY',
+          confidence: 0.88,
+          reason_code: 'question',
+          run_api_allowed: false,
+          requires_confirmation: false,
+        }),
+        createdAt: '2026-07-12T00:00:00Z',
+        streamSequence: 10,
+      },
+      {
+        id: 'tool-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'TOOL_CALL',
+        payloadJson: JSON.stringify({tool: 'readFile', args: '{"path":"README.md"}', id: 'call-1'}),
+        createdAt: '2026-07-12T00:00:01Z',
+        streamSequence: 11,
+      },
+      {
+        id: 'done-event',
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        actionId: null,
+        type: 'TURN_DONE',
+        payloadJson: JSON.stringify({cost_usd: 0.012}),
+        createdAt: '2026-07-12T00:00:02Z',
+        streamSequence: 12,
+      },
+    ];
+    const hydrated = agentReducer(initialAgentState, {type: 'events:hydrate', events});
+    expect(hydrated.routingState?.route).toBe('CHAT_ONLY');
+    expect(hydrated.streamEvents.map((item) => item.type)).toEqual(['route', 'tool', 'usage']);
+    expect(hydrated.streamEvents.map((item) => item.streamSequence)).toEqual([10, 11, 12]);
+    const appended = agentReducer(hydrated, {type: 'events:hydrate', events, append: true});
+    expect(appended.streamEvents).toHaveLength(3);
+    expect(appended.status).toBe('idle');
   });
 
   it('derives messages and pending actions from stored turns', () => {
@@ -198,9 +296,11 @@ describe('agentState', () => {
     expect(runPhaseLabel('AWAITING_APPROVAL')).toBe('Waiting for approval');
     expect(runPhaseLabel('WORKING')).toBe('Coding');
     expect(runPhaseLabel('COMPLETE')).toBe('Done');
+    expect(runPhaseLabel('PARTIAL')).toBe('Done with warnings');
     expect(runPhaseLabel('FAILED')).toBe('Failed');
 
     expect(isTerminalRunStatus('COMPLETE')).toBe(true);
+    expect(isTerminalRunStatus('PARTIAL')).toBe(true);
     expect(isTerminalRunStatus('WORKING')).toBe(false);
 
     expect(runOpenPath('r1', 'AWAITING_APPROVAL')).toBe('/plan/r1');
@@ -210,10 +310,11 @@ describe('agentState', () => {
     expect(
       runProgress([
         {status: 'COMPLETE', title: 'a'},
-        {status: 'WORKING', title: 'b'},
-        {status: 'PENDING', title: 'c'},
+        {status: 'PARTIAL', title: 'b'},
+        {status: 'FAILED', title: 'c'},
+        {status: 'WORKING', title: 'd'},
       ]),
-    ).toEqual({done: 1, total: 3, pct: 33, current: 'b'});
+    ).toEqual({done: 3, total: 4, pct: 75, current: 'd'});
     expect(runProgress([])).toEqual({done: 0, total: 0, pct: 0, current: null});
   });
 

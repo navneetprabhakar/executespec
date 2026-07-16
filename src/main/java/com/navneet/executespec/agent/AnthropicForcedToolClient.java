@@ -77,12 +77,28 @@ public class AnthropicForcedToolClient {
       // 1) Flatten: system -> system param; everything else -> one user transcript.
       StringBuilder system = new StringBuilder();
       StringBuilder transcript = new StringBuilder();
+      List<AnthropicApi.ContentBlock> mediaBlocks = new ArrayList<>();
       for (Message m : messages) {
         if (m instanceof SystemMessage sm) {
           if (system.length() > 0) system.append("\n\n");
           system.append(sm.getText());
         } else if (m instanceof UserMessage um) {
           transcript.append("USER:\n").append(um.getText()).append("\n\n");
+          if (um.getMedia() != null) {
+            for (var media : um.getMedia()) {
+              mediaBlocks.add(
+                  new AnthropicApi.ContentBlock(
+                      AnthropicApi.ContentBlock.Type.IMAGE,
+                      new AnthropicApi.ContentBlock.Source(
+                          "base64",
+                          media.getMimeType().toString(),
+                          java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()),
+                          null,
+                          null),
+                      null,
+                      null));
+            }
+          }
         } else if (m instanceof AssistantMessage am) {
           if (am.getText() != null && !am.getText().isBlank()) {
             transcript.append("ASSISTANT:\n").append(am.getText()).append("\n");
@@ -120,10 +136,11 @@ public class AnthropicForcedToolClient {
       }
 
       // 3) Single-turn request with tool_choice = ANY (must emit a tool call).
+      List<AnthropicApi.ContentBlock> userBlocks = new ArrayList<>();
+      userBlocks.add(new AnthropicApi.ContentBlock(transcript.toString()));
+      userBlocks.addAll(mediaBlocks);
       AnthropicApi.AnthropicMessage userMsg =
-          new AnthropicApi.AnthropicMessage(
-              List.of(new AnthropicApi.ContentBlock(transcript.toString())),
-              AnthropicApi.Role.USER);
+          new AnthropicApi.AnthropicMessage(userBlocks, AnthropicApi.Role.USER);
       AnthropicApi.ChatCompletionRequest req =
           AnthropicApi.ChatCompletionRequest.builder()
               .model(model)

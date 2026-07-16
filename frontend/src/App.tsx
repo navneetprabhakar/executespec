@@ -14,7 +14,7 @@ import IdeRunResult from '@/ide/IdeRunResult';
 import IdeProject from '@/ide/IdeProject';
 import IdeProjects from '@/ide/IdeProjects';
 import {IdeProjectPulse, IdeProjectRuns, IdeProjectRepos} from '@/ide/IdeProjectTabs';
-import {IdeProjectChat, IdeProjectCode, IdeProjectArchitecture} from '@/ide/IdeProjectMore';
+import {IdeProjectCode, IdeProjectArchitecture} from '@/ide/IdeProjectMore';
 import {IdeProjectSetup} from '@/ide/IdeProjectSetup';
 import {IdeProjectMembers} from '@/ide/IdeProjectMembers';
 import {IdeProjectActivity} from '@/ide/IdeProjectActivity';
@@ -156,7 +156,8 @@ function protectedChildren() {
       <Route path='/projects/:projectId/runs' element={<IdeProjectRuns />} />
       <Route path='/projects/:projectId/runs/:runShort' element={<IdeRunResult />} />
       <Route path='/projects/:projectId/code' element={<IdeProjectCode />} />
-      <Route path='/projects/:projectId/chat' element={<IdeProjectChat />} />
+      {/* Compatibility URL: project chat is now the canonical agent-session surface. */}
+      <Route path='/projects/:projectId/chat' element={<Navigate to='../agent' replace />} />
       <Route path='/projects/:projectId/setup' element={<IdeProjectSetup />} />
       <Route path='/projects/:projectId/activity' element={<IdeProjectActivity />} />
       <Route path='/projects/:projectId/members' element={<IdeProjectMembers />} />

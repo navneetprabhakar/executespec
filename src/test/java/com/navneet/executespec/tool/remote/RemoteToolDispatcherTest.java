@@ -7,9 +7,21 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agentsession.LocalHandsState;
+import com.navneet.executespec.agentsession.LocalHandsStateService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -37,12 +49,15 @@ class RemoteToolDispatcherTest {
 
   private final ObjectMapper om = new ObjectMapper();
   private SseBroadcaster broadcaster;
+  private LocalHandsStateService stateService;
   private RemoteToolDispatcher dispatcher;
 
   @BeforeEach
   void setUp() {
     broadcaster = mock(SseBroadcaster.class);
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, 120_000L);
+    stateService = mock(LocalHandsStateService.class);
+    when(stateService.pending(any())).thenReturn(java.util.List.of());
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120_000L);
   }
 
   @Test
@@ -89,6 +104,42 @@ class RemoteToolDispatcherTest {
     assertThat(frame.get("args").get("path").asText()).isEqualTo("x");
     assertThat(frame.get("callId").asText()).isNotBlank();
     assertThat(cap.getValue().data().get("permissionKind")).isEqualTo("read");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            eq(frame.get("callId").asText()),
+            eq(LocalHandsState.AWAITING_CLIENT),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any());
+    verify(stateService)
+        .recordCompleted(
+            eq("r1"),
+            eq(frame.get("callId").asText()),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any(),
+            eq("{\"ok\":true,\"content\":\"hello\"}"));
+  }
+
+  @Test
+  void dispatch_reusesExactDurableResultAfterWorkerRestart_withoutReemittingToolCall()
+      throws Exception {
+    dispatcher.registerAfterWorkerRestart("r1");
+    when(stateService.findRestartedResult("r1", "t1", "shell", "{\"cmd\":\"touch x\"}"))
+        .thenReturn(
+            java.util.Optional.of(
+                new LocalHandsStateService.RestartedResult(
+                    "old-call", "{\"ok\":true,\"content\":\"done\"}", Instant.now())));
+
+    JsonNode result =
+        om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{\"cmd\":\"touch x\"}"));
+
+    assertThat(result.path("content").asText()).isEqualTo("done");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+    verify(stateService).findRestartedResult("r1", "t1", "shell", "{\"cmd\":\"touch x\"}");
   }
 
   @Test
@@ -96,6 +147,47 @@ class RemoteToolDispatcherTest {
     assertThatCode(() -> dispatcher.complete("nope", "c1", "{}")).doesNotThrowAnyException();
     dispatcher.register("r1");
     assertThatCode(() -> dispatcher.complete("r1", "unknown", "{}")).doesNotThrowAnyException();
+  }
+
+  @Test
+  void duplicateResults_areFirstWriterWins_andPersistOneTerminalTransition() throws Exception {
+    dispatcher.register("r1");
+    CountDownLatch emitted = new CountDownLatch(1);
+    String[] callId = new String[1];
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              callId[0] = om.readTree(event.payload()).path("callId").asText();
+              emitted.countDown();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(emitted.await(2, TimeUnit.SECONDS)).isTrue();
+
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"first\"}");
+      // A retried HTTP response must not append a second terminal event or replace the result.
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"duplicate\"}");
+
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("first");
+      verify(stateService, org.mockito.Mockito.times(1))
+          .recordCompleted(
+              eq("r1"),
+              eq(callId[0]),
+              eq("t1"),
+              eq("readFile"),
+              eq("read"),
+              any(),
+              eq("{\"ok\":true,\"content\":\"first\"}"));
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   @Test
@@ -123,11 +215,229 @@ class RemoteToolDispatcherTest {
 
   @Test
   void permissionKind_classifies_cliProtocolTools() throws Exception {
-    assertPermissionKind("spawn_subagent", "read");
     assertPermissionKind("update_plan", "read");
     assertPermissionKind("todo", "read");
     assertPermissionKind("ast_edit", "edit");
     assertPermissionKind("mcp_client", "shell");
+  }
+
+  @Test
+  void disconnect_keepsCallPending_andReconnectReemitsIt() throws Exception {
+    dispatcher.register("r1");
+    CountDownLatch firstEmission = new CountDownLatch(1);
+    AtomicInteger emissionCount = new AtomicInteger();
+    String[] callId = new String[1];
+    doAnswer(
+            inv -> {
+              RunEvent event = inv.getArgument(1);
+              callId[0] = om.readTree(event.payload()).get("callId").asText();
+              if (emissionCount.incrementAndGet() == 1) {
+                firstEmission.countDown();
+              } else {
+                dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"resumed\"}");
+              }
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
+
+      dispatcher.disconnect("r1");
+      assertThat(result.isDone()).isFalse();
+      dispatcher.reconnect("r1");
+
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("resumed");
+      assertThat(emissionCount).hasValue(2);
+      verify(stateService)
+          .record(
+              eq("r1"),
+              eq(callId[0]),
+              eq(LocalHandsState.CLIENT_RECONNECTED),
+              eq("t1"),
+              eq("readFile"),
+              eq("read"),
+              any());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void reconnectRenewsPendingCallDeadline() throws Exception {
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120L);
+    dispatcher.register("r1");
+    CountDownLatch firstEmission = new CountDownLatch(1);
+    AtomicInteger emissions = new AtomicInteger();
+    String[] callId = new String[1];
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              callId[0] = om.readTree(event.payload()).path("callId").asText();
+              if (emissions.incrementAndGet() == 1) firstEmission.countDown();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<String> result =
+          executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+      assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
+      Thread.sleep(80L);
+      dispatcher.disconnect("r1");
+      dispatcher.reconnect("r1");
+      Thread.sleep(70L);
+
+      assertThat(result.isDone()).isFalse();
+      dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"handoff\"}");
+      assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
+          .isEqualTo("handoff");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void malformedClientResultFailsPendingCallWithoutWaitingForTimeout() throws Exception {
+    dispatcher.register("r1");
+    doAnswer(
+            invocation -> {
+              RunEvent event = invocation.getArgument(1);
+              String callId = om.readTree(event.payload()).path("callId").asText();
+              assertThat(dispatcher.rejectMalformed("r1", callId)).isTrue();
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    JsonNode result = om.readTree(dispatcher.dispatch("r1", "t1", "readFile", "{}"));
+
+    assertThat(result.path("kind").asText()).isEqualTo("CLIENT_PROTOCOL_ERROR");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            any(),
+            eq(LocalHandsState.CLIENT_PROTOCOL_ERROR),
+            eq("t1"),
+            eq("readFile"),
+            eq("read"),
+            any());
+  }
+
+  @Test
+  void timeout_returnsClientStateInsteadOfInternalToolFailure() throws Exception {
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 1L);
+    dispatcher.register("r1");
+
+    JsonNode result = om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{}"));
+
+    assertThat(result.path("kind").asText()).isEqualTo("CLIENT_TIMEOUT");
+    verify(stateService)
+        .record(
+            eq("r1"),
+            any(),
+            eq(LocalHandsState.CLIENT_TIMEOUT),
+            eq("t1"),
+            eq("shell"),
+            eq("shell"),
+            any());
+  }
+
+  @Test
+  void restartStatus_doesNotPretendDurableCallCanResumeMissingWorkerFuture() {
+    LocalHandsStateService.PendingCall pending =
+        new LocalHandsStateService.PendingCall(
+            "call-restart",
+            "r1",
+            "t1",
+            "readFile",
+            "read",
+            "{\"callId\":\"call-restart\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now());
+    when(stateService.pending("r1")).thenReturn(List.of(pending));
+
+    RemoteToolDispatcher restarted = new RemoteToolDispatcher(broadcaster, om, stateService, 1000L);
+
+    RemoteToolDispatcher.ReconnectStatus status = restarted.reconnectStatus("r1");
+
+    assertThat(status.state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(status.workerWaitRebound()).isFalse();
+    assertThat(status.pendingCalls())
+        .extracting(LocalHandsStateService.PendingCall::callId)
+        .containsExactly("call-restart");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+  }
+
+  @Test
+  void restartStatus_marksPersistedCallOlderThanLeaseAsStale() {
+    LocalHandsStateService.PendingCall stale =
+        new LocalHandsStateService.PendingCall(
+            "call-stale",
+            "r1",
+            "t1",
+            "shell",
+            "shell",
+            "{\"callId\":\"call-stale\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now().minusSeconds(10));
+    when(stateService.pending("r1")).thenReturn(List.of(stale));
+
+    RemoteToolDispatcher restarted =
+        new RemoteToolDispatcher(broadcaster, om, stateService, 1000L, 1L);
+
+    RemoteToolDispatcher.ReconnectStatus status = restarted.reconnectStatus("r1");
+
+    assertThat(status.state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
+    assertThat(status.pendingCalls()).isEmpty();
+    assertThat(status.staleCallIds()).containsExactly("call-stale");
+  }
+
+  @Test
+  void pendingCalls_filtersExpiredLeaseAfterLongReconnect() {
+    LocalHandsStateService.PendingCall stale =
+        new LocalHandsStateService.PendingCall(
+            "call-stale",
+            "r1",
+            "t1",
+            "readFile",
+            "read",
+            "{\"callId\":\"call-stale\"}",
+            LocalHandsState.AWAITING_CLIENT,
+            Instant.now().minusSeconds(10));
+    when(stateService.pending("r1")).thenReturn(List.of(stale));
+
+    RemoteToolDispatcher restarted = new RemoteToolDispatcher(broadcaster, om, stateService, 1000L);
+
+    assertThat(restarted.pendingCalls("r1")).isEmpty();
+  }
+
+  @Test
+  void registerAfterWorkerRestart_closesDurableCallsBeforeNewDispatch() {
+    when(stateService.closeForWorkerRestart("r1")).thenReturn(1);
+
+    dispatcher.registerAfterWorkerRestart("r1");
+
+    assertThat(dispatcher.isRemote("r1")).isTrue();
+    verify(stateService).closeForWorkerRestart("r1");
+  }
+
+  @Test
+  void recoveredSession_doesNotClaimWorkerWaitUntilResumedWorkerDispatches() {
+    when(stateService.closeForWorkerRestart("r1")).thenReturn(0);
+
+    dispatcher.registerAfterWorkerRestart("r1");
+
+    RemoteToolDispatcher.ReconnectStatus status = dispatcher.reconnectStatus("r1");
+    assertThat(status.state()).isEqualTo("CONNECTED");
+    assertThat(status.workerWaitRebound()).isFalse();
   }
 
   private void assertPermissionKind(String toolName, String expected) throws Exception {

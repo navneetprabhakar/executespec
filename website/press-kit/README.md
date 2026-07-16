@@ -1,6 +1,7 @@
 # ExecuteSpec Press Kit
 
-_For Product Hunt launch, advertising, and press contacts. Last refreshed 2026-04-28 (Wave 5)._
+_For Product Hunt launch, advertising, and press contacts._
+_Last refreshed 2026-07-13 (ExecuteSpec 2.0 / CLI 1.0 release track)._ 
 
 ## Contact
 
@@ -10,26 +11,25 @@ _For Product Hunt launch, advertising, and press contacts. Last refreshed 2026-0
 - **Email (support)**: `admin@executespec.ai`
 - **Website**: `https://executespec.ai`
 - **App**: `https://dev.executespec.ai`
-- **Public 30-day demo (no signup)**: `https://dev.executespec.ai/v3/exec-demo`
-- **Trust posture**: `https://dev.executespec.ai/v3/trust`
+- **Trust posture**: `https://dev.executespec.ai/trust`
 - **Product Hunt**: (link after launch)
 
 ## One-liner
 
-> ExecuteSpec ships AI-written pull requests you can actually merge — for one repo or for twenty.
+> ExecuteSpec turns a plain-English spec into a reviewable pull request across one or more linked repos.
 
 ## Two-liner
 
-> ExecuteSpec ships AI-written pull requests you can actually merge — for one repo or for twenty.
-> Plan, build, test, review, open a PR. ~80% of real runs land Ready, and you see the verdict (Ready / Needs review / Failed) on every one of yours.
+> ExecuteSpec turns a plain-English spec into a reviewable pull request across one or more linked repos.
+> Plan, approve, build, test, review, and open a PR with a deterministic Ready / Needs review / Failed verdict and reloadable evidence. We do not publish a universal success rate; outcomes depend on the repository, spec, provider, and validation gates.
 
 ## Longer description (suitable for press)
 
-> ExecuteSpec is an AI coding platform that ships pull requests your team will actually merge. Every run flows through a single pipeline — **planner → plan-approval gate → executor → reviewer → final build + test gate** — and ends with a deterministic verdict (Ready / Needs review / Failed) attached to the PR. The verdict is derived from real signals (build status, test pass rate, reviewer outcome, spec adherence), not LLM self-rating. ~80% of real runs land Ready against real codebases.
+> ExecuteSpec is an AI coding platform for structured, reviewable delivery. Every run flows through a single pipeline — **planner → plan-approval gate → executor → reviewer → final build + test gate** — and ends with a deterministic verdict (Ready / Needs review / Failed) attached to the PR. The run report separates deterministic signals (build and test results) from reviewer assessments and the internal verified-score summary; it is not an independent benchmark or merge guarantee.
 >
 > Built for the merge step rather than the typing step: where Cursor, GitHub Copilot, and Continue suggest code at the cursor and leave validation to you, ExecuteSpec runs the validation itself and only opens a PR when it's ready (or labels it Needs review / Failed when it isn't).
 >
-> Multi-repo project workspaces with architecture docs, tech-debt panels, project memory, and RAG-powered project chat. Current self-serve tiers: **Free** (200 AI credits/month, native DeepSeek only), **Pro** ($20/mo, 2,000 AI credits), **BYOK** ($50/mo single-person org, own provider keys), **Team** ($50/seat/month, minimum 2 seats, BYOK + collaboration + audit log), **Enterprise** (custom contract + DPA path). Built for US + global engineering teams.
+> Multi-repo project workspaces with architecture docs, tech-debt panels, project memory, RAG-powered project chat, and a web agent control plane with durable turns and local-hands handoff to CLI/VS Code. Current self-serve tiers: **Free** (200 AI credits/month), **Pro** ($20/mo, 2,000 AI credits), **BYOK** ($50/mo single-person org, own provider keys), **Team** ($50/seat/month, minimum 2 seats, BYOK + collaboration + audit log), **Enterprise** (custom contract + DPA path). Built for US + global engineering teams.
 
 ## Founding story (1 paragraph)
 
@@ -54,7 +54,7 @@ website/press-kit/
 ├── og-hero-template/                        ← source for the 1200×630 OG card
 │   ├── template.html
 │   ├── render.js
-│   ├── og-hero.png                         (1200×630 — re-rendered 2026-04-28 with v3 selling-point)
+│   ├── og-hero.png                         (1200×630 — current social preview)
 │   └── README.md
 ├── current/                                 (canonical current Console-era captures)
 │   ├── 01-compose-start.png                 (Start work / spec composer)
@@ -74,12 +74,14 @@ website/press-kit/
 ├── ss-05-validation-report.png              (historical pre-v3 capture; do not use)
 ├── ss-05b-validation-polished.png           (historical pre-v3 capture; do not use)
 ├── ss-extra-score-trend.png                 (historical pre-v3 capture; do not use)
-└── CAPTURE_GUIDE.md                         (SOP for shooting the next round in v3)
+├── ../media/hero.webm                       (current illustrative walkthrough; synthetic demo data)
+├── ../media/hero.vtt                        (caption track for the walkthrough)
+└── CAPTURE_GUIDE.md                         (SOP for shooting the next round)
 ```
 
-The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like.
+The old `ss-*` screenshots are from the pre-v3 visual identity. They show v2 dashboard, v2 run-detail, v2 architecture viewer, and v2 validation report — useful for historical context but **not** what the current product looks like. The landing-page walkthrough includes a caption track and an expandable transcript so the synthetic sequence is accessible without sound. `hero-poster.png` is sampled from the current `hero.webm` at a stable 1.5-second frame; regenerate and re-seal both when the recording changes.
 
-Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. They should be treated as product-demo screenshots, not real customer data.
+Use `current/` for investor, website, Product Hunt, and deck work. These captures were re-shot on 2026-06-19 from the current Console shell at a 1440×900 viewport, using deterministic demo data through a local screenshot API shim. The checked-in hero is a 54-second provider-free fixture recording (`hero.webm`, SHA-256 `387e7e1deb82457938cd4ad3822db83528d25a285c91a80f109f452022efaa47`), with provenance in [`docs/evidence/current-tuple-hero-recording-2026-07-13.json`](../../docs/evidence/current-tuple-hero-recording-2026-07-13.json). Its manifest keeps independent human review **pending**. Treat all screenshots and video as product-demo assets, not real customer data, production metrics, benchmark evidence, or independent UX signoff.
 
 ## Brand guidelines (current — to be unified in the color-codes pass)
 

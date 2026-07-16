@@ -49,8 +49,15 @@ public class SseController {
   public SseEmitter subscribe(
       @PathVariable String runId,
       @RequestParam(required = false) String token,
+      @RequestParam(name = "lastEventId", required = false) String lastEventIdParam,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
+    // Browser EventSource normally sends Last-Event-ID as a header. Custom reconnect clients
+    // (including the CLI's token-refresh path) cannot always preserve that header, so accept the
+    // equivalent query parameter as a bounded compatibility path. The header remains authoritative
+    // when both are present.
+    String effectiveLastEventId =
+        lastEventId != null && !lastEventId.isBlank() ? lastEventId : lastEventIdParam;
     // Prefer scoped SSE token validation
     if (token != null && !token.isBlank()) {
       String userId = jwtUtil.validateSseToken(token, runId);
@@ -59,8 +66,8 @@ public class SseController {
             "SSE subscription for run {} via scoped token (user={}, lastEventId={})",
             runId,
             userId,
-            lastEventId);
-        return broadcaster.subscribe(runId, lastEventId);
+            effectiveLastEventId);
+        return broadcaster.subscribe(runId, effectiveLastEventId);
       }
       // Fall through to full JWT check if SSE token is invalid
     }
@@ -70,7 +77,8 @@ public class SseController {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Valid SSE token or JWT required");
     }
     guard.requireRunAccess(runId, userDetails);
-    log.debug("SSE subscription for run {} via full JWT (lastEventId={})", runId, lastEventId);
-    return broadcaster.subscribe(runId, lastEventId);
+    log.debug(
+        "SSE subscription for run {} via full JWT (lastEventId={})", runId, effectiveLastEventId);
+    return broadcaster.subscribe(runId, effectiveLastEventId);
   }
 }

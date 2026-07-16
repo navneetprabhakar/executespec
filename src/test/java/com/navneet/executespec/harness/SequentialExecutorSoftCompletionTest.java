@@ -154,6 +154,13 @@ class SequentialExecutorSoftCompletionTest {
               return Optional.of(rowsByKey.computeIfAbsent(key, k -> new AgentTask()));
             });
     lenient()
+        .when(taskRepo.findByIdForUpdate(anyString()))
+        .thenAnswer(
+            inv -> {
+              String key = inv.getArgument(0);
+              return Optional.of(rowsByKey.computeIfAbsent(key, k -> new AgentTask()));
+            });
+    lenient()
         .when(taskRepo.saveAndFlush(any()))
         .thenAnswer(
             inv -> {
@@ -1698,6 +1705,17 @@ class SequentialExecutorSoftCompletionTest {
                         && s.continuationActionsJson().contains("\"usedLimit\":1")
                         && s.continuationActionsJson().contains("\"maxLimit\":1")),
         "Expected durable continuation action history on T1. Saw: " + saveLog);
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(s -> "run-soft_T1".equals(s.taskKey()) && "PENDING".equals(s.status())),
+        "Expected selected continuation to reopen the terminal primary row before rerun. Saw: "
+            + saveLog);
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(s -> "run-soft_T1".equals(s.taskKey()) && "COMPLETE".equals(s.status())),
+        "Expected selected continuation outcome to persist COMPLETE after the primary failure. Saw:"
+            + " "
+            + saveLog);
   }
 
   @Test

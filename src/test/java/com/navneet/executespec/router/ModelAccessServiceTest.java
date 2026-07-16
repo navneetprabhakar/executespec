@@ -28,8 +28,8 @@ class ModelAccessServiceTest {
 
   private static final String FREE_MODEL = "deepseek-v4-flash-native";
   private static final String PREMIUM_MODEL = "claude-opus-4-8";
-  private static final String DISABLED_MODEL = "sarvam-105b";
-  private static final String DISABLED_GEMINI_MODEL = "gemini-3.5-flash";
+  private static final String GEMINI_MODEL = "gemini-3.5-flash";
+  private static final String RETIRED_MODEL = "retired-provider-model";
 
   @Mock private ModelRegistry modelRegistry;
   @Mock private TierEnforcementService tierService;
@@ -39,8 +39,9 @@ class ModelAccessServiceTest {
   void setUp() {
     when(modelRegistry.freeTierModels()).thenReturn(List.of(FREE_MODEL));
     when(modelRegistry.canonicalize(anyString())).thenAnswer(inv -> inv.getArgument(0));
-    when(modelRegistry.providerFor(DISABLED_MODEL)).thenReturn("sarvam");
-    when(modelRegistry.providerFor(DISABLED_GEMINI_MODEL)).thenReturn("gemini");
+    when(modelRegistry.providerFor(FREE_MODEL)).thenReturn("deepseek");
+    when(modelRegistry.providerFor(PREMIUM_MODEL)).thenReturn("anthropic");
+    when(modelRegistry.providerFor(GEMINI_MODEL)).thenReturn("gemini");
     when(tierService.resolveUserTier("free-user")).thenReturn("FREE");
     when(tierService.resolveUserTier("pro-user")).thenReturn("PRO");
   }
@@ -66,17 +67,10 @@ class ModelAccessServiceTest {
   }
 
   @Test
-  void disabledProviderModelsAreUnavailableForEveryTier() {
-    assertFalse(service.isAllowed("free-user", DISABLED_MODEL));
-    assertFalse(service.isAllowed("pro-user", DISABLED_MODEL));
-    assertEquals("DISABLED", service.minTierFor(DISABLED_MODEL));
-    assertFalse(service.isAllowed("pro-user", DISABLED_GEMINI_MODEL));
-    assertEquals("DISABLED", service.minTierFor(DISABLED_GEMINI_MODEL));
-    ResponseStatusException ex =
-        assertThrows(
-            ResponseStatusException.class,
-            () -> service.assertModelAllowed("pro-user", DISABLED_MODEL));
-    assertEquals(400, ex.getStatusCode().value());
+  void paidTiersMayUseGeminiWhenTheProviderIsAvailable() {
+    assertTrue(service.isAllowed("pro-user", GEMINI_MODEL));
+    assertEquals("PRO", service.minTierFor(GEMINI_MODEL));
+    assertDoesNotThrow(() -> service.assertModelAllowed("pro-user", GEMINI_MODEL));
   }
 
   @Test
@@ -97,19 +91,24 @@ class ModelAccessServiceTest {
   }
 
   @Test
-  void assertProviderRejectsTemporarilyDisabledGemini() {
-    ResponseStatusException ex =
-        assertThrows(
-            ResponseStatusException.class,
-            () -> ModelAccessService.assertProviderEnabled("GEMINI"));
-    assertEquals(400, ex.getStatusCode().value());
+  void assertProviderAllowsGemini() {
+    assertDoesNotThrow(() -> ModelAccessService.assertProviderEnabled("GEMINI"));
   }
 
   @Test
-  void detectsDisabledProviderModelSlugsFromAggregatorLists() {
-    assertTrue(ModelAccessService.isDisabledProviderModelSlug("gemini-3.5-flash"));
-    assertTrue(ModelAccessService.isDisabledProviderModelSlug("sarvam-105b"));
+  void doesNotTreatSupportedProviderSlugsAsDisabled() {
+    assertFalse(ModelAccessService.isDisabledProviderModelSlug("gemini-3.5-flash"));
     assertFalse(ModelAccessService.isDisabledProviderModelSlug("deepseek-v4-pro"));
     assertFalse(ModelAccessService.isDisabledProviderModelSlug("claude-sonnet-4-6"));
+  }
+
+  @Test
+  void unknownRetiredModelsFailClosedForPaidTiers() {
+    assertFalse(service.isAllowed("pro-user", RETIRED_MODEL));
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.assertModelAllowed("pro-user", RETIRED_MODEL));
+    assertEquals(400, ex.getStatusCode().value());
   }
 }

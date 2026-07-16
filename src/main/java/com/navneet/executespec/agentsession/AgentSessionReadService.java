@@ -1,6 +1,5 @@
 package com.navneet.executespec.agentsession;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,8 +7,10 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.SessionSnapshot;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
@@ -30,6 +31,8 @@ import lombok.RequiredArgsConstructor;
 @Component
 @RequiredArgsConstructor
 class AgentSessionReadService {
+
+  private static final int LEGACY_SNAPSHOT_PAGE_SIZE = 500;
 
   private final AgentSessionRepository sessionRepo;
   private final AgentTurnRepository turnRepo;
@@ -53,30 +56,121 @@ class AgentSessionReadService {
   }
 
   List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
+    return listEvents(sessionId, 500, user);
+  }
+
+  List<AgentActionEvent> listEvents(String sessionId, int limit, AppUserDetails user) {
     requireSession(sessionId, user);
-    return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId);
+    int capped = Math.max(1, Math.min(500, limit));
+    // Compatibility route remains chronological; new clients use /events/replay for cursors.
+    return eventRepo.findBySessionIdOrderByCreatedAtAsc(sessionId, PageRequest.of(0, capped));
+  }
+
+  AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
+    AgentSession session = requireSession(sessionId, user);
+    List<AgentActionEvent> events =
+        after == null || after < 0
+            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+                sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE))
+            : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+                sessionId, after);
+    long last = after == null || after < 0 ? 0 : after;
+    if (after != null && after >= 0) {
+      // Keep the cursor contract defensive even if a replica/query implementation returns a stale
+      // row. Legacy null-sequence rows remain visible for compatibility, but a durable sequence
+      // at or below the caller's cursor must never be replayed as a new event.
+      events =
+          events.stream()
+              .filter(
+                  event ->
+                      event != null
+                          && (event.getStreamSequence() == null
+                              || event.getStreamSequence() > after))
+              .toList();
+    }
+    // V262 makes stream_sequence non-null for new rows, but tolerate a legacy/corrupt row rather
+    // than turning an authenticated reconnect into a 500. Null-sequence events remain visible in
+    // the replay payload; the cursor advances only to the greatest durable sequence available.
+    for (AgentActionEvent event : events) {
+      if (event.getStreamSequence() != null) {
+        last = Math.max(last, event.getStreamSequence());
+      }
+    }
+    boolean snapshot = after == null || after < 0;
+    boolean legacyEventsOmitted =
+        !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
+    boolean truncated = false;
+    boolean hasMore = false;
+    if (snapshot) {
+      truncated = eventRepo.countBySessionId(sessionId) > LEGACY_SNAPSHOT_PAGE_SIZE;
+      hasMore = truncated;
+    }
+    if (legacyEventsOmitted) {
+      // A cursor cannot establish a complete ordering across pre-V262 rows. Return an explicit
+      // full snapshot instead of letting a client treat an incomplete delta as authoritative.
+      long totalEvents = eventRepo.countBySessionId(sessionId);
+      events =
+          eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+              sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE));
+      snapshot = true;
+      legacyEventsOmitted = false;
+      truncated = totalEvents > LEGACY_SNAPSHOT_PAGE_SIZE;
+      hasMore = truncated;
+      last = 0;
+      for (AgentActionEvent event : events) {
+        if (event.getStreamSequence() != null) {
+          last = Math.max(last, event.getStreamSequence());
+        }
+      }
+    }
+    Long nextSequence =
+        hasMore
+                && events.stream()
+                    .map(AgentActionEvent::getStreamSequence)
+                    .filter(java.util.Objects::nonNull)
+                    .max(Long::compareTo)
+                    .isPresent()
+            ? events.stream()
+                .map(AgentActionEvent::getStreamSequence)
+                .filter(java.util.Objects::nonNull)
+                .max(Long::compareTo)
+                .orElse(null)
+            : null;
+    return new AgentEventReplayResponse(
+        events,
+        last,
+        snapshot,
+        snapshot
+            ? new SessionSnapshot(
+                session.getId(), session.getStatus(), session.getTitle(), session.getUpdatedAt())
+            : null,
+        legacyEventsOmitted,
+        truncated,
+        hasMore,
+        nextSequence);
   }
 
   List<AgentTurnResponse> listTurns(
       String sessionId, String beforeTurnId, int limit, AppUserDetails user) {
     requireSession(sessionId, user);
     int capped = Math.max(1, Math.min(100, limit));
-    List<AgentTurn> turns = new ArrayList<>(turnRepo.findBySessionIdOrderBySequenceAsc(sessionId));
+    List<AgentTurn> turns;
     if (beforeTurnId != null && !beforeTurnId.isBlank()) {
       Integer beforeSequence =
-          turns.stream()
-              .filter(t -> beforeTurnId.equals(t.getId()))
+          turnRepo
+              .findById(beforeTurnId)
+              .filter(turn -> sessionId.equals(turn.getSessionId()))
               .map(AgentTurn::getSequence)
-              .findFirst()
               .orElse(null);
-      if (beforeSequence != null) {
-        turns = turns.stream().filter(t -> t.getSequence() < beforeSequence).toList();
-      }
+      turns =
+          beforeSequence == null
+              ? turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped))
+              : turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+                  sessionId, beforeSequence, PageRequest.of(0, capped));
+    } else {
+      turns = turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped));
     }
-    if (turns.size() > capped) {
-      turns = turns.subList(turns.size() - capped, turns.size());
-    }
-    return turns.stream().map(turnReadModel::toResponse).toList();
+    return turns.reversed().stream().map(turnReadModel::toResponse).toList();
   }
 
   AgentSession requireSession(String sessionId, AppUserDetails user) {
@@ -86,6 +180,10 @@ class AgentSessionReadService {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found"));
     if (!user.getUser().getId().equals(session.getUserId())) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
+    }
+    String userOrgId = user.getUser().getOrgId();
+    if (userOrgId != null && session.getOrgId() != null && !userOrgId.equals(session.getOrgId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
     return session;

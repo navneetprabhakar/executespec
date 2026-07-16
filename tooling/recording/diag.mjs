@@ -1,9 +1,12 @@
 import {chromium} from 'playwright';
 const APP = 'http://localhost:5173';
 const API = 'http://localhost:8080';
+const EMAIL = process.env.ES_EMAIL;
+const PASSWORD = process.env.ES_PASSWORD;
+if (!EMAIL || !PASSWORD) throw new Error('Set ES_EMAIL and ES_PASSWORD');
 const RUN_ID = 'cd2d6807-e696-4db9-bedd-9595f19b816d';
 const PROJECT_ID = '6119f4b2-7622-48c3-a56f-a999b826d5c2';
-const r = await fetch(`${API}/api/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'admin@executespec.ai',password:'g7kZfo#oKYrI'})});
+const r = await fetch(`${API}/api/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:EMAIL,password:PASSWORD})});
 const token = (await r.json()).accessToken;
 const browser = await chromium.launch({headless:true});
 const ctx = await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:2});

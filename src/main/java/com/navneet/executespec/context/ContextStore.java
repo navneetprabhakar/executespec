@@ -1,6 +1,10 @@
 package com.navneet.executespec.context;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,6 +25,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -58,19 +63,30 @@ public class ContextStore {
   private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
+  private final boolean diskCheckpointEnabled;
 
   @Autowired
   public ContextStore(
       ObjectMapper objectMapper,
       Metrics metrics,
-      ObjectProvider<StringRedisTemplate> redisProvider) {
-    this(objectMapper, metrics, redisProvider.getIfAvailable());
+      ObjectProvider<StringRedisTemplate> redisProvider,
+      @Value("${durability.worker-context.enabled:true}") boolean diskCheckpointEnabled) {
+    this(objectMapper, metrics, redisProvider.getIfAvailable(), diskCheckpointEnabled);
   }
 
   ContextStore(ObjectMapper objectMapper, Metrics metrics, StringRedisTemplate redis) {
+    this(objectMapper, metrics, redis, true);
+  }
+
+  ContextStore(
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      StringRedisTemplate redis,
+      boolean diskCheckpointEnabled) {
     this.objectMapper = objectMapper;
     this.metrics = metrics;
     this.redis = redis;
+    this.diskCheckpointEnabled = diskCheckpointEnabled;
   }
 
   /** Compose the Redis key for a given ExecutionContext. */
@@ -88,62 +104,108 @@ public class ContextStore {
    * @return byte size written (or 0 if skipped / failed)
    */
   public int save(ExecutionContext ctx, List<Message> history, int iteration) {
-    if (redis == null) {
-      log.debug(
-          "ContextStore save SKIPPED (Redis not wired) run={} task={}", ctx.runId(), ctx.taskId());
-      metrics.recordContextSave("skipped", 0);
-      return 0;
-    }
+    if (ctx == null || history == null) return 0;
+    String json = serialize(history, iteration, ctx);
+    int size = json.getBytes(StandardCharsets.UTF_8).length;
+    boolean redisSaved = false;
     try {
-      String json = serialize(history, iteration, ctx);
-      String key = keyFor(ctx);
-      redis.opsForValue().set(key, json, CONTEXT_TTL);
-      int size = json.getBytes(StandardCharsets.UTF_8).length;
-      log.debug(
-          "ContextStore save OK run={} task={} iter={} bytes={}",
-          ctx.runId(),
-          ctx.taskId(),
-          iteration,
-          size);
-      metrics.recordContextSave("ok", size);
-      return size;
+      if (redis != null) {
+        redis.opsForValue().set(keyFor(ctx), json, CONTEXT_TTL);
+        redisSaved = true;
+      }
     } catch (Exception e) {
       log.warn(
-          "ContextStore save FAILED run={} task={} iter={}: {}",
+          "ContextStore Redis save FAILED run={} task={} iter={}: {}",
           ctx.runId(),
           ctx.taskId(),
           iteration,
           e.getMessage());
-      metrics.recordContextSave("failed", 0);
-      return 0;
     }
+    boolean diskSaved = writeDiskCheckpoint(ctx, json);
+    if (redisSaved || diskSaved) {
+      log.debug(
+          "ContextStore save OK run={} task={} iter={} bytes={} redis={} disk={}",
+          ctx.runId(),
+          ctx.taskId(),
+          iteration,
+          size,
+          redisSaved,
+          diskSaved);
+      metrics.recordContextSave(redisSaved ? "ok" : "disk", size);
+      return size;
+    }
+    metrics.recordContextSave(redis == null ? "skipped" : "failed", 0);
+    return 0;
   }
 
   /** Read a snapshot back. Empty if missing, TTL-expired, or Redis is down. */
   public Optional<SavedContext> load(ExecutionContext ctx) {
-    if (redis == null) return Optional.empty();
-    try {
-      String json = redis.opsForValue().get(keyFor(ctx));
-      if (json == null) return Optional.empty();
-      return Optional.of(deserialize(json));
-    } catch (Exception e) {
-      log.warn(
-          "ContextStore load FAILED run={} task={}: {}", ctx.runId(), ctx.taskId(), e.getMessage());
-      return Optional.empty();
+    if (ctx == null) return Optional.empty();
+    boolean redisRejected = false;
+    boolean redisFailed = false;
+    if (redis != null) {
+      try {
+        String json = redis.opsForValue().get(keyFor(ctx));
+        if (json != null) {
+          Optional<SavedContext> snapshot = deserializeForContext(json, ctx);
+          if (snapshot.isPresent()) {
+            metrics.recordContextLoad("redis");
+            return snapshot;
+          }
+          redisRejected = true;
+          log.warn(
+              "ContextStore Redis snapshot identity mismatch run={} task={}; ignoring payload",
+              ctx.runId(),
+              ctx.taskId());
+        }
+      } catch (Exception e) {
+        redisFailed = true;
+        log.warn(
+            "ContextStore Redis load FAILED run={} task={}: {}",
+            ctx.runId(),
+            ctx.taskId(),
+            e.getMessage());
+      }
     }
+    Optional<SavedContext> diskSnapshot = readDiskCheckpoint(ctx);
+    if (diskSnapshot.isPresent()) {
+      metrics.recordContextLoad("disk");
+      return diskSnapshot;
+    }
+    if (redisRejected) {
+      metrics.recordContextLoad("identity_mismatch");
+    } else if (redisFailed) {
+      metrics.recordContextLoad("redis_error");
+    } else {
+      metrics.recordContextLoad("miss");
+    }
+    return Optional.empty();
   }
 
   /** Remove the snapshot for a task — called when the task completes successfully. */
   public void delete(ExecutionContext ctx) {
-    if (redis == null) return;
-    try {
-      redis.delete(keyFor(ctx));
-    } catch (Exception e) {
-      log.warn(
-          "ContextStore delete FAILED run={} task={}: {}",
-          ctx.runId(),
-          ctx.taskId(),
-          e.getMessage());
+    if (ctx == null) return;
+    if (redis != null) {
+      try {
+        redis.delete(keyFor(ctx));
+      } catch (Exception e) {
+        log.warn(
+            "ContextStore Redis delete FAILED run={} task={}: {}",
+            ctx.runId(),
+            ctx.taskId(),
+            e.getMessage());
+      }
+    }
+    if (diskCheckpointEnabled) {
+      try {
+        Files.deleteIfExists(diskCheckpointPath(ctx));
+      } catch (Exception e) {
+        log.warn(
+            "ContextStore disk delete FAILED run={} task={}: {}",
+            ctx.runId(),
+            ctx.taskId(),
+            e.getMessage());
+      }
     }
   }
 
@@ -158,28 +220,165 @@ public class ContextStore {
    * @return number of keys deleted (or 0 if Redis is down or no keys matched).
    */
   public long deleteAll(String runId) {
-    if (redis == null || runId == null || runId.isBlank()) return 0;
-    try {
-      java.util.Set<String> keys = redis.keys(KEY_PREFIX + runId + ":*");
-      if (keys == null || keys.isEmpty()) return 0;
-      Long deleted = redis.delete(keys);
-      log.info(
-          "ContextStore deleteAll run={} keysFound={} keysDeleted={}", runId, keys.size(), deleted);
-      return deleted == null ? 0 : deleted;
-    } catch (Exception e) {
-      log.warn("ContextStore deleteAll FAILED run={}: {}", runId, e.getMessage());
-      return 0;
+    return deleteAll(runId, null);
+  }
+
+  /** Delete Redis snapshots and workspace checkpoints when the run workspace is known. */
+  public long deleteAll(String runId, Path workspaceRoot) {
+    if (runId == null || runId.isBlank()) return 0;
+    long deleted = 0;
+    if (redis != null) {
+      try {
+        java.util.Set<String> keys = redis.keys(KEY_PREFIX + runId + ":*");
+        if (keys != null && !keys.isEmpty()) {
+          Long redisDeleted = redis.delete(keys);
+          deleted += redisDeleted == null ? 0 : redisDeleted;
+          log.info(
+              "ContextStore deleteAll run={} keysFound={} keysDeleted={}",
+              runId,
+              keys.size(),
+              redisDeleted);
+        }
+      } catch (Exception e) {
+        log.warn("ContextStore Redis deleteAll FAILED run={}: {}", runId, e.getMessage());
+      }
     }
+    if (diskCheckpointEnabled && workspaceRoot != null) {
+      try {
+        Path workerDir = workspaceRoot.resolve(".agent-context").resolve("worker");
+        if (Files.isDirectory(workerDir)) {
+          try (var files = Files.list(workerDir)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+              if (Files.deleteIfExists(file)) deleted++;
+            }
+          }
+          try {
+            Files.deleteIfExists(workerDir);
+          } catch (Exception ignored) {
+            // Keep a non-empty or concurrently-used directory.
+          }
+        }
+      } catch (Exception e) {
+        log.warn("ContextStore disk deleteAll FAILED run={}: {}", runId, e.getMessage());
+      }
+    }
+    return deleted;
   }
 
   /** True iff a snapshot exists for this context. Cheap probe used by recovery logic. */
   public boolean exists(ExecutionContext ctx) {
-    if (redis == null) return false;
+    if (ctx == null) return false;
+    if (redis != null) {
+      try {
+        if (Boolean.TRUE.equals(redis.hasKey(keyFor(ctx)))) return true;
+      } catch (Exception e) {
+        log.debug("ContextStore Redis exists failed run={} task={}", ctx.runId(), ctx.taskId());
+      }
+    }
+    return diskCheckpointEnabled && Files.isRegularFile(diskCheckpointPath(ctx));
+  }
+
+  /** Workspace-local checkpoint path; the workspace is the durable handoff boundary. */
+  static Path diskCheckpointPath(ExecutionContext ctx) {
+    String task = safeSegment(ctx.taskId());
+    return ctx.workspaceRoot().resolve(".agent-context").resolve("worker").resolve(task + ".json");
+  }
+
+  private boolean writeDiskCheckpoint(ExecutionContext ctx, String json) {
+    if (!diskCheckpointEnabled) return false;
+    Path target = diskCheckpointPath(ctx);
+    Path temp = target.resolveSibling(target.getFileName() + ".tmp");
     try {
-      return Boolean.TRUE.equals(redis.hasKey(keyFor(ctx)));
+      Files.createDirectories(target.getParent());
+      Files.writeString(
+          temp,
+          json + "\n",
+          StandardCharsets.UTF_8,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING,
+          StandardOpenOption.WRITE);
+      try {
+        Files.move(
+            temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+      }
+      return true;
     } catch (Exception e) {
+      log.warn(
+          "ContextStore disk checkpoint FAILED run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      try {
+        Files.deleteIfExists(temp);
+      } catch (Exception ignored) {
+        // best-effort cleanup
+      }
       return false;
     }
+  }
+
+  private Optional<SavedContext> readDiskCheckpoint(ExecutionContext ctx) {
+    if (!diskCheckpointEnabled) return Optional.empty();
+    try {
+      Path path = diskCheckpointPath(ctx);
+      if (!Files.isRegularFile(path)) return Optional.empty();
+      Optional<SavedContext> snapshot =
+          deserializeForContext(Files.readString(path, StandardCharsets.UTF_8), ctx);
+      if (snapshot.isEmpty()) {
+        log.warn(
+            "ContextStore disk snapshot identity mismatch run={} task={}; ignoring checkpoint",
+            ctx.runId(),
+            ctx.taskId());
+      }
+      return snapshot;
+    } catch (Exception e) {
+      log.warn(
+          "ContextStore disk load FAILED run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * Parse a persisted snapshot only when its embedded identity matches the key/path being read.
+   *
+   * <p>This is a deliberately fail-closed boundary for restart and provider-handoff recovery: a
+   * copied workspace, stale Redis key, or task-id collision must never feed another run's
+   * conversation into the current worker. The IDs are present in every snapshot written by this
+   * store; an absent/blank identity is therefore treated as invalid rather than as a legacy
+   * wildcard.
+   */
+  private Optional<SavedContext> deserializeForContext(String json, ExecutionContext ctx) {
+    if (json == null || ctx == null) return Optional.empty();
+    try {
+      SavedContext snapshot = deserialize(json);
+      if (!java.util.Objects.equals(ctx.runId(), snapshot.runId())
+          || !java.util.Objects.equals(ctx.taskId(), snapshot.taskId())
+          || snapshot.runId() == null
+          || snapshot.runId().isBlank()
+          || snapshot.taskId() == null
+          || snapshot.taskId().isBlank()) {
+        return Optional.empty();
+      }
+      return Optional.of(snapshot);
+    } catch (Exception e) {
+      log.warn(
+          "ContextStore snapshot parse FAILED run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  private static String safeSegment(String value) {
+    String safe = value == null ? "task" : value.replaceAll("[^A-Za-z0-9_.-]", "_");
+    if (safe.isBlank()) safe = "task";
+    return safe.length() <= 160 ? safe : safe.substring(0, 160);
   }
 
   private String serialize(List<Message> history, int iteration, ExecutionContext ctx) {

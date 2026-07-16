@@ -3,7 +3,7 @@ import {createRoot, Root} from 'react-dom/client';
 import {MemoryRouter, Route, Routes} from 'react-router-dom';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {AgentConversation} from './agentPanels';
+import {AgentConversation, AgentTopBar} from './agentPanels';
 import IdeAgent from './IdeAgent';
 
 (
@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
   listAgentCapabilities: vi.fn(),
   getManagedAiBalance: vi.fn(),
   listAgentTurns: vi.fn(),
+  listAgentEvents: vi.fn(),
+  replayAgentEvents: vi.fn(),
   createAgentSession: vi.fn(),
   streamAgentTurn: vi.fn(),
   confirmAgentRunProposal: vi.fn(),
@@ -135,6 +137,8 @@ function setHappyPathMocks() {
     },
   ]);
   api.getManagedAiBalance.mockResolvedValue(managedAi);
+  api.listAgentEvents.mockResolvedValue([]);
+  api.replayAgentEvents.mockResolvedValue({events: [], lastSequence: 0, snapshot: true});
   api.listAgentTurns.mockResolvedValue([
     {
       turnId: 't0',
@@ -268,6 +272,83 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
+  });
+
+  it('exposes agent status as an accessible live region for screen-reader operators', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    await act(async () => {
+      root?.render(
+        <AgentTopBar
+          selected={session}
+          barStatus={{label: 'Reconnecting', tone: 'waiting'}}
+          scopeLabel='ExecuteSpec'
+          busy={false}
+          settingsOpen={false}
+          managedAi={null}
+          sessionUsage={{inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0}}
+          routingState={null}
+          capabilities={[]}
+          pendingGateCount={0}
+          onNewChat={vi.fn()}
+          onOpenApprovals={vi.fn()}
+          onToggleChats={vi.fn()}
+          onToggleSettings={vi.fn()}
+        />,
+      );
+    });
+
+    const status = host.querySelector('.agent-bar-status');
+    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.getAttribute('aria-live')).toBe('polite');
+    expect(status?.textContent).toContain('Reconnecting');
+  });
+
+  it('names the mobile new-sandbox control when its visible label collapses', async () => {
+    ({host, root} = await renderAgent('/agent'));
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
+  });
+
+  it('surfaces new-sandbox creation failures instead of leaving the action silent', async () => {
+    api.createAgentSession.mockRejectedValueOnce(new Error('session service unavailable'));
+    ({host, root} = await renderAgent('/agent'));
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    await act(async () => {
+      newSandbox.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'session service unavailable',
+    );
+  });
+
+  it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
+    ({host, root} = await renderAgent('/agent'));
+    const baseline = api.listAgentSessions.mock.calls.length;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await flush();
+
+    expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(baseline);
+    expect(api.listAgentGates.mock.calls.length).toBeGreaterThan(1);
+    expect(api.listAgentTurns.mock.calls.length).toBeGreaterThan(1);
+    expect(host.textContent).toContain('Web agent');
   });
 
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
@@ -453,7 +534,7 @@ describe('IdeAgent', () => {
           ]}
           streamEvents={[]}
           streamText=''
-          isBusy={false}
+          isBusy={true}
           visibleAction={null}
           gates={[]}
           runCard={null}
@@ -481,6 +562,159 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Create a remote sandbox plan for a README change');
     expect(host.querySelectorAll('.agent-msg').length).toBe(2);
     expect(host.textContent).not.toContain('Recent answer');
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('Agent is working.');
+  });
+
+  it('hydrates persisted subagent activity inline without a new route', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.replayAgentEvents.mockResolvedValue({
+      events: [
+        {
+          id: 'event-1',
+          sessionId: 's1',
+          actionId: null,
+          type: 'SUBAGENT_COMPLETED',
+          payloadJson: JSON.stringify({summary: 'SCOUT returned cited files'}),
+          createdAt: '2026-06-20T00:00:02Z',
+        },
+      ],
+      lastSequence: 1,
+      snapshot: true,
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+    await flush();
+
+    expect(api.replayAgentEvents).toHaveBeenCalledWith('s1');
+    expect(host.textContent).toContain('SUBAGENT COMPLETED');
+    expect(host.textContent).toContain('SCOUT returned cited files');
+  });
+
+  it('drains paginated replay pages so older activity is not lost on reload', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.replayAgentEvents.mockImplementation(async (_sessionId: string, after?: number | null) =>
+      after == null
+        ? {
+            events: [
+              {
+                id: 'event-page-1',
+                sessionId: 's1',
+                actionId: null,
+                type: 'SUBAGENT_STARTED',
+                payloadJson: JSON.stringify({summary: 'SCOUT started'}),
+                createdAt: '2026-06-20T00:00:01Z',
+                streamSequence: 1,
+              },
+            ],
+            lastSequence: 1,
+            snapshot: true,
+            hasMore: true,
+            nextSequence: 1,
+          }
+        : {
+            events: [
+              {
+                id: 'event-page-2',
+                sessionId: 's1',
+                actionId: null,
+                type: 'SUBAGENT_COMPLETED',
+                payloadJson: JSON.stringify({summary: 'SCOUT returned cited files'}),
+                createdAt: '2026-06-20T00:00:02Z',
+                streamSequence: 2,
+              },
+            ],
+            lastSequence: 2,
+            snapshot: false,
+            hasMore: false,
+            nextSequence: null,
+          },
+    );
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+    await flush();
+
+    expect(api.replayAgentEvents).toHaveBeenNthCalledWith(1, 's1');
+    expect(api.replayAgentEvents).toHaveBeenNthCalledWith(2, 's1', 1);
+    expect(host.textContent).toContain('SUBAGENT STARTED');
+    expect(host.textContent).toContain('SCOUT returned cited files');
+  });
+
+  it('keeps the replay page already fetched when a later page is interrupted', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.replayAgentEvents.mockImplementation(async (_sessionId: string, after?: number | null) => {
+      if (after != null) throw new Error('replay page unavailable');
+      return {
+        events: [
+          {
+            id: 'event-partial-page',
+            sessionId: 's1',
+            actionId: null,
+            type: 'SUBAGENT_COMPLETED',
+            payloadJson: JSON.stringify({summary: 'Recovered first page'}),
+            createdAt: '2026-06-20T00:00:02Z',
+            streamSequence: 1,
+          },
+        ],
+        lastSequence: 1,
+        snapshot: true,
+        hasMore: true,
+        nextSequence: 1,
+      };
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+    await flush();
+
+    expect(host.textContent).toContain('Recovered first page');
+  });
+
+  it('offers a keyboard-accessible jump when activity arrives off-screen', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+    const jumpToLatest = vi.fn();
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          messages={[{id: 'assistant:1', role: 'assistant', content: 'A long-running answer'}]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={true}
+          visibleAction={null}
+          gates={[]}
+          runCard={null}
+          runCost={null}
+          hasNewActivity
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onJumpToLatest={jumpToLatest}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+
+    const jump = host.querySelector<HTMLButtonElement>('.agent-jump-latest');
+    expect(jump?.getAttribute('aria-label')).toBe('Jump to latest activity');
+    await act(async () => jump?.click());
+    expect(jumpToLatest).toHaveBeenCalledTimes(1);
   });
 
   it('does not collapse a user turn behind an empty persisted assistant summary', async () => {
@@ -536,7 +770,53 @@ describe('IdeAgent', () => {
 
     expect(host.textContent).toContain('Submit a coding run to add README launch notes');
     expect(host.querySelectorAll('.agent-msg').length).toBe(2);
-    expect(host.textContent).not.toContain('Recent answer');
+    expect(host.textContent).toContain(
+      'No response arrived for this turn. You can send the message again.',
+    );
+  });
+
+  it('replaces a marker-only Markdown fragment with an explicit response state', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          streamText=''
+          visibleAction={null}
+          gates={[]}
+          runCost={null}
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+          messages={[{id: 'turn:assistant', role: 'assistant', content: '1.'}]}
+          isBusy={false}
+          streamEvents={[]}
+          runCard={null}
+          routingState={null}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain(
+      'No response arrived for this turn. You can send the message again.',
+    );
+    expect(host.querySelector('.signal-md-list')).toBeNull();
   });
 
   it('collapses generated code blocks by default and shows assistant turn usage', async () => {
@@ -614,6 +894,56 @@ describe('IdeAgent', () => {
       type: 'input:set',
       input: expect.stringContaining('artifact-1.html'),
     });
+
+    const originalClipboard = navigator.clipboard;
+    const originalOpen = window.open;
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {writeText: vi.fn().mockRejectedValue(new Error('clipboard denied'))},
+    });
+    Object.defineProperty(window, 'open', {
+      configurable: true,
+      value: vi.fn(() => null),
+    });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:test-artifact'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      const copy = [...host.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Copy',
+      );
+      const preview = [...host.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Preview',
+      );
+      if (!copy || !preview) throw new Error('Artifact actions were not rendered.');
+      await act(async () => {
+        copy.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        preview.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+        await Promise.resolve();
+      });
+      expect(host.textContent).toContain('Clipboard access was denied. Use Download instead.');
+      expect(host.textContent).toContain(
+        'Preview was blocked. Allow pop-ups or use Download instead.',
+      );
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {configurable: true, value: originalClipboard});
+      Object.defineProperty(window, 'open', {configurable: true, value: originalOpen});
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectUrl,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: originalRevokeObjectUrl,
+      });
+    }
   });
 
   it('renders multi-file generated output as separate artifact actions', async () => {
@@ -796,5 +1126,60 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Remote sandbox · plan-gated · PR-oriented');
     expect(host.textContent).toContain('91/100');
     expect(host.textContent).toContain('Review evidence');
+  });
+
+  it('replays durable turns when the POST-SSE body ends without a terminal event', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.streamAgentTurn.mockRejectedValue(
+      new Error(
+        'Agent stream ended before the turn completed. Refresh the conversation and retry.',
+      ),
+    );
+    api.listAgentTurns.mockResolvedValueOnce([]).mockResolvedValue([
+      {
+        turnId: 't3',
+        sessionId: 's1',
+        sequence: 3,
+        userMessage: 'Inspect the current test failure',
+        assistantSummary: 'The server persisted this turn before the stream disconnected.',
+        intentType: 'CHAT_ONLY',
+        intentConfidence: 0.9,
+        route: 'CHAT_ONLY',
+        reasonCode: 'question',
+        actionType: null,
+        proposedActionJson: null,
+        linkedRunId: null,
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 0,
+        costUsd: 0.001,
+        status: 'COMPLETED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+
+    ({host, root} = await renderAgent('/agent'));
+    const textarea = host.querySelector('textarea');
+    if (!textarea) throw new Error('Agent composer textarea was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Inspect the current test failure');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const send = [...host.querySelectorAll('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Send',
+    );
+    if (!send) throw new Error('Agent send button was not rendered.');
+    await act(async () => {
+      send.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await flush();
+    await flush();
+
+    expect(api.listAgentTurns.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(host.textContent).toContain(
+      'The server persisted this turn before the stream disconnected.',
+    );
+    expect(host.textContent).toContain('Agent stream ended before the turn completed');
   });
 });

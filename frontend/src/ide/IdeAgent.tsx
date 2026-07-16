@@ -8,7 +8,7 @@ import {
   initialAgentState,
   isTerminalRunStatus,
   toMessages,
-  type AgentUsageSummary,
+  toolEventTimelineItem,
   type PendingAction,
 } from '@/ide/agentState';
 import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
@@ -17,57 +17,8 @@ import {
   selectScopedAgentSession,
   webAgentSessionRequest,
 } from '@/ide/agentSession';
-
-const MAX_CONTEXT_TURNS = 8;
-
-function totalUsageTokens(usage: AgentUsageSummary): number {
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
-}
-
-function sessionUsageContext(usage: AgentUsageSummary): api.AgentConversationMessage | null {
-  const totalTokens = totalUsageTokens(usage);
-  if (totalTokens <= 0) return null;
-  return {
-    role: 'system',
-    content:
-      `Conversation usage visible in the web UI before this turn: ${totalTokens} total tokens ` +
-      `(${usage.inputTokens} input, ${usage.outputTokens} output, ${usage.reasoningTokens} reasoning). ` +
-      'Current billing policy: chat turns are included conversation usage and have not charged AI credits. ' +
-      'Run credits are charged separately only when a plan-gated run is approved. ' +
-      'If the user asks what this chat or session cost in AI credits, answer from these facts; do not say you cannot access session usage.',
-  };
-}
-
-function conversationForStream(
-  turns: api.AgentTurnResponse[],
-  latestMessage: string,
-): api.AgentConversationMessage[] {
-  const usageContext = sessionUsageContext(usageFromTurns(turns));
-  const conversation: api.AgentConversationMessage[] = [];
-  if (usageContext) conversation.push(usageContext);
-  for (const turn of turns.slice(-MAX_CONTEXT_TURNS)) {
-    if (turn.userMessage?.trim()) {
-      conversation.push({role: 'user', content: turn.userMessage.trim()});
-    }
-    if (turn.assistantSummary?.trim()) {
-      conversation.push({role: 'assistant', content: turn.assistantSummary.trim()});
-    }
-  }
-  conversation.push({role: 'user', content: latestMessage});
-  return conversation;
-}
-
-function usageFromTurns(turns: api.AgentTurnResponse[]): AgentUsageSummary {
-  return turns.reduce(
-    (acc, turn) => ({
-      inputTokens: acc.inputTokens + (turn.inputTokens || 0),
-      outputTokens: acc.outputTokens + (turn.outputTokens || 0),
-      reasoningTokens: acc.reasoningTokens + (turn.reasoningTokens || 0),
-      costUsd: acc.costUsd + (turn.costUsd || 0),
-    }),
-    {inputTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0},
-  );
-}
+import {useAgentRunStream} from '@/ide/agentRunStream';
+import {conversationForStream, usageFromTurns} from '@/ide/agentConversationContext';
 
 export default function IdeAgent() {
   const navigate = useNavigate();
@@ -78,9 +29,70 @@ export default function IdeAgent() {
   const [uploading, setUploading] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [runDetail, setRunDetail] = useState<api.RunDetail | null>(null);
-  const [runCost, setRunCost] = useState<number | null>(null);
+  const [hasNewActivity, setHasNewActivity] = useState(false);
+  const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
+  const eventCursorRef = useRef(0);
+  const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
+  const liveRun = useAgentRunStream(state.activeRun);
+  const runDetail = liveRun.detail;
+  const runCost = liveRun.costUsd;
+
+  useEffect(() => {
+    if (!chatsOpen && !settingsOpen) return;
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const focusable = dialog?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (settingsOpen) setSettingsOpen(false);
+        else setChatsOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const controls = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (controls.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      overlayFocusRef.current?.focus();
+      overlayFocusRef.current = null;
+    };
+  }, [chatsOpen, settingsOpen]);
+
+  const toggleChats = useCallback(() => {
+    if (!chatsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    if (!chatsOpen) setSettingsOpen(false);
+    setChatsOpen((open) => !open);
+  }, [chatsOpen]);
+
+  const toggleSettings = useCallback(() => {
+    if (!settingsOpen) overlayFocusRef.current = document.activeElement as HTMLElement | null;
+    if (!settingsOpen) setChatsOpen(false);
+    setSettingsOpen((open) => !open);
+  }, [settingsOpen]);
 
   const scope = useMemo(() => ({projectId, runId}), [projectId, runId]);
   const selected = useMemo(() => {
@@ -88,6 +100,11 @@ export default function IdeAgent() {
     if (!candidate) return null;
     return agentSessionMatchesScope(candidate, scope) ? candidate : null;
   }, [scope, state.sessions, state.selectedId]);
+
+  useEffect(() => {
+    setSelectedProvider(selected?.defaultProvider ?? '');
+    setSelectedModel(selected?.defaultModel ?? '');
+  }, [selected?.id, selected?.defaultProvider, selected?.defaultModel]);
 
   const historicalActions = useMemo(
     () => state.turns.map(actionFromTurn).filter(Boolean) as PendingAction[],
@@ -113,10 +130,99 @@ export default function IdeAgent() {
   ];
   const sessionUsage = useMemo(() => usageFromTurns(state.turns), [state.turns]);
 
-  const loadTurns = useCallback(async (sessionId: string) => {
-    const rows = await api.listAgentTurns(sessionId, {limit: 50});
-    dispatch({type: 'turns:set', turns: rows});
-  }, []);
+  /**
+   * The replay endpoint deliberately bounds an initial snapshot. A reconnect that consumes only
+   * that first page silently loses older tool/progress events, so drain every advertised page
+   * before handing the result to the reducer. The length fallback keeps clients compatible with
+   * pre-pagination servers which returned `snapshot=true` without the newer metadata.
+   */
+  const replayAllEvents = useCallback(
+    async (sessionId: string, after?: number | null): Promise<api.AgentEventReplayResponse> => {
+      const pages: api.AgentEventReplayResponse[] = [];
+      const seenIds = new Set<string>();
+      const seenSequences = new Set<number>();
+      const requestedCursors = new Set<string>();
+      let cursor = after ?? null;
+      let firstPage = true;
+
+      for (;;) {
+        const cursorKey = cursor == null ? 'snapshot' : String(cursor);
+        if (requestedCursors.has(cursorKey)) break;
+        requestedCursors.add(cursorKey);
+        let response: api.AgentEventReplayResponse;
+        try {
+          response =
+            cursor == null
+              ? await api.replayAgentEvents(sessionId)
+              : await api.replayAgentEvents(sessionId, cursor);
+        } catch (error) {
+          // Preserve pages already fetched if a later page is interrupted. An initial-page
+          // failure still propagates so the compatibility `/events` route can be attempted.
+          if (pages.length === 0) throw error;
+          break;
+        }
+        pages.push(response);
+
+        const sequenceValues = response.events
+          .map((event) => event.streamSequence)
+          .filter((sequence): sequence is number => sequence != null);
+        const maxPageSequence = sequenceValues.length > 0 ? Math.max(...sequenceValues) : null;
+        const shouldContinue =
+          response.hasMore === true ||
+          (firstPage && response.snapshot && response.events.length >= 500);
+        if (!shouldContinue) break;
+
+        const next = response.nextSequence ?? maxPageSequence;
+        if (next == null || (cursor != null && next <= cursor)) break;
+        cursor = next;
+        firstPage = false;
+      }
+
+      const events = pages.flatMap((page) =>
+        page.events.filter((event) => {
+          if (event.streamSequence != null) {
+            if (seenSequences.has(event.streamSequence)) return false;
+            seenSequences.add(event.streamSequence);
+          }
+          if (seenIds.has(event.id)) return false;
+          seenIds.add(event.id);
+          return true;
+        }),
+      );
+      return {
+        ...(pages[0] ?? {events: [], lastSequence: after ?? 0, snapshot: after == null}),
+        events,
+        lastSequence: pages.reduce(
+          (last, page) => Math.max(last, page.lastSequence ?? 0),
+          after ?? 0,
+        ),
+        hasMore: false,
+        nextSequence: null,
+      };
+    },
+    [],
+  );
+
+  const loadTurns = useCallback(
+    async (sessionId: string) => {
+      const rows = await api.listAgentTurns(sessionId, {limit: 50});
+      dispatch({type: 'turns:set', turns: rows});
+      try {
+        if (typeof api.replayAgentEvents === 'function') {
+          const replay = await replayAllEvents(sessionId);
+          eventCursorRef.current = replay.lastSequence || 0;
+          dispatch({type: 'events:hydrate', events: replay.events});
+        } else if (typeof api.listAgentEvents === 'function') {
+          // Compatibility with older servers and reduced test clients.
+          const events = (await api.listAgentEvents(sessionId)) ?? [];
+          dispatch({type: 'events:hydrate', events});
+        }
+      } catch {
+        // Historical event replay is additive; a missing event endpoint must not hide turns.
+      }
+    },
+    [replayAllEvents],
+  );
 
   const loadSessions = useCallback(async () => {
     const items = await api.listAgentSessions(25);
@@ -138,12 +244,29 @@ export default function IdeAgent() {
   const load = useCallback(async () => {
     dispatch({type: 'load:start'});
     try {
-      const [sessionRows, gateRows, capabilityRows, managedAi] = await Promise.all([
+      let modelCatalogPromise: Promise<api.AvailableModelsResponse> = Promise.resolve({
+        providers: [],
+      });
+      // Some legacy surface tests intentionally provide a reduced API mock. Accessing a missing
+      // Vitest namespace export can throw, so keep the optional catalog additive and fail-closed.
+      try {
+        const loadModels = (
+          api as {getAvailableModels?: () => Promise<api.AvailableModelsResponse>}
+        ).getAvailableModels;
+        if (typeof loadModels === 'function') {
+          modelCatalogPromise = loadModels().catch(() => ({providers: []}));
+        }
+      } catch {
+        // Model switching is optional for an older server/mock; the provider default still works.
+      }
+      const [sessionRows, gateRows, capabilityRows, managedAi, modelCatalog] = await Promise.all([
         api.listAgentSessions(25),
         api.listAgentGates(12),
         api.listAgentCapabilities('WEB'),
         api.getManagedAiBalance().catch(() => null),
+        modelCatalogPromise,
       ]);
+      setAvailableModels(modelCatalog.providers ?? []);
       const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
       const scoped = selectScopedAgentSession(sessionRows, scope);
       const selectedId =
@@ -169,6 +292,22 @@ export default function IdeAgent() {
     void load();
   }, [load]);
 
+  // Mobile browsers routinely suspend the tab while the operator switches apps.
+  // Reconcile durable sessions, gates, and the selected transcript when the tab
+  // becomes visible again so the cockpit does not keep a stale approval/run
+  // state after a backgrounded stream or a server-side action. Do not refresh
+  // during an active POST-SSE turn: the stream's durable replay path owns that
+  // transition and a concurrent load could overwrite optimistic activity.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (state.status === 'streaming' || state.status === 'toolRunning') return;
+      void load();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [load, state.status]);
+
   useEffect(() => {
     if (!state.selectedId) {
       dispatch({type: 'turns:set', turns: []});
@@ -183,7 +322,12 @@ export default function IdeAgent() {
   }, [loadTurns, state.selectedId]);
 
   useEffect(() => {
-    if (stickToBottom.current) endRef.current?.scrollIntoView({block: 'end'});
+    if (stickToBottom.current) {
+      endRef.current?.scrollIntoView({block: 'end'});
+      setHasNewActivity(false);
+    } else {
+      setHasNewActivity(true);
+    }
   }, [state.turns, state.pendingUser, state.streamText, state.streamEvents, runDetail]);
 
   // A confirmed web-agent turn persists the run id on the durable turn. Hydrate
@@ -194,37 +338,6 @@ export default function IdeAgent() {
       dispatch({type: 'run:submitted', runId: latestLinkedRunId});
     }
   }, [latestLinkedRunId, state.activeRun]);
-
-  // Poll the agent-submitted run so the pinned run card stays live until terminal.
-  useEffect(() => {
-    const id = state.activeRun;
-    if (!id) {
-      setRunDetail(null);
-      setRunCost(null);
-      return;
-    }
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const [detail, cost] = await Promise.all([
-          api.getRun(id),
-          api.getLiveCost(id).catch(() => null),
-        ]);
-        if (!alive) return;
-        setRunDetail(detail);
-        if (cost && typeof cost.costUsd === 'number') setRunCost(cost.costUsd);
-        if (!isTerminalRunStatus(detail.status)) timer = setTimeout(poll, 4000);
-      } catch {
-        if (alive) timer = setTimeout(poll, 6000);
-      }
-    };
-    void poll();
-    return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [state.activeRun]);
 
   // Escape closes the chats drawer / settings popover.
   useEffect(() => {
@@ -246,6 +359,21 @@ export default function IdeAgent() {
     return session;
   }
 
+  // Toolbar/drawer actions are intentionally fire-and-forget, but a failed
+  // session creation must still become visible in the same error surface as
+  // initial loading. Without this boundary a rejected promise only hits the
+  // console and leaves the operator with a button that appears to do nothing.
+  async function startNewSession() {
+    try {
+      await createSession();
+    } catch (e) {
+      dispatch({
+        type: 'error',
+        error: e instanceof Error ? e.message : 'Failed to create a new sandbox.',
+      });
+    }
+  }
+
   async function ensureSession() {
     if (selected) return selected;
     return createSession();
@@ -260,16 +388,23 @@ export default function IdeAgent() {
     try {
       const session = await ensureSession();
       for (const file of list) {
-        const meta = await api.uploadAgentAttachment(session.id, file);
-        dispatch({
-          type: 'attachment:add',
-          attachment: {
-            attachmentId: meta.attachmentId,
-            filename: meta.filename,
-            mimeType: meta.mimeType,
-            extractedChars: meta.extractedChars,
-          },
-        });
+        const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+        try {
+          const meta = await api.uploadAgentAttachment(session.id, file);
+          dispatch({
+            type: 'attachment:add',
+            attachment: {
+              attachmentId: meta.attachmentId,
+              filename: meta.filename,
+              mimeType: meta.mimeType,
+              extractedChars: meta.extractedChars,
+              previewUrl,
+            },
+          });
+        } catch (error) {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          throw error;
+        }
       }
     } catch (e) {
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Upload failed.'});
@@ -298,11 +433,16 @@ export default function IdeAgent() {
     const message = (seed ?? state.input).trim();
     if (!message || state.status === 'streaming' || state.status === 'toolRunning') return;
     const attachmentIds = state.attachments.map((a) => a.attachmentId);
+    state.attachments.forEach((attachment) => {
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    });
     dispatch({type: 'stream:start', message});
     const abort = new AbortController();
     abortRef.current = abort;
+    let activeSessionId: string | null = null;
     try {
       const session = await ensureSession();
+      activeSessionId = session.id;
       await api.streamAgentTurn(
         session.id,
         {
@@ -312,9 +452,13 @@ export default function IdeAgent() {
           clientCapabilities: {
             localTools: false,
             interactive: true,
+            // The web agent renders bounded, read-only diffs inline. It does not
+            // claim mutation/revert authority; edits still go through a run.
             canRenderDiff: true,
             canRenderTui: false,
           },
+          providerOverride: selectedProvider || null,
+          modelOverride: selectedModel || null,
         },
         {
           onAck: (ack) => dispatch({type: 'stream:ack', turnId: ack.turn_id}),
@@ -325,7 +469,9 @@ export default function IdeAgent() {
             dispatch({
               type: 'stream:event',
               item: {
-                id: `tool:${tool.id || tool.tool}:${Date.now()}`,
+                // The backend replay uses the same tool-call id so a proxy retry cannot
+                // duplicate a frame that was already rendered live.
+                id: `tool:${tool.id || tool.tool}`,
                 type: 'tool',
                 title: tool.tool,
                 detail: tool.args,
@@ -335,11 +481,19 @@ export default function IdeAgent() {
             dispatch({
               type: 'stream:event',
               item: {
-                id: `result:${result.id}:${Date.now()}`,
+                id: `result:${result.id}`,
                 type: 'result',
                 title: 'Tool result',
                 detail: result.result,
               },
+            }),
+          onToolEvent: (event) =>
+            dispatch({
+              type: 'stream:event',
+              item: toolEventTimelineItem(
+                event,
+                `event:${event.name ?? event.type ?? 'update'}:${event.status ?? event.state ?? ''}:${event.detail ?? event.message ?? ''}`,
+              ),
             }),
           onDone: (done) =>
             dispatch({
@@ -359,6 +513,27 @@ export default function IdeAgent() {
       dispatch({type: 'stream:done'});
       await refreshAfterMutation(session.id);
     } catch (e) {
+      // A POST-SSE response can end after the server has persisted the turn (for
+      // example when a proxy drops the body after the final tool result). Reset
+      // the optimistic composer state and replay durable turns before showing the
+      // transport error. This keeps Web recovery semantically identical to a
+      // reload and never fabricates a completed assistant message from partial
+      // tokens.
+      dispatch({type: 'stream:stop'});
+      if (activeSessionId) {
+        try {
+          if (typeof api.replayAgentEvents === 'function') {
+            const replay = await replayAllEvents(activeSessionId, eventCursorRef.current);
+            eventCursorRef.current = replay.lastSequence || eventCursorRef.current;
+            if (replay.events.length > 0) {
+              dispatch({type: 'events:hydrate', events: replay.events, append: true});
+            }
+          }
+          await refreshAfterMutation(activeSessionId);
+        } catch {
+          // Preserve the original stream error; replay is best-effort.
+        }
+      }
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Agent turn failed.'});
     } finally {
       abortRef.current = null;
@@ -422,8 +597,7 @@ export default function IdeAgent() {
     if (!id) return;
     try {
       await api.cancelRun(id);
-      const detail = await api.getRun(id).catch(() => null);
-      if (detail) setRunDetail(detail);
+      await liveRun.refresh().catch(() => undefined);
       await refreshAfterMutation();
     } catch (e) {
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Could not stop the run.'});
@@ -458,7 +632,15 @@ export default function IdeAgent() {
   const runCard = runDetail;
   const onChatScroll = (e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stickToBottom.current = atBottom;
+    if (atBottom) setHasNewActivity(false);
+  };
+
+  const jumpToLatest = () => {
+    stickToBottom.current = true;
+    setHasNewActivity(false);
+    endRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
   };
 
   return (
@@ -473,14 +655,27 @@ export default function IdeAgent() {
         sessionUsage={sessionUsage}
         routingState={state.routingState}
         capabilities={state.capabilities}
-        pendingGateCount={state.gates.length}
+        pendingGateCount={inlineGates.length}
         onNewChat={() => {
           setChatsOpen(false);
-          void createSession();
+          void startNewSession();
         }}
         onOpenApprovals={() => setChatsOpen(true)}
-        onToggleChats={() => setChatsOpen((o) => !o)}
-        onToggleSettings={() => setSettingsOpen((o) => !o)}
+        onToggleChats={toggleChats}
+        onToggleSettings={toggleSettings}
+        availableModels={availableModels}
+        selectedProvider={selectedProvider}
+        selectedModel={selectedModel}
+        onProviderChange={(provider) => {
+          setSelectedProvider(provider);
+          const entry = availableModels.find((p) => p.id === provider);
+          setSelectedModel(entry?.models?.[0]?.id ?? '');
+        }}
+        onModelChange={(model) => {
+          setSelectedModel(model);
+          const owner = availableModels.find((p) => p.models.some((m) => m.id === model));
+          if (owner) setSelectedProvider(owner.id);
+        }}
       />
 
       {state.error && (
@@ -495,6 +690,13 @@ export default function IdeAgent() {
             aria-label='Dismiss error'
           >
             ×
+          </button>
+          <button
+            className='agent-error-retry'
+            onClick={() => void load()}
+            disabled={state.status === 'loadingSession'}
+          >
+            {state.status === 'loadingSession' ? 'Retrying…' : 'Retry'}
           </button>
         </div>
       )}
@@ -511,7 +713,7 @@ export default function IdeAgent() {
         }}
         onNewChat={() => {
           setChatsOpen(false);
-          void createSession();
+          void startNewSession();
         }}
         onApproveGate={(gate) => {
           setChatsOpen(false);
@@ -537,16 +739,25 @@ export default function IdeAgent() {
         gates={inlineGates}
         runCard={runCard}
         runCost={runCost}
+        runStreamStatus={liveRun.status}
+        runUnavailable={liveRun.unavailable}
+        routingState={state.routingState}
+        hasNewActivity={hasNewActivity}
         input={state.input}
         attachments={state.attachments}
         uploading={uploading}
         endRef={endRef}
         dispatch={dispatch}
         onScroll={onChatScroll}
+        onJumpToLatest={jumpToLatest}
         onSend={() => void send()}
         onStop={stop}
         onAddFiles={(files) => void handleFiles(files)}
-        onRemoveAttachment={(id) => dispatch({type: 'attachment:remove', attachmentId: id})}
+        onRemoveAttachment={(id) => {
+          const attachment = state.attachments.find((item) => item.attachmentId === id);
+          if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+          dispatch({type: 'attachment:remove', attachmentId: id});
+        }}
         onConfirmAction={(pending) => void confirmAction(pending)}
         onApproveGate={(gate) => void approveGate(gate)}
         onRejectGate={(gate) => void rejectGate(gate)}

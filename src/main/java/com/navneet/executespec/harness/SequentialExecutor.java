@@ -1,5 +1,6 @@
 package com.navneet.executespec.harness;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -17,6 +18,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
@@ -32,6 +34,8 @@ import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.InitialRoutingDecision;
+import com.navneet.executespec.router.InitialRoutingService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.router.ModelResolver;
@@ -44,6 +48,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -128,6 +133,17 @@ Important rules:
   compiles.
 - When the task is fully complete, call completeTask with a brief summary.
   Do not output any text that is not needed to complete the task.
+
+REPOSITORY LOCALIZATION AND CONTEXT BUDGET:
+- Start with a narrow inventory (listFiles) and exact-symbol/error searches (searchFiles) before
+  opening large files. Search first; do not recursively dump a repository into context.
+- Follow references from the matching definition or failing test, then read only the relevant
+  line ranges. Keep the remaining context headroom for edits, test output, and repair turns.
+- Reuse evidence already in this conversation and gitDiff/gitStatus after edits; do not re-read
+  unchanged files or repeat a search with the same query. If a search misses, broaden it once
+  (symbol -> filename -> related test) before changing strategy.
+- Use deterministic local search and the repository's existing indexes when available. Never
+  invent a symbol, path, API, or test command when the workspace can answer it.
 
 DO NOT commit, stage, or push. Workspace changes are committed and pushed
 automatically at run-end by a downstream service. You have NO gitCommit
@@ -273,6 +289,11 @@ finish the requested edit and report what existing check, if any, you ran. Do no
 validation-report flows unless the user explicitly asks for review/validation.
 """;
 
+  /** Package-local prompt-composition seam; keeps the legacy constant private to this facade. */
+  static String localHandsFinalOverride() {
+    return LOCAL_HANDS_FINAL_OVERRIDE;
+  }
+
   /**
    * RL-2026-05-066 (verifyBoot) — appended to the worker prompt ONLY when {@code
    * worker.verify-boot.enabled} is on (default OFF). Kept out of {@link #SYSTEM_PROMPT_BASE} per
@@ -330,12 +351,102 @@ to boot — skip it for those.""";
       gcsTaskCheckpointService;
 
   private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
+
+  /** Optional in source-compatible test constructors; Spring supplies the routing seam. */
+  private InitialRoutingService initialRoutingService;
+
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final GoalDonenessEvaluator goalDonenessEvaluator = new GoalDonenessEvaluator();
   private final GoalContinuationPolicy goalContinuationPolicy = new GoalContinuationPolicy();
 
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
+
+  /** Optional only for source-compatible unit construction; Spring always supplies it. */
+  private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
+
+  public SequentialExecutor(
+      WorkerAgent worker,
+      BuildProjectTool buildProjectTool,
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      SseBroadcaster broadcaster,
+      AgentTaskRepository taskRepo,
+      ModelResolver modelResolver,
+      com.navneet.executespec.router.ModelMatrixProperties matrixProps,
+      com.navneet.executespec.project.rag.RetrievalService retrievalService,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.context.ContextStore contextStore,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
+      com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
+      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService) {
+    this(
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        matrixProps,
+        retrievalService,
+        inLoopTestRunner,
+        featureFlagService,
+        contextStore,
+        costTracker,
+        gcsTaskCheckpointService,
+        availableProviderResolver,
+        goalContinuationAdvisor,
+        repoOrientationService);
+    this.taskOutcomeMetricService = taskOutcomeMetricService;
+  }
+
+  @Autowired
+  public SequentialExecutor(
+      WorkerAgent worker,
+      BuildProjectTool buildProjectTool,
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      SseBroadcaster broadcaster,
+      AgentTaskRepository taskRepo,
+      ModelResolver modelResolver,
+      com.navneet.executespec.router.ModelMatrixProperties matrixProps,
+      com.navneet.executespec.project.rag.RetrievalService retrievalService,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.context.ContextStore contextStore,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
+      com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
+      InitialRoutingService initialRoutingService,
+      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService) {
+    this(
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        matrixProps,
+        retrievalService,
+        inLoopTestRunner,
+        featureFlagService,
+        contextStore,
+        costTracker,
+        gcsTaskCheckpointService,
+        availableProviderResolver,
+        goalContinuationAdvisor,
+        repoOrientationService,
+        taskOutcomeMetricService);
+    this.initialRoutingService = initialRoutingService;
+  }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
       new ConcurrentHashMap<>();
@@ -356,6 +467,14 @@ to boot — skip it for those.""";
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, ContinuationConfirmationScope>
       continuationConfirmationScopeByRun = new ConcurrentHashMap<>();
+
+  /**
+   * Recovery generation observed when a worker starts a task. A rolling-restart takeover increments
+   * {@code agent_task.recovery_attempt}; retaining the generation here lets a stale worker refuse
+   * to write terminal state after another JVM has claimed the task.
+   */
+  private final ConcurrentMap<String, Integer> taskRecoveryAttemptByTask =
+      new ConcurrentHashMap<>();
 
   private record ContinuationConfirmationScope(
       boolean confirmed, RunContinuationDecision action, String provider, String model) {
@@ -531,7 +650,13 @@ to boot — skip it for those.""";
       // about task N (assessment Gap 5: cross-task coherence was deferred entirely to the
       // reviewer wiring pass). Accumulated unconditionally (cheap strings); INJECTED only when
       // the flag is on.
-      List<String> runJournal = new ArrayList<>();
+      // Keep the prompt-local journal warm while retaining the last bounded entries on the
+      // workspace. A crash/restart can therefore restore cross-task context without replaying the
+      // provider transcript or treating the journal as authoritative task state.
+      java.nio.file.Path journalWorkspace = req.runContext().workspaceRoot();
+      List<String> runJournal =
+          new ArrayList<>(
+              com.navneet.executespec.context.RunJournalStore.load(journalWorkspace, runId));
       for (int i = 0; i < taskCount; i++) {
         // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
         // calls {@code future.cancel(true)} which interrupts THIS thread, but
@@ -568,7 +693,8 @@ to boot — skip it for those.""";
         //   - run fresh
         TaskOutcome outcome;
         if (resume != null) {
-          ResumeAction action = resolveResumeAction(runId, task.id(), resume);
+          ResumeAction action =
+              resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
           switch (action.kind()) {
             case SKIP_TERMINAL -> {
               log.info(
@@ -595,8 +721,12 @@ to boot — skip it for those.""";
           outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
         }
 
+        recordTaskOutcomeMetric(req, task, outcome);
         outcomes.add(outcome);
-        runJournal.add(journalEntry(task, outcome));
+        String journalEntry = journalEntry(task, outcome);
+        runJournal.removeIf(existing -> existing.startsWith(task.id() + " ("));
+        runJournal.add(journalEntry);
+        com.navneet.executespec.context.RunJournalStore.save(journalWorkspace, runJournal, runId);
         metrics.recordTaskStatus(outcome.status().name());
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
@@ -655,7 +785,7 @@ to boot — skip it for those.""";
       // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
       // state gets the same cleanup. Both calls are best-effort; failures are logged only.
       if (contextStore != null) {
-        contextStore.deleteAll(runId);
+        contextStore.deleteAll(runId, req.runContext().workspaceRoot());
       }
       clearCrossProviderState(runId);
       clearContinuationActionState(runId);
@@ -669,6 +799,61 @@ to boot — skip it for those.""";
       lowComplexityWorkerStartTierEffectiveByRun.remove(runId);
       continuationConfirmationScopeByRun.remove(runId);
     }
+  }
+
+  private void recordTaskOutcomeMetric(
+      ExecutionRequest req, PlannedTask task, TaskOutcome outcome) {
+    if (taskOutcomeMetricService == null || req == null || task == null || outcome == null) return;
+    String runId = req.runContext().runId();
+    RunCostTracker.Snapshot usage =
+        costTracker == null ? null : costTracker.snapshotTask(runId, task.id());
+    WorkerResult primary = outcome.workerOutcome();
+    WorkerResult retry = outcome.retryWorkerOutcome();
+    int iterations =
+        (primary == null ? 0 : primary.iterations()) + (retry == null ? 0 : retry.iterations());
+    taskOutcomeMetricService.record(
+        runId,
+        taskCategory(task),
+        task.complexity().name(),
+        taskLanguage(task),
+        outcome.retryAttempted() ? 2 : 1,
+        outcome,
+        usage == null ? 0 : usage.outputTokens(),
+        maxOutputTokens(task.complexity()),
+        iterations,
+        usage == null ? 0.0 : usage.costUsd());
+  }
+
+  private static int maxOutputTokens(PlannedTask.Complexity complexity) {
+    return switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
+      case LOW -> 4096;
+      case MEDIUM -> 8192;
+      case HIGH -> 16384;
+    };
+  }
+
+  private static String taskLanguage(PlannedTask task) {
+    for (String file : taskValues(task.touchesFiles())) {
+      String lower = file.toLowerCase(Locale.ROOT);
+      if (lower.endsWith(".java")) return "java";
+      if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
+      if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
+      if (lower.endsWith(".py")) return "python";
+      if (lower.endsWith(".rs")) return "rust";
+      if (lower.endsWith(".go")) return "go";
+    }
+    return null;
+  }
+
+  /** Conservative, provider-neutral task prompt budget used before model selection. */
+  private static long requiredContextTokens(PlannedTask task) {
+    if (task == null) return 0L;
+    return ContextPlanner.estimateTextTokens(
+        task.id(),
+        task.title(),
+        task.description(),
+        String.join("\n", task.touchesFiles()),
+        String.join("\n", task.hardConstraints()));
   }
 
   private void emitTaskWavePlan(String runId, Plan plan) {
@@ -761,7 +946,8 @@ to boot — skip it for those.""";
    * {@link com.navneet.executespec.state.entity.AgentTask} status; loads a Redis snapshot iff the
    * task is the resume target.
    */
-  private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
+  private ResumeAction resolveResumeAction(
+      String runId, String taskId, ResumeRequest resume, java.nio.file.Path workspaceRoot) {
     // 2026-05-10 — task-id format normalisation.
     //
     // The `taskId` argument is the LOGICAL plan id ("T12") — comes
@@ -815,13 +1001,9 @@ to boot — skip it for those.""";
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
 
-    // Resume target — try to load the snapshot from Redis.
-    com.navneet.executespec.tool.ExecutionContext ctx =
-        new com.navneet.executespec.tool.ExecutionContext(
-            runId,
-            taskId,
-            // workspaceRoot isn't part of the Redis key — any value works for keyFor.
-            java.nio.file.Paths.get("/"));
+    // Resume target — try Redis first, then the workspace-local durable checkpoint. The workspace
+    // root is not part of the Redis key, but it is required for disk fallback after a JVM restart.
+    com.navneet.executespec.tool.ExecutionContext ctx = resumeContext(runId, taskId, workspaceRoot);
     com.navneet.executespec.context.SavedContext snap = contextStore.load(ctx).orElse(null);
     if (snap == null) {
       log.info(
@@ -831,6 +1013,13 @@ to boot — skip it for those.""";
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
     return new ResumeAction(ResumeKind.RESUME_FROM_SNAPSHOT, persisted, snap);
+  }
+
+  /** Builds the context used by resume resolution, preserving the disk handoff boundary. */
+  static com.navneet.executespec.tool.ExecutionContext resumeContext(
+      String runId, String taskId, java.nio.file.Path workspaceRoot) {
+    return new com.navneet.executespec.tool.ExecutionContext(
+        runId, taskId, workspaceRoot == null ? java.nio.file.Paths.get("/") : workspaceRoot);
   }
 
   private String readPersistedTaskStatus(String runId, String taskId) {
@@ -972,16 +1161,136 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
+    ProviderHandoffDossier.write(
+        req.runContext().workspaceRoot(),
+        runId,
+        task.id(),
+        outcome.dispatchedProvider(),
+        outcome.dispatchedModel(),
+        candidate.provider(),
+        candidate.model(),
+        decision.decision().name(),
+        reason,
+        outcome.smokeTestOutput());
+
+    // A failed/partial primary attempt is terminal for ordinary stale-worker fencing, but it is
+    // deliberately not terminal for this executor's selected continuation rerun. Clear the
+    // terminal marker under the row lock before executeOne() publishes WORKING; otherwise the
+    // retry runs in memory while persistTaskStatus() rejects both its WORKING and COMPLETE writes
+    // as a "terminal overwrite". That left the database stuck at FAILED/PARTIAL even when the
+    // handoff produced a passing result. This reset is reached only after reserveContinuationAction
+    // succeeds, so an exhausted/blocked action cannot reopen a task.
+    prepareTaskForContinuation(runId, task.id());
+
+    // Preserve the worker's latest investigation when handing the same task to a different
+    // provider/model. The workspace is shared, but starting with a fresh conversation makes the
+    // replacement model repeat repository exploration and can undo the value of the escalation.
+    // ContextStore is best-effort; a missing/expired snapshot still falls back to a fresh attempt.
+    com.navneet.executespec.context.SavedContext handoff = loadContinuationSnapshot(req, task);
     TaskOutcome rerun =
         executeOne(
             task,
             plan,
             req,
             isFinalTask,
-            null,
+            handoff,
             new ProviderModelOverride(
                 candidate.provider(), candidate.model(), decision.decision()));
     return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+  }
+
+  private void prepareTaskForContinuation(String runId, String taskIdShort) {
+    if (taskRepo == null || runId == null || runId.length() < 8 || taskIdShort == null) {
+      return;
+    }
+    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    // This method is called from the long-running executor thread, outside the short persistence
+    // transaction used by persistTaskStatus. The subsequent saveAndFlush is the atomic terminal
+    // reset for this selected action; recovery-attempt fencing still protects a stale JVM.
+    var existing = taskRepo.findById(key);
+    if (existing.isEmpty()) {
+      log.warn("prepareTaskForContinuation: row not found id={}", key);
+      return;
+    }
+    var task = existing.get();
+    task.setStatus("PENDING");
+    task.setCompletedAt(null);
+    task.setDurationMs(null);
+    task.setLastActivityAt(java.time.Instant.now());
+    taskRepo.saveAndFlush(task);
+    log.info("prepareTaskForContinuation: reopened id={} for selected handoff rerun", key);
+  }
+
+  /**
+   * Load the latest bounded worker snapshot for a model/provider continuation handoff.
+   *
+   * <p>The snapshot key is derived from the same run/task context used by {@link WorkerAgent};
+   * keeping this lookup in one seam makes the handoff behavior testable and keeps Redis failures
+   * non-fatal, matching the normal retry/resume policy.
+   */
+  com.navneet.executespec.context.SavedContext loadContinuationSnapshot(
+      ExecutionRequest req, PlannedTask task) {
+    if (contextStore == null || req == null || req.runContext() == null || task == null) {
+      return null;
+    }
+    var context =
+        new com.navneet.executespec.tool.ExecutionContext(
+            req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
+    java.nio.file.Path evidenceBundle =
+        context
+            .workspaceRoot()
+            .resolve(".agent-context")
+            .resolve(com.navneet.executespec.context.ContextEvidenceBundleWriter.FILE_NAME);
+    if (Files.exists(evidenceBundle)) {
+      // Context-agent evidence is optional during an in-flight run, but when a bundle exists it
+      // must be current before a provider handoff reuses the snapshot. A stale bundle means the
+      // workspace changed after the evidence was captured; restart with the fresh task prompt.
+      ObjectMapper mapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+      if (new com.navneet.executespec.context.ContextEvidenceBundleWriter(mapper)
+          .readCurrent(context.workspaceRoot(), context.runId())
+          .isEmpty()) {
+        log.info(
+            "Continuation handoff evidence bundle stale run={} task={} — starting fresh",
+            context.runId(),
+            context.taskId());
+        return null;
+      }
+    }
+    try {
+      var snapshot = contextStore.load(context).orElse(null);
+      if (snapshot != null) {
+        var dossier =
+            ProviderHandoffDossier.read(context.workspaceRoot(), context.runId(), context.taskId());
+        if (dossier.isPresent()) {
+          var history = new ArrayList<>(snapshot.history());
+          history.add(
+              new org.springframework.ai.chat.messages.UserMessage(
+                  ProviderHandoffDossier.recoveryNote(dossier.get())));
+          snapshot =
+              com.navneet.executespec.context.SavedContext.builder()
+                  .runId(snapshot.runId())
+                  .taskId(snapshot.taskId())
+                  .iteration(snapshot.iteration())
+                  .history(history)
+                  .savedAt(snapshot.savedAt())
+                  .sizeBytes(snapshot.sizeBytes())
+                  .build();
+        }
+        log.info(
+            "Continuation handoff run={} task={} resumes snapshot iter={}",
+            context.runId(),
+            context.taskId(),
+            snapshot.iteration());
+      }
+      return snapshot;
+    } catch (RuntimeException e) {
+      log.warn(
+          "Continuation handoff snapshot unavailable run={} task={}: {}",
+          context.runId(),
+          context.taskId(),
+          e.getMessage());
+      return null;
+    }
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -1122,7 +1431,11 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      // Action-history writes are part of the task's recovery-owned state.  Always take the row
+      // lock, even when this executor did not capture a local generation (for example a resumed
+      // process handling a synthetic continuation outcome).  A stale JVM must not race a recovery
+      // writer while appending a decision that could overwrite the newer JSON document.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.debug("appendContinuationActionHistory: row not found id={}", key);
         return;
@@ -1270,6 +1583,118 @@ to boot — skip it for those.""";
     return executeOne(task, plan, req, isFinalTask, null);
   }
 
+  /**
+   * Resolves the route for a first worker attempt through the canonical candidate/ranking seam.
+   * Retries and resumed workers deliberately bypass this method's selection path.
+   */
+  InitialRoutingDecision initialRouteFor(
+      PlannedTask task,
+      ExecutionRequest req,
+      String currentProvider,
+      String currentModel,
+      boolean firstAttempt) {
+    if (!firstAttempt
+        || initialRoutingService == null
+        || featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_INITIAL_ROUTING)) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("initial routing disabled or route is not a first attempt"));
+    }
+    if (Boolean.getBoolean("executespec.strict-provider")) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("strict provider mode; initial routing kept the explicit provider/model"));
+    }
+    if (req != null && Boolean.TRUE.equals(req.routePinned())) {
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("route pinned; initial routing kept the explicit provider/model"));
+    }
+    String category = taskCategory(task);
+    try {
+      return initialRoutingService.decide(
+          currentProvider,
+          currentModel,
+          com.navneet.executespec.router.ModelProviderCandidateRequest.builder()
+              .taskCategory(category)
+              .taskComplexity(
+                  task == null || task.complexity() == null ? "UNKNOWN" : task.complexity().name())
+              .requiredQualityThreshold(requiredGoalQualityThreshold(category))
+              .requiredContextTokens(requiredContextTokens(task))
+              .providerAvailability(providerAvailability(req.runContext().runId()))
+              .providerPreferenceOrder(providerPreferenceOrder(currentProvider))
+              .build());
+    } catch (RuntimeException ex) {
+      log.warn(
+          "Initial route selection failed closed for task={} provider={} model={}: {}",
+          task == null ? null : task.id(),
+          currentProvider,
+          currentModel,
+          ex.getMessage());
+      return new InitialRoutingDecision(
+          currentProvider,
+          currentModel,
+          false,
+          false,
+          List.of(),
+          List.of(),
+          List.of("initial route selection failed closed"));
+    }
+  }
+
+  private void emitInitialRoutingDecision(
+      String runId,
+      String taskId,
+      String currentProvider,
+      String currentModel,
+      InitialRoutingDecision decision) {
+    if (decision == null
+        || featureFlagService == null
+        || !featureFlagService.isEnabled(FLAG_INITIAL_ROUTING)) {
+      return;
+    }
+    List<String> considered =
+        decision.consideredCandidates().stream()
+            .filter(java.util.Objects::nonNull)
+            .map(ModelProviderScore::label)
+            .toList();
+    List<String> rejected =
+        decision.rejectedCandidates().stream()
+            .filter(java.util.Objects::nonNull)
+            .map(ModelProviderScore::label)
+            .toList();
+    broadcaster.emit(
+        runId,
+        RunEvent.initialRoutingDecision(
+            runId,
+            taskId,
+            currentProvider,
+            currentModel,
+            decision.provider(),
+            decision.model(),
+            decision.changed(),
+            decision.observedQualityEvidenceUsed(),
+            considered,
+            rejected,
+            decision.reasons()));
+  }
+
   private TaskOutcome executeOne(
       PlannedTask task,
       Plan plan,
@@ -1308,12 +1733,37 @@ to boot — skip it for those.""";
       ProviderModelOverride providerModelOverride,
       List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
+    rememberRecoveryAttempt(req.runContext().runId(), task.id());
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
     String requestedProvider =
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
         providerModelOverride == null ? req.model() : providerModelOverride.model();
+    String initialRequestedProvider = requestedProvider;
+    String initialRequestedModel = requestedModel;
+    InitialRoutingDecision initialRoute =
+        initialRouteFor(
+            task,
+            req,
+            requestedProvider,
+            requestedModel,
+            providerModelOverride == null && resumeFrom == null);
+    emitInitialRoutingDecision(
+        req.runContext().runId(),
+        task.id(),
+        initialRequestedProvider,
+        initialRequestedModel,
+        initialRoute);
+    requestedProvider = initialRoute.provider();
+    requestedModel = initialRoute.model();
+    if (initialRoute.changed()) {
+      log.info(
+          "Executor task={} initial route changed {} -> {} (observed evidence)",
+          task.id(),
+          providerModelOverride == null ? req.provider() + "/" + req.model() : "override",
+          initialRoute.routeLabel());
+    }
 
     String refDocs = fetchReferenceDocs(req.projectId(), task);
     String systemPrompt =
@@ -1324,6 +1774,7 @@ to boot — skip it for those.""";
             req.plan() == null ? null : req.plan().projectType(),
             req.workspaceSummary(),
             requestedProvider,
+            requestedModel,
             req.localHandsMode());
     String orientation =
         (featureFlagService != null
@@ -1359,6 +1810,11 @@ to boot — skip it for those.""";
             requestedModel,
             req.projectId() != null,
             req.lowComplexityWorkerStartTier());
+    if (initialRoute.changed()) {
+      // ModelResolver normally resolves the tier's YAML model. An evidence-backed initial
+      // decision is already a concrete provider/model candidate, so preserve both halves of it.
+      cfg = cfg.withProviderModel(initialRoute.provider(), initialRoute.model());
+    }
     if (providerModelOverride != null) {
       cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
     }
@@ -1421,7 +1877,7 @@ to boot — skip it for those.""";
             .progressV2(
                 featureFlagService != null
                     && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-            // auto-verify (V255, default OFF): server-side edit-burst test runs with
+            // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
             .autoVerify(
                 featureFlagService != null
@@ -1767,6 +2223,20 @@ to boot — skip it for those.""";
             .wallClockSeconds(retryWallClock)
             .requireBuildVerification(true)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+            // Preserve the server-owned worker controls across the smoke retry. A retry is a
+            // continuation of the same task, not a fresh flag-off execution.
+            .criticPass(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+            .verifyBeforeComplete(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+            .progressV2(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+            .autoVerify(
+                featureFlagService != null
+                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
             .build();
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
@@ -1979,6 +2449,18 @@ to boot — skip it for those.""";
                   .wallClockSeconds(cfg.wallClockSeconds)
                   .requireBuildVerification(true)
                   .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+                  .criticPass(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                  .verifyBeforeComplete(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                  .progressV2(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                  .autoVerify(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.auto-verify.enabled"))
                   .build());
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
@@ -2311,6 +2793,7 @@ to boot — skip it for those.""";
                   .requiredQualityThreshold(requiredQualityThreshold)
                   .providerAvailability(providerAvailability(runId))
                   .providerPreferenceOrder(providerPreferenceOrder(provider))
+                  .requiredContextTokens(requiredContextTokens(task))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .providerBehaviorPoor(providerBehaviorPoor)
                   .routePinned(routePinned)
@@ -2965,7 +3448,10 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      // Goal/continuation evidence is another ancillary task write.  Serialize it with recovery
+      // takeover just like terminal status and action history; otherwise a stale executor can
+      // overwrite the resumed worker's latest decision after the generation CAS succeeds.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.debug("persistGoalDecision: row not found id={}", key);
         return;
@@ -3590,104 +4076,18 @@ to boot — skip it for those.""";
       String runModel,
       boolean projectRun,
       String lowComplexityWorkerStartTierOverride) {
-    AgentTier tier;
-    int maxIter;
-    int maxTokens;
-    int stagnationWarnAfter;
-    int stagnationForceAfter;
-    int wallClockSeconds;
-    switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
-        // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
-        // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
-        // (7 files + npm install + typecheck) hit 30 iters and finished
-        // PARTIAL even though all files were written. Bigger scaffold-heavy
-        // specs consistently need >30 iters because every readFile /
-        // writeFile is one tool call. 50 covers a clean 7-file scaffold
-        // with 2-3 self-review re-reads; 75 covers HIGH tasks (e.g. T3
-        // "implement 4 screens + service" on the same run) with headroom.
-        // (Previous bump 12/22/35 → 20/30/45 was for multi-repo Launches;
-        //  this second bump is for codegen-dense greenfield scaffolds.)
-        //
-        // 2026-05-08 — stagnation thresholds are now complexity-aware too. Static
-        // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 was calibrated
-        // for typical write-then-verify-then-stop patterns; for HIGH-complexity
-        // ProgramBench-style reverse-engineering the worker legitimately needs
-        // ~15-20 read iters before its first write, and was force-terminating
-        // at iter 12 before any source was written. Reviewer then "fixed" the
-        // empty workspace with no-op compile.sh — passing build smoke without
-        // actually compiling source. Verified on cmatrix anthropic run 9b37b099
-        // (2026-05-08) with empty workspace + 100/100 programbench score (which
-        // counted the cleanroom's original binary).
-      case LOW -> {
-        // Default remains WORKHORSE after the cheap-tier eval regression, but operators can opt
-        // LOW tasks into LIGHTWEIGHT starts and rely on continuation policy to step up.
-        tier = lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride);
-        // RL-2026-06: caps loosened again so iteration limits are a backstop, not a
-        // quality ceiling. The dollar cap and stagnation guard remain the real runaway
-        // controls; LOW gets enough room for inspect -> edit -> verify loops on real repos.
-        maxIter = 60;
-        maxTokens = 4096;
-        stagnationWarnAfter = 10;
-        stagnationForceAfter = 16;
-        wallClockSeconds = 30 * 60;
-      }
-      case HIGH -> {
-        tier = AgentTier.PLANNING;
-        // 2026-05-08 — HIGH iter cap 75 → 120 (matches PATCH mode's calibration). Pairs
-        // with WorkerAgent's Lever A force-edit watchdog (fires at 70% with zero writes)
-        // + Lever B best-guess salvage (fires on iter-limit with zero writes). Real cost
-        // ceiling is the per-run cost cap, not the iter cap. Extends headroom for genuine
-        // long-tail HIGH tasks (multi-file Spring Boot apps with deep wiring) that
-        // currently hit iter-limit at iter 75 mid-edit.
-        //
-        // RL-2026-06: 120 -> 180. Non-frontier models need more iterations for the same
-        // tool-using loop. Stagnation remains <25% of the cap, so read-only loops still stop.
-        maxIter = 180;
-        maxTokens = 16384;
-        stagnationWarnAfter = 24;
-        stagnationForceAfter = 40;
-        // RL-2026-05-004: 45→75 min. Gemini is genuinely slow per turn; a real HIGH
-        // task was being wall-clock-killed mid-work → PARTIAL. $ cap still backstops.
-        wallClockSeconds = 75 * 60;
-      }
-      default -> {
-        tier = AgentTier.WORKHORSE;
-        // 2026-05-10 — MEDIUM iter cap 50 → 75. Dev run a59f9798/T12 ("write unit tests for
-        // 3 mobile media.service methods") wrote 92 files at 0.92 writes/iter and hit the
-        // project-run 100-iter cap (50 × 2) mid-test-suite. The worker was making genuine
-        // progress; iter cap killed it.
-        //
-        // RL-2026-06: 75 -> 120. This is the common "real feature slice" band and the most
-        // important budget to uncap for DeepSeek-class models.
-        maxIter = 120;
-        maxTokens = 8192;
-        stagnationWarnAfter = 16;
-        stagnationForceAfter = 28;
-        wallClockSeconds = 45 * 60; // RL-2026-05-004: 25→45 min (PARTIAL reduction)
-      }
-    }
-    // Project runs (Launches on an existing cloned codebase) need more
-    // iterations: the worker has to readFile / searchFiles the real repo
-    // before it can write, so 2× the fresh-scratch cap is the default.
-    //
-    // 2026-05-10 — wall-clock cap also doubles for project runs (same rationale: more files
-    // to read before the first write). Stagnation thresholds DO NOT double — they're
-    // measuring "consecutive non-write iterations" which is a behavioural signal, not a
-    // budget; the underlying LLM doesn't need 2× more reads to recognise "I'm stuck."
-    //
-    // 2026-05-10 — LOW + MEDIUM project stagnation force bumps: 12 → 18 (LOW) and 20 → 24
-    // (MEDIUM) ONLY for project runs. Dev run a59f9798/T9 force-terminated at 12 reads on
-    // a LOW project task that needed to readFile a real codebase before writing the audit
-    // fix; the static 12 is calibrated for fresh-scratch where the workspace is empty.
-    if (projectRun) {
-      maxIter *= 2;
-      wallClockSeconds *= 2;
-      // Bump only the project-run force threshold; warn stays the same so the model still
-      // gets the "PROGRESS CHECK" nudge at the same point.
-      if (complexity == PlannedTask.Complexity.LOW) stagnationForceAfter = 24;
-      else if (complexity == null || complexity == PlannedTask.Complexity.MEDIUM)
-        stagnationForceAfter = 36;
-    }
+    WorkerTierBudgetPolicy.Budget budget =
+        WorkerTierBudgetPolicy.forTask(
+            complexity,
+            projectRun,
+            lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride));
+    AgentTier tier = budget.tier();
+    int maxIter = budget.maxIterations();
+    int maxTokens = budget.maxTokens();
+    int stagnationWarnAfter = budget.stagnationWarnAfter();
+    int stagnationForceAfter = budget.stagnationForceAfter();
+    int wallClockSeconds = budget.wallClockSeconds();
+    // Project-run multipliers and complexity defaults are owned by the pure budget policy.
     // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
     // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
     // every tool call, no prompt cache); observed 1.45M input tokens on HIGH library spec vs
@@ -3712,13 +4112,15 @@ to boot — skip it for those.""";
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
+      int[] profileThresholds =
+          capabilityStagnationThresholds(resolved.providerName(), resolved.getModel());
       return new TierConfig(
           resolved.providerName(),
           resolved.getModel(),
           maxIter,
           maxTokens,
-          stagnationWarnAfter,
-          stagnationForceAfter,
+          profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
+          profileThresholds[1] > 0 ? profileThresholds[1] : stagnationForceAfter,
           wallClockSeconds,
           forceSalvageTool);
     } catch (Exception e) {
@@ -3728,15 +4130,90 @@ to boot — skip it for those.""";
           tier,
           runProvider,
           runModel);
+      int[] profileThresholds = capabilityStagnationThresholds(runProvider, runModel);
       return new TierConfig(
           runProvider,
           runModel,
           maxIter,
           maxTokens,
-          stagnationWarnAfter,
-          stagnationForceAfter,
+          profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
+          profileThresholds[1] > 0 ? profileThresholds[1] : stagnationForceAfter,
           wallClockSeconds,
           forceSalvageTool);
+    }
+  }
+
+  /**
+   * Resolve optional model-specific stagnation thresholds without changing the default ladder.
+   * Profiles are deliberately advisory: malformed, partial, or unsafe values are ignored and the
+   * complexity defaults remain in force. Keeping this lookup at the tier-config boundary makes
+   * model tuning effective for both normal and continuation reruns while avoiding a second routing
+   * implementation in the worker loop.
+   */
+  private int[] capabilityStagnationThresholds(String provider, String model) {
+    if (matrixProps == null
+        || matrixProps.getCapabilityProfiles() == null
+        || !capabilityProfilesEnabled()) return new int[] {0, 0};
+    try {
+      var profiles = matrixProps.getCapabilityProfiles();
+      com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile profile = null;
+      if (provider != null && model != null) {
+        // Resolve legacy/case-variant model names before looking up the model-specific profile.
+        // The worker receives the resolved route from ModelResolver, which may still carry an
+        // in-flight alias; profile selection must use the same canonical identity as ModelRegistry
+        // or a model override silently falls back to the provider profile.
+        String canonicalModel = canonicalProfileModel(model);
+        profile = findCapabilityProfile(profiles, provider + "/" + canonicalModel);
+        if (profile == null && !canonicalModel.equals(model)) {
+          profile = findCapabilityProfile(profiles, provider + "/" + model);
+        }
+      }
+      if (profile == null && provider != null) {
+        profile = findCapabilityProfile(profiles, provider);
+      }
+      if (profile == null) return new int[] {0, 0};
+      int warn = profile.getStagnationWarnAfter() == null ? 0 : profile.getStagnationWarnAfter();
+      int force = profile.getStagnationForceAfter() == null ? 0 : profile.getStagnationForceAfter();
+      // The worker requires force > warn; reject a partial/unsafe profile rather than silently
+      // creating a loop that can never reach its force boundary.
+      return warn > 0 && force > warn ? new int[] {warn, force} : new int[] {0, 0};
+    } catch (RuntimeException e) {
+      log.warn(
+          "Ignoring malformed capability profile provider={} model={}: {}",
+          provider,
+          model,
+          e.getMessage());
+      return new int[] {0, 0};
+    }
+  }
+
+  private String canonicalProfileModel(String model) {
+    if (model == null || matrixProps.getLegacyAliases() == null) return model;
+    String aliasTarget = matrixProps.getLegacyAliases().get(model.toLowerCase(Locale.ROOT));
+    return aliasTarget == null ? model : aliasTarget;
+  }
+
+  private static com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile
+      findCapabilityProfile(
+          Map<String, com.navneet.executespec.router.ModelMatrixProperties.CapabilityProfile>
+              profiles,
+          String key) {
+    if (key == null) return null;
+    var exact = profiles.get(key);
+    if (exact != null) return exact;
+    return profiles.entrySet().stream()
+        .filter(entry -> entry.getKey().equalsIgnoreCase(key))
+        .map(Map.Entry::getValue)
+        .findFirst()
+        .orElse(null);
+  }
+
+  private boolean capabilityProfilesEnabled() {
+    try {
+      return featureFlagService != null && featureFlagService.isEnabled(FLAG_CAPABILITY_PROFILES);
+    } catch (RuntimeException e) {
+      log.warn("Capability-profile flag lookup failed; profile thresholds remain disabled", e);
+      return false;
     }
   }
 
@@ -3830,13 +4307,41 @@ to boot — skip it for those.""";
       String failureDiagnosticJson) {
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      var existing = taskRepo.findById(key);
+      // A terminal status is an ownership boundary: a late result from an older JVM must not
+      // replace the recovery worker's durable evidence.  The row lock makes the generation check
+      // and save atomic with takeover.
+      var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.warn("persistTaskStatus: row not found id={} (status={} skipped)", key, status);
         return;
       }
       var t = existing.get();
+      Integer expectedRecoveryAttempt = taskRecoveryAttemptByTask.get(key);
+      if (expectedRecoveryAttempt != null
+          && !recoveryAttemptMatches(expectedRecoveryAttempt, t.getRecoveryAttempt())) {
+        log.warn(
+            "persistTaskStatus: fenced stale worker id={} expectedRecoveryAttempt={}"
+                + " actualRecoveryAttempt={} status={}",
+            key,
+            expectedRecoveryAttempt,
+            t.getRecoveryAttempt(),
+            status);
+        return;
+      }
+      if (isTerminalTaskStatus(t.getStatus()) && !status.equals(t.getStatus())) {
+        log.warn(
+            "persistTaskStatus: fenced terminal overwrite id={} currentStatus={} incomingStatus={}",
+            key,
+            t.getStatus(),
+            status);
+        return;
+      }
       t.setStatus(status);
+      // Keep task-level liveness durable for crash recovery.  Run-level heartbeats are refreshed
+      // by the orchestrator scheduler, but a long provider turn or scheduler pause can make that
+      // signal stale while this worker is still progressing.  Every persisted task transition is
+      // an independent progress marker used by RunLifecycleService before takeover.
+      t.setLastActivityAt(java.time.Instant.now());
       // Timestamp live — the Timeline tab needs real per-task start/end to render
       // staggered bars, and the end-of-run applyExecutionResultToTasks only writes
       // completedAt + durationMs. Stamp startedAt when a task first moves to WORKING,
@@ -3903,6 +4408,35 @@ to boot — skip it for those.""";
           failureReason != null ? " (reason: " + failureReason + ")" : "");
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);
+    }
+  }
+
+  /** Visible for focused recovery tests; null in the legacy schema is generation zero. */
+  static boolean recoveryAttemptMatches(int expected, Integer actual) {
+    return expected == (actual == null ? 0 : actual);
+  }
+
+  private static boolean isTerminalTaskStatus(String status) {
+    return "COMPLETE".equals(status)
+        || "PARTIAL".equals(status)
+        || "FAILED".equals(status)
+        || "BLOCKED".equals(status)
+        || "CANCELLED".equals(status);
+  }
+
+  private void rememberRecoveryAttempt(String runId, String taskIdShort) {
+    if (taskRepo == null || runId == null || taskIdShort == null) return;
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    try {
+      taskRepo
+          .findById(key)
+          .ifPresent(
+              task ->
+                  taskRecoveryAttemptByTask.put(
+                      key, task.getRecoveryAttempt() == null ? 0 : task.getRecoveryAttempt()));
+    } catch (RuntimeException ex) {
+      // Recovery fencing is additive; a missing row or unavailable read must not stop a worker.
+      log.debug("rememberRecoveryAttempt: unable to read {}: {}", key, ex.getMessage());
     }
   }
 
@@ -4034,9 +4568,15 @@ to boot — skip it for those.""";
    */
   public static final String FLAG_PROVIDER_TUNING = "worker.provider-prompt-tuning.enabled";
 
+  /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
+  public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
+
   /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
   public static final String FLAG_CROSS_PROVIDER_FALLBACK =
       "worker.cross-provider-fallback.enabled";
+
+  /** Initial worker-route selection from observed candidate evidence; default OFF. */
+  public static final String FLAG_INITIAL_ROUTING = "execution.initial-routing.enabled";
 
   /**
    * Context retention across task retries (RL-2026-05-052, T3.14). When ON, the retry path loads
@@ -4087,7 +4627,7 @@ to boot — skip it for those.""";
       String workspaceSummary,
       String provider) {
     return composeSystemPrompt(
-        task, designBlock, refDocs, projectType, workspaceSummary, provider, false);
+        task, designBlock, refDocs, projectType, workspaceSummary, provider, null, false);
   }
 
   String composeSystemPrompt(
@@ -4097,6 +4637,25 @@ to boot — skip it for those.""";
       String projectType,
       String workspaceSummary,
       String provider,
+      Boolean localHandsMode) {
+    return composeSystemPrompt(
+        task, designBlock, refDocs, projectType, workspaceSummary, provider, null, localHandsMode);
+  }
+
+  /**
+   * Compose a worker prompt with optional provider-and-model-specific tuning. Model overlays are
+   * additive and fail closed when no matching classpath resource exists; provider fragments remain
+   * the compatibility fallback. Keeping the model as an explicit input prevents a provider-level
+   * prompt from being applied blindly to materially different models.
+   */
+  String composeSystemPrompt(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary,
+      String provider,
+      String model,
       Boolean localHandsMode) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
 
@@ -4114,6 +4673,10 @@ to boot — skip it for those.""";
       String providerFragment = loadProviderFragment(provider);
       if (!providerFragment.isBlank()) {
         sb.append("\n\n").append(providerFragment);
+      }
+      String modelFragment = loadModelFragment(provider, model);
+      if (!modelFragment.isBlank()) {
+        sb.append("\n\n").append(modelFragment);
       }
     }
 
@@ -4282,6 +4845,18 @@ to boot — skip it for those.""";
                 .wallClockSeconds(altCfg.wallClockSeconds())
                 .requireBuildVerification(true)
                 .forceToolChoiceOnSalvage(altCfg.forceToolChoiceOnSalvage())
+                .criticPass(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                .verifyBeforeComplete(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                .progressV2(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                .autoVerify(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.auto-verify.enabled"))
                 .build());
     log.info(
         "Executor task={} cross-provider retry DONE — alt={} outcome={}",
@@ -4320,44 +4895,16 @@ to boot — skip it for those.""";
    * style.
    */
   String loadProviderFragment(String provider) {
-    if (provider == null || provider.isBlank()) return "";
-    String key = provider.trim().toLowerCase();
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource(
-              "prompts/fragments/provider/" + key + "/build.md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadProviderFragment({}) failed: {}", provider, e.getMessage());
-      return "";
-    }
+    return new PromptComposer().loadProviderFragment(provider);
+  }
+
+  /** Load an optional model-specific BUILD fragment under model/{provider}/{model}/build.md. */
+  String loadModelFragment(String provider, String model) {
+    return new PromptComposer().loadModelFragment(provider, model);
   }
 
   String loadProjectTypeFragments(String projectType) {
-    List<String> keys = fragmentKeysForProjectType(projectType);
-    if (keys.isEmpty()) return "";
-    StringBuilder sb = new StringBuilder();
-    for (String key : keys) {
-      String fragment = loadPromptFragment(key);
-      if (fragment.isBlank()) continue;
-      if (!sb.isEmpty()) sb.append("\n\n");
-      sb.append(fragment);
-    }
-    return sb.toString();
-  }
-
-  private String loadPromptFragment(String key) {
-    if (key == null || key.isBlank()) return "";
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource("prompts/fragments/" + key + ".md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadPromptFragment({}) failed: {}", key, e.getMessage());
-      return "";
-    }
+    return new PromptComposer().loadProjectTypeFragments(projectType);
   }
 
   /**
@@ -4368,47 +4915,16 @@ to boot — skip it for those.""";
    * example {@code java-spring-boot} resolves to {@code prompts/scaffolds/spring-boot.md}.
    */
   private String loadScaffoldForProjectType(String projectType) {
-    if (projectType == null || projectType.isBlank()) return "";
-    String key = scaffoldKeyForProjectType(projectType);
-    if (key.isBlank()) return "";
-    try {
-      org.springframework.core.io.Resource r =
-          new org.springframework.core.io.ClassPathResource("prompts/scaffolds/" + key + ".md");
-      if (!r.exists()) return "";
-      return new String(r.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-    } catch (Exception e) {
-      log.debug("loadScaffoldForProjectType({}) failed: {}", projectType, e.getMessage());
-      return "";
-    }
+    return PromptResourceReader.readOptional(
+        "prompts/scaffolds", PromptComposer.scaffoldKeyForProjectType(projectType));
   }
 
   static String scaffoldKeyForProjectType(String projectType) {
-    if (projectType == null || projectType.isBlank()) return "";
-    String key = projectType.trim().toLowerCase().replace('_', '-');
-    return switch (key) {
-      case "java-spring-boot", "springboot" -> "spring-boot";
-      default -> key;
-    };
+    return PromptComposer.scaffoldKeyForProjectType(projectType);
   }
 
   static List<String> fragmentKeysForProjectType(String projectType) {
-    String key = scaffoldKeyForProjectType(projectType);
-    return switch (key) {
-      case "fullstack", "node-fullstack" ->
-          List.of(
-              "api-url-rules",
-              "module-system",
-              "router-isolation",
-              "backend-robustness",
-              "preview-defaults",
-              "fullstack-directory");
-      case "node-backend" ->
-          List.of("module-system", "router-isolation", "backend-robustness", "preview-defaults");
-      case "node-frontend" -> List.of("api-url-rules", "module-system");
-      case "spring-boot", "python", "go", "rust" ->
-          List.of("backend-robustness", "preview-defaults");
-      default -> List.of();
-    };
+    return PromptComposer.fragmentKeysForProjectType(projectType);
   }
 
   /**
@@ -4437,71 +4953,22 @@ to boot — skip it for those.""";
   }
 
   private String composeUserPrompt(PlannedTask task, String previousBuildError) {
-    return composeUserPrompt(task, previousBuildError, null);
+    return PromptComposer.composeUserPrompt(task, previousBuildError, null);
   }
 
   /** task 12 — one journal line per finished task; accumulated every run, injected when flagged. */
   static String journalEntry(PlannedTask task, TaskOutcome outcome) {
-    String summary = null;
-    if (outcome.workerOutcome() != null && outcome.workerOutcome().completionSummary() != null) {
-      summary = outcome.workerOutcome().completionSummary();
-    }
-    if (summary != null && summary.length() > 220) summary = summary.substring(0, 220) + "…";
-    return task.id()
-        + " ("
-        + task.title()
-        + ") → "
-        + outcome.status()
-        + (summary == null || summary.isBlank() ? "" : " — " + summary);
+    return PromptComposer.journalEntry(task, outcome);
   }
 
   /** task 12 — plan outline + the last few journal entries (~1-2k tokens max). */
   static String journalBlock(Plan plan, List<String> runJournal) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# RUN JOURNAL (context from earlier tasks in this run)\n\n");
-    sb.append("Plan outline: ");
-    List<String> titles = new ArrayList<>();
-    for (PlannedTask t : plan.tasks()) titles.add(t.id() + " " + t.title());
-    sb.append(String.join(" · ", titles.subList(0, Math.min(titles.size(), 12))));
-    sb.append("\n\nCompleted so far:\n");
-    int from = Math.max(0, runJournal.size() - 5);
-    for (int i = from; i < runJournal.size(); i++) {
-      sb.append("- ").append(runJournal.get(i)).append("\n");
-    }
-    sb.append(
-        "\nStay consistent with the files, names, and interfaces established above — later tasks"
-            + " (and the reviewer) assume they hold.");
-    return sb.toString();
+    return PromptComposer.journalBlock(plan, runJournal);
   }
 
   private String composeUserPrompt(
       PlannedTask task, String previousBuildError, String orientation) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
-    sb.append(task.description());
-    if (orientation != null && !orientation.isBlank()) {
-      // task 11 (worker.localization.enabled): advisory warm-start block — layout, identifier
-      // hits, detected build/test commands — so localization isn't re-derived from a cold prompt.
-      sb.append("\n\n").append(orientation);
-    }
-    if (previousBuildError != null && !previousBuildError.isBlank()) {
-      // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
-      // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the
-      // specification of what to fix. The agent's earlier edits are still in the workspace
-      // (per-task retry doesn't reset the workspace), so this is a continuation, not a redo.
-      sb.append("\n\n---\nBUILD FAILED ON THE PREVIOUS ATTEMPT.\n\n");
-      sb.append(
-          "The error below is your spec for this retry — read it carefully, identify the "
-              + "specific files / line numbers / error messages, and fix the root cause. Don't "
-              + "refactor, don't reorganise, don't second-guess your earlier design choices. "
-              + "Your previous edits are still in place; this is a continuation. Use readFile "
-              + "to confirm the current file state where the error points, editFile to fix it, "
-              + "buildProject to verify, then completeTask.\n\n");
-      sb.append("--- BUILD ERROR (verbatim) ---\n");
-      sb.append(truncateBuildErrorForRetry(previousBuildError));
-      sb.append("\n--- END BUILD ERROR ---\n");
-    }
-    return sb.toString();
+    return PromptComposer.composeUserPrompt(task, previousBuildError, orientation);
   }
 
   /**
@@ -4511,16 +4978,7 @@ to boot — skip it for those.""";
    * is repetition.
    */
   private static String truncateBuildErrorForRetry(String s) {
-    if (s == null) return "";
-    int cap = 12_000;
-    if (s.length() <= cap) return s;
-    int head = 8_000;
-    int omitted = s.length() - cap;
-    return s.substring(0, head)
-        + "\n\n... ["
-        + omitted
-        + " chars omitted from middle of build output] ...\n\n"
-        + s.substring(s.length() - (cap - head));
+    return PromptComposer.truncateBuildErrorForRetry(s);
   }
 
   private SmokeTestResult runSmokeTest(ExecutionContext ctx, String plannerCommand) {

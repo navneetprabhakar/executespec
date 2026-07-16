@@ -10,6 +10,7 @@ import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -37,8 +38,10 @@ import lombok.extern.slf4j.Slf4j;
  * note once the last call's input crosses a token threshold — keeping the system prompt + the
  * original task + the most-recent turns verbatim. Mirrors Claude Code's periodic auto-compaction.
  *
- * <p><b>Default OFF</b> behind {@link #FLAG_ENABLED}; with the flag off this is a pass-through and
- * production behaviour is byte-identical.
+ * <p>The legacy token-trigger path is <b>default OFF</b> behind {@link #FLAG_ENABLED}; the
+ * headroom-aware overload used by the production WorkerAgent runs its deterministic planner first
+ * and compacts only when the model-window safety decision is {@code COMPACT}. If model metadata is
+ * unavailable, it falls back to the flag-gated legacy behaviour.
  *
  * <p><b>Tool-pairing safety (load-bearing):</b> the cut is aligned to an {@link AssistantMessage}
  * boundary, so the compactor NEVER splits an {@code AssistantMessage(toolCalls)} from its paired
@@ -106,6 +109,9 @@ public class WorkerHistoryCompactor {
    */
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
 
+  /** Optional deterministic headroom planner; null preserves the pre-2.0 trigger path. */
+  private final ContextPlanner contextPlanner;
+
   static final double WINDOW_TRIGGER_RATIO = 0.75;
 
   /** Recent-tail token budget as a fraction of the window (≈4 chars/token estimate). */
@@ -157,6 +163,49 @@ public class WorkerHistoryCompactor {
       ExecutionContext ctx,
       long lastInputTokens,
       String workerGoal) {
+    return compactIfNeeded(
+        history, workerProvider, workerModel, ctx, lastInputTokens, workerGoal, null, List.of());
+  }
+
+  /**
+   * Headroom-aware worker path. A deterministic context decision runs before the legacy feature
+   * flag/75%-window trigger. Tight headroom invokes the existing safe compactor; unavailable
+   * planning falls through byte-for-byte to the previous behavior.
+   */
+  public List<Message> compactIfNeeded(
+      List<Message> history,
+      String workerProvider,
+      String workerModel,
+      ExecutionContext ctx,
+      long lastInputTokens,
+      String workerGoal,
+      Integer requestedOutputTokens,
+      List<org.springframework.ai.tool.ToolCallback> tools) {
+    if (contextPlanner != null) {
+      ContextPlanner.HeadroomDecision decision =
+          contextPlanner.planHeadroom(
+              workerProvider, workerModel, lastInputTokens, requestedOutputTokens, history, tools);
+      if (decision.shouldCompact()) {
+        log.info(
+            "Worker context headroom low run={} task={} model={} estimatedInput={} outputReserve={}"
+                + " available={} safety={} — compacting",
+            ctx == null ? null : ctx.runId(),
+            ctx == null ? null : ctx.taskId(),
+            workerModel,
+            decision.estimatedInputTokens(),
+            decision.outputReserveTokens(),
+            decision.availableHeadroomTokens(),
+            decision.safetyReserveTokens());
+        return compact(
+            history,
+            workerProvider,
+            ctx,
+            lastInputTokens,
+            workerGoal,
+            true,
+            decision.contextWindowTokens());
+      }
+    }
     if (!featureFlagService.isEnabled(FLAG_ENABLED)) {
       return history;
     }

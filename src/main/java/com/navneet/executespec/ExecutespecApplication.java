@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
       // Anthropic — excluded so app can start without ANTHROPIC_API_KEY
       // Bean created manually in AgentModelConfig with graceful degradation.
       AnthropicChatAutoConfiguration.class,
-      // Google Gemini — only used via manual FallbackLlmRouter calls
+      // Google Gemini — manually created so LlmRouter can apply per-request options and keys
       GoogleGenAiChatAutoConfiguration.class,
       GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
       GoogleGenAiTextEmbeddingAutoConfiguration.class,

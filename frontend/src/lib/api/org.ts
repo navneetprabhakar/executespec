@@ -9,7 +9,7 @@ import {
   ProjectMemberDto,
   SeatsAdjustResponse,
   SpecTemplate,
-  ValidationResult,
+  IntegrationValidationResult,
   req,
 } from './core';
 
@@ -65,7 +65,7 @@ export const updateOrgJiraSettings = (baseUrl: string, email: string, apiToken: 
 
 /** Tests JIRA credentials at org level. */
 export const validateOrgJira = (baseUrl: string, email: string, apiToken: string) =>
-  req<ValidationResult>('/org/me/settings/jira/validate', {
+  req<IntegrationValidationResult>('/org/me/settings/jira/validate', {
     method: 'POST',
     body: JSON.stringify({baseUrl, email, apiToken}),
   });
@@ -79,7 +79,7 @@ export const updateOrgConfluenceSettings = (baseUrl: string, email: string, apiT
 
 /** Tests Confluence credentials at org level. */
 export const validateOrgConfluence = (baseUrl: string, email: string, apiToken: string) =>
-  req<ValidationResult>('/org/me/settings/confluence/validate', {
+  req<IntegrationValidationResult>('/org/me/settings/confluence/validate', {
     method: 'POST',
     body: JSON.stringify({baseUrl, email, apiToken}),
   });

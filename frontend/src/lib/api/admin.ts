@@ -35,6 +35,21 @@ export const haltAllActiveRuns = (reason?: string) =>
     method: 'POST',
     body: JSON.stringify(reason ? {reason} : {}),
   });
+
+export interface AdminReconcileReport {
+  reconciled: number;
+  reconciledIds: string[];
+  staleMinutes: number;
+  cutoff: string;
+}
+
+/** Reconcile stale pre-v2.5.1 execution rows (SUPER_ADMIN only). */
+export const adminReconcileExecutions = (staleMinutes = 30) =>
+  req<AdminReconcileReport>('/admin/executions/reconcile', {
+    method: 'POST',
+    body: JSON.stringify({staleMinutes}),
+  });
+
 export const verifyAuditChain = () => req<AuditChainVerifyReport>('/admin/audit-chain/verify');
 export const getActivationFunnel = (sinceDays = 30) =>
   req<ActivationFunnelReport>(`/admin/activation-funnel?sinceDays=${sinceDays}`);

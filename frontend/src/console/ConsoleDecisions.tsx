@@ -2,6 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, statusKind} from '@/ide/IdeKit';
+import {ScoreBadge} from '@/ide/ScoreBadge';
 import {StatusDot} from '@/ide/IdeIcons';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -47,11 +48,7 @@ function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}
             : ''}
         </span>
       </span>
-      {r.verifiedScore != null && (
-        <IdeBadge kind={r.verifiedScore >= 85 ? 'ok' : r.verifiedScore >= 70 ? 'warn' : 'bad'}>
-          {r.verifiedScore}
-        </IdeBadge>
-      )}
+      {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} />}
       <IdeBadge kind={decision.tone}>{decision.label}</IdeBadge>
     </button>
   );
@@ -62,8 +59,10 @@ export default function ConsoleDecisions() {
   const [gate, setGate] = useState<api.RunSummary[]>([]);
   const [prPending, setPrPending] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(() => {
+    setLoadError(false);
     setLoading(true);
     api
       .getRuns({size: 30})
@@ -85,12 +84,12 @@ export default function ConsoleDecisions() {
         for (const [id, n] of pairs) if (n > 0) next[id] = n;
         setPrPending(next);
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
     api
       .getRuns({status: 'AWAITING_APPROVAL', size: 25})
       .then((r) => setGate(r.content ?? []))
-      .catch(() => {});
+      .catch(() => setLoadError(true));
   }, []);
 
   useEffect(() => {
@@ -121,8 +120,19 @@ export default function ConsoleDecisions() {
         </button>
       </section>
 
+      {loadError && (
+        <div className='con-api-error' role='alert'>
+          <span>Decision data could not be loaded.</span>
+          <button type='button' className='con-api-error-retry' onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {loading && !hasAny ? (
         <div className='con-empty'>Loading decisions…</div>
+      ) : loadError ? (
+        <div className='con-empty'>Decision data is incomplete until the retry succeeds.</div>
       ) : !hasAny ? (
         <div className='con-empty'>Nothing needs attention right now.</div>
       ) : (

@@ -35,6 +35,10 @@ public class GateChain {
     GateResult syntaxResult = toolchain.syntaxCheck(projectRoot, filePath, perGateTimeout);
     gateResults.put(ValidationGate.SYNTAX, syntaxResult);
     appendOutput(rawOutputBuilder, "SYNTAX", syntaxResult);
+    if (!syntaxResult.isMeasured()) {
+      return buildUnmeasuredResult(
+          "SYNTAX", syntaxResult, gateResults, start, rawOutputBuilder.toString());
+    }
     if (!syntaxResult.isPassed()) {
       allErrors.addAll(syntaxResult.getErrors());
       return buildResult(
@@ -59,6 +63,10 @@ public class GateChain {
     GateResult typeResult = toolchain.typeCheck(projectRoot, filePath, perGateTimeout);
     gateResults.put(ValidationGate.TYPE_CHECK, typeResult);
     appendOutput(rawOutputBuilder, "TYPE_CHECK", typeResult);
+    if (!typeResult.isMeasured()) {
+      return buildUnmeasuredResult(
+          "TYPE_CHECK", typeResult, gateResults, start, rawOutputBuilder.toString());
+    }
     if (!typeResult.isPassed()) {
       allErrors.addAll(typeResult.getErrors());
       return buildResult(
@@ -83,6 +91,10 @@ public class GateChain {
     GateResult lintResult = toolchain.lintCheck(projectRoot, filePath, perGateTimeout);
     gateResults.put(ValidationGate.LINT, lintResult);
     appendOutput(rawOutputBuilder, "LINT", lintResult);
+    if (!lintResult.isMeasured()) {
+      return buildUnmeasuredResult(
+          "LINT", lintResult, gateResults, start, rawOutputBuilder.toString());
+    }
     if (!lintResult.isPassed()) {
       boolean hasBlockingLintErrors =
           lintResult.getErrors().stream()
@@ -114,6 +126,10 @@ public class GateChain {
     GateResult testResult = toolchain.unitTest(projectRoot, filePath, perGateTimeout);
     gateResults.put(ValidationGate.UNIT_TEST, testResult);
     appendOutput(rawOutputBuilder, "UNIT_TEST", testResult);
+    if (!testResult.isMeasured()) {
+      return buildUnmeasuredResult(
+          "UNIT_TEST", testResult, gateResults, start, rawOutputBuilder.toString());
+    }
     if (!testResult.isPassed()) {
       allErrors.addAll(testResult.getErrors());
       return buildResult(
@@ -143,6 +159,32 @@ public class GateChain {
         .gateResults(gateResults)
         .totalTime(Duration.between(start, Instant.now()))
         .rawOutput(rawOutput)
+        .measured(true)
+        .evidenceStatus("VERIFIED")
+        .build();
+  }
+
+  private ValidationResult buildUnmeasuredResult(
+      String gate,
+      GateResult gateResult,
+      Map<ValidationGate, GateResult> gateResults,
+      Instant start,
+      String rawOutput) {
+    String reason =
+        "NOT_VERIFIED: "
+            + gate
+            + " gate did not run: "
+            + (gateResult.getRawOutput() == null ? "tool unavailable" : gateResult.getRawOutput());
+    return ValidationResult.builder()
+        .verdict(ValidationVerdict.UNMEASURED)
+        .errors(List.of())
+        .warnings(List.of())
+        .gateResults(gateResults)
+        .totalTime(Duration.between(start, Instant.now()))
+        .rawOutput(rawOutput)
+        .measured(false)
+        .evidenceStatus("NOT_VERIFIED")
+        .unmeasuredReason(reason)
         .build();
   }
 
@@ -151,6 +193,7 @@ public class GateChain {
         .append(gateName)
         .append(" === ")
         .append(result.isPassed() ? "PASS" : "FAIL")
+        .append(result.isMeasured() ? " [MEASURED]" : " [UNMEASURED]")
         .append("\n");
     if (result.getRawOutput() != null && !result.getRawOutput().isEmpty()) {
       sb.append(result.getRawOutput()).append("\n");

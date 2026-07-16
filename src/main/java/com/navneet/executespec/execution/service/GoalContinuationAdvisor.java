@@ -54,6 +54,7 @@ public class GoalContinuationAdvisor {
                 .externalSignals(request.externalSignals())
                 .providerAvailability(request.providerAvailability())
                 .providerPreferenceOrder(request.providerPreferenceOrder())
+                .requiredContextTokens(request.requiredContextTokens())
                 .build());
     double qualityTieBand = Math.max(0.0, rankingQualityTieBand);
     ModelProviderRankingDecision ranking =

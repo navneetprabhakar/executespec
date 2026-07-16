@@ -1,8 +1,18 @@
 import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {Markdown} from '@/signal/components/Markdown';
-import {CommandIcon, PlusIcon, RunsIcon, SearchIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
+import {
+  CommandIcon,
+  ImageIcon,
+  PlusIcon,
+  RunsIcon,
+  SearchIcon,
+  SettingsIcon,
+  StatusDot,
+} from '@/ide/IdeIcons';
+import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
 import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
+import {boundedInlineDiff} from '@/ide/agentDiff';
 import {
   asText,
   friendlyTool,
@@ -109,8 +119,16 @@ function totalTokens(usage?: AgentUsageSummary | null): number {
   return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
 }
 
+function hasRenderableAssistantContent(content: string): boolean {
+  const normalized = content.trim();
+  if (!normalized) return false;
+  // Provider disconnects can persist a partial Markdown marker (for example `1.`). Rendering it
+  // through react-markdown produces an empty list that looks like a blank assistant response.
+  return !/^(?:[-*+]\s*|\d+[.)]\s*)$/.test(normalized);
+}
+
 function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
-  if (!usage || totalTokens(usage) <= 0) return 'No token usage yet';
+  if (!usage || totalTokens(usage) <= 0) return 'Usage appears after the first response';
   const parts = [
     `${tokenCount(totalTokens(usage))} tokens`,
     `${tokenCount(usage.inputTokens)} in`,
@@ -138,6 +156,11 @@ export function AgentTopBar({
   onOpenApprovals,
   onToggleChats,
   onToggleSettings,
+  availableModels,
+  selectedProvider,
+  selectedModel,
+  onProviderChange,
+  onModelChange,
 }: {
   selected: api.AgentSessionResponse | null;
   barStatus: {label: string; tone: BarTone};
@@ -153,6 +176,11 @@ export function AgentTopBar({
   onOpenApprovals: () => void;
   onToggleChats: () => void;
   onToggleSettings: () => void;
+  availableModels?: api.ProviderEntry[];
+  selectedProvider?: string;
+  selectedModel?: string;
+  onProviderChange?: (provider: string) => void;
+  onModelChange?: (model: string) => void;
 }) {
   return (
     <div className='agent-bar'>
@@ -170,7 +198,12 @@ export function AgentTopBar({
         {selected ? sessionTitle(selected) : 'Remote sandbox operator'}
       </div>
       <span className='agent-bar-spacer' />
-      <span className={`agent-bar-status ${barStatus.tone}`}>
+      <span
+        className={`agent-bar-status ${barStatus.tone}`}
+        role='status'
+        aria-live='polite'
+        aria-atomic='true'
+      >
         <span className='agent-bar-dot' aria-hidden='true' />
         {barStatus.label}
       </span>
@@ -182,7 +215,12 @@ export function AgentTopBar({
           {pendingGateCount} approval{pendingGateCount === 1 ? '' : 's'}
         </button>
       )}
-      <button className='agent-bar-btn' onClick={onNewChat} disabled={busy}>
+      <button
+        className='agent-bar-btn'
+        onClick={onNewChat}
+        disabled={busy}
+        aria-label='Start a new sandbox'
+      >
         <PlusIcon size={14} />
         <span>New sandbox</span>
       </button>
@@ -201,6 +239,11 @@ export function AgentTopBar({
             managedAi={managedAi}
             routingState={routingState}
             capabilities={capabilities}
+            availableModels={availableModels ?? []}
+            selectedProvider={selectedProvider ?? ''}
+            selectedModel={selectedModel ?? ''}
+            onProviderChange={onProviderChange ?? (() => {})}
+            onModelChange={onModelChange ?? (() => {})}
             onClose={onToggleSettings}
           />
         )}
@@ -215,18 +258,46 @@ function SettingsPopover({
   routingState,
   capabilities,
   onClose,
+  availableModels,
+  selectedProvider,
+  selectedModel,
+  onProviderChange,
+  onModelChange,
 }: {
   selected: api.AgentSessionResponse | null;
   managedAi: api.ManagedAiBalance | null;
   routingState: RoutingState;
   capabilities: api.AgentCapabilityTool[];
   onClose: () => void;
+  availableModels: api.ProviderEntry[];
+  selectedProvider: string;
+  selectedModel: string;
+  onProviderChange: (provider: string) => void;
+  onModelChange: (model: string) => void;
 }) {
+  const provider = availableModels.find((entry) => entry.id === selectedProvider);
+  const models = provider?.models ?? availableModels.flatMap((entry) => entry.models);
   return (
     <>
-      <div className='agent-pop-backdrop' onClick={onClose} />
-      <div className='agent-pop' role='dialog' aria-label='Agent settings and usage'>
-        <div className='agent-pop-title'>Sandbox policy</div>
+      <div
+        className='agent-pop-backdrop'
+        data-agent-overlay-backdrop='settings'
+        onClick={onClose}
+      />
+      <div
+        className='agent-pop'
+        data-agent-overlay='settings'
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='agent-settings-title'
+        tabIndex={-1}
+      >
+        <div className='agent-pop-title' id='agent-settings-title'>
+          Sandbox policy
+        </div>
+        <button className='agent-pop-close' onClick={onClose} aria-label='Close agent settings'>
+          ×
+        </button>
         <div className='agent-pop-row'>
           <span>Execution target</span>
           <code>remote only</code>
@@ -242,6 +313,37 @@ function SettingsPopover({
         <div className='agent-pop-row'>
           <span>Run credits</span>
           <code>charged after approval</code>
+        </div>
+        <div className='agent-pop-row agent-model-controls'>
+          <label htmlFor='agent-provider-select'>Provider</label>
+          <select
+            id='agent-provider-select'
+            value={selectedProvider}
+            onChange={(event) => onProviderChange(event.target.value)}
+            disabled={availableModels.length === 0}
+          >
+            <option value=''>Default</option>
+            {availableModels.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label || entry.id}
+              </option>
+            ))}
+          </select>
+          <label htmlFor='agent-model-select'>Model</label>
+          <select
+            id='agent-model-select'
+            value={selectedModel}
+            onChange={(event) => onModelChange(event.target.value)}
+            disabled={models.length === 0}
+          >
+            <option value=''>Provider default</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label || model.id}
+              </option>
+            ))}
+          </select>
+          <small>Applies to the next turn.</small>
         </div>
         {managedAi && <ManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>
@@ -338,10 +440,24 @@ export function AgentChatsDrawer({
   if (!open) return null;
   return (
     <>
-      <div className='agent-drawer-backdrop' onClick={onClose} />
-      <aside className='agent-drawer' role='dialog' aria-label='Chats'>
+      <div
+        className='agent-drawer-backdrop'
+        data-agent-overlay-backdrop='chats'
+        onClick={onClose}
+      />
+      <aside
+        className='agent-drawer'
+        data-agent-overlay='chats'
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='agent-chats-title'
+        tabIndex={-1}
+      >
         <div className='agent-drawer-head'>
-          <strong>Remote sandboxes</strong>
+          <strong id='agent-chats-title'>Remote sandboxes</strong>
+          <button className='agent-drawer-close' onClick={onClose} aria-label='Close chats'>
+            ×
+          </button>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
             New sandbox
@@ -490,7 +606,13 @@ function MessageBubble({
         )}
       </div>
       <div className='agent-msg-body'>
-        <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
+        {message.role === 'assistant' && !hasRenderableAssistantContent(message.content) ? (
+          <div className='agent-msg-empty' role='status'>
+            No response arrived for this turn. You can send the message again.
+          </div>
+        ) : (
+          <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
+        )}
       </div>
       {message.role === 'assistant' && (
         <ArtifactRail artifacts={extractAgentArtifacts(message.content)} dispatch={dispatch} />
@@ -507,15 +629,28 @@ function ArtifactRail({
   dispatch: Dispatch<AgentAction>;
 }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
+  const [previewErrorId, setPreviewErrorId] = useState<string | null>(null);
   if (!artifacts.length) return null;
 
   async function copyArtifact(artifact: AgentArtifact) {
-    await navigator.clipboard?.writeText(artifact.content);
-    setCopiedId(artifact.id);
-    window.setTimeout(
-      () => setCopiedId((current) => (current === artifact.id ? null : current)),
-      1600,
-    );
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(artifact.content);
+      setCopyErrorId(null);
+      setCopiedId(artifact.id);
+      window.setTimeout(
+        () => setCopiedId((current) => (current === artifact.id ? null : current)),
+        1600,
+      );
+    } catch {
+      setCopiedId(null);
+      setCopyErrorId(artifact.id);
+      window.setTimeout(
+        () => setCopyErrorId((current) => (current === artifact.id ? null : current)),
+        3000,
+      );
+    }
   }
 
   function downloadArtifact(artifact: AgentArtifact) {
@@ -531,7 +666,13 @@ function ArtifactRail({
   function previewArtifact(artifact: AgentArtifact) {
     const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    try {
+      const preview = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!preview) throw new Error('Preview popup blocked');
+      setPreviewErrorId(null);
+    } catch {
+      setPreviewErrorId(artifact.id);
+    }
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
@@ -562,7 +703,11 @@ function ArtifactRail({
             </div>
             <div className='agent-artifact-actions'>
               <button className='ide-btn ghost' onClick={() => void copyArtifact(artifact)}>
-                {copiedId === artifact.id ? 'Copied' : 'Copy'}
+                {copiedId === artifact.id
+                  ? 'Copied'
+                  : copyErrorId === artifact.id
+                    ? 'Copy unavailable'
+                    : 'Copy'}
               </button>
               <button className='ide-btn ghost' onClick={() => downloadArtifact(artifact)}>
                 Download
@@ -583,6 +728,16 @@ function ArtifactRail({
                 Use in sandbox
               </button>
             </div>
+            {copyErrorId === artifact.id && (
+              <div className='agent-artifact-action-error' role='alert'>
+                Clipboard access was denied. Use Download instead.
+              </div>
+            )}
+            {previewErrorId === artifact.id && (
+              <div className='agent-artifact-action-error' role='alert'>
+                Preview was blocked. Allow pop-ups or use Download instead.
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -607,16 +762,61 @@ function mimeForArtifact(artifact: AgentArtifact): string {
 
 /** Friendly activity chips for tool/run events — no raw JSON. */
 function Activity({items}: {items: StreamTimelineItem[]}) {
-  const shown = items.filter((i) => i.type === 'tool' || i.type === 'run');
+  const shown = items.filter(
+    (i) =>
+      i.type === 'tool' ||
+      i.type === 'run' ||
+      (i.type === 'system' &&
+        /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN[ _]VALIDATION[ _]EVIDENCE/i.test(
+          i.title,
+        )),
+  );
   if (!shown.length) return null;
   return (
-    <div className='agent-activity'>
-      {shown.map((i) => (
-        <span key={i.id} className='agent-activity-chip'>
-          {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
-          {i.type === 'run' ? 'Run created' : friendlyTool(i.title)}
+    <div className='agent-activity' data-agent-region='activity'>
+      {shown.map((i) =>
+        i.type === 'system' && /RUN[ _]VALIDATION[ _]EVIDENCE/i.test(i.title) && i.detail ? (
+          <details key={i.id} className='agent-activity-evidence'>
+            <summary className='agent-activity-chip'>
+              <SearchIcon size={13} />
+              <span>Verification evidence</span>
+            </summary>
+            <p>{i.detail}</p>
+          </details>
+        ) : (
+          <span key={i.id} className='agent-activity-chip'>
+            {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
+            <span>
+              {i.type === 'run'
+                ? 'Run created'
+                : i.type === 'system'
+                  ? i.title
+                  : friendlyTool(i.title)}
+              {i.type === 'system' && i.detail ? ` · ${i.detail}` : ''}
+            </span>
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function RouteDecision({routingState}: {routingState: RoutingState}) {
+  if (!routingState) return null;
+  const runRoute = routingState.runApiAllowed;
+  return (
+    <div className='agent-route-decision' data-agent-region='route-decision' role='status'>
+      <span className='agent-route-decision-label'>Next step</span>
+      <strong>{runRoute ? 'Ready to run' : 'Answer from context'}</strong>
+      <details className='agent-route-details'>
+        <summary>Why this response?</summary>
+        <span>
+          {Math.round(routingState.confidence * 100)}% confidence ·{' '}
+          {runRoute
+            ? 'a run can be started after confirmation'
+            : 'no files or commands will be changed'}
         </span>
-      ))}
+      </details>
     </div>
   );
 }
@@ -635,12 +835,16 @@ function Typing() {
 function SandboxRunCard({
   run,
   liveCostUsd,
+  streamStatus,
+  unavailable,
   busy,
   onOpen,
   onStop,
 }: {
   run: api.RunDetail;
   liveCostUsd: number | null;
+  streamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  unavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
@@ -655,8 +859,23 @@ function SandboxRunCard({
   const variant = !terminal ? '' : failed ? ' failed' : cancelled ? ' cancelled' : ' done';
   const pillKind = !terminal ? 'live' : failed ? 'bad' : cancelled ? 'muted' : 'ok';
   const activePhase = sandboxPhaseKey(run.status);
-  const score = run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100`;
+  const score =
+    run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100 · internal`;
   const provider = run.aiProvider || run.workerModel || 'default route';
+  const streamLabel =
+    unavailable === 'RUN_NOT_FOUND'
+      ? 'Run no longer available'
+      : unavailable === 'AUTH_REQUIRED'
+        ? 'Sign in again to view this run'
+        : streamStatus === 'RECONNECTING'
+          ? 'Reconnecting live events'
+          : streamStatus === 'CONNECTING'
+            ? 'Connecting live events'
+            : streamStatus === 'CONNECTED'
+              ? 'Live events connected'
+              : streamStatus === 'CLOSED' && !terminal
+                ? 'Snapshot only · live events unavailable'
+                : null;
   const prUrl = run.scmPrUrl || run.githubPrUrl;
   const terminalLabel = failed
     ? 'Open failure evidence'
@@ -664,7 +883,13 @@ function SandboxRunCard({
       ? 'Open cancelled run'
       : 'Review evidence';
   return (
-    <div className={`agent-runcard${variant}`}>
+    <div
+      className={`agent-runcard${variant}`}
+      data-agent-region='run-card'
+      data-run-status={run.status || 'UNKNOWN'}
+      data-stream-status={streamStatus || 'IDLE'}
+      data-run-unavailable={unavailable || undefined}
+    >
       <div className='agent-runcard-head'>
         <RunsIcon size={16} />
         <span className='agent-runcard-title'>{run.runTitle || 'Remote sandbox run'}</span>
@@ -686,6 +911,15 @@ function SandboxRunCard({
         </span>
       </div>
       <div className='agent-runcard-mode'>Remote sandbox · plan-gated · PR-oriented</div>
+      {streamLabel && (
+        <div
+          className={`agent-runcard-stream ${streamStatus === 'CONNECTED' ? 'ok' : ''}`}
+          role='status'
+        >
+          <span aria-hidden='true' />
+          {streamLabel}
+        </div>
+      )}
       <div className='agent-runcard-phases' aria-label='Sandbox phase'>
         {SANDBOX_PHASES.map((phase) => (
           <span
@@ -749,6 +983,198 @@ function SandboxRunCard({
           </button>
         )}
       </div>
+      {terminal && <InlineRunDiff runId={run.runId} onOpen={onOpen} />}
+    </div>
+  );
+}
+
+/**
+ * Bounded diff inspection for the chat-first run card.
+ *
+ * The viewer remains read-only for the current run. A requested hunk revert is
+ * sent through the existing fork endpoint only after explicit confirmation,
+ * then the user is taken to the normal plan gate for review and approval.
+ */
+function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) => void}) {
+  const panelId = `agent-inline-diff-${runId}`;
+  const headingId = `${panelId}-heading`;
+  const [expanded, setExpanded] = useState(false);
+  const [files, setFiles] = useState<api.FileWithStatus[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [diff, setDiff] = useState<DiffLine[] | null>(null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+  const [pendingRevert, setPendingRevert] = useState<{
+    filePath: string;
+    hunkIndex: number;
+    request: string;
+  } | null>(null);
+  const [revertBusy, setRevertBusy] = useState(false);
+
+  async function toggle() {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    setExpanded(true);
+    if (status !== 'idle') return;
+    setStatus('loading');
+    try {
+      const rows = await api.getFilesWithStatus(runId);
+      const changed = (rows ?? [])
+        .filter((row) => row.status === 'ADDED' || row.status === 'MODIFIED')
+        .slice(0, 20);
+      setFiles(changed);
+      setStatus('ready');
+      if (changed.length) {
+        void open(changed[0].path);
+      } else {
+        setSelected(null);
+        setMessage('No added or modified files were reported.');
+      }
+    } catch {
+      setStatus('error');
+      setMessage('Changed files are unavailable in this run snapshot.');
+    }
+  }
+
+  async function open(path: string) {
+    setSelected(path);
+    setDiff(null);
+    setMessage('Loading diff…');
+    try {
+      const payload = await api.getFileDiff(runId, path);
+      // Keep the chat surface responsive even if a backend returns a very large file.
+      const shaped = boundedInlineDiff(payload);
+      setDiff(shaped.lines);
+      setMessage(
+        shaped.truncated
+          ? 'Diff truncated to 2,500 lines. Open Changed files for the full result.'
+          : '',
+      );
+    } catch {
+      setDiff(null);
+      setMessage('This file diff is unavailable. Open Changed files for the full result.');
+    }
+  }
+
+  async function confirmRevert() {
+    if (!pendingRevert || revertBusy) return;
+    setRevertBusy(true);
+    setMessage('Creating a reviewable revert run…');
+    try {
+      const fork = await api.forkRun(runId, {userRequest: pendingRevert.request});
+      setPendingRevert(null);
+      onOpen(`/plan/${fork.runId}`);
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'Could not create the revert run.');
+    } finally {
+      setRevertBusy(false);
+    }
+  }
+
+  return (
+    <div className='agent-inline-diff' data-agent-region='inline-diff'>
+      <button
+        className='ide-btn ghost'
+        type='button'
+        onClick={() => void toggle()}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+      >
+        {expanded ? 'Hide inline diff' : 'Inspect changed files'}
+      </button>
+      {expanded && (
+        <div
+          className='agent-inline-diff-panel'
+          id={panelId}
+          role='region'
+          aria-labelledby={headingId}
+        >
+          <div className='agent-inline-diff-head'>
+            <strong id={headingId}>Read-only diff</strong>
+            <span>20 files · 2,500 lines max</span>
+          </div>
+          {status === 'loading' && (
+            <div className='agent-inline-diff-note' role='status' aria-live='polite'>
+              Loading changed files…
+            </div>
+          )}
+          {files.length > 0 && (
+            <div className='agent-inline-diff-grid'>
+              <div className='agent-inline-diff-files' role='listbox' aria-label='Changed files'>
+                {files.map((file) => (
+                  <button
+                    key={file.path}
+                    type='button'
+                    role='option'
+                    aria-selected={selected === file.path}
+                    className={selected === file.path ? 'active' : ''}
+                    onClick={() => void open(file.path)}
+                  >
+                    <code>{file.path}</code>
+                    <span>{file.status}</span>
+                  </button>
+                ))}
+              </div>
+              <div className='agent-inline-diff-view'>
+                {selected && diff ? (
+                  <IdeCodeViewer
+                    filename={selected}
+                    content={diff.map((line) => line.text).join('\n')}
+                    diff={diff}
+                    onRevertHunk={(hunkIndex, request) =>
+                      setPendingRevert({filePath: selected, hunkIndex, request})
+                    }
+                  />
+                ) : (
+                  <div className='agent-inline-diff-note'>Select a file to inspect its diff.</div>
+                )}
+              </div>
+            </div>
+          )}
+          {message && (
+            <div className='agent-inline-diff-note' role='status' aria-live='polite'>
+              {message}
+            </div>
+          )}
+          {pendingRevert && (
+            <div
+              className='agent-inline-diff-confirm'
+              role='alertdialog'
+              aria-label='Confirm hunk revert'
+            >
+              <strong>Prepare a revert run?</strong>
+              <span>
+                This creates a new plan for hunk {pendingRevert.hunkIndex + 1} in{' '}
+                <code>{pendingRevert.filePath}</code>. The current run and repository are not
+                mutated.
+              </span>
+              <div className='agent-inline-diff-confirm-actions'>
+                <button
+                  className='ide-btn ghost'
+                  type='button'
+                  onClick={() => setPendingRevert(null)}
+                  disabled={revertBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  className='ide-btn'
+                  type='button'
+                  onClick={() => void confirmRevert()}
+                  disabled={revertBusy}
+                >
+                  {revertBusy ? 'Creating…' : 'Create revert plan'}
+                </button>
+              </div>
+            </div>
+          )}
+          <div className='agent-inline-diff-foot'>
+            Read-only preview. Revert creates a new plan and never mutates this run directly.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1110,11 +1536,16 @@ function Composer({
       {attachments.length > 0 && (
         <div className='agent-attachments'>
           {attachments.map((a) => (
-            <span
+            <div
               key={a.attachmentId}
               className='agent-attach-chip'
               title={`${a.mimeType} · ${a.extractedChars} chars extracted`}
             >
+              {a.previewUrl ? (
+                <img className='agent-attach-thumb' src={a.previewUrl} alt='' aria-hidden='true' />
+              ) : (
+                <ImageIcon size={14} />
+              )}
               <span className='agent-attach-chip-name'>{a.filename}</span>
               <button
                 onClick={() => onRemoveAttachment(a.attachmentId)}
@@ -1122,16 +1553,28 @@ function Composer({
               >
                 ×
               </button>
-            </span>
+            </div>
           ))}
         </div>
       )}
       <div className='agent-composer-box'>
-        <label className='agent-attach-btn' title='Attach PDF, Markdown, or text'>
+        <label
+          className='agent-attach-btn'
+          title='Attach an image, PDF, Markdown, or text'
+          tabIndex={uploading || isBusy ? -1 : 0}
+          role='button'
+          aria-label='Attach a file'
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && !uploading && !isBusy) {
+              e.preventDefault();
+              e.currentTarget.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+            }
+          }}
+        >
           {uploading ? <span className='agent-attach-spin' /> : <Paperclip />}
           <input
             type='file'
-            accept='.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
+            accept='.png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp,.pdf,.md,.markdown,.txt,.text,.csv,.json,.log,text/plain,text/markdown,application/pdf,application/json'
             multiple
             style={{display: 'none'}}
             disabled={uploading || isBusy}
@@ -1173,7 +1616,7 @@ function Composer({
         )}
       </div>
       <div className='agent-composer-hint'>
-        Enter to send · attach PDF, Markdown, or text · web search built in
+        Enter to send · attach image, PDF, Markdown, or text · web search built in
       </div>
     </div>
   );
@@ -1189,12 +1632,17 @@ export function AgentConversation({
   gates,
   runCard,
   runCost,
+  runStreamStatus,
+  runUnavailable,
+  routingState,
+  hasNewActivity = false,
   input,
   attachments,
   uploading,
   endRef,
   dispatch,
   onScroll,
+  onJumpToLatest,
   onSend,
   onStop,
   onAddFiles,
@@ -1214,12 +1662,17 @@ export function AgentConversation({
   gates: api.AgentGateDecisionCard[];
   runCard: api.RunDetail | null;
   runCost: number | null;
+  runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
+  runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
+  routingState?: RoutingState;
+  hasNewActivity?: boolean;
   input: string;
   attachments: AgentAttachmentLite[];
   uploading: boolean;
   endRef: RefObject<HTMLDivElement>;
   dispatch: Dispatch<AgentAction>;
   onScroll: (e: UIEvent<HTMLDivElement>) => void;
+  onJumpToLatest?: () => void;
   onSend: () => void;
   onStop: () => void;
   onAddFiles: (files: FileList | null) => void;
@@ -1237,9 +1690,28 @@ export function AgentConversation({
   const showComposerContract =
     messages.length === 0 && !visibleAction && gates.length === 0 && !runCard;
   return (
-    <section className='agent-chat'>
+    <section className='agent-chat' data-agent-surface='protected-transcript'>
       <h1 className='ide-sr-only'>Agent</h1>
-      <div className='agent-chat-scroll' onScroll={onScroll}>
+      <div className='agent-chat-scroll' data-agent-region='transcript' onScroll={onScroll}>
+        <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
+          {runCard
+            ? `Remote sandbox ${runPhaseLabel(runCard.status)}${
+                runUnavailable === 'RUN_NOT_FOUND'
+                  ? '. Run no longer available.'
+                  : runUnavailable === 'AUTH_REQUIRED'
+                    ? '. Sign in again to view this run.'
+                    : runStreamStatus === 'RECONNECTING'
+                      ? '. Reconnecting live events.'
+                      : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
+                        ? '. Live events unavailable; showing the latest snapshot.'
+                        : ''
+              }`
+            : isBusy
+              ? streamText
+                ? 'Agent is responding.'
+                : 'Agent is working.'
+              : ''}
+        </div>
         <div className='agent-chat-col'>
           {showOperatorInScroll && (
             <OperatorIntro
@@ -1248,7 +1720,7 @@ export function AgentConversation({
             />
           )}
           {gates.length > 0 && (
-            <div className='agent-gates-inline'>
+            <div className='agent-gates-inline' data-agent-region='approval-gates'>
               <div className='agent-gates-label'>Remote sandboxes waiting for your approval</div>
               {gates.map((g) => (
                 <GateCard
@@ -1262,6 +1734,7 @@ export function AgentConversation({
               ))}
             </div>
           )}
+          <RouteDecision routingState={routingState ?? null} />
           {empty
             ? !showOperatorInScroll && (
                 <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
@@ -1275,6 +1748,8 @@ export function AgentConversation({
             <SandboxRunCard
               run={runCard}
               liveCostUsd={runCost}
+              streamStatus={runStreamStatus}
+              unavailable={runUnavailable}
               busy={isBusy}
               onOpen={onOpenRun}
               onStop={onStopRun}
@@ -1290,6 +1765,19 @@ export function AgentConversation({
           )}
           <div ref={endRef} />
         </div>
+        {/* Never float the scroll affordance over an approval gate. On short
+            viewports it can otherwise cover the primary Approve action. */}
+        {hasNewActivity && gates.length === 0 && onJumpToLatest && (
+          <button
+            className='agent-jump-latest'
+            data-agent-region='new-activity'
+            type='button'
+            onClick={onJumpToLatest}
+            aria-label='Jump to latest activity'
+          >
+            <span aria-hidden='true'>↓</span> New activity
+          </button>
+        )}
       </div>
       <div className='agent-composer-wrap'>
         <div className='agent-chat-col'>

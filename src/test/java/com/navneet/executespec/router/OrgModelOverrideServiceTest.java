@@ -113,15 +113,12 @@ class OrgModelOverrideServiceTest {
   }
 
   @Test
-  void disabledProvider_rejectedWith400() {
+  void geminiProvider_isAvailableWhenModelIsKnown() {
     seed("ENTERPRISE", null);
     when(registry.isKnownModel("gemini-3.5-flash")).thenReturn(true);
     when(registry.providerFor("gemini-3.5-flash")).thenReturn("gemini");
 
-    assertThatThrownBy(
-            () -> svc.updateOverrides("org-1", Map.of("gemini:planning", "gemini-3.5-flash"), "a"))
-        .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("disabled");
+    svc.updateOverrides("org-1", Map.of("gemini:planning", "gemini-3.5-flash"), "a");
   }
 
   @Test

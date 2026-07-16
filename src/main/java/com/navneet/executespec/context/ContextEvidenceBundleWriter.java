@@ -1,0 +1,264 @@
+package com.navneet.executespec.context;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.eclipse.jgit.api.Git;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+/**
+ * Writes the bounded, machine-readable handoff produced by {@link ContextAgent}.
+ *
+ * <p>The markdown context and decisions journal are useful to a model, but are awkward for a
+ * reconnecting client or a later run to validate. This sidecar records the exact evidence inputs
+ * and SHA-256 fingerprints of the two durable markdown sources. Consumers can therefore reject a
+ * stale handoff instead of silently replaying evidence from an earlier workspace state.
+ *
+ * <p>The file is written with a temp-and-rename sequence so a crash cannot leave a partially
+ * written dossier. Lists and free-form text are bounded here because this artifact is intended for
+ * handoff/recovery, not as an unbounded run log.
+ */
+@Component
+public class ContextEvidenceBundleWriter {
+
+  public static final int SCHEMA_VERSION = 1;
+  public static final String FILE_NAME = "evidence-bundle.json";
+  static final int MAX_TEXT_CHARS = 12_000;
+  static final int MAX_LIST_ITEMS = 200;
+  static final int MAX_ITEM_CHARS = 1_000;
+
+  private final ObjectMapper objectMapper;
+  private final ContextEvidenceAssembler evidenceAssembler;
+
+  @Autowired
+  public ContextEvidenceBundleWriter(
+      ObjectMapper objectMapper, ContextEvidenceAssembler evidenceAssembler) {
+    this.objectMapper = objectMapper;
+    this.evidenceAssembler = evidenceAssembler;
+  }
+
+  /** Compatibility constructor for non-Spring recovery/test callers. */
+  public ContextEvidenceBundleWriter(ObjectMapper objectMapper) {
+    this(objectMapper, new ContextEvidenceAssembler(new ContextPlanner()));
+  }
+
+  /** Writes a new bundle and returns its target path. */
+  public Path write(Path projectPath, ContextAgentInput input, String runId) throws IOException {
+    if (projectPath == null) throw new IllegalArgumentException("projectPath is required");
+    if (input == null) throw new IllegalArgumentException("input is required");
+    if (runId == null || runId.isBlank()) throw new IllegalArgumentException("runId is required");
+
+    Path contextDir = projectPath.resolve(".agent-context");
+    Files.createDirectories(contextDir);
+    Path target = contextDir.resolve(FILE_NAME);
+    ObjectNode root = objectMapper.createObjectNode();
+    root.put("schemaVersion", SCHEMA_VERSION);
+    root.put("runId", runId);
+    root.put("capturedAt", Instant.now().toString());
+    root.put("goal", cap(input.runGoal(), MAX_TEXT_CHARS));
+
+    ObjectNode sources = root.putObject("sources");
+    sources.put(
+        "contextDocumentSha256", sha256(readSource(contextDir.resolve("CODEBASE_CONTEXT.md"))));
+    sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
+    String repoHeadSha = resolveRepoHeadSha(projectPath);
+    if (repoHeadSha != null) sources.put("repoHeadSha", repoHeadSha);
+    String repoStateSha = resolveRepoStateSha(projectPath);
+    if (repoStateSha != null) sources.put("repoStateSha256", repoStateSha);
+
+    ObjectNode evidence = root.putObject("evidence");
+    ContextEvidenceAssembler.Selection selected = evidenceAssembler.select(input);
+    evidence.put("gitDiffSummary", cap(input.gitDiffSummary(), MAX_TEXT_CHARS));
+    putList(evidence, "newPackages", selected.packageIndexes());
+    putList(evidence, "newFiles", selected.fileIndexes());
+    putList(evidence, "workerReports", selected.workerIndexes());
+    evidence.put("reviewerSummary", cap(input.reviewerSummary(), MAX_TEXT_CHARS));
+    evidence.put("recentDecisions", cap(input.recentDecisions(), MAX_TEXT_CHARS));
+
+    // Structured handoff state is additive to the legacy evidence fields. Empty hypothesis is
+    // intentional: this component persists what was observed, never an inferred claim.
+    ObjectNode handoff = root.putObject("handoff");
+    handoff.put("goal", cap(input.runGoal(), MAX_TEXT_CHARS));
+    handoff.put("hypothesis", cap(input.hypothesis(), MAX_TEXT_CHARS));
+    putList(handoff, "changedFiles", input.changedFiles());
+    putList(handoff, "failures", input.failures());
+    putList(handoff, "doNotRepeat", input.doNotRepeat());
+
+    Path temp = contextDir.resolve(FILE_NAME + ".tmp-" + safeRunId(runId));
+    Files.writeString(
+        temp,
+        objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root) + "\n",
+        StandardCharsets.UTF_8,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE);
+    try {
+      Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+      Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+    return target;
+  }
+
+  /**
+   * Loads a bundle only when it belongs to {@code runId} and both source fingerprints still match.
+   * An empty result means missing, malformed, or stale evidence.
+   */
+  public Optional<JsonNode> readCurrent(Path projectPath, String runId) {
+    if (projectPath == null || runId == null || runId.isBlank()) return Optional.empty();
+    Path contextDir = projectPath.resolve(".agent-context");
+    Path target = contextDir.resolve(FILE_NAME);
+    try {
+      JsonNode root = objectMapper.readTree(Files.readString(target));
+      if (root == null || root.path("schemaVersion").asInt(-1) != SCHEMA_VERSION) {
+        return Optional.empty();
+      }
+      if (!runId.equals(root.path("runId").asText())) return Optional.empty();
+      JsonNode sources = root.path("sources");
+      Path contextSource = contextDir.resolve("CODEBASE_CONTEXT.md");
+      Path decisionsSource = contextDir.resolve("decisions.md");
+      // An absent source is not an empty, current source. Treating both missing files as the
+      // SHA-256 of an empty string would let a copied bundle appear trustworthy in a partially
+      // initialized workspace, defeating the stale-evidence guard.
+      if (!Files.isRegularFile(contextSource) || !Files.isRegularFile(decisionsSource)) {
+        return Optional.empty();
+      }
+      String contextHash = sha256(readSource(contextSource));
+      String decisionsHash = sha256(readSource(decisionsSource));
+      if (!contextHash.equals(sources.path("contextDocumentSha256").asText())
+          || !decisionsHash.equals(sources.path("decisionsSha256").asText())) {
+        return Optional.empty();
+      }
+      String recordedHead = sources.path("repoHeadSha").asText("");
+      if (!recordedHead.isBlank()) {
+        String currentHead = resolveRepoHeadSha(projectPath);
+        if (currentHead == null || !recordedHead.equals(currentHead)) return Optional.empty();
+      }
+      String recordedState = sources.path("repoStateSha256").asText("");
+      if (!recordedState.isBlank()) {
+        String currentState = resolveRepoStateSha(projectPath);
+        if (currentState == null || !recordedState.equals(currentState)) return Optional.empty();
+      }
+      return Optional.of(root);
+    } catch (Exception e) {
+      return Optional.empty();
+    }
+  }
+
+  private void putList(ObjectNode parent, String name, List<String> values) {
+    ArrayNode array = parent.putArray(name);
+    if (values == null) return;
+    LinkedHashSet<String> deduped = new LinkedHashSet<>();
+    for (String value : values) {
+      if (value == null || value.isBlank()) continue;
+      deduped.add(cap(value.strip(), MAX_ITEM_CHARS));
+      if (deduped.size() == MAX_LIST_ITEMS) break;
+    }
+    deduped.forEach(array::add);
+  }
+
+  private static String readSource(Path path) throws IOException {
+    return Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
+  }
+
+  private static String cap(String value, int max) {
+    if (value == null) return "";
+    return value.length() <= max ? value : value.substring(0, max) + "\n[truncated]";
+  }
+
+  private static String safeRunId(String runId) {
+    return runId.replaceAll("[^A-Za-z0-9_.-]", "_");
+  }
+
+  static String sha256(String value) {
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder(64);
+      for (byte b : digest) hex.append(String.format("%02x", b));
+      return hex.toString();
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+  }
+
+  /**
+   * Returns the workspace HEAD when it is a git checkout; older/non-git workspaces remain valid.
+   */
+  static String resolveRepoHeadSha(Path projectPath) {
+    if (projectPath == null) return null;
+    try (Git git = Git.open(projectPath.toFile())) {
+      return git.getRepository().resolve("HEAD").name();
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /**
+   * Fingerprints dirty repository state as well as HEAD. A commit SHA alone cannot detect an
+   * in-progress edit, which is precisely the state in which a continuation handoff is most likely
+   * to be stale. The generated evidence sidecar is excluded so reading a bundle does not invalidate
+   * itself; file bytes are included for changed and untracked paths.
+   */
+  static String resolveRepoStateSha(Path projectPath) {
+    if (projectPath == null) return null;
+    try (Git git = Git.open(projectPath.toFile())) {
+      org.eclipse.jgit.api.Status status = git.status().call();
+      Map<String, String> states = new TreeMap<>();
+      addStatus(states, "added", status.getAdded());
+      addStatus(states, "changed", status.getChanged());
+      addStatus(states, "conflicting", status.getConflicting());
+      addStatus(states, "missing", status.getMissing());
+      addStatus(states, "modified", status.getModified());
+      addStatus(states, "removed", status.getRemoved());
+      addStatus(states, "untracked", status.getUntracked());
+      addStatus(states, "untrackedFolder", status.getUntrackedFolders());
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      for (Map.Entry<String, String> entry : states.entrySet()) {
+        String relative = entry.getKey();
+        if (relative.equals(".agent-context/" + FILE_NAME)
+            || relative.startsWith(".agent-context/" + FILE_NAME + ".tmp-")) {
+          continue;
+        }
+        digest.update((entry.getValue() + "\0" + relative + "\0").getBytes(StandardCharsets.UTF_8));
+        Path file = projectPath.resolve(relative);
+        if (Files.isRegularFile(file)) digest.update(Files.readAllBytes(file));
+      }
+      return hex(digest.digest());
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static void addStatus(
+      Map<String, String> states, String label, java.util.Set<String> paths) {
+    if (paths == null) return;
+    for (String path : paths) {
+      if (path == null || path.isBlank()) continue;
+      states.merge(path.replace('\\', '/'), label, (first, ignored) -> first + "+" + label);
+    }
+  }
+
+  private static String hex(byte[] bytes) {
+    StringBuilder result = new StringBuilder(bytes.length * 2);
+    for (byte b : bytes) result.append(String.format("%02x", b));
+    return result.toString();
+  }
+}

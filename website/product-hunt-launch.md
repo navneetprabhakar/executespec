@@ -1,12 +1,12 @@
 # Product Hunt Launch Kit — ExecuteSpec
 
-> **Refreshed 2026-06-10** (RL-2026-06-019 truth pass). All pricing/claims in this kit now match the
-> billing DB (Free / Pro $29 / Team $50/seat / Enterprise) and the honest-claims policy
+> **Refreshed 2026-07-13** (ExecuteSpec 2.0 / CLI 1.0 website refresh). All pricing/claims in this kit now match the
+> billing DB (Free / Pro $20 / Pro+ $100 hidden / BYOK $50 / Team $50/seat / Enterprise) and the honest-claims policy
 > (`docs/enterprise-one-pager.md`: no SOC 2, no SAML-end-to-end, no benchmark numbers until the
 > rebuilt eval lands). Source of truth for live copy: `website/index.html` + the app's
 > `PublicPricingPage`.
 
-_Prepared: 2026-04-21 · refreshed 2026-06-10_
+_Prepared: 2026-04-21 · refreshed 2026-07-13_
 
 Everything we need to hit "ship it" on Product Hunt. US-first framing since that's where our traffic is coming from.
 
@@ -22,7 +22,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 | **Pricing tag** | — | `Freemium` (Free → $20 Pro → $50 BYOK → $50/seat Team → Enterprise) |
 | **Platforms** | — | `Web` |
 | **Website** | — | `https://executespec.ai` |
-| **Demo video** | — | TODO — 60-90s: spec → plan gate (with price) → live execution → verified score → real PR |
+| **Demo video** | — | `website/media/hero.webm` — current-tuple illustrative workflow (provider-free fixture); do not present it as a live customer run, benchmark, or SOTA result |
 
 ## 2 · 260-char description (paste-ready)
 
@@ -39,7 +39,7 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 > **What's different:**
 > - **You approve the plan — and the price — first.** The planner decomposes your spec into tasks with a cost estimate. Credits are charged only when you approve, and refunded if the run fails. No surprise PRs, no surprise bills.
 > - **Verified score, not vibes.** Every run ends with a 0–100 score computed from the actual build passing, your actual test suite running in the workspace, and the reviewer agent finding (or not finding) wiring issues. Not the LLM grading its own homework.
-> - **Real PRs on your repos.** One repo or twenty — multi-repo projects with architecture docs, per-repo codemaps, a tech-debt panel, and project chat that knows your codebase.
+> - **Real PRs on your repos.** One or more linked repos — multi-repo projects with architecture docs, per-repo codemaps, a tech-debt panel, and project chat that knows your codebase.
 > - **Autofix on-ramps.** One click turns PR review comments, tech-debt categories, or code-scan findings into their own patch runs, each with its own PR.
 >
 > **How pricing works (because this is what trips everyone up):**
@@ -48,14 +48,12 @@ Everything we need to hit "ship it" on Product Hunt. US-first framing since that
 > - **Pro ($20/mo)**: 2,000 AI credits/month on managed keys with all default models.
 > - **Pro+ ($100/mo)**: hidden managed-credit upsell for high-usage Pro users, 125,000 AI credits/month.
 > - **BYOK ($50/mo)**: single-person org, mandatory provider keys, model matrix, no provider markup.
-> - **Team ($50/seat/mo)**: 2-seat minimum, BYOK, shared org controls, customer provider quota.
-> - **BYOK ($50/mo)**: single-person org, mandatory provider keys, model matrix, zero provider markup.
 > - **Team ($50/seat/mo, from 2 seats)**: BYOK — unlimited runs on your own Anthropic/OpenAI/Gemini keys, zero per-run markup. Org spend caps + approval thresholds.
 > - **Enterprise**: custom contract + signed DPA, per-org model matrix control, per-run model pins.
 >
 > **The hard truths:**
 > - We're early. No SOC 2 yet (it's on the roadmap — happy to fill in your security questionnaire), and we publish only what we can measure.
-> - Runs take 5–20 minutes. This is delegation, not autocomplete — start one, go do something else, come back to a scored PR.
+> - Run time varies with repository size, task complexity, provider, and validation. This is delegation, not autocomplete — start one, go do something else, and return to reloadable evidence.
 >
 > Would love your feedback — what would it take for you to *trust* an AI-opened PR enough to review it like a teammate's?
 
@@ -74,7 +72,7 @@ A: Because it's deterministic and additive over real signals: code delivered (30
 A: Full working changes: Spring Boot backends, React + Vite frontends, Python CLIs, multi-repo features across existing codebases. There's also a library of readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, …) and modernization recipes (JS→TS, Express→Fastify, …).
 
 **Q: GDPR / data handling?**
-A: Specs go only to the LLM provider you pick; nobody trains on your code. Workspaces are wiped at run end. GDPR export + erasure are built into the product; signed DPA available. We're an early-stage company — we publish what's true today, and SOC 2 Type II is on the roadmap, not claimed.
+A: Specs are sent only to the configured provider route; nobody trains on your code. Run-scoped workspace retention and cleanup follow the deployment policy. GDPR export + erasure are built into the product; signed DPA available. We're an early-stage company — we publish what's true today, and SOC 2 Type II is on the roadmap, not claimed.
 
 **Q: What's the catch?**
 A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why the plan gate shows you the estimate and charges only on approval. (2) The verified score tells you where to *start* reviewing, not to skip reviewing — "Needs review" means exactly that.
@@ -99,7 +97,7 @@ A: Two: (1) HIGH-complexity runs are genuinely expensive — that's exactly why 
 
 1. ✅ **`website/images/og-hero.png`** — exists (1200×630), referenced by both the marketing site and the app's OG tags. Verify it resolves on prod before launch.
 2. ✅ **Screenshots** — use `website/press-kit/current/` for current Console-era captures. The legacy `website/press-kit/ss-*` files are historical pre-v3 screenshots and must not be used for launch/deck assets.
-3. ⬜ **Demo video** — 60-90s. Script: (a) paste spec → plan gate shows tasks + price (10s), (b) approve → watch tasks execute via live log (20s), (c) reviewer passes (10s), (d) verified score + real PR on GitHub (15s), (e) share the verified report link (5s).
+3. ⚠️ **Illustrative demo video** — `website/media/hero.webm` is a 54-second provider-free synthetic fixture recording (SHA-256 `387e7e1deb82457938cd4ad3822db83528d25a285c91a80f109f452022efaa47`) regenerated against the current release tuple. Its provenance is recorded in `docs/evidence/current-tuple-hero-recording-2026-07-13.json`; independent human review remains pending. Keep it labeled illustrative and do not present it as a live customer run, benchmark, or SOTA result.
 4. ⬜ **Verified-report gallery** — run 5–10 real specs against known OSS repos; publish the public share links as the proof section (replaces benchmark numbers until the rebuilt eval lands).
 5. ⬜ **Hunter** — someone with >500 followers who has hunted ≥3 dev-tools in the last 90 days.
 
@@ -166,14 +164,14 @@ Carousel: 1 "The problem" (AI PRs nobody trusts) · 2 "Plan gate with price" · 
 | Free sign-ups | 200 | 600 | 2,000 |
 | Pro conversions | 10 (5%) | 40 | 150 |
 | Team seats | 2 | 8 | 30 |
-| $ MRR added | $368 | $1,472 | $5,520 |
+| $ MRR added | $300 | $1,200 | $4,500 |
 
-_MRR model: Pro = $29 × count (founder-50 halves the first 100), Team = $39 × seats. Track via the in-app 6-stage activation funnel (SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED)._
+_MRR model: Pro = $20 × count, Team = $50 × seats (two-seat minimum). Track via the in-app 6-stage activation funnel (SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED)._
 
 ## 10 · Post-launch follow-ups (P1)
 
 1. **Stripe top-up flow** — `BillingController.purchaseTopup` routes only to Razorpay today; Stripe path needs the checkout-URL variant + webhook handler + `TopupPackage.stripePriceId`.
 2. **Country-aware gateway routing** — route `country == "IN"` → Razorpay, else Stripe (today it's the `defaultGateway` string).
 3. **Stripe refund path** — `BillingService.issueProratedRefund` TODO; upgrades on Stripe currently skip the prorated refund silently.
-4. **TEAM yearly plans** — V165 deactivated the $49-era yearly rows and no $39-based replacement landed; decide + seed if annual Team demand shows up.
+4. **TEAM yearly plans** — annual Team pricing is not currently offered; decide + seed it only if annual demand shows up.
 5. **Benchmark re-run** — publish the rebuilt-harness SWE-bench numbers (with the honest small-N framing) once they land; until then the proof asset is the verified-report gallery.

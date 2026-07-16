@@ -3,6 +3,7 @@ package com.navneet.executespec.tool;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,6 +35,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class ToolRegistry {
+
+  /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
+  public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
 
   private final List<Tool> allTools;
   private final ObjectMapper objectMapper;
@@ -77,6 +81,18 @@ public class ToolRegistry {
   public static final Set<String> WORKER_DENY_TOOLS = Set.of("gitCommit");
 
   /**
+   * Compatibility fallbacks that must never be advertised to a server-side worker. These tools
+   * either claim a capability that is not actually wired (LSP/MCP), or silently substitute a
+   * regex/edit fallback for a structural operation (AST). Keeping them in the global bean list is
+   * intentional for local-hands clients, but exposing them to a coding worker makes the model
+   * choose between misleading schemas and the canonical tools. This deny list is unconditional so
+   * an older database row with {@code worker.lean-toolset.enabled=false} cannot regress production
+   * worker behavior. Remote/local-hands runs explicitly retain the compatibility surface below.
+   */
+  public static final Set<String> SERVER_WORKER_EXCLUDED_TOOLS =
+      Set.of("ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+
+  /**
    * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
    * canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
    * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
@@ -90,8 +106,8 @@ public class ToolRegistry {
    *
    * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
    * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
-   * unwired fallbacks (lsp, spawn_subagent, mcp_client, plan/todo stubs) stay out. Flag-gated tools
-   * listed here still require their own flag ON to bind.
+   * unwired fallbacks (lsp, mcp_client, plan/todo stubs) stay out. Flag-gated tools listed here
+   * still require their own flag ON to bind.
    */
   public static final Set<String> LEAN_WORKER_TOOLS =
       Set.of(
@@ -155,6 +171,26 @@ public class ToolRegistry {
   }
 
   /**
+   * Binds a deliberately small implementer tool set. Mutation calls are routed through the supplied
+   * authorization function after schema parsing; read/test tools execute normally. This prevents a
+   * model loop from bypassing the persisted single-writer reservation.
+   */
+  public List<ToolCallback> bindForImplementer(
+      ExecutionContext ctx,
+      Set<String> allowedNames,
+      BiFunction<String, JsonNode, ToolResult> authorizedMutation) {
+    return allTools.stream()
+        .filter(this::isToolBound)
+        .filter(tool -> allowedNames == null || allowedNames.contains(tool.name()))
+        .map(
+            tool ->
+                (ToolCallback)
+                    new ContextBoundToolCallback(
+                        tool, ctx, objectMapper, remoteToolDispatcher, authorizedMutation))
+        .collect(Collectors.toList());
+  }
+
+  /**
    * Worker-restricted bind — same as {@link #bind(ExecutionContext)} but excludes any tool listed
    * in {@link #WORKER_DENY_TOOLS} (currently just {@code gitCommit}). Use this instead of {@code
    * bind} when constructing the worker's LLM request so the model can't get itself stuck in a
@@ -171,15 +207,29 @@ public class ToolRegistry {
    * providers). Null provider / no profile ⇒ global flag gating only.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider) {
+    return bindForWorker(ctx, provider, null);
+  }
+
+  /**
+   * Provider/model-aware worker bind. A model profile ({@code provider/model}) takes precedence
+   * over a provider profile; this permits safe tuning when models behind one provider have
+   * different tool-schema behaviour.
+   */
+  public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
+    final boolean remote = isRemoteRun(ctx);
     // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
     // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
-            && !isRemoteRun(ctx);
-    final java.util.Set<String> profileTools = profileOptionalTools(provider);
+            && !remote;
+    final java.util.Set<String> profileTools = profileOptionalTools(provider, model);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
+        // Fallback/structural compatibility tools remain available to explicit local-hands
+        // sessions, but are never advertised to a server worker even while the legacy lean flag is
+        // OFF. This keeps old persisted flag state from reintroducing misleading schemas.
+        .filter(t -> remote || !SERVER_WORKER_EXCLUDED_TOOLS.contains(t.name()))
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
@@ -190,13 +240,30 @@ public class ToolRegistry {
   }
 
   private java.util.Set<String> profileOptionalTools(String provider) {
-    if (provider == null || modelRegistry == null) return java.util.Set.of();
+    return profileOptionalTools(provider, null);
+  }
+
+  private java.util.Set<String> profileOptionalTools(String provider, String model) {
+    if (provider == null || modelRegistry == null || !capabilityProfilesEnabled())
+      return java.util.Set.of();
     try {
-      var profile = modelRegistry.capabilityProfileFor(provider);
+      var profile =
+          model == null
+              ? modelRegistry.capabilityProfileFor(provider)
+              : modelRegistry.capabilityProfileFor(provider, model);
       if (profile == null || profile.getOptionalTools() == null) return java.util.Set.of();
       return new java.util.HashSet<>(profile.getOptionalTools());
     } catch (Exception e) {
       return java.util.Set.of();
+    }
+  }
+
+  private boolean capabilityProfilesEnabled() {
+    try {
+      return featureFlagService != null && featureFlagService.isEnabled(FLAG_CAPABILITY_PROFILES);
+    } catch (RuntimeException e) {
+      log.warn("Capability-profile flag lookup failed; optional tools remain disabled", e);
+      return false;
     }
   }
 
@@ -249,8 +316,17 @@ public class ToolRegistry {
       Tool tool,
       ExecutionContext ctx,
       ObjectMapper objectMapper,
-      RemoteToolDispatcher remoteToolDispatcher)
+      RemoteToolDispatcher remoteToolDispatcher,
+      BiFunction<String, JsonNode, ToolResult> authorizedMutation)
       implements ToolCallback {
+
+    ContextBoundToolCallback(
+        Tool tool,
+        ExecutionContext ctx,
+        ObjectMapper objectMapper,
+        RemoteToolDispatcher remoteToolDispatcher) {
+      this(tool, ctx, objectMapper, remoteToolDispatcher, null);
+    }
 
     @Override
     public ToolDefinition getToolDefinition() {
@@ -287,7 +363,11 @@ public class ToolRegistry {
         return errorEnvelope(ToolResult.ErrorKind.INVALID_ARGS, argErr.get());
       }
       try {
-        ToolResult result = tool.execute(args, ctx);
+        ToolResult result =
+            authorizedMutation != null
+                    && ("writeFile".equals(tool.name()) || "editFile".equals(tool.name()))
+                ? authorizedMutation.apply(tool.name(), args)
+                : tool.execute(args, ctx);
         return switch (result) {
           case ToolResult.Ok ok -> okEnvelope(ok.content());
           case ToolResult.Err err -> errorEnvelope(err.kind(), err.message());

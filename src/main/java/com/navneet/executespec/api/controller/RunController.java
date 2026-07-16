@@ -197,7 +197,7 @@ public class RunController {
 
     // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
     PipelineRun run =
-        v2Orchestrator.submitRun(
+        v2Orchestrator.submitRunWithLocalExecution(
             req.userRequest(),
             req.source() != null ? req.source() : "REST",
             req.repoUrl(),
@@ -217,9 +217,11 @@ public class RunController {
             Boolean.TRUE.equals(req.tddMode()),
             req.branch(),
             req.prReviewComments(),
+            com.navneet.executespec.state.RunMode.BUILD,
             req.requireConfirmationBeforeExpensiveContinuation(),
             req.requireBenchmarkPriorForAutomaticContinuation(),
-            req.lowComplexityWorkerStartTier());
+            req.lowComplexityWorkerStartTier(),
+            localExecutionRequested);
 
     // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
     // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
@@ -434,6 +436,11 @@ public class RunController {
         req.executionMode(),
         approveRun.getHarnessVersion());
 
+    // Historical BATCH rows remain readable, but batch execution was never wired into the V2
+    // executor. Reject new approvals explicitly instead of persisting BATCH and silently running
+    // realtime workers with batch-only preview/notification behavior.
+    rejectRetiredBatchApproval(req.approved(), req.executionMode());
+
     // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
     if (req.approved() && req.creditsConfirmed() != null) {
       stateStore
@@ -484,47 +491,33 @@ public class RunController {
       stateStore.setApprovedExecutionMode(runId, "BATCH");
     }
 
-    // V2 orchestrator blocks on GateStore.awaitPlanGate() which completes
-    // instantly on the in-memory future. If no future exists (server
-    // restarted while run was AWAITING_APPROVAL), the pipeline thread is
-    // gone — signalling the gate would write Redis/DB without anything
-    // reading them, leaving the run silently stuck. Detect that case and
-    // fail the run cleanly so the user gets an actionable message.
-    if (!gateStore.isPlanGateWaiting(runId)) {
-      log.warn(
-          "POST /api/runs/{}/approve — no pipeline thread waiting; "
-              + "run was interrupted during AWAITING_APPROVAL. Failing cleanly.",
-          runId);
-      // Still persist the gate decision (DB+Redis) — the audit record is
-      // useful — then mark the run FAILED with a retry-able reason.
-      gateStore.setPlanGate(runId, req.approved());
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              r -> {
-                r.setStatus("FAILED");
-                r.setFailureReason(
-                    "Approval received after server restart — pipeline "
-                        + "thread was lost. Please submit a new run.");
-                r.setCompletedAt(Instant.now());
-                stateStore.saveRun(r);
-              });
+    var outcome = runLifecycleService.resolvePlanGate(runId, req.approved());
+    if (outcome
+        == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+            .CONFLICTING_DECISION) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "Approval received but the pipeline was interrupted by a restart. "
-              + "Please submit a new run.");
+          HttpStatus.CONFLICT, "Plan gate was already resolved with the opposite decision.");
     }
-    // Atomic claim — if another concurrent approve call already resolved the gate,
-    // return 409 Conflict to this caller (adversarial-test-report Finding 4).
-    boolean claimed = gateStore.tryClaimPlanGate(runId, req.approved());
-    if (!claimed) {
+    if (outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .INVALID_STATE
+        || outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .PLAN_MISSING
+        || outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .WORKSPACE_GONE) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan gate has already been resolved by another caller.");
+          HttpStatus.CONFLICT, "Plan approval cannot resume from the run's current state.");
     }
 
     // Wave 2.1 — activation funnel step 4 (fires once per user, only on
     // positive approval — rejections don't count as "crossed the credit bar").
-    if (req.approved() && approveRun.getCreatedByUserId() != null) {
+    if (req.approved()
+        && outcome
+            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .RESUME_QUEUED
+        && approveRun.getCreatedByUserId() != null) {
       eventTracking.track(
           approveRun.getCreatedByUserId(),
           com.navneet.executespec.analytics.EventName.PLAN_APPROVED,
@@ -889,7 +882,7 @@ public class RunController {
     }
 
     stateStore.save(run);
-    scmPushService.push(run);
+    ScmPushService.PushResult pushResult = scmPushService.push(run);
 
     // Reload to pick up PR URL set during push
     PipelineRun updated = stateStore.findRun(runId).orElse(run);
@@ -899,16 +892,17 @@ public class RunController {
             : (updated.getGithubPrUrl() != null ? updated.getGithubPrUrl() : "");
     String provider = updated.getScmProvider() != null ? updated.getScmProvider() : "";
 
+    String resultPrUrl = pushResult.prUrl().isBlank() ? prUrl : pushResult.prUrl();
     return ResponseEntity.ok(
         Map.of(
-            "status",
-            "pushed",
-            "repoUrl",
-            updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
-            "prUrl",
-            prUrl,
-            "scmProvider",
-            provider));
+            "status", pushResult.status(),
+            "repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
+            "prUrl", resultPrUrl,
+            "scmProvider", provider.isBlank() ? pushResult.scmProvider() : provider,
+            "message", pushResult.message(),
+            "attempted", Integer.toString(pushResult.attempted()),
+            "succeeded", Integer.toString(pushResult.succeeded()),
+            "failed", Integer.toString(pushResult.failed())));
   }
 
   /**
@@ -1534,6 +1528,15 @@ public class RunController {
       String parentTaskId,
       Integer subtaskIndex,
       Integer subtaskTotal) {}
+
+  static void rejectRetiredBatchApproval(boolean approved, String executionMode) {
+    if (approved && "BATCH".equalsIgnoreCase(executionMode)) {
+      throw new ResponseStatusException(
+          HttpStatus.GONE,
+          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
+              + " REALTIME");
+    }
+  }
 
   public record MessageResponse(String fromAgent, String contentSummary, Instant sentAt) {}
 

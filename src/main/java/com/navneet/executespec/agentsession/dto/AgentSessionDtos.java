@@ -44,6 +44,48 @@ public final class AgentSessionDtos {
       Instant createdAt,
       Instant updatedAt) {}
 
+  /** Replayable session event page. Initial pages also carry the durable session state snapshot. */
+  public record AgentEventReplayResponse(
+      List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+      long lastSequence,
+      boolean snapshot,
+      SessionSnapshot session,
+      boolean legacyEventsOmitted,
+      boolean truncated,
+      boolean hasMore,
+      Long nextSequence) {
+
+    /** Backward-compatible constructor for callers that only need the event envelope. */
+    public AgentEventReplayResponse(
+        List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+        long lastSequence,
+        boolean snapshot) {
+      this(events, lastSequence, snapshot, null, false, false, false, null);
+    }
+
+    /** Backward-compatible constructor for callers that include a session snapshot only. */
+    public AgentEventReplayResponse(
+        List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+        long lastSequence,
+        boolean snapshot,
+        SessionSnapshot session) {
+      this(events, lastSequence, snapshot, session, false, false, false, null);
+    }
+
+    /** Backward-compatible constructor for replay metadata without truncation fields. */
+    public AgentEventReplayResponse(
+        List<com.navneet.executespec.agentsession.entity.AgentActionEvent> events,
+        long lastSequence,
+        boolean snapshot,
+        SessionSnapshot session,
+        boolean legacyEventsOmitted) {
+      this(events, lastSequence, snapshot, session, legacyEventsOmitted, false, false, null);
+    }
+  }
+
+  /** Minimal durable state needed to reconcile a reconnecting client before applying events. */
+  public record SessionSnapshot(String id, String status, String title, Instant updatedAt) {}
+
   public record RepoContext(
       String cwdName,
       String gitRemote,
@@ -63,6 +105,7 @@ public final class AgentSessionDtos {
       RepoContext repoContext,
       ClientCapabilities clientCapabilities,
       String providerOverride,
+      String modelOverride,
       List<String> attachmentIds) {
     /** Back-compat constructor for callers that predate server-side attachments. */
     public StreamTurnRequest(
@@ -71,7 +114,25 @@ public final class AgentSessionDtos {
         RepoContext repoContext,
         ClientCapabilities clientCapabilities,
         String providerOverride) {
-      this(message, conversation, repoContext, clientCapabilities, providerOverride, null);
+      this(message, conversation, repoContext, clientCapabilities, providerOverride, null, null);
+    }
+
+    /** Back-compat constructor for callers that already send attachment ids. */
+    public StreamTurnRequest(
+        String message,
+        List<Map<String, Object>> conversation,
+        RepoContext repoContext,
+        ClientCapabilities clientCapabilities,
+        String providerOverride,
+        List<String> attachmentIds) {
+      this(
+          message,
+          conversation,
+          repoContext,
+          clientCapabilities,
+          providerOverride,
+          null,
+          attachmentIds);
     }
   }
 

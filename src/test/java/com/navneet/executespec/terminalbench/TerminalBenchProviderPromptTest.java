@@ -13,7 +13,8 @@ class TerminalBenchProviderPromptTest {
   @Test
   void deepseekTerminalPromptIncludesTerminalSpecificToolDisciplineWhenFlagEnabled() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
-    when(flags.isEnabled("worker.provider-prompt-tuning.enabled")).thenReturn(true);
+    when(flags.getString("terminal-bench.provider-prompt-tuning.enabled", "true"))
+        .thenReturn("true");
 
     String prompt = service(flags).systemPromptForProvider("deepseek");
 
@@ -26,9 +27,22 @@ class TerminalBenchProviderPromptTest {
   @Test
   void unknownProviderFallsBackToBaseTerminalPrompt() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
-    when(flags.isEnabled("worker.provider-prompt-tuning.enabled")).thenReturn(true);
+    when(flags.getString("terminal-bench.provider-prompt-tuning.enabled", "true"))
+        .thenReturn("true");
 
     String prompt = service(flags).systemPromptForProvider("made-up");
+
+    assertThat(prompt).contains("You are an autonomous terminal agent");
+    assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC TERMINAL NOTES");
+  }
+
+  @Test
+  void terminalFlagCanExplicitlyDisableDefaultOnFragments() {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.getString("terminal-bench.provider-prompt-tuning.enabled", "true"))
+        .thenReturn("false");
+
+    String prompt = service(flags).systemPromptForProvider("deepseek");
 
     assertThat(prompt).contains("You are an autonomous terminal agent");
     assertThat(prompt).doesNotContain("PROVIDER-SPECIFIC TERMINAL NOTES");

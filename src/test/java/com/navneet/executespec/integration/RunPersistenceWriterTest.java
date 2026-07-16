@@ -8,12 +8,16 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
+import com.navneet.executespec.harness.ExecutionResult;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -64,5 +68,39 @@ class RunPersistenceWriterTest {
     assertThat(run.getStatus()).isEqualTo("REVIEWING");
     verify(runRepo).save(run);
     verify(broadcaster).emit(eq("run-3"), any(RunEvent.class));
+  }
+
+  @Test
+  void aggregateWriteUsesRecoveryLockAndDoesNotClobberTerminalTask() {
+    AgentTask recovered = AgentTask.builder().taskId("12345678_T1").status("COMPLETE").build();
+    when(taskRepo.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(recovered));
+    TaskOutcome lateFailure =
+        TaskOutcome.builder().taskId("T1").status(TaskOutcome.Status.WORKER_FAILED).build();
+
+    writer.applyExecutionResultToTasks(
+        "12345678-run", ExecutionResult.builder().perTask(List.of(lateFailure)).build());
+
+    assertThat(recovered.getStatus()).isEqualTo("COMPLETE");
+    verify(taskRepo).findByIdForUpdate("12345678_T1");
+    verify(taskRepo, never()).save(any(AgentTask.class));
+  }
+
+  @Test
+  void aggregateWriteRepairsNonTerminalTaskAfterWorkerDiedBeforeFlush() {
+    AgentTask interrupted = AgentTask.builder().taskId("12345678_T2").status("WORKING").build();
+    when(taskRepo.findByIdForUpdate("12345678_T2")).thenReturn(Optional.of(interrupted));
+    TaskOutcome failed =
+        TaskOutcome.builder()
+            .taskId("T2")
+            .status(TaskOutcome.Status.WORKER_FAILED)
+            .totalLatencyMs(12)
+            .build();
+
+    writer.applyExecutionResultToTasks(
+        "12345678-run", ExecutionResult.builder().perTask(List.of(failed)).build());
+
+    assertThat(interrupted.getStatus()).isEqualTo("FAILED");
+    verify(taskRepo).findByIdForUpdate("12345678_T2");
+    verify(taskRepo).save(interrupted);
   }
 }

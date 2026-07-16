@@ -30,6 +30,7 @@ public record GoalContinuationAdvisorRequest(
     RunContinuationDecision userConfirmedContinuationAction,
     String userConfirmedContinuationProvider,
     String userConfirmedContinuationModel,
+    long requiredContextTokens,
     int providerSwitchesUsed,
     int maxProviderSwitches,
     int modelStepUpsUsed,
@@ -55,6 +56,7 @@ public record GoalContinuationAdvisorRequest(
         providerAvailability == null ? Map.of() : Map.copyOf(providerAvailability);
     providerPreferenceOrder =
         providerPreferenceOrder == null ? List.of() : List.copyOf(providerPreferenceOrder);
+    requiredContextTokens = Math.max(0L, requiredContextTokens);
     providerSwitchesUsed = Math.max(0, providerSwitchesUsed);
     maxProviderSwitches = Math.max(0, maxProviderSwitches);
     modelStepUpsUsed = Math.max(0, modelStepUpsUsed);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {createRequire} from 'node:module';
+import {createHash} from 'node:crypto';
 import {createServer} from 'node:net';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -66,6 +67,39 @@ async function waitFor(url, label, timeoutMs = 60_000) {
   throw new Error(`${label} was not ready at ${url}: ${lastError}`);
 }
 
+/**
+ * Wait for a semantically visible page and two identical compositor frames before capturing.
+ * A DOM/network-ready page can still produce a transient black screenshot while fonts and the
+ * first paint are settling.  Returning the stable buffer also prevents the caller from taking
+ * a new, potentially earlier frame after this check succeeds.
+ */
+async function waitForPaintStable(page, timeoutMs = 10_000) {
+  await page.waitForFunction(() => {
+    const body = document.body;
+    if (!body || document.readyState !== 'complete') return false;
+    const rect = body.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && (body.innerText || '').trim().length >= 40;
+  }, {timeout: timeoutMs});
+  await page.evaluate(async () => {
+    if (document.fonts?.ready) await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  const deadline = Date.now() + timeoutMs;
+  let previousHash = null;
+  let stableFrames = 0;
+  let attempts = 0;
+  while (Date.now() < deadline) {
+    attempts += 1;
+    const buffer = await page.screenshot({fullPage: true, animations: 'disabled'});
+    const hash = createHash('sha256').update(buffer).digest('hex');
+    stableFrames = hash === previousHash ? stableFrames + 1 : 1;
+    previousHash = hash;
+    if (stableFrames >= 2) return {buffer, hash, attempts};
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  throw new Error(`paint did not stabilize within ${timeoutMs}ms (last hash ${previousHash || 'none'})`);
+}
+
 async function readLocalCredentials() {
   const email = process.env.EMAIL || process.env.EXECUTESPEC_SMOKE_EMAIL;
   const password = process.env.PASSWORD || process.env.EXECUTESPEC_SMOKE_PASSWORD;
@@ -97,6 +131,38 @@ async function login() {
   return {email, token: json.accessToken};
 }
 
+/**
+ * Create an isolated, empty WEB session for this smoke. The local credential used by release
+ * QA is intentionally long-lived and may contain historical fixture turns that reference runs
+ * deleted by a previous attempt. Selecting a fresh session keeps this shell/contract smoke
+ * side-effect free with respect to runs while still exercising the real authenticated API.
+ */
+async function createSmokeSession(auth) {
+  const id = `web-browser-smoke-${crypto.randomUUID()}`;
+  const res = await fetch(`${backendUrl}/api/agent/sessions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      id,
+      surface: 'WEB',
+      title: `Browser smoke ${id.slice(-12)}`,
+      defaultExecutionMode: 'PRODUCTION',
+      approvalPolicy: 'CONFIRM_MUTATIONS',
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create isolated browser smoke session: HTTP ${res.status} ${await res.text()}`);
+  }
+  const json = await res.json();
+  if (json.id !== id) {
+    throw new Error(`Browser smoke session id mismatch: expected ${id}, received ${json.id || 'none'}`);
+  }
+  return id;
+}
+
 function startVite(port) {
   const child = spawn(
     'npm',
@@ -121,6 +187,7 @@ async function main() {
   await mkdir(outDir, {recursive: true});
   await waitFor(`${backendUrl}/actuator/health`, 'backend health');
   const auth = await login();
+  const smokeSessionId = await createSmokeSession(auth);
   const port = await findFrontendPort();
   const frontendUrl = `http://localhost:${port}`;
   const vite = startVite(port);
@@ -143,6 +210,27 @@ async function main() {
       executablePath: existsSync(chromePath) ? chromePath : undefined,
     });
     page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+    // The account is deliberately reusable across QA runs. Force the newly-created empty session
+    // to the head of the real API response so stale historical fixture turns cannot hydrate a
+    // deleted run and turn this provider-free shell smoke into an accidental run/SSE test.
+    await page.route('**/api/agent/sessions*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const rows = await response.json().catch(() => null);
+      if (!Array.isArray(rows)) {
+        await route.fulfill({response});
+        return;
+      }
+      const ordered = [...rows].sort((a, b) => {
+        if (a?.id === smokeSessionId) return -1;
+        if (b?.id === smokeSessionId) return 1;
+        return 0;
+      });
+      await route.fulfill({response, body: JSON.stringify(ordered)});
+    });
     page.on('console', (msg) => {
       if (['error', 'warning'].includes(msg.type())) {
         consoleMessages.push(`${msg.type()}: ${msg.text()}`);
@@ -168,36 +256,42 @@ async function main() {
     }, auth.token);
 
     await page.goto(`${frontendUrl}/agent`, {waitUntil: 'networkidle'});
-    await page.getByText('Control plane').waitFor({timeout: 20_000});
-    await page.getByText('Managed AI').waitFor({timeout: 20_000});
-    await page.getByText('Pending gates').waitFor({timeout: 20_000});
-    await page.getByText('WEB capabilities').waitFor({timeout: 20_000});
-    results.push(['PASS', 'agent shell rails', 'Control plane, Managed AI, gates, WEB capabilities rendered']);
-
-    await page.getByRole('button', {name: 'New session'}).click();
-    await page.getByText('Create a session to start.').waitFor({timeout: 5_000}).catch(() => {});
-    results.push(['PASS', 'fresh session', 'New WEB agent session requested before prompt smoke']);
-
-    const webCapabilitiesText = await page.locator('.agent-capabilities').innerText();
-    if (/local_code_task|local_git_|shell/i.test(webCapabilitiesText)) {
-      throw new Error(`WEB capabilities leaked local-only actions: ${webCapabilitiesText}`);
-    }
-    results.push(['PASS', 'WEB capability boundary', webCapabilitiesText.replace(/\s+/g, ', ')]);
-
-    await page.locator('textarea').fill('commit all files and push to git');
-    await page.getByRole('button', {name: 'Send'}).click();
-    await page.getByText('LOCAL_TOOL_ACTION', {exact: true}).first().waitFor({timeout: 30_000});
-    await page.getByText('Continue with local hands').waitFor({timeout: 30_000});
-    await page.getByText('Run API').waitFor({timeout: 30_000});
-    await page.getByText('blocked').waitFor({timeout: 30_000});
+    // The agent surface is now the chat-first "Remote sandbox operator" contract. Keep this
+    // smoke deterministic and side-effect free: semantic turn/run acceptance is covered by the
+    // dedicated authenticated scenario harness, while this check proves the protected shell and
+    // WEB/local-hands boundary without spending an LLM call.
+    await page.getByText('Remote sandbox operator').first().waitFor({timeout: 20_000});
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 20_000});
+    // The empty-state rail was intentionally de-jargoned: it now explains when usage
+    // appears instead of claiming that no token usage exists. Keep the smoke anchored to
+    // the current user-facing contract so an old marker cannot turn a healthy shell into a
+    // misleading capture failure.
+    await page.getByText('Usage appears after the first response', {exact: true}).waitFor({timeout: 20_000});
+    await page.getByText('Remote sandbox only', {exact: true}).waitFor({timeout: 20_000});
+    await page.getByRole('button', {name: 'Start a new sandbox'}).waitFor({timeout: 20_000});
     results.push([
       'PASS',
-      'local git prompt route',
-      'LOCAL_TOOL_ACTION rendered as local-hands handoff with Run API blocked',
+      'agent shell and sandbox contract',
+      'Remote sandbox operator, Ready state, usage rail, composer contract, and Start a new sandbox rendered',
     ]);
 
-    await page.screenshot({path: screenshot, fullPage: true});
-    results.push(['PASS', 'screenshot', screenshot]);
+    const pageText = await page.locator('body').innerText();
+    if (/\b(?:local_code_task|local_git_|LOCAL_TOOL_ACTION)\b/i.test(pageText)) {
+      throw new Error(`WEB surface leaked local-only action names: ${pageText.slice(0, 1200)}`);
+    }
+    results.push([
+      'PASS',
+      'WEB capability boundary',
+      'Protected empty state contains no local tool/action capability names',
+    ]);
+
+    const stableCapture = await waitForPaintStable(page);
+    await writeFile(screenshot, stableCapture.buffer);
+    results.push([
+      'PASS',
+      'paint-ready screenshot',
+      `${screenshot} (stable hash ${stableCapture.hash}, ${stableCapture.attempts} compositor frames)`,
+    ]);
 
     const noisyConsole = consoleMessages.filter(
       (line) => !/Download the React DevTools|favicon/i.test(line),
@@ -223,6 +317,7 @@ async function main() {
 - Backend: \`${backendUrl}\`
 - Frontend: \`${frontendUrl}\`
 - Account: \`${auth.email}\`
+- Isolated session: \`${smokeSessionId}\`
 - Screenshot: \`${screenshot}\`
 - Summary: ${results.length} pass, 0 fail
 
@@ -250,6 +345,7 @@ ${rows}
 - Backend: \`${backendUrl}\`
 - Frontend: \`${frontendUrl}\`
 - Account: \`${auth.email}\`
+- Isolated session: \`${smokeSessionId}\`
 - Failure screenshot: \`${failureScreenshot}\`
 - Summary: FAILED
 - Console warnings/errors: ${consoleMessages.length ? consoleMessages.map((line) => `\`${line.replace(/`/g, "'")}\``).join(', ') : 'none'}

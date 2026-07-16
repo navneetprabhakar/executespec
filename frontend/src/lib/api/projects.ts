@@ -101,7 +101,14 @@ export const createProject = (body: {
 
 export const updateProjectSettings = (
   id: string,
-  body: {aiProvider?: string; githubOwner?: string},
+  body: {
+    name?: string;
+    description?: string;
+    targetBranch?: string;
+    branchNamingPattern?: string;
+    aiProvider?: string;
+    githubOwner?: string;
+  },
 ) => req<ProjectDto>(`/projects/${id}/settings`, {method: 'PATCH', body: JSON.stringify(body)});
 
 export const archiveProject = (id: string) =>

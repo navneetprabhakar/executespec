@@ -21,7 +21,7 @@ class TestWorkerAgentPromptTest {
   private final TestPlanRepository testPlanRepository = mock(TestPlanRepository.class);
   private final TestWorkerAgent agent =
       new TestWorkerAgent(
-          mock(com.navneet.executespec.agent.FallbackLlmRouter.class),
+          mock(com.navneet.executespec.agent.LlmRouter.class),
           mock(com.navneet.executespec.router.ModelResolver.class),
           mock(com.navneet.executespec.state.StateStore.class),
           mock(com.navneet.executespec.testgen.repository.TestTaskRepository.class),

@@ -2,7 +2,7 @@ package com.navneet.executespec.scoring;
 
 import java.util.Optional;
 
-import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TestCoverageRescorer {
 
-  private final ValidationReportRepository reportRepo;
+  private final ValidationReportService validationReportService;
 
   @EventListener
   @Transactional
@@ -37,24 +37,20 @@ public class TestCoverageRescorer {
     TestExecutionSummary s = event.summary();
     if (s == null) return;
 
-    Optional<ValidationReport> found = reportRepo.findByRunId(event.runId());
-    if (found.isEmpty()) {
+    Optional<ValidationReport> rescored =
+        validationReportService.rescoreAfterConcreteTests(event.runId(), s);
+    if (rescored.isEmpty()) {
       log.debug("TestCoverageRescorer: no report for run {} yet — skipping", event.runId());
       return;
     }
 
-    int score = deriveScore(s);
-    ValidationReport report = found.get();
-    if (report.getTestCoverageScore() != null && report.getTestCoverageScore() == score) {
-      return;
-    }
-    report.setTestCoverageScore(score);
-    reportRepo.save(report);
+    ValidationReport report = rescored.get();
     log.info(
-        "TestCoverageRescorer: run {} testCoverageScore {} → {} (total={} passed={})",
+        "TestCoverageRescorer: run {} rescored verifiedScore={} rubricScore={} (total={}"
+            + " passed={})",
         event.runId(),
-        report.getTestCoverageScore(),
-        score,
+        report.getVerifiedScore(),
+        report.getRubricScore(),
         s.getTotalTests(),
         s.getPassed());
   }

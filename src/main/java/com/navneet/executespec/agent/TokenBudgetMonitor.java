@@ -38,11 +38,12 @@ public class TokenBudgetMonitor {
     int limit = contextLimitFor(model);
     double usagePct = (double) lastCallInputTokens / limit;
 
-    // HIGH complexity gets 5% extra headroom (thresholds raised by 0.05)
-    double headroom = "HIGH".equalsIgnoreCase(complexity) ? 0.05 : 0.0;
-    double warnPct = props.getCompaction().getWarnPct() + headroom;
-    double compactPct = props.getCompaction().getCompactPct() + headroom;
-    double hardStopPct = props.getCompaction().getHardStopPct() + headroom;
+    // Complexity must not silently inflate percentage thresholds. HIGH-task reserve belongs in
+    // ContextPlanner's explicit output/tool/verification/handoff budget, so every model uses the
+    // same observable compaction policy and the reserved headroom remains auditable.
+    double warnPct = props.getCompaction().getWarnPct();
+    double compactPct = props.getCompaction().getCompactPct();
+    double hardStopPct = props.getCompaction().getHardStopPct();
 
     Status status;
     if (usagePct >= hardStopPct) {

@@ -46,7 +46,8 @@ public class ProviderStatusService {
       Map.of(
           LlmProvider.ANTHROPIC, List.of(LlmProvider.OPENAI, LlmProvider.GEMINI),
           LlmProvider.OPENAI, List.of(LlmProvider.GEMINI, LlmProvider.ANTHROPIC),
-          LlmProvider.GEMINI, List.of(LlmProvider.OPENAI, LlmProvider.ANTHROPIC));
+          LlmProvider.GEMINI, List.of(LlmProvider.OPENAI, LlmProvider.ANTHROPIC),
+          LlmProvider.DEEPSEEK, List.of(LlmProvider.OPENROUTER, LlmProvider.FIREWORKS));
 
   private static final Map<LlmProvider, String> STATUS_PAGES =
       Map.of(

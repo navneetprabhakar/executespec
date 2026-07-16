@@ -88,6 +88,22 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   @Test
+  void noOpBuildExitZeroIsNotVerifiedBuildEvidence() {
+    assertEquals(
+        false,
+        ReviewerAgent.isBuildVerifiedEvidence(
+            "command=true\nsource=fallback:no-op\nsmokeSignal=UNAVAILABLE\nnoOp=true\nexit=0"));
+    assertEquals(
+        true,
+        ReviewerAgent.isBuildVerifiedEvidence(
+            "command=npm run build\n"
+                + "source=inferred:npm\n"
+                + "smokeSignal=EXECUTED\n"
+                + "noOp=false\n"
+                + "exit=0"));
+  }
+
+  @Test
   void general_fixed_wiring_clean_build_pass_returns_fixed_issues() throws Exception {
     var g = workerWithSummaryAndWrites("VERDICT: FIXED_ISSUES\nFound 2, fixed both.");
     var w = workerWithSummary("VERDICT: CLEAN\nNothing to wire.");
@@ -278,6 +294,34 @@ class ReviewerAgentVerdictParsingTest {
     org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(withRefusedWrite));
     org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(withNeither));
     org.junit.jupiter.api.Assertions.assertFalse(ReviewerAgent.hasWriteCalls(null));
+  }
+
+  @Test
+  void hasWriteCalls_recognises_mutating_command_aliases() {
+    for (String tool :
+        List.of(
+            "move",
+            "deletePath",
+            "bash",
+            "executeCommand",
+            "installDependencies",
+            "testProject",
+            "lintProject",
+            "formatProject",
+            "ast_edit",
+            "background_process",
+            "gitCommit")) {
+      var result =
+          WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.COMPLETED)
+              .iterations(1)
+              .toolCallsDispatched(1)
+              .toolCallLog(List.of(tool + "(path=src/foo.ts)"))
+              .totalLatencyMs(0L)
+              .build();
+      org.junit.jupiter.api.Assertions.assertTrue(
+          ReviewerAgent.hasWriteCalls(result), "expected mutating alias: " + tool);
+    }
   }
 
   @Test

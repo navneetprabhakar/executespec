@@ -181,9 +181,9 @@ public class ProjectDashboardController {
             pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost);
 
     List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
-    // v2.5.10+: prefer verifiedScore (objective build+tests+verdict signal)
-    // over accuracyScore (LLM self-assessment). Fall back to accuracyScore
-    // for pre-V106 rows that don't carry verifiedScore yet.
+    // v2.5.10+: aggregate only verifiedScore (objective build+tests+verdict signal).
+    // Legacy accuracyScore is an LLM self-assessment and must never be promoted into
+    // a dashboard aggregate when deterministic evidence is absent.
     double avgScore =
         reports.stream()
             .map(ProjectDashboardController::preferredScore)
@@ -362,14 +362,12 @@ public class ProjectDashboardController {
   /**
    * v2.5.10+: the headline score shown in the dashboard is the verified score (V106) when present —
    * an objective blend of build pass, test pass-rate, and reviewer verdict. Accuracy score (LLM
-   * self-assessment) is only used as a fallback for rows that predate the verified-score columns.
-   * This prevents the dashboard from averaging hallucinated LLM self-scores on runs that the
-   * harness already graded "clean" on evidence.
+   * self-assessment) is deliberately excluded when verified evidence is absent.
    */
   private static Integer preferredScore(ValidationReport report) {
     if (report == null) return null;
     Integer v = report.getVerifiedScore();
     if (v != null) return v;
-    return report.getAccuracyScore();
+    return null;
   }
 }

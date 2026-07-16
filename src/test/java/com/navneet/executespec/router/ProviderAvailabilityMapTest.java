@@ -24,8 +24,8 @@ class ProviderAvailabilityMapTest {
   }
 
   @Test
-  void returnsEmptyWhenResolverHasNoProviderEvidence() {
+  void marksKnownProvidersUnavailableWhenResolverHasNoAvailableProviders() {
     assertThat(ProviderAvailabilityMap.fromAvailableProviders(Set.of(), List.of("anthropic")))
-        .isEmpty();
+        .containsEntry("anthropic", false);
   }
 }

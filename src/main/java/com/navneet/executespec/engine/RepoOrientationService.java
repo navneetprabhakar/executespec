@@ -6,7 +6,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,10 +16,10 @@ import java.util.stream.Stream;
 
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 import com.navneet.executespec.smoketest.TestCommandResolver;
+import com.navneet.executespec.tool.RepositorySearchService;
 
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -39,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class RepoOrientationService {
 
   static final int MAX_BLOCK_CHARS = 3_500;
@@ -47,7 +45,6 @@ public class RepoOrientationService {
   static final int MAX_HITS_PER_IDENTIFIER = 5;
   static final int MAX_FILES_SCANNED = 4_000;
   static final int MAX_TREE_ENTRIES = 40;
-  static final long MAX_FILE_BYTES = 512 * 1024;
 
   private static final Set<String> SKIP_DIRS =
       Set.of(
@@ -88,6 +85,16 @@ public class RepoOrientationService {
 
   private final BuildCommandResolver buildCommandResolver;
   private final TestCommandResolver testCommandResolver;
+  private final RepositorySearchService repositorySearchService;
+
+  public RepoOrientationService(
+      BuildCommandResolver buildCommandResolver,
+      TestCommandResolver testCommandResolver,
+      RepositorySearchService repositorySearchService) {
+    this.buildCommandResolver = buildCommandResolver;
+    this.testCommandResolver = testCommandResolver;
+    this.repositorySearchService = repositorySearchService;
+  }
 
   /**
    * Build the orientation block for a task in an existing repo. Empty string when the workspace is
@@ -110,7 +117,7 @@ public class RepoOrientationService {
       }
 
       List<String> identifiers = extractIdentifiers(taskText);
-      Map<String, List<String>> hits = grepIdentifiers(workspaceRoot, files, identifiers);
+      Map<String, List<String>> hits = searchIdentifiers(workspaceRoot, identifiers);
       if (!hits.isEmpty()) {
         sb.append("Task-identifier matches (candidate starting points, NOT a complete list):\n");
         for (Map.Entry<String, List<String>> e : hits.entrySet()) {
@@ -219,27 +226,35 @@ public class RepoOrientationService {
         .toList();
   }
 
-  private static Map<String, List<String>> grepIdentifiers(
-      Path root, List<Path> files, List<String> identifiers) {
+  private Map<String, List<String>> searchIdentifiers(Path root, List<String> identifiers) {
     Map<String, List<String>> hits = new LinkedHashMap<>();
-    if (identifiers.isEmpty()) return hits;
-    Set<String> remaining = new LinkedHashSet<>(identifiers);
-    for (Path f : files) {
-      if (remaining.isEmpty()) break;
-      String content;
+    for (String identifier : identifiers) {
       try {
-        if (Files.size(f) > MAX_FILE_BYTES) continue;
-        content = Files.readString(f);
-      } catch (Exception e) {
-        continue; // binary / unreadable — skip
-      }
-      for (String id : identifiers) {
-        if (!content.contains(id)) continue;
-        List<String> list = hits.computeIfAbsent(id, k -> new ArrayList<>());
-        if (list.size() < MAX_HITS_PER_IDENTIFIER) {
-          list.add(root.relativize(f).toString());
-          if (list.size() == MAX_HITS_PER_IDENTIFIER) remaining.remove(id);
-        }
+        RepositorySearchService.SearchResult result =
+            repositorySearchService.search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    identifier,
+                    RepositorySearchService.SearchMode.EXACT,
+                    true,
+                    null,
+                    null,
+                    MAX_HITS_PER_IDENTIFIER * 8,
+                    0));
+        List<String> paths =
+            result.hits().stream()
+                .map(RepositorySearchService.SearchHit::path)
+                .distinct()
+                .limit(MAX_HITS_PER_IDENTIFIER)
+                .toList();
+        if (!paths.isEmpty()) hits.put(identifier, paths);
+      } catch (RuntimeException e) {
+        // Orientation is advisory and fail-open; one malformed identifier must not suppress the
+        // layout, resolver commands, or other identifier matches.
+        log.debug(
+            "Repository search failed for orientation identifier {}: {}",
+            identifier,
+            e.getMessage());
       }
     }
     return hits;
