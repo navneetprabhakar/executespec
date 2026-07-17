@@ -76,6 +76,7 @@ public class RunController {
   private final RunVisibilitySpec runVisibilitySpec;
   private final RunAccessGuard guard;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
   private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
   private final com.navneet.executespec.billing.service.ManagedAiUsageService managedAiUsageService;
 
@@ -88,6 +89,7 @@ public class RunController {
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
   private final com.navneet.executespec.agent.CostEstimator costEstimator;
   private final com.navneet.executespec.cost.RunCostTracker v2CostTracker;
+  private final com.navneet.executespec.cost.RunCostEvidenceService runCostEvidenceService;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
@@ -148,6 +150,13 @@ public class RunController {
               + " runs execute remotely.");
     }
 
+    // Brownfield admission happens before quota accounting and before the asynchronous pipeline.
+    // A project with linked repositories must submit an exact, fully-linked code boundary.
+    if (!localExecutionRequested && req.projectId() != null && !req.projectId().isBlank()) {
+      projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
+      projectRepoService.resolveForRunStrict(req.projectId(), req.selectedRepoIds());
+    }
+
     // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same
     // Idempotency-Key returns the ORIGINAL run instead of creating a duplicate. Checked BEFORE the
     // quota/usage increments below, so a client retry (after a transient 5xx whose response was
@@ -171,6 +180,16 @@ public class RunController {
     // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
     // rejected model never burns the user's monthly quota.
     modelAccessService.assertModelAllowed(userId, req.modelName());
+    String effectiveAiProvider =
+        req.aiProvider() != null && !req.aiProvider().isBlank()
+            ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
+            : aiProviderPreferenceService.preferredProvider(userDetails);
+    if ((effectiveAiProvider == null || effectiveAiProvider.isBlank())
+        && req.modelName() != null
+        && !req.modelName().isBlank()) {
+      effectiveAiProvider = modelAccessService.providerForModel(req.modelName());
+    }
+    modelAccessService.assertProviderModelPair(effectiveAiProvider, req.modelName());
 
     // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly run
     // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
@@ -185,11 +204,6 @@ public class RunController {
     // Extract per-user GitHub credentials to pass into the run
     String githubPat = userDetails.getUser().getGithubPat();
     String githubOwner = userDetails.getUser().getGithubOwner();
-    String effectiveAiProvider =
-        req.aiProvider() != null && !req.aiProvider().isBlank()
-            ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
-            : aiProviderPreferenceService.preferredProvider(userDetails);
-
     // Pass ALL pre-async fields INTO submitRun so they're set on the entity
     // BEFORE the async pipeline thread starts (avoids race condition where the
     // pipeline thread re-loads and re-saves the run without ownership fields).
@@ -354,6 +368,7 @@ public class RunController {
       body.put("reasoningTokens", null);
       body.put("calls", null);
       body.put("source", "stored_total");
+      runCostEvidenceService.enrich(body, run);
       return ResponseEntity.ok(body);
     }
 
@@ -376,6 +391,7 @@ public class RunController {
       body.put("reasoningTokens", snap.reasoningTokens());
       body.put("calls", snap.calls());
       body.put("source", "live_tracker");
+      runCostEvidenceService.enrich(body, run);
       return ResponseEntity.ok(body);
     }
 
@@ -400,6 +416,7 @@ public class RunController {
     body.put("reasoningTokens", null);
     body.put("calls", null);
     body.put("source", "legacy_estimator");
+    runCostEvidenceService.enrich(body, run);
     return ResponseEntity.ok(body);
   }
 
@@ -1218,6 +1235,16 @@ public class RunController {
    */
   @GetMapping("/{runId}/event-log")
   public ResponseEntity<List<java.util.Map<String, Object>>> getEventLog(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    return ResponseEntity.ok(broadcaster.getReplayLog(runId).events());
+  }
+
+  /**
+   * Metadata-bearing replay contract used by reconnecting clients; legacy event-log stays a list.
+   */
+  @GetMapping("/{runId}/event-log/replay")
+  public ResponseEntity<com.navneet.executespec.sse.SseBroadcaster.ReplayLog> getEventReplay(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
     return ResponseEntity.ok(broadcaster.getReplayLog(runId));

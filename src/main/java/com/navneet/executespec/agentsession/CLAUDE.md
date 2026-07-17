@@ -78,6 +78,9 @@ turns separately from runs.
 - Web/CLI/VS Code streaming turns may also send an explicit `modelOverride`. The server resolves
   its provider from the model registry, enforces `ModelAccessService` and provider/model
   compatibility, persists the session default, and applies the override only to that next turn.
+  `AgentStreamTurnStarter` resolves provider and model as one pair: a provider change without a
+  model clears the old provider's session model and falls back through the selected provider's
+  registry route. It must never combine a new provider with a stale model from an earlier turn.
 - Common chat is not only a run launcher. When an `agent_session` has a `projectId`, the streaming
   turn path binds `ProjectChatTools` through `SpecChatService` so CLI and VS Code can answer
   project/code questions with the same architecture, memory, document, tech-debt, and source-search

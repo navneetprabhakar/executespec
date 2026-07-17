@@ -114,10 +114,6 @@ public class ReviewerAgent {
   // review passes finish, before the final build smoke, so the formatter's
   // re-write is included in the buildProject verification.
   private final PostEditFormatter postEditFormatter;
-  // v2.5.12 — resolve PLANNING-tier model from the matrix (same tier as
-  // planner). Was req.model() (run-level worker default), so YAML matrix
-  // changes for the reviewer had no effect.
-  private final com.navneet.executespec.router.ModelResolver modelResolver;
 
   /**
    * Harness-resolution task 8 (flag {@code worker.auto-verify.enabled}) — lets the reviewer run the
@@ -467,7 +463,7 @@ public class ReviewerAgent {
         .build();
   }
 
-  private WorkerResult runPass(
+  WorkerResult runPass(
       ReviewerRequest req,
       int maxIter,
       String taskIdSuffix,
@@ -488,24 +484,14 @@ public class ReviewerAgent {
     } catch (IllegalArgumentException e) {
       reviewerProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
     }
-    // 2026-05-08 — Gemini reviewer-on-Pro fix. Empirically the reviewer's prefix (system prompt
-    // + tools) is ~2-3K tokens, BELOW gemini-3-pro-preview's 4096-token implicit-cache threshold.
-    // Result: 0% cache hit rate on every reviewer call (validated 2026-05-08, 0/14 reviewer
-    // calls hit cache). Switching the reviewer to gemini-3-flash-preview (WORKHORSE tier, 1024
-    // threshold) lets implicit cache fire AND drops per-call cost ~5×. Flash is less capable
-    // than Pro on multi-step reasoning, but reviewer work is inspect-and-fix not novel-design,
-    // and the build-error injection (today's earlier fix) gives the reviewer a concrete spec
-    // anyway. Anthropic + OpenAI reviewers stay on PLANNING tier (cache works fine there).
-    com.navneet.executespec.router.AgentTier reviewerTier =
-        reviewerProvider == com.navneet.executespec.router.LlmProvider.GEMINI
-            ? com.navneet.executespec.router.AgentTier.WORKHORSE
-            : com.navneet.executespec.router.AgentTier.PLANNING;
-    com.navneet.executespec.router.ResolvedModel resolved =
-        modelResolver.resolve("ReviewerAgent", reviewerProvider, reviewerTier);
-    String reviewerModel = resolved.getModel();
-    String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
+    // ReviewerRequest is already resolved by RunOrchestrator. Re-resolving here used to discard a
+    // continuation-selected model and made the "reviewer route promoted" audit event false. It
+    // also made the explicit model pin work only accidentally through a thread-local override.
+    // Preserve the exact validated pair handed across the orchestration boundary.
+    String reviewerModel = req.model();
+    String reviewerProviderName = reviewerProvider.name().toLowerCase();
     String userPrompt = composeReviewerUserPrompt(preBuildError);
-    return worker.run(
+    WorkerTaskRequest workerRequest =
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
             .model(reviewerModel)
@@ -524,7 +510,15 @@ public class ReviewerAgent {
             // shape (V182 layer-3). Without this, reviewer can call completeTask after a few edits
             // without verifying — leaves run in PARTIAL/FINAL_BUILD_FAILED.
             .requireBuildVerification(preBuildError != null)
-            .build());
+            .build();
+    var mutationPolicy =
+        new com.navneet.executespec.tool.ReviewerMutationScope.Policy(
+            Boolean.TRUE.equals(req.brownfield()),
+            req.allowedRepoRoots(),
+            req.approvedNewFiles(),
+            Boolean.TRUE.equals(req.allowBuildManifestCreation()));
+    return com.navneet.executespec.tool.ReviewerMutationScope.withPolicy(
+        mutationPolicy, () -> worker.run(workerRequest));
   }
 
   /**
@@ -886,8 +880,6 @@ exit=0 — the harness will reject premature completions.
 
   /** No-op build fallbacks are not compilation evidence even when their shell exit is zero. */
   static boolean isBuildVerifiedEvidence(String output) {
-    if (extractExitCode(output) != 0) return false;
-    return output == null
-        || (!output.contains("smokeSignal=UNAVAILABLE") && !output.contains("noOp=true"));
+    return com.navneet.executespec.smoketest.BuildVerificationResult.parse(output).passed();
   }
 }

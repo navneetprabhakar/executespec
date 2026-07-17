@@ -29,6 +29,8 @@ class ModelAccessServiceTest {
   private static final String FREE_MODEL = "deepseek-v4-flash-native";
   private static final String PREMIUM_MODEL = "claude-opus-4-8";
   private static final String GEMINI_MODEL = "gemini-3.5-flash";
+  private static final String OPENROUTER_GLM = "glm-5.2";
+  private static final String FIREWORKS_GLM = "glm-5.2-fw";
   private static final String RETIRED_MODEL = "retired-provider-model";
 
   @Mock private ModelRegistry modelRegistry;
@@ -42,6 +44,8 @@ class ModelAccessServiceTest {
     when(modelRegistry.providerFor(FREE_MODEL)).thenReturn("deepseek");
     when(modelRegistry.providerFor(PREMIUM_MODEL)).thenReturn("anthropic");
     when(modelRegistry.providerFor(GEMINI_MODEL)).thenReturn("gemini");
+    when(modelRegistry.providerFor(OPENROUTER_GLM)).thenReturn("openrouter");
+    when(modelRegistry.providerFor(FIREWORKS_GLM)).thenReturn("fireworks");
     when(tierService.resolveUserTier("free-user")).thenReturn("FREE");
     when(tierService.resolveUserTier("pro-user")).thenReturn("PRO");
   }
@@ -71,6 +75,26 @@ class ModelAccessServiceTest {
     assertTrue(service.isAllowed("pro-user", GEMINI_MODEL));
     assertEquals("PRO", service.minTierFor(GEMINI_MODEL));
     assertDoesNotThrow(() -> service.assertModelAllowed("pro-user", GEMINI_MODEL));
+  }
+
+  @Test
+  void validatesProviderModelPairBeforeAsyncDispatch() {
+    assertEquals("anthropic", service.providerForModel(PREMIUM_MODEL));
+    assertDoesNotThrow(() -> service.assertProviderModelPair("ANTHROPIC", PREMIUM_MODEL));
+    ResponseStatusException mismatch =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.assertProviderModelPair("DEEPSEEK", PREMIUM_MODEL));
+    assertEquals(400, mismatch.getStatusCode().value());
+  }
+
+  @Test
+  void acceptsRegisteredAggregatorModelsOnTheirDispatchProviders() {
+    assertDoesNotThrow(() -> service.assertProviderModelPair("OPENROUTER", OPENROUTER_GLM));
+    assertDoesNotThrow(() -> service.assertProviderModelPair("FIREWORKS", FIREWORKS_GLM));
+    assertThrows(
+        ResponseStatusException.class,
+        () -> service.assertProviderModelPair("FIREWORKS", OPENROUTER_GLM));
   }
 
   @Test

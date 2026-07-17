@@ -182,6 +182,22 @@ public class ValidationReportService {
         }
       }
 
+      // RCA-13/14 — fail closed when the run did not deliver an approved product diff, or when
+      // deterministic requirement evidence says the requested product was not implemented. Build
+      // success and a friendly reviewer verdict are not substitutes for delivered code.
+      String evidenceFailure = scoreEvidenceFailure(filesGenerated, accuracyReport);
+      if (evidenceFailure != null) {
+        pipelineResult = PipelineResult.FAILED;
+        issues.add(
+            new ReportIssueDTO(
+                evidenceFailure,
+                "WOULD_CAUSE_BUG",
+                "Do not approve or aggregate this run until product-diff evidence exists.",
+                "DETERMINISTIC_PROVENANCE",
+                null));
+        issuesJson = objectMapper.writeValueAsString(issues);
+      }
+
       // 3b. v2.5.10 — verified signals (build outcome, test counts, reviewer verdict).
       // These replace the LLM-only anchor in ReviewScoringService when the
       // scoring.v2-verified flag is on, and always persist alongside the
@@ -209,30 +225,34 @@ public class ValidationReportService {
       String testCoverageLevel =
           accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
       int verifiedScore =
-          computeVerifiedScore(
-              finalBuildPassed,
-              testsPassedCount,
-              testsTotalCount,
-              reviewerVerdict,
-              unfixedCritical,
-              endpointCoveragePercent,
-              testCoverageLevel,
-              filesGenerated,
-              input.bootVerification());
+          evidenceFailure != null
+              ? 0
+              : computeVerifiedScore(
+                  finalBuildPassed,
+                  testsPassedCount,
+                  testsTotalCount,
+                  reviewerVerdict,
+                  unfixedCritical,
+                  endpointCoveragePercent,
+                  testCoverageLevel,
+                  filesGenerated,
+                  input.bootVerification());
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
       // headline. The rubric awards points dimension-by-dimension so a run that compiled
       // cleanly but had a flaky test still reads 80/100 instead of 0/100.
       int rubricScore =
-          computeRubricScore(
-              finalBuildPassed,
-              testsPassedCount,
-              testsTotalCount,
-              reviewerVerdict,
-              unfixedCritical,
-              endpointCoveragePercent,
-              testCoverageLevel);
+          evidenceFailure != null
+              ? 0
+              : computeRubricScore(
+                  finalBuildPassed,
+                  testsPassedCount,
+                  testsTotalCount,
+                  reviewerVerdict,
+                  unfixedCritical,
+                  endpointCoveragePercent,
+                  testCoverageLevel);
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -419,6 +439,20 @@ public class ValidationReportService {
     ValidationReport report = found.get();
     int total = Math.max(0, summary.getTotalTests());
     int passed = Math.max(0, Math.min(summary.getPassed(), total));
+    // The background HTTP/preview test generator publishes a 0/0 completion event when a run is
+    // not applicable (for example a Python library with no HTTP surface). That event is not
+    // evidence that the worker's already-executed tests disappeared. Never let weaker, empty
+    // downstream evidence erase a positive concrete workspace-test result captured during report
+    // generation.
+    if (total == 0 && report.getTestsTotal() != null && report.getTestsTotal() > 0) {
+      log.info(
+          "Ignoring empty downstream test summary for run={} because report already has {}/{}"
+              + " concrete workspace tests",
+          runId,
+          report.getTestsPassed(),
+          report.getTestsTotal());
+      return Optional.of(report);
+    }
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
         verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
@@ -685,6 +719,28 @@ public class ValidationReportService {
       }
     }
     return count;
+  }
+
+  static String scoreEvidenceFailure(int productFilesChanged, AccuracyReport accuracy) {
+    if (productFilesChanged <= 0) {
+      return "No approved product-code diff was proven against the admitted Git baseline.";
+    }
+    if (accuracy == null) return null;
+    boolean hasDeterministicMissingRequirements =
+        accuracy.getMissingRequirements() != null && !accuracy.getMissingRequirements().isEmpty();
+    if (accuracy.getSpecAdherenceScore() == 0 && hasDeterministicMissingRequirements) {
+      return "Spec adherence is zero and required product behavior is deterministically missing.";
+    }
+    AccuracyReport.EndpointCoverage endpoints = accuracy.getEndpointCoverage();
+    if (endpoints != null
+        && endpoints.getRequired() != null
+        && !endpoints.getRequired().isEmpty()
+        && endpoints.getCoveragePercent() == 0
+        && endpoints.getMissing() != null
+        && !endpoints.getMissing().isEmpty()) {
+      return "Required runtime surface has zero deterministic endpoint coverage.";
+    }
+    return null;
   }
 
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {

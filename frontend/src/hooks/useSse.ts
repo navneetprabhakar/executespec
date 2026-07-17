@@ -1,12 +1,14 @@
 import {useEffect, useRef} from 'react';
 import {useSseStore} from '@/stores/useSseStore';
 import {useRunStore} from '@/stores/useRunStore';
-import {getMessages, getSseToken} from '@/lib/api';
+import {getMessages, getRunEventLog, getSseToken} from '@/lib/api';
+import {replayEntry, replayNotice, runEventKey} from '@/lib/runReplay';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
 export function useSse(runId: string | null) {
-  const {setStatus, addEntry, clearEntries, setRunId, bumpFileWrittenTick} = useSseStore();
+  const {setStatus, addEntry, hydrateEntries, clearEntries, setRunId, bumpFileWrittenTick} =
+    useSseStore();
   const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
@@ -38,9 +40,24 @@ export function useSse(runId: string | null) {
     attemptRef.current = 0;
     lastEventIdRef.current = null;
 
-    // Pre-populate with historical messages so revisiting a completed run shows its log.
+    // Hydrate the durable event stream before attaching live SSE. The response carries the last
+    // durable sequence, so the subsequent subscription asks the server to replay any event that
+    // landed in the small fetch-to-connect gap.
     // Only do this for NEW run IDs so we don't double-prepend history on remount.
     if (isNewRun) {
+      getRunEventLog(runId)
+        .then((replay) => {
+          if (!active) return;
+          hydrateEntries(replay.events.map(replayEntry), replayNotice(replay));
+          lastEventIdRef.current = replay.lastEventId;
+        })
+        .catch(() => {
+          if (active)
+            hydrateEntries([], 'Earlier activity could not be loaded. Live events will continue.');
+        })
+        .finally(() => {
+          if (active) void connect();
+        });
       getMessages(runId)
         .then((msgs) => {
           msgs.forEach((msg, i) => {
@@ -112,7 +129,7 @@ export function useSse(runId: string | null) {
           }
 
           const entry = {
-            id: `${Date.now()}-${Math.random()}`,
+            id: runEventKey(data, ev.lastEventId),
             type: data.type ?? 'LOG',
             data,
             timestamp: Date.now(),
@@ -183,7 +200,7 @@ export function useSse(runId: string | null) {
       };
     }
 
-    connect();
+    if (!isNewRun) void connect();
 
     return () => {
       active = false;

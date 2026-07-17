@@ -30,6 +30,17 @@ public class ProjectRepo {
     USER
   }
 
+  public enum SourceReadiness {
+    UNKNOWN,
+    LINKED,
+    AUTH_VALIDATED,
+    SOURCE_READABLE,
+    INVENTORIED,
+    INDEXING,
+    READY,
+    BLOCKED
+  }
+
   @Id @Builder.Default private UUID id = UUID.randomUUID();
 
   @Enumerated(EnumType.STRING)
@@ -93,6 +104,24 @@ public class ProjectRepo {
   @Column(name = "detected_stack", columnDefinition = "jsonb")
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private String detectedStack;
+
+  /**
+   * V273 — source usability is deliberately separate from project linking and the optional
+   * .executespec bootstrap PR. UNKNOWN covers legacy/unprobed rows; READY requires a readable
+   * branch plus a successful, non-empty GitHub tree inventory.
+   */
+  @Column(name = "source_readiness_status", nullable = false, length = 24)
+  @Builder.Default
+  private String sourceReadinessStatus = SourceReadiness.UNKNOWN.name();
+
+  @Column(name = "source_readiness_reason", length = 96)
+  private String sourceReadinessReason;
+
+  @Column(name = "source_file_count")
+  private Long sourceFileCount;
+
+  @Column(name = "source_readiness_checked_at")
+  private Instant sourceReadinessCheckedAt;
 
   /**
    * v2.6.2 (E1.1) — bootstrap state of the .executespec/ folder in this repo. Persisted as String

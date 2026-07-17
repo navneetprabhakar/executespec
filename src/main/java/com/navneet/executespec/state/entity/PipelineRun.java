@@ -242,6 +242,26 @@ public class PipelineRun {
   @Column(name = "ai_provider", length = 20)
   private String aiProvider = "OPENAI";
 
+  /**
+   * Caller-visible provider selection preserved independently from any effective/fallback route.
+   */
+  @Column(name = "requested_provider", length = 20)
+  private String requestedProvider;
+
+  /** Exact caller-selected model. Null means provider-tier routing, not an implicit model pin. */
+  @Column(name = "requested_model", length = 120)
+  private String requestedModel;
+
+  /** AUTO, PROVIDER_PREFERRED, or EXACT_LOCK. */
+  @Builder.Default
+  @Column(name = "routing_mode", length = 24, nullable = false)
+  private String routingMode = "PROVIDER_PREFERRED";
+
+  /** Durable exact-route marker used by resume, continuation, chat and the transport router. */
+  @Builder.Default
+  @Column(name = "route_pinned", nullable = false)
+  private boolean routePinned = false;
+
   // Hierarchical Planner (v2.6.2 — V130)
   /**
    * Strategy chosen by {@code SmartClassifierAgent}: SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY.

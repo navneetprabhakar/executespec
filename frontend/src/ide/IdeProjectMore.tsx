@@ -24,12 +24,14 @@ import {
   invariantViolationCounts,
   looksLikeArtifact,
   techDebtCategories,
+  uiBound,
 } from '@/ide/projectMoreUtils';
 import {
   formatProjectList,
   formatProjectRunList,
   resolveProjectChatSlashAction,
 } from '@/ide/projectChatUtils';
+
 import {
   ProjectBanner as Banner,
   ProjectChatMessageCard as ChatMessageCard,
@@ -524,6 +526,8 @@ export function IdeProjectCode() {
   // Browse state
   const [repoId, setRepoId] = useState('');
   const [files, setFiles] = useState<string[] | null>(null);
+  const [filesError, setFilesError] = useState('');
+  const [fileReload, setFileReload] = useState(0);
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState<Record<string, string>>({});
   // Mobile tree search query. The mobile view still renders the real folder
@@ -563,12 +567,16 @@ export function IdeProjectCode() {
   useEffect(() => {
     if (sub !== 'browse' || !repoId) return;
     setFiles(null);
+    setFilesError('');
     setActive(null);
     api
       .listRepoFiles(projectId, repoId)
       .then((r) => setFiles(r.files ?? []))
-      .catch(() => setFiles([]));
-  }, [projectId, repoId, sub]);
+      .catch((e: unknown) => {
+        setFiles([]);
+        setFilesError(e instanceof Error ? e.message : 'Repository file inventory unavailable.');
+      });
+  }, [projectId, repoId, sub, fileReload]);
 
   // Health — lazy on tab open.
   useEffect(() => {
@@ -743,7 +751,15 @@ export function IdeProjectCode() {
           active={sub}
           onSelect={(k) => setSub(k as CodeSub)}
           tabs={[
-            {key: 'browse', label: files == null ? 'Files' : `Files · ${files.length}`},
+            {
+              key: 'browse',
+              label:
+                files == null
+                  ? 'Files'
+                  : filesError
+                    ? 'Files · unavailable'
+                    : `Files · ${files.length}`,
+            },
             {key: 'debt', label: `Issues · ${debtCats.length}`},
             {key: 'review', label: 'Review'},
             {key: 'health', label: 'Repo health'},
@@ -764,6 +780,13 @@ export function IdeProjectCode() {
               <div className='ide-split-files' style={{width: 260}}>
                 {files === null ? (
                   <IdeLoader label='Loading files…' pad={20} />
+                ) : filesError ? (
+                  <div className='ide-empty' style={{padding: 16}}>
+                    <div style={{color: 'var(--ide-red)', marginBottom: 10}}>{filesError}</div>
+                    <button className='ide-btn ghost' onClick={() => setFileReload((n) => n + 1)}>
+                      Retry file inventory
+                    </button>
+                  </div>
                 ) : (
                   <IdeFileTree files={files} activePath={active} onOpen={open} />
                 )}
@@ -897,7 +920,9 @@ export function IdeProjectCode() {
             <div className='ide-empty'>No repos linked.</div>
           ) : (
             health.repos.map((r) => {
-              const drift = r.isStale;
+              const syncStatus = r.syncStatus || 'UNKNOWN';
+              const drift = syncStatus === 'DRIFTED';
+              const syncKnown = syncStatus !== 'UNKNOWN';
               return (
                 <div key={r.repoId} className='ide-card' style={{marginBottom: 8}}>
                   <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
@@ -910,10 +935,12 @@ export function IdeProjectCode() {
                         style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
                       >
                         {(r.currentOriginSha || '').slice(0, 7) || '—'}{' '}
-                        {drift ? '· stale vs origin' : '· in sync'}
+                        {drift ? '· stale vs origin' : syncKnown ? '· in sync' : '· status unknown'}
                       </div>
                     </div>
-                    <IdeBadge kind={drift ? 'warn' : 'ok'}>{drift ? 'Drift' : 'Healthy'}</IdeBadge>
+                    <IdeBadge kind={!syncKnown || drift ? 'warn' : 'ok'}>
+                      {drift ? 'Drift' : syncKnown ? 'Healthy' : 'Unknown'}
+                    </IdeBadge>
                     {drift && (
                       // §3.4 — codemap-stale recovery CTA: Sync/Regenerate live on Repos.
                       <Link
@@ -1159,16 +1186,21 @@ export function IdeProjectArchitecture() {
 
   function refresh() {
     if (!projectId) return;
+    // The current map is the primary surface. Render it as soon as its own request completes;
+    // history, rules, decisions, staleness, repos, and coverage must not form a shared latency
+    // barrier around it.
+    setArch(undefined);
+    uiBound(api.getArchitectureDoc(projectId))
+      .then(setArch)
+      .catch(() => setArch(null));
     Promise.allSettled([
-      api.getArchitectureDoc(projectId),
-      api.getArchitectureVersions(projectId),
-      api.listProjectInvariants(projectId),
-      api.listProjectInvariantViolations(projectId),
-      api.listProjectAdrs(projectId, false),
-      api.getArchitectureStaleness(projectId),
-      api.getProjectRepos(projectId),
-    ]).then(async ([a, v, inv, viol, adr, st, rp]) => {
-      setArch(a.status === 'fulfilled' ? a.value : null);
+      uiBound(api.getArchitectureVersions(projectId)),
+      uiBound(api.listProjectInvariants(projectId)),
+      uiBound(api.listProjectInvariantViolations(projectId)),
+      uiBound(api.listProjectAdrs(projectId, false)),
+      uiBound(api.getArchitectureStaleness(projectId)),
+      uiBound(api.getProjectRepos(projectId)),
+    ]).then(async ([v, inv, viol, adr, st, rp]) => {
       setVersions(v.status === 'fulfilled' ? (v.value as ArchitectureDoc[]) : []);
       setInvariants(inv.status === 'fulfilled' ? inv.value : []);
       if (viol.status === 'fulfilled') setViolations(viol.value);
@@ -1355,8 +1387,8 @@ export function IdeProjectArchitecture() {
                     {arch?.version ? `v${arch.version}` : 'Latest'}
                   </div>
                 </div>
-                <IdeBadge kind={staleness?.stale ? 'warn' : 'ok'}>
-                  {staleness?.stale ? 'Stale' : 'Up to date'}
+                <IdeBadge kind={!staleness || staleness.stale ? 'warn' : 'ok'}>
+                  {!staleness ? 'Freshness unknown' : staleness.stale ? 'Stale' : 'Up to date'}
                 </IdeBadge>
               </div>
               {docMd ? (

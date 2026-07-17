@@ -1,5 +1,10 @@
 import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
 import {Markdown} from '@/signal/components/Markdown';
 import {
   CommandIcon,
@@ -157,6 +162,10 @@ export function AgentTopBar({
   onToggleChats,
   onToggleSettings,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -177,6 +186,10 @@ export function AgentTopBar({
   onToggleChats: () => void;
   onToggleSettings: () => void;
   availableModels?: api.ProviderEntry[];
+  providerReadiness?: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported?: boolean;
+  providerReadinessLoading?: boolean;
+  providerReadinessError?: boolean;
   selectedProvider?: string;
   selectedModel?: string;
   onProviderChange?: (provider: string) => void;
@@ -240,6 +253,10 @@ export function AgentTopBar({
             routingState={routingState}
             capabilities={capabilities}
             availableModels={availableModels ?? []}
+            providerReadiness={providerReadiness ?? new Map()}
+            providerReadinessSupported={providerReadinessSupported ?? false}
+            providerReadinessLoading={providerReadinessLoading ?? false}
+            providerReadinessError={providerReadinessError ?? false}
             selectedProvider={selectedProvider ?? ''}
             selectedModel={selectedModel ?? ''}
             onProviderChange={onProviderChange ?? (() => {})}
@@ -259,6 +276,10 @@ function SettingsPopover({
   capabilities,
   onClose,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -270,13 +291,22 @@ function SettingsPopover({
   capabilities: api.AgentCapabilityTool[];
   onClose: () => void;
   availableModels: api.ProviderEntry[];
+  providerReadiness: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported: boolean;
+  providerReadinessLoading: boolean;
+  providerReadinessError: boolean;
   selectedProvider: string;
   selectedModel: string;
   onProviderChange: (provider: string) => void;
   onModelChange: (model: string) => void;
 }) {
-  const provider = availableModels.find((entry) => entry.id === selectedProvider);
+  const provider = availableModels.find(
+    (entry) => entry.id.toUpperCase() === selectedProvider.toUpperCase(),
+  );
   const models = provider?.models ?? availableModels.flatMap((entry) => entry.models);
+  const selectedReadiness = selectedProvider
+    ? providerReadiness.get(selectedProvider.toUpperCase())
+    : null;
   return (
     <>
       <div
@@ -324,11 +354,36 @@ function SettingsPopover({
           >
             <option value=''>Default</option>
             {availableModels.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label || entry.id}
+              <option
+                key={entry.id}
+                value={entry.id}
+                disabled={
+                  providerReadinessSupported &&
+                  !providerIsDispatchable(providerReadiness.get(entry.id.toUpperCase()))
+                }
+              >
+                {providerOptionLabel(
+                  entry.label || entry.id,
+                  providerReadiness.get(entry.id.toUpperCase()),
+                )}
               </option>
             ))}
           </select>
+          <small
+            role={
+              selectedProvider && !providerIsDispatchable(selectedReadiness) ? 'alert' : 'status'
+            }
+          >
+            {!providerReadinessSupported
+              ? 'Provider readiness is not exposed by this server; dispatch policy still applies.'
+              : !selectedProvider
+                ? 'Account default; the server verifies its effective route.'
+                : providerReadinessError
+                  ? 'Provider readiness unavailable; explicit routing is disabled.'
+                  : providerReadinessLoading
+                    ? 'Checking provider readiness…'
+                    : providerReadinessLabel(selectedReadiness)}
+          </small>
           <label htmlFor='agent-model-select'>Model</label>
           <select
             id='agent-model-select'
@@ -343,7 +398,10 @@ function SettingsPopover({
               </option>
             ))}
           </select>
-          <small>Applies to the next turn.</small>
+          <small>
+            Provider changes use that provider's default route. Choosing a model pins that exact
+            account-eligible model for the next turn.
+          </small>
         </div>
         {managedAi && <ManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>

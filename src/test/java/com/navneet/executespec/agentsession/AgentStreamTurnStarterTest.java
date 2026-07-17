@@ -177,6 +177,48 @@ class AgentStreamTurnStarterTest {
   }
 
   @Test
+  void sessionRouteWinsOverAChangedAccountPreference() {
+    AgentSession session = session();
+    session.setDefaultProvider("ANTHROPIC");
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(aiProviderPreferenceService.preferredProvider(any(AppUserDetails.class)))
+        .thenReturn("OPENAI");
+
+    var ctx =
+        starter.begin(
+            session, "s1", new StreamTurnRequest("Inspect", null, null, null, null), user());
+
+    assertThat(ctx.provider()).isEqualTo("ANTHROPIC");
+  }
+
+  @Test
+  void providerOnlySwitchClearsAnIncompatibleSessionModel() {
+    AgentSession session = session();
+    session.setDefaultProvider("OPENAI");
+    session.setDefaultModel("gpt-5.4-mini");
+    when(turnRepo.countBySessionId("s1")).thenReturn(0L);
+    when(aiProviderPreferenceService.updatePreferredProvider(
+            any(AppUserDetails.class), eq("ANTHROPIC")))
+        .thenReturn("ANTHROPIC");
+    org.mockito.Mockito.doThrow(
+            new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "incompatible"))
+        .when(modelAccessService)
+        .assertProviderModelPair("ANTHROPIC", "gpt-5.4-mini");
+
+    var ctx =
+        starter.begin(
+            session,
+            "s1",
+            new StreamTurnRequest("Switch", null, null, null, "ANTHROPIC", null, null),
+            user());
+
+    assertThat(ctx.provider()).isEqualTo("ANTHROPIC");
+    assertThat(ctx.model()).isNull();
+    assertThat(session.getDefaultModel()).isNull();
+  }
+
+  @Test
   void explicitModelSwitchIsAuthorizedAndPersistsProviderAndModel() {
     AgentSession session = session();
     when(turnRepo.countBySessionId("s1")).thenReturn(0L);
@@ -195,6 +237,7 @@ class AgentStreamTurnStarterTest {
             user());
 
     verify(modelAccessService).assertModelAllowed("u1", "gpt-5.4-mini");
+    verify(modelAccessService).assertProviderModelPair("OPENAI", "gpt-5.4-mini");
     assertThat(ctx.provider()).isEqualTo("OPENAI");
     assertThat(ctx.model()).isEqualTo("gpt-5.4-mini");
     assertThat(session.getDefaultProvider()).isEqualTo("OPENAI");
@@ -205,6 +248,15 @@ class AgentStreamTurnStarterTest {
   void rejectsModelProviderMismatchBeforePersistingSession() {
     AgentSession session = session();
     when(modelRegistry.providerFor("gpt-5.4-mini")).thenReturn("openai");
+    when(aiProviderPreferenceService.updatePreferredProvider(
+            any(AppUserDetails.class), eq("ANTHROPIC")))
+        .thenReturn("ANTHROPIC");
+    org.mockito.Mockito.doThrow(
+            new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST,
+                "Model 'gpt-5.4-mini' is not served by provider 'ANTHROPIC'."))
+        .when(modelAccessService)
+        .assertProviderModelPair("ANTHROPIC", "gpt-5.4-mini");
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->

@@ -280,17 +280,23 @@ public class WorkspaceInitService {
   public void cloneMultipleRepos(String runId, List<RepoToClone> repos, String pat)
       throws Exception {
     if (repos == null || repos.isEmpty()) return;
+    long distinctTargets =
+        repos.stream().map(r -> repoDirectoryName(r.fullName())).distinct().count();
+    if (distinctTargets != repos.size()) {
+      throw new IllegalArgumentException(
+          "selected repositories contain colliding checkout directory names");
+    }
     Path workspace = runWorkspacePath(runId);
     Path reposRoot = workspace.resolve("repos");
     Files.createDirectories(reposRoot);
 
     for (RepoToClone r : repos) {
-      String dirName =
-          r.fullName().contains("/")
-              ? r.fullName().substring(r.fullName().indexOf('/') + 1)
-              : r.fullName();
+      String dirName = repoDirectoryName(r.fullName());
       Path target = reposRoot.resolve(dirName);
       if (Files.isDirectory(target.resolve(".git"))) {
+        // A crash may have left a complete clone before its baseline row was persisted. Reconcile
+        // the immutable baseline before treating the clone as admitted.
+        persistCloneSnapshot(runId, r, target);
         log.debug("Repo {} already cloned for run {}", r.fullName(), runId);
         continue;
       }
@@ -317,17 +323,73 @@ public class WorkspaceInitService {
   }
 
   /**
+   * Deterministic post-clone admission for brownfield runs. The outer seed repository is never
+   * considered evidence; every requested repository must have Git metadata and at least one real
+   * non-hidden file. This check runs before classifier/planner dispatch.
+   */
+  public WorkspaceAdmission verifyMultipleRepos(String runId, List<RepoToClone> repos) {
+    if (repos == null || repos.isEmpty()) {
+      return new WorkspaceAdmission(false, 0, "no repositories were selected");
+    }
+    Path reposRoot = runWorkspacePath(runId).resolve("repos");
+    long totalFiles = 0;
+    for (RepoToClone repo : repos) {
+      String dirName = repoDirectoryName(repo.fullName());
+      Path target = reposRoot.resolve(dirName);
+      if (!Files.isDirectory(target.resolve(".git"))) {
+        return new WorkspaceAdmission(false, totalFiles, "clone missing for " + repo.fullName());
+      }
+      try (var files = Files.walk(target)) {
+        long repoFiles =
+            files
+                .filter(Files::isRegularFile)
+                .filter(path -> !target.relativize(path).startsWith(".git"))
+                .filter(
+                    path -> {
+                      Path relative = target.relativize(path);
+                      for (Path segment : relative) {
+                        if (segment.toString().startsWith(".")) return false;
+                      }
+                      return true;
+                    })
+                .count();
+        if (repoFiles == 0) {
+          return new WorkspaceAdmission(
+              false, totalFiles, "repository has no source files: " + repo.fullName());
+        }
+        totalFiles += repoFiles;
+      } catch (IOException e) {
+        return new WorkspaceAdmission(
+            false, totalFiles, "could not inventory " + repo.fullName() + ": " + e.getMessage());
+      }
+    }
+    return new WorkspaceAdmission(true, totalFiles, null);
+  }
+
+  public record WorkspaceAdmission(boolean admitted, long fileCount, String reason) {}
+
+  static String repoDirectoryName(String fullName) {
+    if (fullName == null || fullName.isBlank()) {
+      throw new IllegalArgumentException("repository full name is required");
+    }
+    int slash = fullName.lastIndexOf('/');
+    return slash >= 0 ? fullName.substring(slash + 1) : fullName;
+  }
+
+  /**
    * Captures {@code git rev-parse HEAD} in the newly cloned repo and writes a {@link
-   * com.navneet.executespec.state.entity.RunRepoSnapshot} row. Non-fatal on failure — snapshot is
-   * only used by the reset-to-original flow; a missing row means that flow won't be available for
-   * this repo but the run proceeds.
+   * com.navneet.executespec.state.entity.RunRepoSnapshot} row. Baseline persistence is part of
+   * brownfield admission: without the exact branch/SHA the run cannot later prove what changed.
    */
   private void persistCloneSnapshot(String runId, RepoToClone r, Path target) {
     try {
+      boolean alreadyPersisted =
+          snapshotRepo.findByRunId(runId).stream()
+              .anyMatch(snapshot -> r.fullName().equals(snapshot.getRepoFullName()));
+      if (alreadyPersisted) return;
       String sha = captureHeadSha(target);
       if (sha == null || sha.isBlank()) {
-        log.warn("Snapshot skipped for run {} repo {} — empty SHA", runId, r.fullName());
-        return;
+        throw new IllegalStateException("could not capture baseline SHA for " + r.fullName());
       }
       String branch = r.branch() == null || r.branch().isBlank() ? "main" : r.branch();
       com.navneet.executespec.state.entity.RunRepoSnapshot snap =
@@ -341,8 +403,8 @@ public class WorkspaceInitService {
       snapshotRepo.save(snap);
       log.debug("Snapshot saved run={} repo={} branch={} sha={}", runId, r.fullName(), branch, sha);
     } catch (Exception e) {
-      log.warn(
-          "persistCloneSnapshot failed run={} repo={}: {}", runId, r.fullName(), e.getMessage());
+      throw new IllegalStateException(
+          "could not persist repository baseline for " + r.fullName(), e);
     }
   }
 

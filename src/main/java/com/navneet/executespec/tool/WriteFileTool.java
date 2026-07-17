@@ -102,6 +102,12 @@ public class WriteFileTool implements Tool {
     }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+      boolean overwrite = args.path("overwrite").asBoolean(false);
+      String reviewerPolicyError =
+          ReviewerMutationScope.validateWriteFile(path, Files.exists(resolved), overwrite);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       // Guardrail-level file-sandbox gate — no-op at LOW; at MEDIUM/HIGH
       // rejects writes outside the allowed dir+dotfile set.
       FileSandboxPolicy.Decision sandbox =
@@ -111,7 +117,6 @@ public class WriteFileTool implements Tool {
             "writeFile blocked by FileSandboxPolicy path={} reason={}", path, sandbox.reason());
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, sandbox.reason());
       }
-      boolean overwrite = args.path("overwrite").asBoolean(false);
       if (Files.exists(resolved)) {
         if (!overwrite) {
           return ToolResult.err(

@@ -1,0 +1,63 @@
+package com.navneet.executespec.cost;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.navneet.executespec.state.entity.PipelineRun;
+
+import org.springframework.stereotype.Service;
+
+import lombok.RequiredArgsConstructor;
+
+/** Builds the auditable, per-call cost ledger returned by the run cost endpoint. */
+@Service
+@RequiredArgsConstructor
+public class RunCostEvidenceService {
+
+  private final RunStepUsageRepository repository;
+
+  public void enrich(Map<String, Object> body, PipelineRun run) {
+    List<RunStepUsage> rows = repository.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+    List<Map<String, Object>> stepCalls =
+        rows.stream().map(RunCostEvidenceService::toCall).toList();
+    double attributed = rows.stream().mapToDouble(RunStepUsage::getCostUsd).sum();
+    double total = ((Number) body.getOrDefault("costUsd", 0d)).doubleValue();
+    double difference = total - attributed;
+    body.put("stepCalls", stepCalls);
+    body.put("attributedCostUsd", attributed);
+    body.put("unattributedCostUsd", difference);
+    body.put("reconciled", Math.abs(difference) < 0.000001d);
+    body.put(
+        "phases",
+        Map.of(
+            "classifier", nullToZero(run.getClassifierCostUsd()),
+            "outline", nullToZero(run.getOutlineCostUsd()),
+            "expansion", nullToZero(run.getExpansionCostUsd()),
+            "coherence", nullToZero(run.getCoherenceCostUsd())));
+  }
+
+  private static Map<String, Object> toCall(RunStepUsage row) {
+    Map<String, Object> call = new LinkedHashMap<>();
+    call.put("id", row.getId());
+    call.put("taskId", row.getTaskId());
+    call.put("agentRole", row.getAgentRole());
+    call.put("stepId", row.getStepId());
+    call.put("retryOf", row.getRetryOf());
+    call.put("provider", row.getProvider());
+    call.put("model", row.getModel());
+    call.put("inputTokens", row.getInputTokens());
+    call.put("outputTokens", row.getOutputTokens());
+    call.put("cacheReadTokens", row.getCacheReadTokens());
+    call.put("cacheWriteTokens", row.getCacheWriteTokens());
+    call.put("reasoningTokens", row.getReasoningTokens());
+    call.put("costUsd", row.getCostUsd());
+    call.put("callIndex", row.getCallIndex());
+    call.put("createdAt", row.getCreatedAt());
+    return call;
+  }
+
+  private static double nullToZero(Double value) {
+    return value == null ? 0d : value;
+  }
+}

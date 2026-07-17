@@ -1,11 +1,13 @@
 package com.navneet.executespec.sse;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.annotation.PostConstruct;
@@ -311,11 +313,17 @@ public class SseBroadcaster {
    * replay TTL). Reuses the same Redis list the reconnect-replay uses — no new persistence. Each
    * entry already carries {@code type} + {@code timestamp} + payload fields (see {@link RunEvent}).
    */
-  public List<java.util.Map<String, Object>> getReplayLog(String runId) {
+  public ReplayLog getReplayLog(String runId) {
     try {
-      List<String> raw = redis.opsForList().range(REPLAY_PREFIX + runId, 0, -1);
-      if (raw == null || raw.isEmpty()) return java.util.List.of();
+      String key = REPLAY_PREFIX + runId;
+      List<String> raw = redis.opsForList().range(key, 0, -1);
+      Long ttlMs = redis.getExpire(key, TimeUnit.MILLISECONDS);
+      if (raw == null || raw.isEmpty()) {
+        return new ReplayLog(java.util.List.of(), false, "EXPIRED_OR_EMPTY", null, null, false);
+      }
       List<java.util.Map<String, Object>> out = new java.util.ArrayList<>(raw.size());
+      long firstSequence = 0;
+      long lastSequence = 0;
       for (String entry : raw) {
         try {
           com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
@@ -324,17 +332,42 @@ public class SseBroadcaster {
           // drop that row from the run-detail Logs API.
           String json =
               node.has("seq") && node.has("payload") ? node.path("payload").asText() : entry;
-          out.add(mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
+          java.util.Map<String, Object> event =
+              mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+          if (node.has("seq")) {
+            long sequence = node.path("seq").asLong(0);
+            if (firstSequence == 0) firstSequence = sequence;
+            lastSequence = sequence;
+            // The browser receives this same sequence as Last-Event-ID on the live stream. Keeping
+            // it in the durable row gives both transports one stable deduplication identity.
+            event.put("_eventId", String.valueOf(sequence));
+          }
+          out.add(event);
         } catch (Exception ignore) {
           // skip a single malformed entry; keep the rest of the log
         }
       }
-      return out;
+      Instant retainedUntil = ttlMs != null && ttlMs > 0 ? Instant.now().plusMillis(ttlMs) : null;
+      return new ReplayLog(
+          out,
+          true,
+          "AVAILABLE",
+          retainedUntil,
+          lastSequence > 0 ? String.valueOf(lastSequence) : null,
+          firstSequence > 1);
     } catch (Exception e) {
       log.debug("[SSE] replay-log read failed for run {}: {}", runId, e.getMessage());
-      return java.util.List.of();
+      return new ReplayLog(java.util.List.of(), false, "STORE_UNAVAILABLE", null, null, false);
     }
   }
+
+  public record ReplayLog(
+      List<java.util.Map<String, Object>> events,
+      boolean available,
+      String reason,
+      Instant retainedUntil,
+      String lastEventId,
+      boolean truncated) {}
 
   private void publishToRedis(String runId, String json, long sequence) {
     try {

@@ -134,7 +134,9 @@ public class AgentRunSubmissionGate {
           "Run submissions are temporarily paused for maintenance. Please try again later.");
     }
 
-    String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
+    String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
+    String modelName =
+        AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
     modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
     String lowStartTier =
         request == null
@@ -147,10 +149,18 @@ public class AgentRunSubmissionGate {
     apiKeyResolver.validateKeyAvailability(user.getUser().getId());
 
     String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
+    String modelProvider =
+        explicitModel == null ? null : modelAccessService.providerForModel(explicitModel);
+    String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
+    String selectedProvider =
+        AgentText.firstNonBlank(providerOverride, modelProvider, sessionProvider);
     String effectiveProvider =
-        providerOverride != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, providerOverride)
+        selectedProvider != null
+            ? (providerOverride != null || modelProvider != null
+                ? aiProviderPreferenceService.updatePreferredProvider(user, selectedProvider)
+                : selectedProvider)
             : aiProviderPreferenceService.preferredProvider(user);
+    modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
     String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
 
     PipelineRun run =

@@ -202,6 +202,30 @@ class RunOrchestratorReviewerRouteTest {
   }
 
   @Test
+  void deterministicProvenanceFailureDowngradesTheRunInsteadOfPublishingPartial() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .verifiedScore(0)
+            .pipelineResult(PipelineResult.FAILED)
+            .issuesJson("[{\"stage\":\"DETERMINISTIC_PROVENANCE\"}]")
+            .build();
+
+    assertThat(RunOrchestrator.validationReportProvenanceFailed(report)).isTrue();
+  }
+
+  @Test
+  void ordinaryLowQualityReportIsNotMisclassifiedAsMissingProductEvidence() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .verifiedScore(0)
+            .pipelineResult(PipelineResult.FAILED)
+            .issuesJson("[{\"stage\":\"REVIEWER\"}]")
+            .build();
+
+    assertThat(RunOrchestrator.validationReportProvenanceFailed(report)).isFalse();
+  }
+
+  @Test
   void failedValidationReportBuildsLowQualityGoalDecision() {
     ValidationReport report =
         ValidationReport.builder()

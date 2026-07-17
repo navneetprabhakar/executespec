@@ -385,6 +385,21 @@ describe('protected transcript visual contract', () => {
         ]}
         selectedProvider='deepseek'
         selectedModel='deepseek-v4-flash-native'
+        providerReadiness={
+          new Map([
+            [
+              'DEEPSEEK',
+              {
+                provider: 'DEEPSEEK',
+                state: 'POLICY_BLOCKED',
+                dispatchable: false,
+                keySourceMode: 'OWN_KEYS',
+                reason: 'Blocked by policy.',
+              },
+            ],
+          ])
+        }
+        providerReadinessSupported
         onProviderChange={vi.fn()}
         onModelChange={vi.fn()}
       />,
@@ -392,6 +407,13 @@ describe('protected transcript visual contract', () => {
     expect(top.querySelector('[data-agent-overlay="settings"]')).not.toBeNull();
     expect(top.querySelector('[data-agent-overlay-backdrop="settings"]')).not.toBeNull();
     expect(top.querySelector('#agent-provider-select')).not.toBeNull();
+    expect(
+      top.querySelector<HTMLOptionElement>('#agent-provider-select option[value="deepseek"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(top.querySelector('#agent-provider-select')?.parentElement?.textContent).toContain(
+      'Blocked by the effective organization provider policy.',
+    );
     expect(top.querySelector('#agent-model-select')).not.toBeNull();
     expect(top.querySelector('#agent-model-select')?.textContent).toContain('DeepSeek Flash');
 

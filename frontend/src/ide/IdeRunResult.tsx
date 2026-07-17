@@ -12,6 +12,9 @@ import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
+import {costReconciliation, phaseCostRows} from '@/ide/runCostLedger';
+import {providerIsDispatchable} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
@@ -81,8 +84,10 @@ export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const providerReadiness = useProviderReadiness();
   const runId = params.runId || params.runShort || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
+  const [costEvidence, setCostEvidence] = useState<api.RunCostEvidence | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
@@ -124,6 +129,13 @@ export default function IdeRunResult() {
   const [previewStarted, setPreviewStarted] = useState(false);
   // RL-2026-05-046 — Logs tab: the run's live-log events (persisted SSE replay, 24h).
   const [eventLog, setEventLog] = useState<api.RunLogEvent[] | null>(null);
+  const [eventReplay, setEventReplay] = useState<api.RunReplayLog | null>(null);
+
+  async function loadEventLog() {
+    const replay = await api.getRunEventLog(runId);
+    setEventReplay(replay);
+    setEventLog(replay.events);
+  }
 
   useEffect(() => {
     if (!runId) return;
@@ -193,10 +205,22 @@ export default function IdeRunResult() {
         .then(setTimeline)
         .catch(() => setTimeline({tasks: []}));
     if (tab === 'Logs' && !eventLog)
+      void loadEventLog().catch(() => {
+        setEventReplay({
+          events: [],
+          available: false,
+          reason: 'STORE_UNAVAILABLE',
+          retainedUntil: null,
+          lastEventId: null,
+          truncated: false,
+        });
+        setEventLog([]);
+      });
+    if (tab === 'Cost' && !costEvidence)
       api
-        .getRunEventLog(runId)
-        .then(setEventLog)
-        .catch(() => setEventLog([]));
+        .getLiveCost(runId)
+        .then(setCostEvidence)
+        .catch(() => setCostEvidence(null));
     if (tab === 'Chat' && !chat) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -250,9 +274,12 @@ export default function IdeRunResult() {
     if (!runId || eventLog) return;
     const s = (run?.status || '').toUpperCase();
     if (!['REVIEWING', 'VALIDATING', 'GENERATING_REPORT', 'REPORTING'].includes(s)) return;
-    api
+    void api
       .getRunEventLog(runId)
-      .then(setEventLog)
+      .then((replay) => {
+        setEventReplay(replay);
+        setEventLog(replay.events);
+      })
       .catch(() => setEventLog([]));
   }, [eventLog, run?.status, runId]);
 
@@ -936,6 +963,22 @@ export default function IdeRunResult() {
                 <Kv k='Status' v={run?.status ?? '—'} />
                 <Kv k='Provider' v={(run?.aiProvider || '—').toLowerCase()} />
                 <Kv
+                  k='Requested route'
+                  v={
+                    run?.requestedProvider
+                      ? `${run.requestedProvider.toLowerCase()}${run.requestedModel ? ` / ${run.requestedModel}` : ''}`
+                      : '—'
+                  }
+                />
+                <Kv
+                  k='Route policy'
+                  v={
+                    run?.routingMode
+                      ? `${run.routingMode}${run.routePinned ? ' (locked)' : ''}`
+                      : '—'
+                  }
+                />
+                <Kv
                   k='Worker'
                   v={
                     <span className='ide-mono' style={{fontSize: 11}}>
@@ -1133,7 +1176,12 @@ export default function IdeRunResult() {
               >
                 ⌁ Share
               </button>
-              {['anthropic', 'openai']
+              {(providerReadiness.supported
+                ? providerReadiness.rows
+                    .filter((row) => providerIsDispatchable(row))
+                    .map((row) => row.provider.toLowerCase())
+                : ['anthropic', 'openai']
+              )
                 .filter((p) => p !== (run?.aiProvider || '').toLowerCase())
                 .map((p) => (
                   <button
@@ -1152,6 +1200,19 @@ export default function IdeRunResult() {
                     ↻ Try {providerLabel(p)}
                   </button>
                 ))}
+              {providerReadiness.supported &&
+                !providerReadiness.loading &&
+                providerReadiness.rows.every(
+                  (row) =>
+                    row.provider.toLowerCase() === (run?.aiProvider || '').toLowerCase() ||
+                    !providerIsDispatchable(row),
+                ) && (
+                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    {providerReadiness.error
+                      ? 'Provider readiness unavailable; re-run choices are disabled.'
+                      : 'No other provider is currently ready for dispatch.'}
+                  </span>
+                )}
               {/* Run management lives in an overflow so the row stays scannable. */}
               <div style={{position: 'relative'}}>
                 <button
@@ -1783,19 +1844,16 @@ export default function IdeRunResult() {
                     className='ide-mono'
                     style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
                   >
-                    · replay, retained 24h
+                    {eventReplay?.available && eventReplay.retainedUntil
+                      ? `· replay available until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
+                      : '· replay retained for up to 24h'}
                   </span>
                   <span style={{flex: 1}} />
                   {/* RES-6 — the replay is a snapshot; let the user re-pull it. */}
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 10px', fontSize: 12}}
-                    onClick={() =>
-                      api
-                        .getRunEventLog(runId)
-                        .then(setEventLog)
-                        .catch(() => {})
-                    }
+                    onClick={() => void loadEventLog().catch(() => {})}
                   >
                     ↻ Refresh
                   </button>
@@ -1804,8 +1862,9 @@ export default function IdeRunResult() {
                   <IdeLoader label='Loading event log…' />
                 ) : visibleLog.length === 0 ? (
                   <div className='ide-empty'>
-                    No log events retained for this run. The live log is kept for 24h after each
-                    event.
+                    {eventReplay?.reason === 'STORE_UNAVAILABLE'
+                      ? 'Activity replay is temporarily unavailable. Refresh to try again.'
+                      : 'No activity is retained for this run. Replay expires 24 hours after the last event.'}
                   </div>
                 ) : (
                   <div
@@ -2212,11 +2271,14 @@ export default function IdeRunResult() {
             <div className='ide-card'>
               <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
               <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
-              <Kv k='Input tokens' v={num(run?.totalInputTokens)} />
-              <Kv k='Output tokens' v={num(run?.totalOutputTokens)} />
+              <Kv k='Input tokens' v={num(costEvidence?.inputTokens ?? run?.totalInputTokens)} />
+              <Kv k='Output tokens' v={num(costEvidence?.outputTokens ?? run?.totalOutputTokens)} />
+              <Kv k='Cache-read tokens' v={num(costEvidence?.cacheReadTokens)} />
+              <Kv k='Cache-write tokens' v={num(costEvidence?.cacheWriteTokens)} />
+              <Kv k='Reasoning tokens' v={num(costEvidence?.reasoningTokens)} />
               {isSuperAdmin && (
                 <>
-                  <Kv k='Actual cost' v={usd(run?.actualCostUsd)} />
+                  <Kv k='Actual cost' v={usd(costEvidence?.costUsd ?? run?.actualCostUsd)} />
                   <Kv k='Hard cap' v={usd(run?.hardCapUsd)} />
                   <Kv
                     k='Estimate range'
@@ -2250,10 +2312,98 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-h2'>Per phase</div>
                 <div className='ide-card'>
-                  <Kv k='Classifier' v={usd(run?.classifierCostUsd)} />
-                  <Kv k='Outline' v={usd(run?.outlineCostUsd)} />
-                  <Kv k='Expansion' v={usd(run?.expansionCostUsd)} />
+                  {phaseCostRows(run, costEvidence).map(([label, cost]) => (
+                    <Kv key={label} k={label} v={usd(cost)} />
+                  ))}
                 </div>
+                <div className='ide-h2'>Pipeline agents</div>
+                <div className='ide-card'>
+                  {(run?.agentTokens ?? []).length === 0 ? (
+                    <div className='ide-empty'>No persisted agent-token attribution.</div>
+                  ) : (
+                    run?.agentTokens?.map((agent, index) => (
+                      <div
+                        key={`${agent.role}-${index}`}
+                        className='ide-kv'
+                        style={{alignItems: 'start'}}
+                      >
+                        <span>{agent.role}</span>
+                        <span className='ide-mono' style={{fontSize: 11, textAlign: 'right'}}>
+                          {agent.provider || '—'} · {agent.model || '—'}
+                          <br />
+                          {agent.inputTokens.toLocaleString()} in ·{' '}
+                          {agent.outputTokens.toLocaleString()} out
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className='ide-h2'>Provider calls</div>
+                <div className='ide-card' style={{overflowX: 'auto'}}>
+                  {(costEvidence?.stepCalls ?? []).length === 0 ? (
+                    <div className='ide-empty'>
+                      No per-call attribution is available for this run.
+                    </div>
+                  ) : (
+                    <table style={{width: '100%', borderCollapse: 'collapse', fontSize: 11}}>
+                      <thead>
+                        <tr style={{textAlign: 'left', color: 'var(--ide-fg-muted)'}}>
+                          <th>Role / task</th>
+                          <th>Provider / model</th>
+                          <th>Tokens</th>
+                          <th>Cache / reasoning</th>
+                          <th>Retry</th>
+                          <th style={{textAlign: 'right'}}>Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {costEvidence?.stepCalls.map((call) => (
+                          <tr key={call.id} style={{borderTop: '1px solid var(--ide-border)'}}>
+                            <td style={{padding: '7px 8px 7px 0'}}>
+                              {call.agentRole || 'unattributed'}
+                              <div style={{color: 'var(--ide-fg-muted)'}}>
+                                {call.taskId || call.stepId || 'run-level'}
+                              </div>
+                            </td>
+                            <td>
+                              {call.provider || '—'}
+                              <div className='ide-mono'>{call.model || '—'}</div>
+                            </td>
+                            <td>
+                              {call.inputTokens.toLocaleString()} in ·{' '}
+                              {call.outputTokens.toLocaleString()} out
+                            </td>
+                            <td>
+                              {call.cacheReadTokens.toLocaleString()} read ·{' '}
+                              {call.cacheWriteTokens.toLocaleString()} write
+                              <div>{call.reasoningTokens.toLocaleString()} reasoning</div>
+                            </td>
+                            <td>{call.retryOf || '—'}</td>
+                            <td style={{textAlign: 'right'}}>{usd(call.costUsd)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                {(() => {
+                  const reconciliation = costReconciliation(costEvidence);
+                  if (!reconciliation) return null;
+                  return (
+                    <div className='ide-card' style={{marginTop: 12}}>
+                      <Kv k='Displayed run total' v={usd(reconciliation.total)} />
+                      <Kv k='Attributed provider calls' v={usd(reconciliation.attributed)} />
+                      <Kv
+                        k={
+                          reconciliation.reconciled
+                            ? 'Unattributed remainder'
+                            : 'Unattributed / pending attribution'
+                        }
+                        v={usd(reconciliation.remainder)}
+                      />
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>

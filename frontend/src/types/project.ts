@@ -19,6 +19,24 @@ export interface ProjectRepo {
   lastSyncedSha: string | null;
   /** Raw JSON string of {@link StackInfo}; null when not yet detected. */
   detectedStack: string | null;
+  sourceReadinessStatus:
+    | 'UNKNOWN'
+    | 'LINKED'
+    | 'AUTH_VALIDATED'
+    | 'SOURCE_READABLE'
+    | 'INVENTORIED'
+    | 'INDEXING'
+    | 'READY'
+    | 'BLOCKED';
+  sourceReadinessReason: string | null;
+  sourceFileCount: number | null;
+  sourceReadinessCheckedAt: string | null;
+  executespecFolderStatus:
+    | 'NOT_BOOTSTRAPPED'
+    | 'BOOTSTRAP_PR_OPEN'
+    | 'BOOTSTRAPPED'
+    | 'BOOTSTRAP_FAILED';
+  executespecBootstrapPrUrl: string | null;
   /** v2.5.2 — PR webhook installation state. */
   webhookInstalled: boolean;
   /** R-322 — declared monorepo project root (null = repo root). Detected
@@ -105,6 +123,8 @@ export interface ProjectDashboardDTO {
   completedRuns: number;
   failedRuns: number;
   avgScore: number;
+  /** Reports rejected by deterministic validity checks and omitted from avgScore. */
+  excludedScoreReports?: number;
   totalTokens: number;
   totalCostUsd: number;
   /** v2.6.4 — populated by ProjectDashboardController; older responses may omit it. */

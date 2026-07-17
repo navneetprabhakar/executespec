@@ -299,46 +299,56 @@ class RunPlanningCoordinator {
         new java.util.concurrent.ConcurrentHashMap<>();
 
     List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+    java.util.Map<String, String> routeContext =
+        com.navneet.executespec.router.RunModelOverrides.capture();
     for (PlannedTask t : tasksToExpand) {
       futures.add(
           java.util.concurrent.CompletableFuture.runAsync(
-              () -> {
-                try {
-                  if (enableEpicRecursion && t.taskType() == PlannedTask.TaskType.EPIC) {
-                    List<PlannedTask> children =
-                        expandEpic(runId, t, skeleton, effectiveReq, rootCtx);
-                    expanded.put(t.id(), children);
-                  } else {
-                    ExecutionContext taskCtx =
-                        new ExecutionContext(runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
-                    PlannedTask full = taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
-                    expanded.put(t.id(), List.of(full));
-                  }
-                } catch (Throwable ex) {
-                  log.warn(
-                      "V2 run={} task expansion failed for {}: {}", runId, t.id(), ex.getMessage());
-                  expansionFailures.put(t.id(), ex);
-                  // Fall back to a LEAF carrying just the title-derived
-                  // description so the pipeline can still progress.
-                  expanded.put(
-                      t.id(),
-                      List.of(
-                          PlannedTask.builder()
-                              .id(t.id())
-                              .title(t.title())
-                              .description(
-                                  "Implement: "
-                                      + t.title()
-                                      + " (expansion failed; worker will figure it out)")
-                              .complexity(t.complexity())
-                              .touchesFiles(t.touchesFiles())
-                              .dependsOn(t.dependsOn())
-                              .hardConstraints(List.of())
-                              .meetsRequirements(List.of())
-                              .taskType(PlannedTask.TaskType.LEAF)
-                              .build()));
-                }
-              },
+              () ->
+                  com.navneet.executespec.router.RunModelOverrides.runWith(
+                      routeContext,
+                      () -> {
+                        try {
+                          if (enableEpicRecursion && t.taskType() == PlannedTask.TaskType.EPIC) {
+                            List<PlannedTask> children =
+                                expandEpic(runId, t, skeleton, effectiveReq, rootCtx);
+                            expanded.put(t.id(), children);
+                          } else {
+                            ExecutionContext taskCtx =
+                                new ExecutionContext(
+                                    runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
+                            PlannedTask full =
+                                taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
+                            expanded.put(t.id(), List.of(full));
+                          }
+                        } catch (Throwable ex) {
+                          log.warn(
+                              "V2 run={} task expansion failed for {}: {}",
+                              runId,
+                              t.id(),
+                              ex.getMessage());
+                          expansionFailures.put(t.id(), ex);
+                          // Fall back to a LEAF carrying just the title-derived
+                          // description so the pipeline can still progress.
+                          expanded.put(
+                              t.id(),
+                              List.of(
+                                  PlannedTask.builder()
+                                      .id(t.id())
+                                      .title(t.title())
+                                      .description(
+                                          "Implement: "
+                                              + t.title()
+                                              + " (expansion failed; worker will figure it out)")
+                                      .complexity(t.complexity())
+                                      .touchesFiles(t.touchesFiles())
+                                      .dependsOn(t.dependsOn())
+                                      .hardConstraints(List.of())
+                                      .meetsRequirements(List.of())
+                                      .taskType(PlannedTask.TaskType.LEAF)
+                                      .build()));
+                        }
+                      }),
               pool.executor()));
     }
     try {
@@ -552,40 +562,46 @@ class RunPlanningCoordinator {
     java.util.concurrent.ConcurrentMap<String, PlannedTask> bodied =
         new java.util.concurrent.ConcurrentHashMap<>();
     List<java.util.concurrent.CompletableFuture<Void>> subFutures = new ArrayList<>();
+    java.util.Map<String, String> subRouteContext =
+        com.navneet.executespec.router.RunModelOverrides.capture();
     for (PlannedTask child : reIdChildren) {
       subFutures.add(
           java.util.concurrent.CompletableFuture.runAsync(
-              () -> {
-                try {
-                  ExecutionContext childCtx =
-                      new ExecutionContext(runId, "_expand_" + child.id(), rootCtx.workspaceRoot());
-                  bodied.put(
-                      child.id(),
-                      taskExpander.expand(child, subPlanForContext, parentReq, childCtx));
-                } catch (Throwable ex) {
-                  log.warn(
-                      "V2 run={} sub-task expansion failed for {}: {}",
-                      runId,
-                      child.id(),
-                      ex.getMessage());
-                  bodied.put(
-                      child.id(),
-                      PlannedTask.builder()
-                          .id(child.id())
-                          .title(child.title())
-                          .description(
-                              "Implement: "
-                                  + child.title()
-                                  + " (sub-expansion failed; worker will figure it out)")
-                          .complexity(child.complexity())
-                          .touchesFiles(child.touchesFiles())
-                          .dependsOn(child.dependsOn())
-                          .hardConstraints(List.of())
-                          .meetsRequirements(List.of())
-                          .taskType(PlannedTask.TaskType.LEAF)
-                          .build());
-                }
-              },
+              () ->
+                  com.navneet.executespec.router.RunModelOverrides.runWith(
+                      subRouteContext,
+                      () -> {
+                        try {
+                          ExecutionContext childCtx =
+                              new ExecutionContext(
+                                  runId, "_expand_" + child.id(), rootCtx.workspaceRoot());
+                          bodied.put(
+                              child.id(),
+                              taskExpander.expand(child, subPlanForContext, parentReq, childCtx));
+                        } catch (Throwable ex) {
+                          log.warn(
+                              "V2 run={} sub-task expansion failed for {}: {}",
+                              runId,
+                              child.id(),
+                              ex.getMessage());
+                          bodied.put(
+                              child.id(),
+                              PlannedTask.builder()
+                                  .id(child.id())
+                                  .title(child.title())
+                                  .description(
+                                      "Implement: "
+                                          + child.title()
+                                          + " (sub-expansion failed; worker will figure it out)")
+                                  .complexity(child.complexity())
+                                  .touchesFiles(child.touchesFiles())
+                                  .dependsOn(child.dependsOn())
+                                  .hardConstraints(List.of())
+                                  .meetsRequirements(List.of())
+                                  .taskType(PlannedTask.TaskType.LEAF)
+                                  .build());
+                        }
+                      }),
               pool.executor()));
     }
     try {

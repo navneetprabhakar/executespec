@@ -17,6 +17,7 @@ import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
@@ -113,9 +114,18 @@ class SpecChatServiceTest {
 
   private static SpecChatService newService(
       LlmRouter router, List<ToolCallback> actionToolList, List<ToolCallback> projectToolList) {
+    return newService(router, actionToolList, projectToolList, LlmProvider.ANTHROPIC);
+  }
+
+  private static SpecChatService newService(
+      LlmRouter router,
+      List<ToolCallback> actionToolList,
+      List<ToolCallback> projectToolList,
+      LlmProvider actualProvider) {
     ModelResolver modelResolver = mock(ModelResolver.class);
     ResolvedModel model = mock(ResolvedModel.class);
     when(model.getModel()).thenReturn("test-model");
+    when(model.getActualProvider()).thenReturn(actualProvider);
     when(modelResolver.resolve(any(), any(), any())).thenReturn(model);
 
     ProjectChatActionTools actionTools = mock(ProjectChatActionTools.class);
@@ -149,6 +159,27 @@ class SpecChatServiceTest {
         props,
         costTracker,
         keyContextStore);
+  }
+
+  @Test
+  void dispatchesResolvedFallbackProviderWithItsModel() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("fallback answer"));
+    SpecChatService svc = newService(router, List.of(), List.of(), LlmProvider.OPENAI);
+
+    svc.runTurn(
+        new RecordingSink(),
+        mock(AppUserDetails.class),
+        "sess-fallback",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "hi")),
+        "anthropic");
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router).call(request.capture());
+    assertThat(request.getValue().provider()).isEqualTo("openai");
+    assertThat(request.getValue().model()).isEqualTo("test-model");
   }
 
   @Test

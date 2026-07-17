@@ -266,14 +266,16 @@ public class ProjectArchitectureController {
     String pat = projectRepoReadPat(projectId, repoId, userDetails);
     String slug = repo.getGithubRepoFullName();
     String branch = repo.getDefaultBranch();
-    List<String> files;
-    try {
-      files = github.listRepoFiles("https://github.com/" + slug, branch, pat);
-    } catch (Exception e) {
+    var result = github.listRepoFilesResult("https://github.com/" + slug, branch, pat);
+    if (!result.successful()) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_GATEWAY, "GitHub list failed: " + e.getMessage());
+          HttpStatus.BAD_GATEWAY,
+          "Repository file inventory unavailable ("
+              + result.errorCode()
+              + (result.upstreamStatus() == null ? "" : ", upstream " + result.upstreamStatus())
+              + ")");
     }
-    return ResponseEntity.ok(new RepoFileListDto(slug, branch, files));
+    return ResponseEntity.ok(new RepoFileListDto(slug, branch, result.files()));
   }
 
   public record RepoFileDto(

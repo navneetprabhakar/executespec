@@ -98,6 +98,10 @@ public class ShellTool implements Tool {
     if (command == null || command.isBlank()) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "command is required");
     }
+    String reviewerPolicyError = ReviewerMutationScope.validateShell();
+    if (reviewerPolicyError != null) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+    }
     int timeout =
         args.hasNonNull("timeoutSeconds")
             ? Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC)

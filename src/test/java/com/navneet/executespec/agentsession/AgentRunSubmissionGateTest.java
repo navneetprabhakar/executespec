@@ -180,6 +180,78 @@ class AgentRunSubmissionGateTest {
   }
 
   @Test
+  void confirmationInheritsSessionProviderAndModelWhenClientsDoNotEchoThem() {
+    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
+        .thenReturn(Optional.empty());
+    when(runOrchestrator.submitRun(
+            anyString(),
+            anyString(),
+            isNull(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            anyBoolean(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            isNull(),
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
+        .thenReturn(PipelineRun.builder().runId("run-session-route").createdByUserId("u1").build());
+    AgentSession session =
+        AgentSession.builder()
+            .id("s1")
+            .orgId("org-1")
+            .userId("u1")
+            .projectId("p1")
+            .defaultProvider("ANTHROPIC")
+            .defaultModel("claude-opus-4-8")
+            .build();
+
+    gate.submitConfirmed(
+        session,
+        turn("Implement OAuth login"),
+        decision("CODE_RUN_REQUIRED", true),
+        request(true),
+        user());
+
+    verify(modelAccessService).assertProviderModelPair("ANTHROPIC", "claude-opus-4-8");
+    verify(runOrchestrator)
+        .submitRun(
+            "Implement OAuth login",
+            "AGENT_ORCHESTRATOR",
+            null,
+            "EXISTING",
+            null,
+            null,
+            false,
+            false,
+            "claude-opus-4-8",
+            "ANTHROPIC",
+            "u1",
+            "org-1",
+            "p1",
+            "PRODUCTION",
+            null,
+            null,
+            false,
+            null,
+            null,
+            (Boolean) null,
+            (Boolean) null,
+            (String) null);
+  }
+
+  @Test
   void confirmedRunCanStartLowComplexityWorkersOnLightweightTier() {
     when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
         .thenReturn(Optional.empty());

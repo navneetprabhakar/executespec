@@ -433,7 +433,7 @@ claim in a tool result — never invent a runId, score, or status.""";
     int rounds =
         runToolLoop(
             sink,
-            provider.name().toLowerCase(),
+            model.getActualProvider().name().toLowerCase(),
             model.getModel(),
             messages,
             context,
@@ -484,7 +484,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .fallback(false)
               .build();
     }
-    String providerName = provider.name().toLowerCase();
+    String providerName = model.getActualProvider().name().toLowerCase();
     if (user != null && user.getUser() != null && user.getUser().getId() != null) {
       keyContextStore.resolveAndPut(sessionId, user.getUser().getId());
     }

@@ -8,6 +8,22 @@ export type ContractDetectorSummary = {
   driftCandidateIds: string[];
 };
 
+export function uiBound<T>(promise: Promise<T>, timeoutMs = 10_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error('Request timed out.')), timeoutMs);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function looksLikeArtifact(content: string): boolean {
   return content.length > 1200 || /```|^#{2,}\s|\|.+\|/m.test(content);
 }

@@ -58,31 +58,36 @@ class AgentStreamTurnStarter {
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
-    String modelProvider =
-        explicitModel == null || modelRegistry == null
-            ? null
-            : modelRegistry.providerFor(explicitModel);
+    String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
+    String accountProvider = aiProviderPreferenceService.preferredProvider(user);
+    String effectiveProvider =
+        explicitProvider != null
+            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
+            : sessionProvider != null ? sessionProvider : accountProvider;
     if (explicitModel != null) {
       if (modelAccessService != null) {
         modelAccessService.assertModelAllowed(user.getUser().getId(), explicitModel);
       }
-      if (modelProvider == null) {
+      String modelProvider =
+          modelRegistry == null ? null : modelRegistry.providerFor(explicitModel);
+      if (modelProvider == null || modelProvider.isBlank()) {
         throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.BAD_REQUEST, "Unknown model: " + explicitModel);
       }
-      if (explicitProvider != null && !modelProvider.equalsIgnoreCase(explicitProvider)) {
-        throw new org.springframework.web.server.ResponseStatusException(
-            org.springframework.http.HttpStatus.BAD_REQUEST,
-            "Model '" + explicitModel + "' is not served by provider '" + explicitProvider + "'.");
+      if (effectiveProvider == null) effectiveProvider = modelProvider;
+      if (modelAccessService != null) {
+        modelAccessService.assertProviderModelPair(effectiveProvider, explicitModel);
       }
-      if (explicitProvider == null) explicitProvider = modelProvider;
-    }
-    String effectiveProvider =
-        explicitProvider != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
-            : aiProviderPreferenceService.preferredProvider(user);
-    if (effectiveProvider == null) {
-      effectiveProvider = session.getDefaultProvider();
+    } else if (explicitProvider != null
+        && session.getDefaultModel() != null
+        && modelAccessService != null) {
+      try {
+        modelAccessService.assertProviderModelPair(effectiveProvider, session.getDefaultModel());
+      } catch (org.springframework.web.server.ResponseStatusException incompatibleSessionModel) {
+        // A provider-only switch returns to tier routing; never retain a stale exact model from the
+        // previous provider and create an impossible pair.
+        session.setDefaultModel(null);
+      }
     }
     if (effectiveProvider != null) {
       session.setDefaultProvider(effectiveProvider);

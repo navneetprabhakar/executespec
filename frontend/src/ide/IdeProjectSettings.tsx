@@ -17,6 +17,12 @@ import {
   projectDocumentDisplay,
   projectSettingsFormFromProject,
 } from '@/ide/projectSettingsUtils';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 
 type SettingsSub = 'settings' | 'documents' | 'memory';
 
@@ -25,6 +31,7 @@ export function IdeProjectSettings() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canEdit = canEditProjectSettings(user);
+  const providerReadiness = useProviderReadiness();
 
   const [sub, setSub] = useState<SettingsSub>('settings');
   const [project, setProject] = useState<api.ProjectDto | null>(null);
@@ -207,10 +214,36 @@ export function IdeProjectSettings() {
                     disabled={!canEdit}
                     onChange={(e) => setProvider(e.target.value)}
                   >
-                    <option value='ANTHROPIC'>Anthropic</option>
-                    <option value='OPENAI'>OpenAI</option>
-                    <option value='DEEPSEEK'>DeepSeek</option>
+                    {[
+                      ['ANTHROPIC', 'Anthropic'],
+                      ['OPENAI', 'OpenAI'],
+                      ['DEEPSEEK', 'DeepSeek'],
+                    ].map(([id, label]) => (
+                      <option
+                        key={id}
+                        value={id}
+                        disabled={
+                          providerReadiness.supported &&
+                          !providerIsDispatchable(providerReadiness.byProvider.get(id))
+                        }
+                      >
+                        {providerReadiness.supported
+                          ? providerOptionLabel(label, providerReadiness.byProvider.get(id))
+                          : label}
+                      </option>
+                    ))}
                   </select>
+                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                    {!providerReadiness.supported
+                      ? 'The server will enforce provider policy when work starts.'
+                      : providerReadiness.error
+                        ? 'Provider readiness is temporarily unavailable.'
+                        : providerReadiness.loading
+                          ? 'Checking provider readiness…'
+                          : providerReadinessLabel(
+                              providerReadiness.byProvider.get(provider.toUpperCase()),
+                            )}
+                  </div>
                 </Field>
                 <Field label='Target branch'>
                   <input

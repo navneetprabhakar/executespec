@@ -126,6 +126,53 @@ public class ModelAccessService {
     }
   }
 
+  /** Returns the canonical provider that owns a registered model, or {@code null} when unknown. */
+  public String providerForModel(String modelName) {
+    if (modelName == null || modelName.isBlank()) return null;
+    return modelRegistry.providerFor(modelRegistry.canonicalize(modelName));
+  }
+
+  /**
+   * Rejects a provider/model pair that cannot be dispatched together. This belongs at request
+   * admission rather than in the asynchronous pipeline: silently dropping an incompatible model
+   * makes the persisted route and the provider bill disagree with the user's selection.
+   */
+  public void assertProviderModelPair(String provider, String modelName) {
+    if (modelName == null || modelName.isBlank()) return;
+    String owner = providerForModel(modelName);
+    if (owner == null || owner.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown model: " + modelName);
+    }
+    String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase(Locale.ROOT);
+    if ("google".equals(normalizedProvider)) normalizedProvider = "gemini";
+    LlmProvider routeProvider;
+    try {
+      routeProvider = LlmProvider.valueOf(normalizedProvider.toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException invalidProvider) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Unknown provider: " + provider, invalidProvider);
+    }
+    String canonical = modelRegistry.canonicalize(modelName);
+    if (!canRouteModel(routeProvider, canonical, owner)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Model '" + modelName + "' is not served by provider '" + provider + "'.");
+    }
+  }
+
+  /** Canonical native/aggregator routability rule shared by admission and orchestration. */
+  public static boolean canRouteModel(
+      LlmProvider provider, String canonicalModel, String ownerProvider) {
+    if (provider == null || canonicalModel == null || canonicalModel.isBlank()) return false;
+    if (provider.name().equalsIgnoreCase(ownerProvider)) return true;
+    return switch (provider) {
+      case OPENROUTER -> OpenRouterModelMapper.isSupported(canonicalModel);
+      case FIREWORKS -> FireworksModelMapper.isSupported(canonicalModel);
+      case DEEPSEEK -> canonicalModel.startsWith("deepseek-v4-");
+      default -> false;
+    };
+  }
+
   public static boolean isFreeTier(String tier) {
     return tier == null || tier.isBlank() || "FREE".equalsIgnoreCase(tier);
   }

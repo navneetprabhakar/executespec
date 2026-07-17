@@ -19,6 +19,9 @@ import {
 } from '@/ide/agentSession';
 import {useAgentRunStream} from '@/ide/agentRunStream';
 import {conversationForStream, usageFromTurns} from '@/ide/agentConversationContext';
+import {providerIsDispatchable, providerReadinessLabel} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
+import {eligibleAgentProviderCatalog, exactModelMatchesProvider} from '@/ide/agentModelRouting';
 
 export default function IdeAgent() {
   const navigate = useNavigate();
@@ -33,6 +36,7 @@ export default function IdeAgent() {
   const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  const providerReadiness = useProviderReadiness();
   const eventCursorRef = useRef(0);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
@@ -247,6 +251,7 @@ export default function IdeAgent() {
       let modelCatalogPromise: Promise<api.AvailableModelsResponse> = Promise.resolve({
         providers: [],
       });
+      let userModelsPromise: Promise<api.UserModel[] | null> = Promise.resolve(null);
       // Some legacy surface tests intentionally provide a reduced API mock. Accessing a missing
       // Vitest namespace export can throw, so keep the optional catalog additive and fail-closed.
       try {
@@ -256,17 +261,26 @@ export default function IdeAgent() {
         if (typeof loadModels === 'function') {
           modelCatalogPromise = loadModels().catch(() => ({providers: []}));
         }
+        const loadUserModels = (api as {getMyModels?: () => Promise<api.UserModel[]>}).getMyModels;
+        if (typeof loadUserModels === 'function') {
+          // Current servers expose `/models/me`; if that authenticated eligibility request fails,
+          // show no exact pins rather than falling back to the broader public catalog. Null is
+          // reserved for genuine older-server compatibility where the endpoint is absent.
+          userModelsPromise = loadUserModels().catch(() => []);
+        }
       } catch {
         // Model switching is optional for an older server/mock; the provider default still works.
       }
-      const [sessionRows, gateRows, capabilityRows, managedAi, modelCatalog] = await Promise.all([
-        api.listAgentSessions(25),
-        api.listAgentGates(12),
-        api.listAgentCapabilities('WEB'),
-        api.getManagedAiBalance().catch(() => null),
-        modelCatalogPromise,
-      ]);
-      setAvailableModels(modelCatalog.providers ?? []);
+      const [sessionRows, gateRows, capabilityRows, managedAi, modelCatalog, userModels] =
+        await Promise.all([
+          api.listAgentSessions(25),
+          api.listAgentGates(12),
+          api.listAgentCapabilities('WEB'),
+          api.getManagedAiBalance().catch(() => null),
+          modelCatalogPromise,
+          userModelsPromise,
+        ]);
+      setAvailableModels(eligibleAgentProviderCatalog(modelCatalog.providers ?? [], userModels));
       const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
       const scoped = selectScopedAgentSession(sessionRows, scope);
       const selectedId =
@@ -291,6 +305,13 @@ export default function IdeAgent() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!selectedModel || availableModels.length === 0) return;
+    if (!exactModelMatchesProvider(availableModels, selectedProvider, selectedModel)) {
+      setSelectedModel('');
+    }
+  }, [availableModels, selectedModel, selectedProvider]);
 
   // Mobile browsers routinely suspend the tab while the operator switches apps.
   // Reconcile durable sessions, gates, and the selected transcript when the tab
@@ -432,6 +453,26 @@ export default function IdeAgent() {
   async function send(seed?: string) {
     const message = (seed ?? state.input).trim();
     if (!message || state.status === 'streaming' || state.status === 'toolRunning') return;
+    const explicitReadiness = selectedProvider
+      ? providerReadiness.byProvider.get(selectedProvider.toUpperCase())
+      : null;
+    if (
+      selectedProvider &&
+      providerReadiness.supported &&
+      (providerReadiness.loading ||
+        providerReadiness.error ||
+        !providerIsDispatchable(explicitReadiness))
+    ) {
+      dispatch({
+        type: 'error',
+        error: providerReadiness.error
+          ? 'Provider readiness could not be verified. Retry after the service is available.'
+          : providerReadiness.loading
+            ? 'Provider readiness is still being checked.'
+            : providerReadinessLabel(explicitReadiness),
+      });
+      return;
+    }
     const attachmentIds = state.attachments.map((a) => a.attachmentId);
     state.attachments.forEach((attachment) => {
       if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
@@ -664,12 +705,17 @@ export default function IdeAgent() {
         onToggleChats={toggleChats}
         onToggleSettings={toggleSettings}
         availableModels={availableModels}
+        providerReadiness={providerReadiness.byProvider}
+        providerReadinessSupported={providerReadiness.supported}
+        providerReadinessLoading={providerReadiness.loading}
+        providerReadinessError={providerReadiness.error}
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         onProviderChange={(provider) => {
           setSelectedProvider(provider);
-          const entry = availableModels.find((p) => p.id === provider);
-          setSelectedModel(entry?.models?.[0]?.id ?? '');
+          // Provider choice means provider-default routing. Exact model choice is separate and
+          // must never leak from the previously selected provider.
+          setSelectedModel('');
         }}
         onModelChange={(model) => {
           setSelectedModel(model);

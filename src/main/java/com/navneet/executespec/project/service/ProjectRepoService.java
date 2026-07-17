@@ -98,8 +98,13 @@ public class ProjectRepoService {
 
     String githubOwner = extractOwner(req.githubRepoFullName());
 
-    String branch = req.defaultBranch() != null ? req.defaultBranch() : "main";
     String repoUrl = "https://github.com/" + req.githubRepoFullName();
+    String githubPat = userRepo.findById(callerUserId).map(u -> u.getGithubPat()).orElse(null);
+    String branch = req.defaultBranch();
+    if (branch == null || branch.isBlank()) {
+      branch = gitHub.getDefaultBranch(repoUrl, githubPat);
+    }
+    if (branch == null || branch.isBlank()) branch = "main";
     // R-323 — hard size gate (skipped when threshold = -1).
     // R-325 — when the request opts in via {@code attachAnyway},
     // the gate is bypassed and the attach proceeds; the actual size
@@ -110,7 +115,7 @@ public class ProjectRepoService {
     long observedSizeKb = -1L;
     boolean attachAnywayRequested = Boolean.TRUE.equals(req.attachAnyway());
     if (repoMaxSizeKb > 0) {
-      observedSizeKb = gitHub.getRepoSizeKb(repoUrl, null);
+      observedSizeKb = gitHub.getRepoSizeKb(repoUrl, githubPat);
       boolean exceeds = observedSizeKb > 0 && observedSizeKb > repoMaxSizeKb;
       if (exceeds && !attachAnywayRequested) {
         long thresholdMb = repoMaxSizeKb / 1024;
@@ -139,7 +144,10 @@ public class ProjectRepoService {
     // R-322 — read the .executespec/root.yml monorepo marker on attach
     // so monorepo customers get correct project-root behaviour without
     // a separate config step. NULL stays the default (repo root).
-    String subdir = detectMonorepoSubdir(repoUrl, branch, null);
+    String subdir = detectMonorepoSubdir(repoUrl, branch, githubPat);
+    String headSha = gitHub.getBranchHeadSha(repoUrl, branch, githubPat);
+    GitHubRepoService.RepoFileListResult sourceInventory =
+        gitHub.listRepoFilesResult(repoUrl, branch, githubPat);
     ProjectRepo entity =
         ProjectRepo.builder()
             .id(UUID.randomUUID())
@@ -149,8 +157,8 @@ public class ProjectRepoService {
             .githubRepoFullName(req.githubRepoFullName())
             .githubOwner(githubOwner)
             .defaultBranch(branch)
-            .detectedStack(stackDetector.detect(req.githubRepoFullName(), null))
-            .lastSyncedSha(gitHub.getBranchHeadSha(repoUrl, branch, null))
+            .detectedStack(stackDetector.detect(req.githubRepoFullName(), githubPat))
+            .lastSyncedSha(headSha)
             .subdir(subdir)
             // R-325 — persist the observed size + opt-in flag so the
             // credit-surcharge calc can run later. Negative observed
@@ -159,6 +167,7 @@ public class ProjectRepoService {
             .sizeKb(observedSizeKb > 0 ? observedSizeKb : null)
             .attachedAnyway(attachedAnywayPersisted)
             .build();
+    applySourceReadiness(entity, headSha, sourceInventory);
     repoRepo.save(entity);
 
     log.info(
@@ -215,7 +224,7 @@ public class ProjectRepoService {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
 
     // Metadata refresh only. These are GitHub network calls — run OUTSIDE any transaction.
-    String detected = stackDetector.detect(repo.getGithubRepoFullName(), null);
+    String detected = stackDetector.detect(repo.getGithubRepoFullName(), overridePat);
     if (detected != null) repo.setDetectedStack(detected);
     String headSha =
         gitHub.getBranchHeadSha(
@@ -223,6 +232,13 @@ public class ProjectRepoService {
             repo.getDefaultBranch(),
             overridePat);
     if (headSha != null) repo.setLastSyncedSha(headSha);
+    applySourceReadiness(
+        repo,
+        headSha,
+        gitHub.listRepoFilesResult(
+            "https://github.com/" + repo.getGithubRepoFullName(),
+            repo.getDefaultBranch(),
+            overridePat));
     // R-322 — re-read the monorepo marker on every sync so a customer
     // who drops .executespec/root.yml after attach gets the subdir
     // picked up on the next sync. We never clear back to NULL on a
@@ -239,6 +255,41 @@ public class ProjectRepoService {
     // one held across the network probes above. Architecture regen is now an explicit action.
     ProjectRepo saved = repoRepo.save(repo);
     return ProjectRepoDto.from(saved);
+  }
+
+  private static void applySourceReadiness(
+      ProjectRepo repo, String headSha, GitHubRepoService.RepoFileListResult sourceInventory) {
+    repo.setSourceReadinessCheckedAt(Instant.now());
+    repo.setSourceFileCount(
+        sourceInventory != null && sourceInventory.successful()
+            ? (long) sourceInventory.files().size()
+            : null);
+    if (headSha == null || headSha.isBlank()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason(
+          sourceInventory == null || sourceInventory.errorCode() == null
+              ? "BRANCH_UNREADABLE"
+              : sourceInventory.errorCode());
+      return;
+    }
+    if (sourceInventory == null || !sourceInventory.successful()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason(
+          sourceInventory == null ? "SOURCE_INVENTORY_FAILED" : sourceInventory.errorCode());
+      return;
+    }
+    if (sourceInventory.files().isEmpty()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason("EMPTY_REPOSITORY");
+      return;
+    }
+    if (sourceInventory.truncated()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.INVENTORIED.name());
+      repo.setSourceReadinessReason("SOURCE_INVENTORY_TRUNCATED");
+      return;
+    }
+    repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.READY.name());
+    repo.setSourceReadinessReason("SOURCE_INVENTORY_CONFIRMED");
   }
 
   /**
@@ -406,6 +457,33 @@ public class ProjectRepoService {
         .map(l -> repoRepo.findById(l.getRepoId()).orElse(null))
         .filter(r -> r != null)
         .collect(Collectors.toList());
+  }
+
+  /**
+   * Resolve the exact brownfield code boundary for a run. Unlike the historical compatibility
+   * helper above, this method is fail-closed: a missing, duplicated, or no-longer-linked id is a
+   * request error rather than an invitation to execute against a partial/empty workspace.
+   */
+  public List<ProjectRepo> resolveForRunStrict(String projectId, List<UUID> repoIds) {
+    if (projectId == null || projectId.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId is required");
+    }
+    if (repoIds == null || repoIds.isEmpty()) {
+      if (!linkRepo.findByProjectId(projectId).isEmpty()) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Select at least one linked repository before starting project work");
+      }
+      return List.of();
+    }
+    List<UUID> distinct = repoIds.stream().distinct().toList();
+    List<ProjectRepo> resolved = resolveForRun(projectId, distinct);
+    if (resolved.size() != distinct.size()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "One or more selected repositories are missing or are not linked to this project");
+    }
+    return resolved;
   }
 
   /**

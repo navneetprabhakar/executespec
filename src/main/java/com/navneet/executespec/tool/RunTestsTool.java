@@ -537,7 +537,11 @@ public class RunTestsTool implements Tool {
         return cmd;
       }
     }
-    cmd.add("python");
+    // Host runtimes (including supported macOS local development and modern distro images) expose
+    // Python 3 as `python3`; `python` is not guaranteed and caused otherwise-valid targeted pytest
+    // calls to fail while the resolver-driven whole suite passed. Benchmark containers keep their
+    // existing `python` contract because their conda/testbed images provide it.
+    cmd.add(containerId == null ? "python3" : "python");
     cmd.add("-m");
     cmd.add("pytest");
     cmd.addAll(testIds);
