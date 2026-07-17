@@ -3003,14 +3003,31 @@ public class RunOrchestrator implements RunControlPort {
     // formula remains the bootstrap fallback for novel shapes.
     String providerKey = provider == null ? null : provider.toUpperCase();
     String strategyKey = strategy == null ? null : strategy.name();
+    // Only an EXPLICIT model pin should drive a model-specific estimate. The `model` argument is
+    // always populated (it falls back to the provider's default model), so it cannot distinguish a
+    // real pin from a default. Use the persisted V275 route intent instead: an EXACT_LOCK / pinned
+    // run carries the customer-chosen model.
+    String pinnedModel =
+        runRow != null
+                && runRow.isRoutePinned()
+                && runRow.getRequestedModel() != null
+                && !runRow.getRequestedModel().isBlank()
+            ? runRow.getRequestedModel().trim()
+            : null;
+    // The historical k-NN is model-blind (keyed on strategy/provider/repoCount/taskCount only), so
+    // it would return the same number for two runs that differ only by pinned model. When the run
+    // carries an explicit model pin, skip history and price that exact model with the model-aware
+    // formula so the estimate actually changes with the selected model.
     Optional<RunCostTracker.Estimate> historical =
-        costHistoryService.estimateFromHistory(
-            strategyKey, providerKey, repoCount, complexities.size());
+        pinnedModel != null
+            ? Optional.empty()
+            : costHistoryService.estimateFromHistory(
+                strategyKey, providerKey, repoCount, complexities.size());
     RunCostTracker.Estimate est =
         historical.orElseGet(
             () ->
                 costTracker.estimateRunTierAware(
-                    provider, complexities, strategy, repoCount, isProjectScoped));
+                    provider, complexities, strategy, repoCount, isProjectScoped, pinnedModel));
     runRepo
         .findById(runId)
         .ifPresent(

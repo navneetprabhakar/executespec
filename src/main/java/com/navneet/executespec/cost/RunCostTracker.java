@@ -333,6 +333,24 @@ public class RunCostTracker {
       com.navneet.executespec.agent.PlanStrategy strategy,
       int repoCount,
       boolean isProjectScoped) {
+    return estimateRunTierAware(
+        provider, taskComplexities, strategy, repoCount, isProjectScoped, null);
+  }
+
+  /**
+   * Model-aware estimate. When {@code modelOverride} is a non-blank model id, every tier is priced
+   * against that exact model — mirroring a per-run/org model pin ({@code
+   * RunModelOverrides.withRunPin} overrides all tiers), so the estimate changes when the selected
+   * model changes even within one provider. When null, each tier uses its provider default (the
+   * historical behaviour).
+   */
+  public Estimate estimateRunTierAware(
+      String provider,
+      java.util.List<String> taskComplexities,
+      com.navneet.executespec.agent.PlanStrategy strategy,
+      int repoCount,
+      boolean isProjectScoped,
+      String modelOverride) {
     String matrixProvider = provider == null ? "OPENAI" : provider.toUpperCase();
     LlmProvider p;
     try {
@@ -341,10 +359,12 @@ public class RunCostTracker {
       return estimateRun(provider, null, taskComplexities);
     }
 
+    String pinned = modelOverride == null || modelOverride.isBlank() ? null : modelOverride.trim();
     int totalTasks = taskComplexities == null ? 0 : taskComplexities.size();
-    double workerCost = computeWorkerCost(p, taskComplexities);
-    double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks);
-    double postPlanningCost = computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks);
+    double workerCost = computeWorkerCost(p, taskComplexities, pinned);
+    double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks, pinned);
+    double postPlanningCost =
+        computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks, pinned);
     double cacheOverhead = computeCacheWriteOverhead(p, workerCost + postPlanningCost);
 
     double low = workerCost + planningPhaseCost + postPlanningCost + cacheOverhead;
@@ -357,6 +377,11 @@ public class RunCostTracker {
 
   /** Shared worker-cost computation, extracted so the new + old variants stay in sync. */
   private double computeWorkerCost(LlmProvider p, java.util.List<String> taskComplexities) {
+    return computeWorkerCost(p, taskComplexities, null);
+  }
+
+  private double computeWorkerCost(
+      LlmProvider p, java.util.List<String> taskComplexities, String modelOverride) {
     if (taskComplexities == null) return 0.0;
     double total = 0.0;
     for (String c : taskComplexities) {
@@ -366,12 +391,23 @@ public class RunCostTracker {
             case "HIGH" -> AgentTier.PLANNING;
             default -> AgentTier.WORKHORSE;
           };
-      ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-      double[] r = rates(resolved.getActualProvider().name().toLowerCase(), resolved.getModel());
+      double[] r = tierRatesWithOverride(p, tier, modelOverride);
       int[] band = bandFor(c);
       total += (band[0] / 1_000_000.0) * r[0] + (band[1] / 1_000_000.0) * r[1];
     }
     return total;
+  }
+
+  /**
+   * Rate lookup that honours an explicit per-run model pin: when {@code modelOverride} is set every
+   * tier is priced against that model for the estimate provider; otherwise the tier default
+   * resolves as before (which itself still honours a bound {@code RunModelOverrides} overlay).
+   */
+  private double[] tierRatesWithOverride(LlmProvider p, AgentTier tier, String modelOverride) {
+    if (modelOverride != null && !modelOverride.isBlank()) {
+      return rates(p.name().toLowerCase(), modelOverride.trim());
+    }
+    return ratesForTier(p, tier);
   }
 
   /**
@@ -381,8 +417,13 @@ public class RunCostTracker {
    */
   private double computePostPlanningCost(
       LlmProvider p, int repoCount, boolean isProjectScoped, int totalTasks) {
-    double[] planningRates = ratesForTier(p, AgentTier.PLANNING);
-    double[] workhorseRates = ratesForTier(p, AgentTier.WORKHORSE);
+    return computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks, null);
+  }
+
+  private double computePostPlanningCost(
+      LlmProvider p, int repoCount, boolean isProjectScoped, int totalTasks, String modelOverride) {
+    double[] planningRates = tierRatesWithOverride(p, AgentTier.PLANNING, modelOverride);
+    double[] workhorseRates = tierRatesWithOverride(p, AgentTier.WORKHORSE, modelOverride);
 
     // Reviewer general pass — always runs on terminal-state workspaces.
     double reviewerGeneral = cost(REVIEWER_GENERAL_PASS_TOKENS, planningRates);
@@ -561,10 +602,18 @@ public class RunCostTracker {
 
   private double computePlanningPhaseCost(
       LlmProvider p, com.navneet.executespec.agent.PlanStrategy strategy, int totalTasks) {
-    // Pre-resolved per-tier rates for this provider.
-    double[] lightweightRates = ratesForTier(p, AgentTier.LIGHTWEIGHT);
-    double[] workhorseRates = ratesForTier(p, AgentTier.WORKHORSE);
-    double[] planningRates = ratesForTier(p, AgentTier.PLANNING);
+    return computePlanningPhaseCost(p, strategy, totalTasks, null);
+  }
+
+  private double computePlanningPhaseCost(
+      LlmProvider p,
+      com.navneet.executespec.agent.PlanStrategy strategy,
+      int totalTasks,
+      String modelOverride) {
+    // Pre-resolved per-tier rates for this provider (model pin priced across every tier).
+    double[] lightweightRates = tierRatesWithOverride(p, AgentTier.LIGHTWEIGHT, modelOverride);
+    double[] workhorseRates = tierRatesWithOverride(p, AgentTier.WORKHORSE, modelOverride);
+    double[] planningRates = tierRatesWithOverride(p, AgentTier.PLANNING, modelOverride);
 
     if (strategy == null) {
       // Legacy single-phase planner shape — preserves slice-1-and-earlier
