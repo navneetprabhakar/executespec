@@ -101,6 +101,36 @@ public class TaskStatusPersistenceService {
     return Result.UPDATED;
   }
 
+  /**
+   * Persists the goal-doneness + continuation-decision evidence (V250) in its own proxied
+   * transaction. The row lock ({@code findByIdForUpdate}) requires an active transaction; when the
+   * caller reaches this from a fast-fail path with no ambient transaction (e.g. an early worker
+   * router/provider error), an inline pessimistic read would throw {@code
+   * TransactionRequiredException} and silently drop the goal decision — exactly when an operator
+   * most needs to know why the task failed and whether another route might help.
+   */
+  @Transactional
+  @Retryable(
+      retryFor = DataAccessException.class,
+      maxAttempts = 3,
+      backoff = @Backoff(delay = 100, multiplier = 2.0))
+  public Result persistGoalDecisionJson(
+      String runId, String taskIdShort, String goalDonenessJson, String continuationDecisionJson) {
+    if (runId == null || runId.length() < 8 || taskIdShort == null) {
+      return Result.ROW_NOT_FOUND;
+    }
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    var existing = taskRepo.findByIdForUpdate(key);
+    if (existing.isEmpty()) {
+      return Result.ROW_NOT_FOUND;
+    }
+    var task = existing.get();
+    task.setGoalDonenessJson(goalDonenessJson);
+    task.setContinuationDecisionJson(continuationDecisionJson);
+    taskRepo.saveAndFlush(task);
+    return Result.UPDATED;
+  }
+
   private static boolean isPersistedTerminalStatus(String status) {
     return "COMPLETE".equals(status)
         || "PARTIAL".equals(status)
