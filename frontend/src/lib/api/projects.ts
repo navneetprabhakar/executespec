@@ -477,8 +477,10 @@ export const refreshProjectPrs = (projectId: string) =>
     {method: 'POST'},
   );
 
-export const getArchitectureDoc = (projectId: string) =>
-  req<ArchitectureDoc>(`/projects/${projectId}/architecture`);
+export const getArchitectureDoc = async (projectId: string): Promise<ArchitectureDoc | null> => {
+  const doc = await req<ArchitectureDoc | undefined>(`/projects/${projectId}/architecture`);
+  return doc ?? null;
+};
 
 export const getArchitectureVersions = (projectId: string) =>
   req<ArchitectureDoc[]>(`/projects/${projectId}/architecture/versions`);

@@ -160,4 +160,11 @@ public record RunRequest(
      * The shipped CLI sends this on {@code run local}; older backends drop it (default false →
      * today's remote execution). Inert unless the feature flag is on.
      */
-    Boolean localExecution) {}
+    Boolean localExecution,
+    /**
+     * V278 local-source binding — the opaque installation identity of the local connector
+     * submitting a {@code localExecution=true} run. Required whenever the selected project sources
+     * include a LOCAL folder: admission verifies the installation matches the registered connector
+     * and its lease is currently ONLINE. Never a filesystem path; ignored for remote runs.
+     */
+    java.util.UUID localInstallationId) {}

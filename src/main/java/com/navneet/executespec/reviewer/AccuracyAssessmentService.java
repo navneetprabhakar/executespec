@@ -165,7 +165,9 @@ SCORE COMPUTATION GUIDANCE:
   deviations; LOW if major mismatches.
 - testCoverageLevel = grade against what the spec REQUIRED, using these bands precisely. Do NOT
   default to PARTIAL out of caution — pick the band the evidence supports:
-    * NONE — no test files exist, or tests are present but don't exercise any spec target.
+    * NONE — no test files exist, tests don't exercise any spec target, tests reimplement the target
+      logic locally instead of invoking production, or fixtures disable/mock away the security,
+      validation, middleware, persistence, or service boundary they claim to prove.
     * PARTIAL — SOME spec-required test targets have a test, but at least one required target has
       NO test at all. (Use this only when a required target is genuinely untested.)
     * GOOD — EVERY spec-required test target has at least a happy-path test. If the spec says
@@ -178,6 +180,8 @@ SCORE COMPUTATION GUIDANCE:
   Reserve PARTIAL for real gaps (a required endpoint/module with zero test), not for "could be
   more thorough." Inspect the TEST FILES section for this judgment; the KEY SOURCE FILES section
   intentionally excludes tests so implementation and test evidence have independent budgets.
+  A green command is execution evidence only. It does not upgrade copied-logic or
+  requirement-bypassing tests into coverage.
 - Return valid JSON. Do not wrap in markdown fences.
 """;
 

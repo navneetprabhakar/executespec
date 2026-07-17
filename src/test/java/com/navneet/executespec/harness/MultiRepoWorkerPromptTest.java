@@ -120,6 +120,16 @@ class MultiRepoWorkerPromptTest {
   }
 
   @Test
+  void worker_prompt_forbids_tautological_and_requirement_bypassing_tests() {
+    String prompt = newExecutor().composeSystemPrompt(task(), null, null, null, null);
+
+    assertTrue(prompt.contains("Never copy the target predicate/algorithm into the test"));
+    assertTrue(prompt.contains("monkeypatch"));
+    assertTrue(prompt.contains("CSRF"));
+    assertTrue(prompt.contains("keeping the required production boundary active"));
+  }
+
+  @Test
   void local_hands_mode_adds_exact_file_scope_prompt_guard() {
     String prompt =
         newExecutor().composeSystemPrompt(task(), null, null, null, null, "deepseek", true);

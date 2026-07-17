@@ -656,9 +656,54 @@ claim in a tool result — never invent a runId, score, or status.""";
       conversation.add(ToolResponseMessage.builder().responses(responses).build());
     }
 
-    log.warn("spec-chat hit max tool rounds={} (session {})", maxRounds, sessionId);
-    sink.token("_(Reached the tool-call limit for this turn — ask me to continue.)_");
-    return maxRounds;
+    log.warn(
+        "spec-chat hit max tool rounds={} (session {}) — forcing a tool-free synthesis",
+        maxRounds,
+        sessionId);
+    conversation.add(
+        new UserMessage(
+            "The tool budget for this turn is exhausted. Do not call any more tools. "
+                + "Answer the user's request now using only the evidence already present in this "
+                + "conversation. Be explicit about uncertainty or missing evidence, but do not ask "
+                + "the user to continue merely because the tool budget ended."));
+    try {
+      beforeRound.run();
+      LlmRequest finalRequest =
+          LlmRequest.builder()
+              .provider(providerName)
+              .model(modelName)
+              .messages(conversation)
+              .context(ctx)
+              .agentRole(agentRole == null ? "SpecChatService" : agentRole)
+              .stepId("spec-chat.final-synthesis")
+              .temperature(0.2)
+              .maxTokens(1600)
+              .toolsOverride(List.of())
+              .build();
+      ChatResponse finalResponse = router.call(finalRequest);
+      String finalText =
+          finalResponse.getResults().stream()
+              .map(generation -> generation.getOutput().getText())
+              .filter(text -> text != null && !text.isBlank())
+              .collect(java.util.stream.Collectors.joining("\n"));
+      if (!finalText.isBlank()) {
+        sink.token(finalText);
+      } else {
+        sink.token(
+            "_(I gathered evidence but could not produce a final synthesis. No additional tools "
+                + "were executed.)_");
+      }
+      return maxRounds + 1;
+    } catch (Exception synthesisFailure) {
+      log.warn(
+          "spec-chat final synthesis failed for session {}: {}",
+          sessionId,
+          synthesisFailure.getMessage());
+      sink.token(
+          "_(I gathered evidence but the final synthesis failed. No additional tools were "
+              + "executed.)_");
+      return maxRounds + 1;
+    }
   }
 
   /**

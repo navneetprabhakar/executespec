@@ -219,6 +219,12 @@ also create or extend a test that exercises it before calling completeTask:
   - Put tests in the project's conventional location + framework (pytest
     `test_*.py`, Jest `*.test.ts` / `__tests__/`, Go `*_test.go`, JUnit
     `src/test/java/...`). If no test scaffold exists, create the minimal one.
+  - Tests MUST invoke the real production implementation through its public or supported boundary.
+    Never copy the target predicate/algorithm into the test and test the copy; that is zero
+    coverage even when it passes.
+  - Never disable, replace, monkeypatch, or no-op authentication, authorization, CSRF, validation,
+    middleware, persistence, or another requirement under test merely to make the suite green.
+    Mock only a true external dependency while keeping the required production boundary active.
 Untested code is an INCOMPLETE task. Do not call completeTask on a code change
 with zero tests unless the task is genuinely untestable (pure static asset, a
 one-line config) — and if so, say why in your completeTask summary.
@@ -347,6 +353,9 @@ to boot — skip it for those.""";
    */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
+  /** Proxied transaction boundary for locked task-status transitions. */
+  private final TaskStatusPersistenceService taskStatusPersistenceService;
+
   // RL-2026-05-041 (audit #2) — mid-run durability: GCS checkpoint at each task boundary.
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService
       gcsTaskCheckpointService;
@@ -370,6 +379,49 @@ to boot — skip it for those.""";
    * Canonical admitted-baseline product-diff evidence; optional only in legacy unit constructors.
    */
   private RunChangeEvidenceService runChangeEvidenceService;
+
+  /**
+   * Legacy construction seam retained for focused unit tests. Production uses the fully injected
+   * constructor below and always supplies {@link TaskStatusPersistenceService}.
+   */
+  public SequentialExecutor(
+      WorkerAgent worker,
+      BuildProjectTool buildProjectTool,
+      ObjectMapper objectMapper,
+      Metrics metrics,
+      SseBroadcaster broadcaster,
+      AgentTaskRepository taskRepo,
+      ModelResolver modelResolver,
+      com.navneet.executespec.router.ModelMatrixProperties matrixProps,
+      com.navneet.executespec.project.rag.RetrievalService retrievalService,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.context.ContextStore contextStore,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
+      com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService) {
+    this(
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        matrixProps,
+        retrievalService,
+        inLoopTestRunner,
+        featureFlagService,
+        contextStore,
+        costTracker,
+        null,
+        gcsTaskCheckpointService,
+        availableProviderResolver,
+        goalContinuationAdvisor,
+        repoOrientationService);
+  }
 
   public SequentialExecutor(
       WorkerAgent worker,
@@ -404,6 +456,7 @@ to boot — skip it for those.""";
         featureFlagService,
         contextStore,
         costTracker,
+        null,
         gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
@@ -426,6 +479,7 @@ to boot — skip it for those.""";
       com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
+      TaskStatusPersistenceService taskStatusPersistenceService,
       com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
@@ -447,11 +501,12 @@ to boot — skip it for those.""";
         featureFlagService,
         contextStore,
         costTracker,
+        taskStatusPersistenceService,
         gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
-        repoOrientationService,
-        taskOutcomeMetricService);
+        repoOrientationService);
+    this.taskOutcomeMetricService = taskOutcomeMetricService;
     this.initialRoutingService = initialRoutingService;
     this.runChangeEvidenceService = runChangeEvidenceService;
   }
@@ -4290,11 +4345,6 @@ to boot — skip it for those.""";
     return configured.trim().toUpperCase(Locale.ROOT);
   }
 
-  @org.springframework.transaction.annotation.Transactional
-  @org.springframework.retry.annotation.Retryable(
-      retryFor = {org.springframework.dao.DataAccessException.class},
-      maxAttempts = 3,
-      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(String runId, String taskIdShort, String status) {
     persistTaskStatus(runId, taskIdShort, status, null);
   }
@@ -4304,19 +4354,14 @@ to boot — skip it for those.""";
    * {@code lastLlmFailure} (already read as a fallback by {@code RunMapper.extractFailureReason})
    * so the UI shows a concrete message instead of "unknown — see worker logs".
    *
-   * <p>2026-05-04 — {@code @Retryable} added after dev run {@code 3b739e94...} task T1 got stuck in
-   * WORKING for 90+ minutes because a single transient {@code DataAccessException} on the WORKING→
-   * COMPLETE update was silently swallowed and the executor moved on to T2. With 3 attempts + 100ms
-   * backoff (×2 multiplier = 100ms / 200ms / 400ms), transient blips no longer leave stale WORKING
-   * rows. {@code DataAccessException} is the right level — it covers Hikari connection timeouts,
+   * <p>2026-05-04 — retry added after dev run {@code 3b739e94...} task T1 got stuck in WORKING for
+   * 90+ minutes because a single transient {@code DataAccessException} on the WORKING→ COMPLETE
+   * update was silently swallowed and the executor moved on to T2. With 3 attempts + 100ms backoff
+   * (×2 multiplier = 100ms / 200ms / 400ms), transient blips no longer leave stale WORKING rows.
+   * {@code DataAccessException} is the right level — it covers Hikari connection timeouts,
    * optimistic lock failures, and Postgres deadlocks while still letting genuine programmer errors
    * (NullPointerException etc) propagate immediately.
    */
-  @org.springframework.transaction.annotation.Transactional
-  @org.springframework.retry.annotation.Retryable(
-      retryFor = {org.springframework.dao.DataAccessException.class},
-      maxAttempts = 3,
-      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(
       String runId, String taskIdShort, String status, String failureReason) {
     persistTaskStatus(runId, taskIdShort, status, failureReason, null);
@@ -4335,118 +4380,48 @@ to boot — skip it for those.""";
    * <p>For COMPLETE tasks, callers should pass null for the diagnostic — the column is
    * intentionally NULL on success rows so it doubles as a "did this task have problems" filter.
    */
-  @org.springframework.transaction.annotation.Transactional
-  @org.springframework.retry.annotation.Retryable(
-      retryFor = {org.springframework.dao.DataAccessException.class},
-      maxAttempts = 3,
-      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(
       String runId,
       String taskIdShort,
       String status,
       String failureReason,
       String failureDiagnosticJson) {
-    String key = runId.substring(0, 8) + "_" + taskIdShort;
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
     try {
-      // A terminal status is an ownership boundary: a late result from an older JVM must not
-      // replace the recovery worker's durable evidence.  The row lock makes the generation check
-      // and save atomic with takeover.
-      var existing = taskRepo.findByIdForUpdate(key);
-      if (existing.isEmpty()) {
-        log.warn("persistTaskStatus: row not found id={} (status={} skipped)", key, status);
-        return;
-      }
-      var t = existing.get();
       Integer expectedRecoveryAttempt = taskRecoveryAttemptByTask.get(key);
-      if (expectedRecoveryAttempt != null
-          && !recoveryAttemptMatches(expectedRecoveryAttempt, t.getRecoveryAttempt())) {
-        log.warn(
-            "persistTaskStatus: fenced stale worker id={} expectedRecoveryAttempt={}"
-                + " actualRecoveryAttempt={} status={}",
-            key,
-            expectedRecoveryAttempt,
-            t.getRecoveryAttempt(),
-            status);
-        return;
+      TaskStatusPersistenceService persistence =
+          taskStatusPersistenceService != null
+              ? taskStatusPersistenceService
+              : new TaskStatusPersistenceService(taskRepo, costTracker);
+      TaskStatusPersistenceService.Result result =
+          persistence.persist(
+              runId,
+              taskIdShort,
+              status,
+              failureReason,
+              failureDiagnosticJson,
+              expectedRecoveryAttempt);
+      switch (result) {
+        case UPDATED ->
+            log.info(
+                "persistTaskStatus: {} -> {}{}",
+                key,
+                status,
+                failureReason != null ? " (reason: " + failureReason + ")" : "");
+        case ROW_NOT_FOUND ->
+            log.warn("persistTaskStatus: row not found id={} (status={} skipped)", key, status);
+        case STALE_RECOVERY_ATTEMPT ->
+            log.warn(
+                "persistTaskStatus: fenced stale worker id={} expectedRecoveryAttempt={} status={}",
+                key,
+                expectedRecoveryAttempt,
+                status);
+        case TERMINAL_OVERWRITE ->
+            log.warn(
+                "persistTaskStatus: fenced terminal overwrite id={} incomingStatus={}",
+                key,
+                status);
       }
-      if (isTerminalTaskStatus(t.getStatus()) && !status.equals(t.getStatus())) {
-        log.warn(
-            "persistTaskStatus: fenced terminal overwrite id={} currentStatus={} incomingStatus={}",
-            key,
-            t.getStatus(),
-            status);
-        return;
-      }
-      t.setStatus(status);
-      // Keep task-level liveness durable for crash recovery.  Run-level heartbeats are refreshed
-      // by the orchestrator scheduler, but a long provider turn or scheduler pause can make that
-      // signal stale while this worker is still progressing.  Every persisted task transition is
-      // an independent progress marker used by RunLifecycleService before takeover.
-      t.setLastActivityAt(java.time.Instant.now());
-      // Timestamp live — the Timeline tab needs real per-task start/end to render
-      // staggered bars, and the end-of-run applyExecutionResultToTasks only writes
-      // completedAt + durationMs. Stamp startedAt when a task first moves to WORKING,
-      // completedAt when it reaches a terminal status. Don't overwrite existing values.
-      if ("WORKING".equals(status) && t.getStartedAt() == null) {
-        t.setStartedAt(java.time.Instant.now());
-      }
-      boolean terminal =
-          "COMPLETE".equals(status)
-              || "PARTIAL".equals(status)
-              || "FAILED".equals(status)
-              || "BLOCKED".equals(status);
-      if (terminal && t.getCompletedAt() == null) {
-        java.time.Instant now = java.time.Instant.now();
-        t.setCompletedAt(now);
-        if (t.getStartedAt() != null && t.getDurationMs() == null) {
-          t.setDurationMs(java.time.Duration.between(t.getStartedAt(), now).toMillis());
-        }
-      }
-      // Live token flush — pull the cumulative per-task snapshot out of
-      // RunCostTracker so the UI sees real numbers for this task the
-      // moment it terminates, not only after the whole run ends.
-      if (terminal && costTracker != null) {
-        try {
-          var snap = costTracker.snapshotTask(runId, taskIdShort);
-          if (snap != null && (snap.inputTokens() > 0 || snap.outputTokens() > 0)) {
-            t.setInputTokens(snap.inputTokens());
-            t.setOutputTokens(snap.outputTokens());
-          }
-        } catch (Exception snapEx) {
-          log.debug("persistTaskStatus: snapshotTask failed for {}: {}", key, snapEx.getMessage());
-        }
-      }
-      if (failureReason != null && !failureReason.isBlank()) {
-        // 2026-05-10 (V184 companion) — defensive cap on the persistence
-        // boundary even though the column is TEXT. Reasons routed here
-        // can include a 240-char finalAssistantText tail PLUS a stack
-        // trace if a tool blew up in an exception path; capping at 4000
-        // is enough to keep the failure cause readable in the DB while
-        // keeping row sizes predictable. Truncate marker is a literal
-        // suffix so a future reader knows the value was clipped, not
-        // that the worker terminated mid-thought.
-        String reason = failureReason;
-        if (reason.length() > 4000) {
-          reason = reason.substring(0, 4000) + "… [truncated]";
-        }
-        t.setLastLlmFailure(reason);
-      }
-      if (failureDiagnosticJson != null && !failureDiagnosticJson.isBlank()) {
-        // V190 (2026-05-13, PR-A) — defensive cap matching last_llm_failure. The diagnostic JSON
-        // is bounded to ~600 chars at the build site (240-char text tail + numeric fields), but
-        // belt-and-braces here too in case a future caller passes a larger payload.
-        String diag = failureDiagnosticJson;
-        if (diag.length() > 8000) {
-          diag = diag.substring(0, 8000) + "\"… [truncated]\"}";
-        }
-        t.setFailureDiagnosticJson(diag);
-      }
-      taskRepo.saveAndFlush(t);
-      log.info(
-          "persistTaskStatus: {} -> {}{}",
-          key,
-          status,
-          failureReason != null ? " (reason: " + failureReason + ")" : "");
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);
     }
@@ -4455,14 +4430,6 @@ to boot — skip it for those.""";
   /** Visible for focused recovery tests; null in the legacy schema is generation zero. */
   static boolean recoveryAttemptMatches(int expected, Integer actual) {
     return expected == (actual == null ? 0 : actual);
-  }
-
-  private static boolean isTerminalTaskStatus(String status) {
-    return "COMPLETE".equals(status)
-        || "PARTIAL".equals(status)
-        || "FAILED".equals(status)
-        || "BLOCKED".equals(status)
-        || "CANCELLED".equals(status);
   }
 
   private void rememberRecoveryAttempt(String runId, String taskIdShort) {

@@ -1390,6 +1390,12 @@ export function IdeProjectRepos() {
               ((r as {repo?: Record<string, unknown>}).repo as
                 | Record<string, unknown>
                 | undefined) || r;
+            // V278 — LOCAL folder sources have no GitHub identity; connection is lease-derived.
+            const isLocal = String((repo as {sourceType?: string}).sourceType || 'SCM') === 'LOCAL';
+            const localOnline =
+              (repo as {localConnectionStatus?: string}).localConnectionStatus === 'ONLINE';
+            const lastSeen = (repo as {sourceLastSeenAt?: string}).sourceLastSeenAt;
+            const revision = (repo as {sourceRevision?: string}).sourceRevision;
             const sync = syncBadge(String(h.syncStatus || 'UNKNOWN'));
             const wh = (h as {webhookInstalled?: boolean}).webhookInstalled;
             const open = numOf(h, 'openPrCount') ?? numOf(h, 'openPrs') ?? 0;
@@ -1416,33 +1422,47 @@ export function IdeProjectRepos() {
             return (
               <div key={id} className='ide-card'>
                 <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 8}}>
-                  ▤ {name}
+                  {isLocal ? '⌂' : '▤'} {name}
                 </div>
                 <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                  <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
-                  <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
-                  <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
-                    {folderStatus === 'BOOTSTRAPPED'
-                      ? '.executespec ready'
-                      : folderStatus === 'BOOTSTRAP_PR_OPEN'
-                        ? 'setup PR open'
-                        : folderStatus === 'BOOTSTRAP_FAILED'
-                          ? 'setup failed'
-                          : 'setup optional'}
-                  </IdeBadge>
-                  <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook ✓' : 'no webhook'}</IdeBadge>
-                  {fullName.includes('/') ? (
-                    <a
-                      href={`https://github.com/${fullName}/pulls`}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                      style={{textDecoration: 'none'}}
-                      title='View pull requests on GitHub'
-                    >
-                      <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
-                    </a>
+                  {isLocal ? (
+                    <>
+                      <IdeBadge kind='ok'>Local folder</IdeBadge>
+                      <IdeBadge kind={localOnline ? 'ok' : 'warn'}>
+                        {localOnline ? 'connector online' : 'connector offline'}
+                      </IdeBadge>
+                      <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                    </>
                   ) : (
-                    <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                    <>
+                      <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
+                      <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                      <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
+                        {folderStatus === 'BOOTSTRAPPED'
+                          ? '.executespec ready'
+                          : folderStatus === 'BOOTSTRAP_PR_OPEN'
+                            ? 'setup PR open'
+                            : folderStatus === 'BOOTSTRAP_FAILED'
+                              ? 'setup failed'
+                              : 'setup optional'}
+                      </IdeBadge>
+                      <IdeBadge kind={wh ? 'ok' : 'warn'}>
+                        {wh ? 'webhook ✓' : 'no webhook'}
+                      </IdeBadge>
+                      {fullName.includes('/') ? (
+                        <a
+                          href={`https://github.com/${fullName}/pulls`}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          style={{textDecoration: 'none'}}
+                          title='View pull requests on GitHub'
+                        >
+                          <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
+                        </a>
+                      ) : (
+                        <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className='ide-kv'>
@@ -1453,12 +1473,27 @@ export function IdeProjectRepos() {
                   <span>Size</span>
                   <span>{sizeKb != null ? fmtKb(sizeKb) : '—'}</span>
                 </div>
-                <div className='ide-kv'>
-                  <span>HEAD</span>
-                  <span className='ide-mono'>
-                    {head ? `${String(head).slice(0, 7)} · ${branch}` : branch}
-                  </span>
-                </div>
+                {isLocal ? (
+                  <>
+                    <div className='ide-kv'>
+                      <span>Revision</span>
+                      <span className='ide-mono'>
+                        {revision ? String(revision).slice(0, 24) : '—'}
+                      </span>
+                    </div>
+                    <div className='ide-kv'>
+                      <span>Last seen</span>
+                      <span>{lastSeen ? new Date(lastSeen).toLocaleString() : '—'}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className='ide-kv'>
+                    <span>HEAD</span>
+                    <span className='ide-mono'>
+                      {head ? `${String(head).slice(0, 7)} · ${branch}` : branch}
+                    </span>
+                  </div>
+                )}
                 {archStatus && (
                   <div className='ide-kv'>
                     <span>Architecture</span>
@@ -1481,31 +1516,35 @@ export function IdeProjectRepos() {
                   >
                     View architecture
                   </Link>
-                  <button
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px'}}
-                    disabled={busy === `sync${id}`}
-                    title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
-                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
-                  >
-                    {busy === `sync${id}` ? '…' : 'Sync'}
-                  </button>
-                  <button
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px'}}
-                    disabled={busy === `regen${id}`}
-                    title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
-                    onClick={() =>
-                      act(
-                        `regen${id}`,
-                        () => api.regenerateRepoArchitecture(projectId, id),
-                        'Architecture regenerated.',
-                      )
-                    }
-                  >
-                    {busy === `regen${id}` ? '…' : 'Regenerate'}
-                  </button>
-                  {!wh && (
+                  {!isLocal && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `sync${id}`}
+                      title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
+                      onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
+                    >
+                      {busy === `sync${id}` ? '…' : 'Sync'}
+                    </button>
+                  )}
+                  {!isLocal && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `regen${id}`}
+                      title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
+                      onClick={() =>
+                        act(
+                          `regen${id}`,
+                          () => api.regenerateRepoArchitecture(projectId, id),
+                          'Architecture regenerated.',
+                        )
+                      }
+                    >
+                      {busy === `regen${id}` ? '…' : 'Regenerate'}
+                    </button>
+                  )}
+                  {!isLocal && !wh && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}

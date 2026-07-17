@@ -111,4 +111,56 @@ class ProviderHandoffFixtureHarnessTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("exactly primaryProvider and fallbackProvider");
   }
+
+  @Test
+  void routeRejectsGeminiEvenWhenTheOperatorAllowListsIt() {
+    WorkerAgent worker = mock(WorkerAgent.class);
+    var root = java.nio.file.Path.of("/tmp/es-gemini-handoff-" + System.nanoTime());
+    assertThatThrownBy(
+            () ->
+                ProviderHandoffFixtureHarness.run(
+                    worker,
+                    new ProviderHandoffFixtureHarness.Request(
+                        "repository-localization-v1",
+                        "v1",
+                        "gemini",
+                        "gemini-3.5-flash",
+                        "r1",
+                        "anthropic",
+                        "claude-sonnet-5",
+                        "r2",
+                        Set.of("gemini", "anthropic"),
+                        ProviderHandoffFixtureHarness.HandoffTrigger.ON_PROVIDER_ERROR),
+                    "r",
+                    root,
+                    (a, b, c, d) -> {}))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not admissible for quality-evidence comparison");
+  }
+
+  @Test
+  void routeRejectsRemovedOrUnknownProvidersAsFallbackToo() {
+    WorkerAgent worker = mock(WorkerAgent.class);
+    var root = java.nio.file.Path.of("/tmp/es-sarvam-handoff-" + System.nanoTime());
+    assertThatThrownBy(
+            () ->
+                ProviderHandoffFixtureHarness.run(
+                    worker,
+                    new ProviderHandoffFixtureHarness.Request(
+                        "repository-localization-v1",
+                        "v1",
+                        "deepseek",
+                        "deepseek-v4-pro-native",
+                        "r1",
+                        "sarvam",
+                        "sarvam-m",
+                        "r2",
+                        Set.of("deepseek", "sarvam"),
+                        ProviderHandoffFixtureHarness.HandoffTrigger.ALWAYS),
+                    "r",
+                    root,
+                    (a, b, c, d) -> {}))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not admissible for quality-evidence comparison");
+  }
 }

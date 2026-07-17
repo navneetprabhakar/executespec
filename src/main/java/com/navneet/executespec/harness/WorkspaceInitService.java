@@ -106,8 +106,9 @@ public class WorkspaceInitService {
    * Clones an existing GitHub repository into the run workspace. Used when {@code
    * repoMode=EXISTING} so the workspace starts from real code.
    *
-   * <p>The PAT is injected into the HTTPS URL as {@code oauth2:{pat}@} so no credential helper
-   * configuration is required.
+   * <p>The PAT authenticates via {@link com.navneet.executespec.repo.GitProcessAuth} — an ephemeral
+   * env-backed credential helper — so it never appears in argv or the persisted origin URL
+   * (credential gate 2026-07-17).
    *
    * <p>Idempotent: no-ops if {@code .git/} already exists in the workspace.
    *
@@ -123,15 +124,10 @@ public class WorkspaceInitService {
     }
     Files.createDirectories(workspace.getParent());
 
-    // Inject PAT into HTTPS URL for authentication
-    String authUrl =
-        (pat != null && !pat.isBlank())
-            ? repoUrl.replace("https://", "https://oauth2:" + pat + "@")
-            : repoUrl;
-
     log.info("Cloning {} into workspace for run {}", repoUrl, runId);
-    // git clone <authUrl> <workspace-path>  — creates the directory
-    runGitStrict(workspace.getParent(), "git", "clone", authUrl, workspace.toString());
+    // Credential-gate 2026-07-17: the PAT rides the child environment via GitProcessAuth — never
+    // argv, never the persisted origin URL (the workspace .git/config stays token-free).
+    runGitStrictAuth(workspace.getParent(), pat, "clone", repoUrl, workspace.toString());
 
     // Override commit identity for agent commits
     runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
@@ -301,18 +297,14 @@ public class WorkspaceInitService {
         continue;
       }
       String httpsUrl = r.cloneUrl() != null ? r.cloneUrl() : "https://github.com/" + r.fullName();
-      String authUrl =
-          (pat != null && !pat.isBlank())
-              ? httpsUrl.replace("https://", "https://oauth2:" + pat + "@")
-              : httpsUrl;
       String cloneBranch = (r.branch() == null || r.branch().isBlank()) ? null : r.branch();
       if (cloneBranch != null) {
         log.info(
             "Cloning {} (branch={}) into {} for run {}", r.fullName(), cloneBranch, target, runId);
-        runGitStrict(reposRoot, "git", "clone", "-b", cloneBranch, authUrl, target.toString());
+        runGitStrictAuth(reposRoot, pat, "clone", "-b", cloneBranch, httpsUrl, target.toString());
       } else {
         log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
-        runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+        runGitStrictAuth(reposRoot, pat, "clone", httpsUrl, target.toString());
       }
       persistCloneSnapshot(runId, r, target);
       // 2026-05-02 — augment .gitignore with vendored-path patterns BEFORE the worker starts
@@ -465,6 +457,26 @@ public class WorkspaceInitService {
       // Mask any embedded PAT in the logged command before throwing
       String cmdStr = String.join(" ", cmd).replaceAll("oauth2:[^@]+@", "oauth2:***@");
       throw new RuntimeException("git command [" + cmdStr + "] exited with " + exit + ": " + out);
+    }
+  }
+
+  /**
+   * Strict git execution with environment-carried authentication (credential-gate 2026-07-17). The
+   * token never enters argv or the persisted remote URL; see {@link
+   * com.navneet.executespec.repo.GitProcessAuth}.
+   */
+  private void runGitStrictAuth(Path dir, String pat, String... gitArgs)
+      throws IOException, InterruptedException {
+    ProcessBuilder pb =
+        com.navneet.executespec.repo.GitProcessAuth.git(pat, java.util.List.of(gitArgs));
+    pb.directory(dir.toFile());
+    pb.redirectErrorStream(true);
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    int exit = p.waitFor();
+    if (exit != 0) {
+      throw new RuntimeException(
+          "git command [git " + String.join(" ", gitArgs) + "] exited with " + exit + ": " + out);
     }
   }
 }

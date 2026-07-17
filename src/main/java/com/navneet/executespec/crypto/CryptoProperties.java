@@ -42,4 +42,19 @@ public class CryptoProperties {
    * <p>Audit: 2026-05-12 line-by-line review item H #52.
    */
   private boolean requireEncryption = false;
+
+  /**
+   * Version label stamped into every newly written {@code enc:v1:<keyVersion>:...} envelope and
+   * used to select the decryption key. Rotate by adding the old key to {@link #previousKeys} under
+   * its version label and bumping this to the new key's label.
+   */
+  private String keyVersion = "1";
+
+  /**
+   * Retired key material kept for decrypt-only use during rotation, keyed by version label. Values
+   * are Base64-encoded 32-byte AES keys (or GCP Secret Manager resource names when they start with
+   * {@code projects/}). Envelopes written under these versions decrypt normally; new writes always
+   * use the primary key + {@link #keyVersion}.
+   */
+  private java.util.Map<String, String> previousKeys = java.util.Map.of();
 }

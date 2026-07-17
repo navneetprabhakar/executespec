@@ -104,4 +104,17 @@ class ProjectRepoServiceSourceReadinessTest {
     assertThat(result.sourceReadinessReason()).isEqualTo("SOURCE_INVENTORY_TRUNCATED");
     assertThat(result.sourceFileCount()).isEqualTo(2);
   }
+
+  @Test
+  void localSourceCannotEnterGithubMetadataSync() {
+    repo.setSourceType(ProjectRepo.SourceType.LOCAL.name());
+    repo.setGithubRepoFullName(null);
+    repo.setGithubOwner(null);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.syncRepo(repoId, "user-1", null, false, "pat"))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("LOCAL sources cannot sync");
+    org.mockito.Mockito.verifyNoInteractions(stackDetector, gitHub);
+  }
 }

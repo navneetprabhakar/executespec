@@ -143,6 +143,7 @@ export function repoDisplayName(r: unknown): string {
   const rec = (r ?? {}) as {
     githubRepoFullName?: string | null;
     fullName?: string | null;
+    sourceDisplayName?: string | null;
     name?: string | null;
     repoName?: string | null;
     githubOwner?: string | null;
@@ -151,17 +152,23 @@ export function repoDisplayName(r: unknown): string {
     repo?: {
       githubRepoFullName?: string | null;
       fullName?: string | null;
+      sourceDisplayName?: string | null;
       name?: string | null;
       repoName?: string | null;
       githubOwner?: string | null;
       id?: string | null;
     } | null;
   };
-  // ProjectRepoDto shape (top-level fields)
-  const slug = rec.githubRepoFullName?.trim() || rec.fullName?.trim();
+  // ProjectRepoDto shape (top-level fields). V278 LOCAL rows have no GitHub slug — their bounded
+  // sourceDisplayName is the human label.
+  const slug =
+    rec.githubRepoFullName?.trim() || rec.fullName?.trim() || rec.sourceDisplayName?.trim();
   if (slug) return slug;
   // ProjectRepoLinkDto shape (nested .repo)
-  const nestedSlug = rec.repo?.githubRepoFullName?.trim() || rec.repo?.fullName?.trim();
+  const nestedSlug =
+    rec.repo?.githubRepoFullName?.trim() ||
+    rec.repo?.fullName?.trim() ||
+    rec.repo?.sourceDisplayName?.trim();
   if (nestedSlug) return nestedSlug;
   // legacy bare-name fixtures (top-level or nested)
   const bareTop = rec.name?.trim() || rec.repoName?.trim();

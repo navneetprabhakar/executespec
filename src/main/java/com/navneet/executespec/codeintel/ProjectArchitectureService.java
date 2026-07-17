@@ -194,10 +194,14 @@ public class ProjectArchitectureService {
     // preserves insertion order and we sort keys before serialise so the comparison isn't
     // sensitive to repo-link iteration order changing across calls.
     String currentFingerprint = serialiseFingerprint(shasByRepo);
+    boolean allRepoArchitecturesReusable =
+        repoArchDocs.stream().allMatch(ProjectArchitectureService::isReusableRepoArchitecture);
     ProjectArchitectureDoc cached =
         archDocRepo
             .findFirstByProjectIdOrderByVersionDesc(projectId)
             .filter(d -> d.getContent() != null && !d.getContent().isBlank())
+            .filter(ProjectArchitectureService::isReusableProjectArchitecture)
+            .filter(d -> allRepoArchitecturesReusable)
             .filter(d -> fingerprintMatches(d.getGeneratedFromShas(), currentFingerprint))
             .orElse(null);
     if (cached != null) {
@@ -369,7 +373,8 @@ public class ProjectArchitectureService {
         repoArchRepo.findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId());
     if (latest.isPresent()
         && codeMap.getId() != null
-        && codeMap.getId().equals(latest.get().getSourceCodeMapId())) {
+        && codeMap.getId().equals(latest.get().getSourceCodeMapId())
+        && isReusableRepoArchitecture(latest.get())) {
       log.info(
           "[{}] repo-arch for {} up-to-date @ codemap v{} — reusing v{}",
           projectId,
@@ -435,6 +440,22 @@ public class ProjectArchitectureService {
         rar.outputTokens(),
         rar.modelUsed());
     return doc;
+  }
+
+  static boolean isReusableRepoArchitecture(RepoArchitectureDoc doc) {
+    if (doc == null || doc.getContent() == null || doc.getContent().isBlank()) return false;
+    String model = doc.getModelUsed();
+    return model != null
+        && !model.isBlank()
+        && !"fallback".equalsIgnoreCase(model)
+        && !doc.getContent().contains("LLM generation failed");
+  }
+
+  static boolean isReusableProjectArchitecture(ProjectArchitectureDoc doc) {
+    if (doc == null || doc.getContent() == null || doc.getContent().isBlank()) return false;
+    String content = doc.getContent();
+    return !content.startsWith("# Project architecture (deterministic)")
+        && !content.contains("LLM generation failed");
   }
 
   /**

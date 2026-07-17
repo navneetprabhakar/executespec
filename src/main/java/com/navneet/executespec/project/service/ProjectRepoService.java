@@ -156,6 +156,8 @@ public class ProjectRepoService {
             .ownerUserId(scope == ProjectRepo.Scope.USER ? callerUserId : null)
             .githubRepoFullName(req.githubRepoFullName())
             .githubOwner(githubOwner)
+            .sourceKey(req.githubRepoFullName())
+            .sourceDisplayName(req.githubRepoFullName())
             .defaultBranch(branch)
             .detectedStack(stackDetector.detect(req.githubRepoFullName(), githubPat))
             .lastSyncedSha(headSha)
@@ -222,6 +224,7 @@ public class ProjectRepoService {
       boolean isOrgAdmin,
       String overridePat) {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+    requireScmSource(repo, "sync");
 
     // Metadata refresh only. These are GitHub network calls — run OUTSIDE any transaction.
     String detected = stackDetector.detect(repo.getGithubRepoFullName(), overridePat);
@@ -366,6 +369,7 @@ public class ProjectRepoService {
             HttpStatus.FORBIDDEN, "Only the repo owner can link their personal repo");
       }
     }
+    requireScmSource(repo, "link through /api/projects/{projectId}/repos/{repoId}");
 
     linkRepo
         .findByProjectIdAndRepoId(projectId, repoId)
@@ -465,6 +469,66 @@ public class ProjectRepoService {
    * request error rather than an invitation to execute against a partial/empty workspace.
    */
   public List<ProjectRepo> resolveForRunStrict(String projectId, List<UUID> repoIds) {
+    List<ProjectRepo> resolved = resolveLinkedStrict(projectId, repoIds);
+    if (resolved.stream()
+        .anyMatch(r -> ProjectRepo.SourceType.LOCAL.name().equals(r.getSourceType()))) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "LOCAL sources require an active local client execution session");
+    }
+    return resolved;
+  }
+
+  /**
+   * Local-hands run admission (V278 binding contract). LOCAL sources are admitted only when the
+   * submitting client proves it is the connector holding the lease: caller owns the source, the
+   * request's installation identity matches the registered one, and the lease is currently ONLINE.
+   * SCM sources pass through unchanged (the client works in its own clone). Cloud runs never reach
+   * this method — {@link #resolveForRunStrict} keeps rejecting LOCAL sources there.
+   */
+  @Transactional
+  public List<ProjectRepo> resolveForLocalRunStrict(
+      String projectId, List<UUID> repoIds, UUID localInstallationId, String callerUserId) {
+    List<ProjectRepo> resolved = resolveLinkedStrict(projectId, repoIds);
+    List<ProjectRepo> localSources =
+        resolved.stream()
+            .filter(r -> ProjectRepo.SourceType.LOCAL.name().equals(r.getSourceType()))
+            .toList();
+    if (localSources.isEmpty()) {
+      return resolved;
+    }
+    if (localInstallationId == null) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Selected LOCAL sources require localInstallationId from the registered local"
+              + " connector");
+    }
+    Instant now = Instant.now();
+    for (ProjectRepo source : localSources) {
+      if (callerUserId == null || !callerUserId.equals(source.getOwnerUserId())) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source " + source.getId() + " is not owned by the submitting user");
+      }
+      if (!localInstallationId.equals(source.getLocalInstallationId())) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source " + source.getId() + " is registered to a different client installation");
+      }
+      if (!"ONLINE".equals(source.localConnectionStatus(now))) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source "
+                + source.getId()
+                + " is OFFLINE; start the local connector so its lease is active");
+      }
+      source.setSourceLastSeenAt(now);
+      repoRepo.save(source);
+    }
+    return resolved;
+  }
+
+  private List<ProjectRepo> resolveLinkedStrict(String projectId, List<UUID> repoIds) {
     if (projectId == null || projectId.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId is required");
     }
@@ -546,6 +610,8 @@ public class ProjectRepoService {
             .ownerUserId(project.getOrgId() != null ? null : callerUserId)
             .githubRepoFullName(fullName)
             .githubOwner(extractOwner(fullName))
+            .sourceKey(fullName)
+            .sourceDisplayName(fullName)
             .defaultBranch("main")
             .detectedStack(null) // fresh repo — no stack detected yet
             .lastSyncedSha(null)
@@ -577,6 +643,7 @@ public class ProjectRepoService {
   @Transactional
   public boolean installWebhook(UUID repoId, String pat, String callerUserId, String callerOrgId) {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+    requireScmSource(repo, "install a webhook");
     boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
     if (ok) {
       repo.setWebhookInstalled(true);
@@ -594,6 +661,14 @@ public class ProjectRepoService {
     String tail = cloneUrl.substring(host + "github.com/".length());
     if (tail.endsWith(".git")) tail = tail.substring(0, tail.length() - 4);
     return tail.contains("/") ? tail : null;
+  }
+
+  private static void requireScmSource(ProjectRepo repo, String operation) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "LOCAL sources cannot " + operation + "; renew them through the local connector");
+    }
   }
 
   /* ──────────────────────────────── helpers ──────────────────────────────── */
