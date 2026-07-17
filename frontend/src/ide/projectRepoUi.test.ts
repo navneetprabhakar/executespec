@@ -2,6 +2,8 @@ import {describe, expect, it} from 'vitest';
 import {
   explicitLinkedRepoSelection,
   normalizeGitHubRepoQuery,
+  normalizeScmRepoQuery,
+  repoSupports,
   sourceReadinessBadge,
   syncBadge,
 } from './projectRepoUi';
@@ -20,6 +22,26 @@ describe('brownfield repository UI contracts', () => {
     expect(normalizeGitHubRepoQuery(' https://github.com/django/django.git ')).toBe(
       'django/django',
     );
+  });
+
+  it('normalizes Bitbucket Cloud URLs without treating them as GitHub', () => {
+    expect(normalizeScmRepoQuery('https://bitbucket.org/acme/platform.git', 'BITBUCKET')).toBe(
+      'acme/platform',
+    );
+    expect(normalizeScmRepoQuery('https://github.com/acme/platform', 'BITBUCKET')).toBe(
+      'https://github.com/acme/platform',
+    );
+  });
+
+  it('fails closed for GitHub-only capabilities on Bitbucket and preserves legacy GitHub rows', () => {
+    expect(
+      repoSupports(
+        {scmProvider: 'BITBUCKET', sourceCapabilities: ['SYNC', 'SOURCE_BROWSE']},
+        'ARCHITECTURE',
+      ),
+    ).toBe(false);
+    expect(repoSupports({scmProvider: 'BITBUCKET'}, 'WEBHOOK')).toBe(false);
+    expect(repoSupports({scmProvider: 'GITHUB'}, 'WEBHOOK')).toBe(true);
   });
 
   it('never presents missing SHA evidence as in sync', () => {

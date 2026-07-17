@@ -47,6 +47,8 @@ public class TechDebtFixService {
   /** Hard cap on issues embedded in the prompt — keeps the user message under ~6KB. */
   private static final int MAX_ISSUES_IN_PROMPT = 30;
 
+  private static final int MAX_REPORTS_SCANNED = 1000;
+
   private final ValidationReportRepository reportRepo;
   private final ProjectRepoLinkRepository linkRepo;
   private final ObjectMapper objectMapper;
@@ -105,7 +107,11 @@ public class TechDebtFixService {
   }
 
   private List<Map<String, Object>> collectIssuesForCategory(String projectId, String category) {
-    List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
+    List<ValidationReport> reports =
+        reportRepo.findRecentByProjectId(
+            projectId,
+            java.time.Instant.now().minus(java.time.Duration.ofDays(366)),
+            org.springframework.data.domain.PageRequest.of(0, MAX_REPORTS_SCANNED));
     List<Map<String, Object>> matching = new ArrayList<>();
     for (ValidationReport r : reports) {
       String json = r.getIssuesJson();

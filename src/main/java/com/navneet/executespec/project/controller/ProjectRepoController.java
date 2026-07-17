@@ -19,6 +19,12 @@ import com.navneet.executespec.project.service.LocalProjectSourceService;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
+import com.navneet.executespec.repo.ScmCapability;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmRemoteRepository;
+import com.navneet.executespec.repo.ScmRepositoryClient;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +44,8 @@ public class ProjectRepoController {
   private final ProjectRepoService service;
   private final LocalProjectSourceService localProjectSourceService;
   private final GitHubRepoService gitHub;
+  private final ScmRepositoryClientRegistry scmClients;
+  private final ScmCredentialResolver scmCredentials;
   private final ProjectAccessGuard projectAccessGuard;
 
   /**
@@ -54,6 +62,24 @@ public class ProjectRepoController {
     // merely the user's personal namespace. An explicit owner remains a server-side filter.
     String ownerFilter = (owner != null && !owner.isBlank()) ? owner : null;
     return ResponseEntity.ok(gitHub.listOwnerRepos(ownerFilter, u.getGithubPat()));
+  }
+
+  /** Provider-neutral remote catalogue. Credentials are resolved server-side and never returned. */
+  @GetMapping("/api/repos/scm")
+  public ResponseEntity<List<ScmRemoteRepository>> listScmRepos(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestParam("provider") String provider,
+      @RequestParam(value = "owner", required = false) String owner) {
+    ScmProvider selected = ScmProvider.require(provider);
+    ScmRepositoryClient client = scmClients.require(selected);
+    if (!client.supports(ScmCapability.CATALOG)) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY, selected + " catalogue is not supported");
+    }
+    return ResponseEntity.ok(
+        client.listRepositories(
+            owner == null || owner.isBlank() ? null : owner.trim(),
+            scmCredentials.require(userDetails.getUser().getId(), selected)));
   }
 
   /* ── Lifecycle ── */
@@ -92,8 +118,7 @@ public class ProjectRepoController {
             repoId,
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            isOrgAdmin(userDetails),
-            userDetails.getUser().getGithubPat()));
+            isOrgAdmin(userDetails)));
   }
 
   /**

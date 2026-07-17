@@ -138,7 +138,7 @@ class AgentStreamTurnRunnerTest {
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 
-    verify(sessionService).failStreamTurn(ctx, "provider unavailable");
+    verify(sessionService).failStreamTurn(ctx, "IllegalStateException: provider unavailable");
     verify(emitter).complete();
     verify(emitter, never()).completeWithError(any());
   }

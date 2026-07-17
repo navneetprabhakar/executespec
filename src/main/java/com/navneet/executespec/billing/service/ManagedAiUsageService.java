@@ -100,6 +100,33 @@ public class ManagedAiUsageService {
         .orElseThrow(() -> routingPolicy.blocked(state, costClass));
   }
 
+  /**
+   * Pre-authorize a fixed-model provider capability such as embeddings. Unlike chat routing this
+   * method never substitutes a different model: doing so would corrupt a persisted vector corpus.
+   * Platform-key calls still obey the same managed-credit hard stop; BYOK calls remain exempt.
+   */
+  @Transactional
+  public void authorizeFixedCapabilityCall(
+      String runId,
+      String provider,
+      String model,
+      String agentRole,
+      RunKeyContext keys,
+      RunKeyContext.Source source) {
+    if (!properties.isEnabled() || !modelClassifier.managedAiEnabled(model)) return;
+    ManagedAiUserContext user = periodService.resolveUser(runId, keys);
+    if (user == null || !isPlatform(source)) return;
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
+    if (!isManaged(policy)) return;
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
+    String state = routingPolicy.recomputeState(period);
+    periodService.syncState(period, state);
+    String costClass = modelClassifier.costClass(model);
+    if (!routingPolicy.isAllowed(state, costClass, agentRole)) {
+      throw routingPolicy.blocked(state, costClass);
+    }
+  }
+
   @Transactional
   public void recordSuccessfulCall(
       String runId,

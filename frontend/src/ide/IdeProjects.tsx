@@ -2,6 +2,13 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {
+  providerIsProjectSelectable,
+  providerDisplayName,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 type Dash = Record<string, unknown>;
@@ -25,6 +32,19 @@ export default function IdeProjects() {
   const [filter, setFilter] = useState<'mine' | 'archived'>('mine');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newProvider, setNewProvider] = useState('');
+  const [createError, setCreateError] = useState('');
+  const providerReadiness = useProviderReadiness();
+  const selectableProviders = useMemo(
+    () => providerReadiness.rows.filter(providerIsProjectSelectable),
+    [providerReadiness.rows],
+  );
+
+  useEffect(() => {
+    if (!newProvider && selectableProviders.length === 1) {
+      setNewProvider(selectableProviders[0].provider.toUpperCase());
+    }
+  }, [newProvider, selectableProviders]);
 
   useEffect(() => {
     api
@@ -53,11 +73,16 @@ export default function IdeProjects() {
   async function create() {
     const name = newName.trim();
     if (!name) return;
+    if (providerReadiness.supported && !newProvider) {
+      setCreateError('Choose an available AI provider for this project.');
+      return;
+    }
     try {
-      const p = await api.createProject({name});
+      setCreateError('');
+      const p = await api.createProject({name, aiProvider: newProvider || undefined});
       navigate(`/projects/${(p as {id?: string}).id ?? ''}`);
-    } catch {
-      setCreating(false);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Project creation failed.');
     }
   }
 
@@ -138,11 +163,17 @@ export default function IdeProjects() {
         </h1>
         <span style={{flex: 1}} />
         {!creating ? (
-          <button className='ide-btn' onClick={() => setCreating(true)}>
+          <button
+            className='ide-btn'
+            onClick={() => {
+              setCreating(true);
+              setCreateError('');
+            }}
+          >
             ＋ New project
           </button>
         ) : (
-          <span style={{display: 'flex', gap: 6}}>
+          <span style={{display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap'}}>
             <input
               className='ide-input'
               autoFocus
@@ -152,12 +183,59 @@ export default function IdeProjects() {
               onKeyDown={(e) => e.key === 'Enter' && create()}
               style={{width: 200}}
             />
-            <button className='ide-btn' onClick={create}>
+            <select
+              className='ide-input'
+              aria-label='AI provider'
+              value={newProvider}
+              disabled={providerReadiness.loading || providerReadiness.error}
+              onChange={(event) => {
+                setNewProvider(event.target.value);
+                setCreateError('');
+              }}
+              style={{width: 190}}
+            >
+              <option value=''>Choose AI provider</option>
+              {providerReadiness.rows.map((row) => (
+                <option
+                  key={row.provider}
+                  value={row.provider.toUpperCase()}
+                  disabled={!providerIsProjectSelectable(row)}
+                >
+                  {providerOptionLabel(providerDisplayName(row.provider), row)}
+                </option>
+              ))}
+            </select>
+            <button
+              className='ide-btn'
+              onClick={create}
+              disabled={
+                providerReadiness.supported &&
+                (providerReadiness.loading || providerReadiness.error || !newProvider)
+              }
+            >
               Create
             </button>
-            <button className='ide-btn ghost' onClick={() => setCreating(false)}>
+            <button
+              className='ide-btn ghost'
+              onClick={() => {
+                setCreating(false);
+                setCreateError('');
+              }}
+            >
               ✕
             </button>
+            <span className='ide-sub' role={createError ? 'alert' : undefined}>
+              {createError ||
+                (providerReadiness.error
+                  ? 'Provider readiness unavailable; creation is disabled.'
+                  : providerReadiness.loading
+                    ? 'Checking provider readiness…'
+                    : newProvider
+                      ? providerReadinessLabel(
+                          providerReadiness.byProvider.get(newProvider.toUpperCase()),
+                        )
+                      : `${selectableProviders.length} provider${selectableProviders.length === 1 ? '' : 's'} available`)}
+            </span>
           </span>
         )}
       </div>

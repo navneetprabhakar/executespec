@@ -648,7 +648,7 @@ public class OrgService {
       java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
 
   private static final java.util.Set<String> VALID_PROVIDERS =
-      java.util.Set.of("anthropic", "openai", "openrouter", "deepseek", "fireworks");
+      java.util.Set.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
 
   @Transactional
   public OrgDto updateKeySourceSettings(
@@ -659,25 +659,26 @@ public class OrgService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
 
     if (keySourceMode != null) {
-      if (!VALID_KEY_SOURCE_MODES.contains(keySourceMode)) {
+      String normalizedMode = keySourceMode.trim().toUpperCase(java.util.Locale.ROOT);
+      if (!VALID_KEY_SOURCE_MODES.contains(normalizedMode)) {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
             "Invalid keySourceMode: " + keySourceMode + ". Must be SYSTEM, OWN_KEYS, or HYBRID.");
       }
-      org.setKeySourceMode(keySourceMode);
+      org.setKeySourceMode(normalizedMode);
     }
 
     if (enabledProviders != null) {
       // Validate and normalize
       for (String p : enabledProviders) {
-        String normalized = p.toLowerCase();
+        String normalized = normalizeProvider(p);
         if (!VALID_PROVIDERS.contains(normalized)
             || ModelAccessService.isDisabledProvider(normalized)) {
           throw new ResponseStatusException(
               HttpStatus.BAD_REQUEST,
               "Invalid provider: "
                   + p
-                  + ". Must be anthropic, openai, openrouter, deepseek, or fireworks.");
+                  + ". Must be anthropic, openai, gemini, openrouter, deepseek, or fireworks.");
         }
       }
       if (enabledProviders.isEmpty()) {
@@ -685,7 +686,7 @@ public class OrgService {
       } else {
         org.setEnabledProviders(
             enabledProviders.stream()
-                .map(String::toLowerCase)
+                .map(OrgService::normalizeProvider)
                 .distinct()
                 .collect(Collectors.joining(",")));
       }
@@ -708,6 +709,12 @@ public class OrgService {
             "providers", String.valueOf(org.getEnabledProviders())));
 
     return result;
+  }
+
+  private static String normalizeProvider(String provider) {
+    if (provider == null) return "";
+    String normalized = provider.trim().toLowerCase(java.util.Locale.ROOT);
+    return "google".equals(normalized) ? "gemini" : normalized;
   }
 
   @Transactional

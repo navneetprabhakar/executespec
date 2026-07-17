@@ -184,11 +184,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
   }
 
   /**
-   * Resolve the rate limit identifier. Auth and webhook requests: IP address. Authenticated
-   * requests: userId.
+   * Resolve the rate limit identifier. Auth, webhook and public-share requests: IP address.
+   * Authenticated requests on other surfaces: userId.
    */
   private String resolveIdentifier(HttpServletRequest request, String group) {
-    if ("AUTH".equals(group) || "WEBHOOK".equals(group)) {
+    if ("AUTH".equals(group) || "WEBHOOK".equals(group) || "PUBLIC_SHARE".equals(group)) {
       return getClientIp(request);
     }
 
@@ -213,6 +213,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
     if ("WEBHOOK".equals(group)) {
       return "DEFAULT";
+    }
+    if ("PUBLIC_SHARE".equals(group)) {
+      return "FREE";
     }
 
     Authentication auth = SecurityContextHolder.getContext().getAuthentication();

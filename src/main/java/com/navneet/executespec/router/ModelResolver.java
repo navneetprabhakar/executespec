@@ -16,8 +16,9 @@ import lombok.extern.slf4j.Slf4j;
  * Resolves the concrete LLM model for a given agent and user-selected provider.
  *
  * <p>Lookup: agentName → {@link AgentTier} (from config) → provider column in matrix → model
- * string. If the user's selected provider is unhealthy (circuit open in {@link
- * ProviderHealthTracker}), fails over to the next provider in the configured failover chain.
+ * string. This layer never performs a health-only provider switch: physical retry/failover belongs
+ * to {@code LlmRouter}, where the durable tenant policy, current key provenance, ordered attempt
+ * ledger and provider-specific fallback model are all available.
  *
  * <p>Replaces the old {@code ModelRouter} (tier-based FAST/CAPABLE/POWER selection).
  */
@@ -28,10 +29,9 @@ public class ModelResolver {
   /**
    * Feature flag gating "adaptive routing" — the historical-success-rate-based provider override
    * inside {@link #selectAdaptiveProvider}. Default OFF (Fix G, 2026-05-03). When OFF, the user's
-   * selected provider is always honoured (subject only to circuit-breaker failover when it's
-   * unhealthy). When ON, providers may be swapped under the user's feet based on observed success
-   * rates — useful for ops scenarios but surprising for a user who picked a specific provider
-   * deliberately.
+   * selected provider is always honoured. When ON, providers may be swapped under the user's feet
+   * based on observed success rates — useful for ops scenarios but surprising for a user who picked
+   * a specific provider deliberately.
    */
   public static final String FLAG_ADAPTIVE_ROUTING = "routing.adaptive-routing.enabled";
 
@@ -82,12 +82,12 @@ public class ModelResolver {
   }
 
   /**
-   * Resolves the model for a given agent within the user's selected provider. Falls back to next
-   * provider in failover chain if primary is unhealthy.
+   * Resolves the model for a given agent within the user's selected provider. Provider-wire
+   * failover happens later in {@code LlmRouter}, after durable policy authorization.
    *
    * @param agentName simple class name of the agent (e.g. "WorkerAgent")
    * @param userProvider the project's selected LLM provider
-   * @return resolved model with actual provider (may differ from requested on failover)
+   * @return resolved model with actual provider (may differ only when adaptive routing is enabled)
    */
   public ResolvedModel resolve(String agentName, LlmProvider userProvider) {
     AgentTier tier = matrixProps.getAgentTierMap().get(agentName);
@@ -97,10 +97,11 @@ public class ModelResolver {
       tier = AgentTier.WORKHORSE;
     }
 
-    // Try the user's selected provider first — but prefer a healthy alternative with
-    // materially better success rate (≥10 pp improvement with sufficient samples).
+    String primaryModel = lookupModel(userProvider, tier);
+    // Adaptive selection is an explicit opt-in. It is evaluated only while the primary circuit is
+    // healthy; an unhealthy circuit must not trigger a global-key-based pre-dispatch switch.
+    // LlmRouter will attempt/retry the selected route and then apply the tenant-authorized chain.
     if (healthTracker.isHealthy(userProvider)) {
-      String primaryModel = lookupModel(userProvider, tier);
       // Fix G (2026-05-03) — adaptive routing is OPT-IN, not opt-out. Default behaviour:
       // honour the user's selected provider. Diagnosed from run a076c876 where every
       // MEDIUM (WORKHORSE-tier) task ran on claude-sonnet-4-6 instead of the configured
@@ -146,41 +147,14 @@ public class ModelResolver {
             .increment();
         return resolved(userProvider, adaptiveProvider, adaptiveModel, tier, true);
       }
-      return resolved(userProvider, userProvider, primaryModel, tier, false);
+    } else {
+      log.warn(
+          "[ModelResolver] {} circuit is open for agent {}; preserving the requested route for"
+              + " tenant-authorized router failover",
+          userProvider,
+          agentName);
     }
-
-    // Failover: try providers in configured order
-    List<String> failoverList =
-        matrixProps.getFailoverOrder().get(userProvider.name().toLowerCase());
-    if (failoverList != null) {
-      for (String fallbackName : failoverList) {
-        LlmProvider fallback = LlmProvider.valueOf(fallbackName.toUpperCase());
-        if (healthTracker.isHealthy(fallback)) {
-          String fallbackModel = lookupModel(fallback, tier);
-          log.warn(
-              "[ModelResolver] Failover: {} → {} for agent {} (tier={})",
-              userProvider,
-              fallback,
-              agentName,
-              tier);
-          Counter.builder("executespec.routing.failover")
-              .tag("from", userProvider.name())
-              .tag("to", fallback.name())
-              .tag("agent", agentName)
-              .register(meterRegistry)
-              .increment();
-          return resolved(userProvider, fallback, fallbackModel, tier, true);
-        }
-      }
-    }
-
-    // All providers unhealthy — force the user's selected provider anyway
-    log.warn(
-        "[ModelResolver] All providers unhealthy — forcing {} for agent {}",
-        userProvider,
-        agentName);
-    String model = lookupModel(userProvider, tier);
-    return resolved(userProvider, userProvider, model, tier, false);
+    return resolved(userProvider, userProvider, primaryModel, tier, false);
   }
 
   /** Resolves a model at a specific tier override (e.g. for stall escalation). */
@@ -193,49 +167,6 @@ public class ModelResolver {
         model,
         tierOverride,
         base.isFallback());
-  }
-
-  /**
-   * Resolves a fallback provider for mid-task recovery, excluding the failed provider. Uses the
-   * failover chain but skips the specified provider name.
-   *
-   * @param agentName agent class name for tier lookup
-   * @param userProvider the project's selected provider
-   * @param excludeProvider provider name to exclude (the one that failed)
-   * @return resolved model from a different provider
-   * @throws IllegalStateException if no fallback is available
-   */
-  public ResolvedModel resolveFallbackExcluding(
-      String agentName, LlmProvider userProvider, String excludeProvider) {
-    AgentTier tier = matrixProps.getAgentTierMap().getOrDefault(agentName, AgentTier.WORKHORSE);
-
-    List<String> failoverList =
-        matrixProps.getFailoverOrder().get(userProvider.name().toLowerCase());
-    if (failoverList != null) {
-      for (String fallbackName : failoverList) {
-        if (fallbackName.equalsIgnoreCase(excludeProvider)) continue;
-        LlmProvider fallback = LlmProvider.valueOf(fallbackName.toUpperCase());
-        if (healthTracker.isHealthy(fallback)) {
-          String model = lookupModel(fallback, tier);
-          log.info(
-              "[ModelResolver] Mid-task fallback: excluding {} → {} for agent {} (tier={})",
-              excludeProvider,
-              fallback,
-              agentName,
-              tier);
-          return resolved(userProvider, fallback, model, tier, true);
-        }
-      }
-    }
-
-    // Also try the user's own provider if it wasn't the failed one
-    if (!userProvider.name().equalsIgnoreCase(excludeProvider)
-        && healthTracker.isHealthy(userProvider)) {
-      String model = lookupModel(userProvider, tier);
-      return resolved(userProvider, userProvider, model, tier, true);
-    }
-
-    throw new IllegalStateException("No fallback provider available excluding " + excludeProvider);
   }
 
   /**

@@ -14,6 +14,7 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.codeintel.repository.RepoArchitectureDocRepository;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -103,7 +104,35 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, providerOverride);
+    return generateInternal(projectId, branchOverride, patOverride, providerOverride, null, null);
+  }
+
+  /** Confirmed Project Chat path with immutable initiating-actor attribution. */
+  public ProjectArchitectureDoc generate(
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId) {
+    return generateInternal(
+        projectId, branchOverride, patOverride, providerOverride, actorUserId, null);
+  }
+
+  /** Confirmed action path: all downstream LLM calls share one durable hard budget. */
+  public ProjectArchitectureDoc generate(
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        branchOverride,
+        patOverride,
+        providerOverride,
+        actorUserId,
+        confirmedActionReference);
   }
 
   /**
@@ -141,11 +170,16 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, null);
+    return generateInternal(projectId, branchOverride, patOverride, null, null, null);
   }
 
   private ProjectArchitectureDoc generateInternal(
-      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
@@ -178,7 +212,8 @@ public class ProjectArchitectureService {
       branchesByRepo.put(repo.getGithubRepoFullName(), effectiveBranch);
 
       // Step 2: per-repo architecture doc (idempotent by codemap)
-      RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);
+      RepoArchitectureDoc rad =
+          ensureRepoArchDoc(projectId, repo, cm, provider, actorUserId, confirmedActionReference);
       repoArchDocs.add(rad);
     }
 
@@ -215,7 +250,14 @@ public class ProjectArchitectureService {
     // Step 3: combined architecture doc (always regenerates)
     ArchitectureDocGenerator.Result combined;
     try {
-      combined = archDocGenerator.generate(projectId, repoArchDocs, repoFullNames, provider);
+      combined =
+          archDocGenerator.generate(
+              projectId,
+              repoArchDocs,
+              repoFullNames,
+              provider,
+              actorUserId,
+              confirmedActionReference);
     } catch (Exception e) {
       log.warn(
           "[{}] LLM combined-arch failed ({}) — falling back to deterministic combine",
@@ -369,6 +411,16 @@ public class ProjectArchitectureService {
    */
   private RepoArchitectureDoc ensureRepoArchDoc(
       String projectId, ProjectRepo repo, ProjectCodeMap codeMap, LlmProvider provider) {
+    return ensureRepoArchDoc(projectId, repo, codeMap, provider, null, null);
+  }
+
+  private RepoArchitectureDoc ensureRepoArchDoc(
+      String projectId,
+      ProjectRepo repo,
+      ProjectCodeMap codeMap,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     Optional<RepoArchitectureDoc> latest =
         repoArchRepo.findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId());
     if (latest.isPresent()
@@ -387,7 +439,13 @@ public class ProjectArchitectureService {
     RepoArchitectureGenerator.Result rar;
     try {
       rar =
-          repoArchGenerator.generate(repo.getGithubRepoFullName(), codeMap.getContent(), provider);
+          repoArchGenerator.generate(
+              projectId,
+              repo.getGithubRepoFullName(),
+              codeMap.getContent(),
+              provider,
+              actorUserId,
+              confirmedActionReference);
     } catch (Exception e) {
       log.warn(
           "[{}] repo-arch LLM failed for {} ({}) — falling back to codemap as arch content",

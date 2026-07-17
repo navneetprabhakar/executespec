@@ -48,4 +48,45 @@ public interface ActivityFeedEntryRepository
       @Param("from") Instant from,
       @Param("to") Instant to,
       Pageable pageable);
+
+  /**
+   * Filtered keyset page for the customer-facing feed. All user-selectable filters are applied in
+   * the database before the limit, so a dense run-event prefix cannot hide matching rows or make
+   * {@code hasMore} lie. The {@code (occurredAt,id)} tuple is a stable descending cursor even when
+   * several events share the same timestamp.
+   */
+  @Query(
+      "SELECT a FROM ActivityFeedEntry a "
+          + "WHERE a.projectId = :projectId "
+          + "AND a.occurredAt >= :from AND a.occurredAt < :to "
+          + "AND a.eventType IN :eventTypes "
+          + "AND (:actorUserId IS NULL OR a.actorUserId = :actorUserId) "
+          + "AND (:targetType IS NULL OR a.targetType = :targetType) "
+          + "AND (:targetId IS NULL OR a.targetId = :targetId) "
+          + "AND (:cursorOccurredAt IS NULL OR a.occurredAt < :cursorOccurredAt "
+          + "OR (a.occurredAt = :cursorOccurredAt AND a.id < :cursorId)) "
+          + "ORDER BY a.occurredAt DESC, a.id DESC")
+  List<ActivityFeedEntry> findFilteredPage(
+      @Param("projectId") UUID projectId,
+      @Param("from") Instant from,
+      @Param("to") Instant to,
+      @Param("eventTypes") List<String> eventTypes,
+      @Param("actorUserId") UUID actorUserId,
+      @Param("targetType") String targetType,
+      @Param("targetId") String targetId,
+      @Param("cursorOccurredAt") Instant cursorOccurredAt,
+      @Param("cursorId") UUID cursorId,
+      Pageable pageable);
+
+  /** Stable, bounded export page pinned to the job's creation timestamp. */
+  @Query(
+      "SELECT a FROM ActivityFeedEntry a "
+          + "WHERE a.projectId = :projectId "
+          + "AND a.occurredAt >= :from AND a.occurredAt < :to "
+          + "ORDER BY a.occurredAt DESC, a.id DESC")
+  List<ActivityFeedEntry> findProjectExportPage(
+      @Param("projectId") UUID projectId,
+      @Param("from") Instant from,
+      @Param("to") Instant to,
+      Pageable pageable);
 }

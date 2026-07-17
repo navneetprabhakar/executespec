@@ -39,4 +39,6 @@ public interface ProjectMemberRepository extends JpaRepository<ProjectMember, St
   List<String> findActiveExternalHostOrgTiersByUserId(@Param("userId") String userId);
 
   int countByProjectIdAndProjectRole(String projectId, String projectRole);
+
+  long countByProjectId(String projectId);
 }

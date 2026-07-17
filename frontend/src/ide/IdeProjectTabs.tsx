@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import type {ProjectRepo} from '@/types/project';
+import type {ProjectCodeIndexStatus, ProjectRepo, ProjectRepoLink} from '@/types/project';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
@@ -10,7 +10,12 @@ import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
-import {normalizeGitHubRepoQuery, sourceReadinessBadge, syncBadge} from '@/ide/projectRepoUi';
+import {
+  normalizeScmRepoQuery,
+  repoSupports,
+  sourceReadinessBadge,
+  syncBadge,
+} from '@/ide/projectRepoUi';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -28,6 +33,14 @@ const stackLanguage = (r: Dash): string | undefined => {
 // Repo size: KB → human (e.g. 1.2 MB / 840 KB).
 const fmtKb = (kb: number): string =>
   kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
+
+const codeIndexByRepo = (rows: ProjectCodeIndexStatus[]) => {
+  const byRepo: Record<string, ProjectCodeIndexStatus> = {};
+  rows.forEach((row) => {
+    if (row.readiness.repoId) byRepo[row.readiness.repoId] = row;
+  });
+  return byRepo;
+};
 function relTime(input?: string | null): string {
   if (!input) return '—';
   const t = new Date(input).getTime();
@@ -710,6 +723,7 @@ export function IdeProjectRuns() {
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
+  const [linkedRepos, setLinkedRepos] = useState<ProjectRepoLink[]>([]);
   const [prBusy, setPrBusy] = useState<string | null>(null);
   // C8 — credit-spending dispatch awaiting confirmation (PR-card "Autofix review").
   const [autofixFor, setAutofixFor] = useState<{prNumber: number; repo: string} | null>(null);
@@ -752,6 +766,24 @@ export function IdeProjectRuns() {
       cancelled = true;
     };
   }, [projectId, sub, prs]);
+
+  // PR review admission is repository-id based. Resolve the dashboard's display-only
+  // repoFullName through the project's linked repo rows before rendering a paid review action.
+  useEffect(() => {
+    if (!projectId || sub !== 'prs') return;
+    let cancelled = false;
+    api
+      .getProjectRepos(projectId)
+      .then((rows) => {
+        if (!cancelled) setLinkedRepos(rows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedRepos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sub]);
 
   // Selected run → fetch detail + validation report for the split-pane.
   useEffect(() => {
@@ -1023,6 +1055,12 @@ export function IdeProjectRuns() {
                 const verdict = pr.reviewVerdict ? String(pr.reviewVerdict) : '';
                 const comments = numOf(pr, 'commentsCount') ?? 0;
                 const key = `${repo}#${num}`;
+                const linkedRepo = linkedRepos.find(
+                  (link) =>
+                    repoDisplayName(link).toLowerCase() === repo.toLowerCase() &&
+                    repoSupports(link, 'PR_REVIEW'),
+                );
+                const linkedRepoId = linkedRepo?.repoId ?? '';
                 return (
                   <div key={`${key}-${i}`} className='ide-card'>
                     <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
@@ -1097,7 +1135,7 @@ export function IdeProjectRuns() {
                           Open on GitHub
                         </button>
                       )}
-                      {repo && num > 0 && (
+                      {repo && num > 0 && linkedRepoId && (
                         <button
                           className='ide-btn ghost'
                           style={{padding: '4px 10px'}}
@@ -1116,9 +1154,10 @@ export function IdeProjectRuns() {
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </button>
                     </div>
-                    {reviewOpen === key && repo && num > 0 && (
+                    {reviewOpen === key && repo && num > 0 && linkedRepoId && (
                       <PrReviewPanel
                         projectId={projectId}
+                        repoId={linkedRepoId}
                         repoFullName={repo}
                         prNumber={num}
                         variant='ide'
@@ -1152,9 +1191,12 @@ export function IdeProjectRuns() {
 
 export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
+  const authUser = useAuthStore((state) => state.user);
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
   const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
-  const [available, setAvailable] = useState<api.GitHubRemoteRepo[] | null>(null);
+  const [codeIndex, setCodeIndex] = useState<Record<string, ProjectCodeIndexStatus>>({});
+  const [provider, setProvider] = useState<'GITHUB' | 'BITBUCKET'>('GITHUB');
+  const [available, setAvailable] = useState<api.ScmRemoteRepository[] | null>(null);
   const [registered, setRegistered] = useState<ProjectRepo[]>([]);
   const [repoQuery, setRepoQuery] = useState('');
   const [showLink, setShowLink] = useState(false);
@@ -1163,7 +1205,7 @@ export function IdeProjectRepos() {
   const [err, setErr] = useState('');
   const [unlinkFor, setUnlinkFor] = useState<{repoId: string; name: string} | null>(null);
 
-  const normalizedQuery = normalizeGitHubRepoQuery(repoQuery);
+  const normalizedQuery = normalizeScmRepoQuery(repoQuery, provider);
   const filteredAvailable =
     available?.filter((repo) =>
       repo.fullName.toLowerCase().includes(normalizedQuery.toLowerCase()),
@@ -1193,11 +1235,29 @@ export function IdeProjectRepos() {
         setHealth(map);
       })
       .catch(() => {});
+    api
+      .getProjectCodeIndex(projectId)
+      .then((rows) => setCodeIndex(codeIndexByRepo(rows)))
+      .catch(() => setCodeIndex({}));
   }
   useEffect(() => {
     if (projectId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const semanticIndexRunning = Object.values(codeIndex).some(
+    (row) => row.readiness.status === 'INDEXING',
+  );
+  useEffect(() => {
+    if (!projectId || !semanticIndexRunning) return;
+    const timer = window.setInterval(() => {
+      api
+        .getProjectCodeIndex(projectId)
+        .then((rows) => setCodeIndex(codeIndexByRepo(rows)))
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [projectId, semanticIndexRunning]);
 
   async function openLinkPanel() {
     setShowLink(true);
@@ -1205,7 +1265,10 @@ export function IdeProjectRepos() {
     if (!available) {
       try {
         const [remoteRepos, registeredRepos] = await Promise.all([
-          api.listGitHubRepos(),
+          api.listScmRepos(
+            provider,
+            provider === 'BITBUCKET' ? authUser?.bitbucketWorkspace || undefined : undefined,
+          ),
           api.listRepos('ALL'),
         ]);
         setAvailable(remoteRepos);
@@ -1231,17 +1294,31 @@ export function IdeProjectRepos() {
     }
   }
 
-  async function link(remote: {fullName: string; defaultBranch?: string}) {
+  async function link(remote: {
+    fullName: string;
+    defaultBranch?: string;
+    immutableId?: string;
+    provider?: 'GITHUB' | 'BITBUCKET';
+  }) {
     const key = remote.fullName;
     setBusy(`link${key}`);
     setMsg('');
     setErr('');
     try {
-      let repo = registered.find((r) => r.githubRepoFullName === remote.fullName);
+      const selectedProvider = remote.provider || provider;
+      let repo = registered.find(
+        (r) =>
+          String(r.scmProvider || 'GITHUB') === selectedProvider &&
+          ((remote.immutableId && r.scmRepositoryId === remote.immutableId) ||
+            r.sourceKey === remote.fullName ||
+            r.githubRepoFullName === remote.fullName),
+      );
       if (!repo) {
         repo = await api.createRepo({
           scope: 'USER',
-          githubRepoFullName: remote.fullName,
+          scmProvider: selectedProvider,
+          repoFullName: remote.fullName,
+          scmRepositoryId: remote.immutableId,
           defaultBranch: remote.defaultBranch,
           attachAnyway: false,
         });
@@ -1261,6 +1338,29 @@ export function IdeProjectRepos() {
 
   function confirmUnlink(repoId: string, name: string) {
     setUnlinkFor({repoId, name});
+  }
+
+  async function selectProvider(candidate: 'GITHUB' | 'BITBUCKET') {
+    const key = `provider:${candidate}`;
+    if (busy) return;
+    setBusy(key);
+    setProvider(candidate);
+    setRepoQuery('');
+    setAvailable(null);
+    setErr('');
+    try {
+      setAvailable(
+        await api.listScmRepos(
+          candidate,
+          candidate === 'BITBUCKET' ? authUser?.bitbucketWorkspace || undefined : undefined,
+        ),
+      );
+    } catch (e: unknown) {
+      setAvailable([]);
+      setErr(e instanceof Error ? e.message : `Failed to load ${candidate} repos.`);
+    } finally {
+      setBusy('');
+    }
   }
 
   return (
@@ -1284,18 +1384,41 @@ export function IdeProjectRepos() {
           <div className='ide-h2' style={{marginTop: 0}}>
             Available repos
           </div>
+          <div style={{display: 'flex', gap: 6, marginBottom: 10}}>
+            {(['GITHUB', 'BITBUCKET'] as const).map((candidate) => {
+              const configured =
+                candidate === 'GITHUB'
+                  ? !!authUser?.hasGithubPat
+                  : !!authUser?.hasBitbucketAppPassword;
+              return (
+                <button
+                  key={candidate}
+                  className={`ide-btn ${provider === candidate ? '' : 'ghost'}`}
+                  disabled={!configured || !!busy}
+                  title={configured ? undefined : `Connect ${candidate} in Integrations first`}
+                  onClick={() => void selectProvider(candidate)}
+                >
+                  {busy === `provider:${candidate}`
+                    ? 'Loading…'
+                    : candidate === 'GITHUB'
+                      ? 'GitHub'
+                      : 'Bitbucket Cloud'}
+                </button>
+              );
+            })}
+          </div>
           <input
             className='ide-input'
             value={repoQuery}
             onChange={(event) => setRepoQuery(event.target.value)}
-            placeholder='Search repos or paste https://github.com/owner/repo'
+            placeholder={`Search repos or paste https://${provider === 'GITHUB' ? 'github.com' : 'bitbucket.org'}/workspace/repo`}
             style={{marginBottom: 10}}
           />
           {available === null ? (
             <IdeLoader label='Loading repos…' />
           ) : available.length === 0 && !attachableTypedSlug ? (
             <div className='ide-empty'>
-              No connected repos yet. Connect GitHub from{' '}
+              No connected repos yet. Connect {provider === 'GITHUB' ? 'GitHub' : 'Bitbucket'} from{' '}
               <Link to='/integrations' style={{color: 'var(--ide-accent)'}}>
                 Integrations
               </Link>
@@ -1324,6 +1447,7 @@ export function IdeProjectRepos() {
                     onClick={() =>
                       link({
                         fullName: attachableTypedSlug,
+                        provider,
                       })
                     }
                   >
@@ -1333,7 +1457,11 @@ export function IdeProjectRepos() {
               )}
               {filteredAvailable.map((r) => {
                 const registeredRepo = registered.find(
-                  (candidate) => candidate.githubRepoFullName === r.fullName,
+                  (candidate) =>
+                    String(candidate.scmProvider || 'GITHUB') === r.provider &&
+                    ((candidate.scmRepositoryId && candidate.scmRepositoryId === r.immutableId) ||
+                      candidate.sourceKey === r.fullName ||
+                      candidate.githubRepoFullName === r.fullName),
                 );
                 const linked = (repos || []).some(
                   (p) => repoDisplayName(p) === r.fullName || repoIdFor(p) === registeredRepo?.id,
@@ -1392,6 +1520,11 @@ export function IdeProjectRepos() {
                 | undefined) || r;
             // V278 — LOCAL folder sources have no GitHub identity; connection is lease-derived.
             const isLocal = String((repo as {sourceType?: string}).sourceType || 'SCM') === 'LOCAL';
+            const scmProvider = String((repo as {scmProvider?: string}).scmProvider || 'GITHUB');
+            const canArchitecture = repoSupports(repo, 'ARCHITECTURE');
+            const canSync = repoSupports(repo, 'SYNC');
+            const canWebhook = repoSupports(repo, 'WEBHOOK');
+            const canPrLink = repoSupports(repo, 'PR_LINK');
             const localOnline =
               (repo as {localConnectionStatus?: string}).localConnectionStatus === 'ONLINE';
             const lastSeen = (repo as {sourceLastSeenAt?: string}).sourceLastSeenAt;
@@ -1414,6 +1547,15 @@ export function IdeProjectRepos() {
               String(repo.sourceReadinessReason || ''),
               numOf(repo, 'sourceFileCount'),
             );
+            const semanticIndex = codeIndex[id]?.readiness;
+            const semanticKind =
+              semanticIndex?.status === 'READY'
+                ? 'ok'
+                : semanticIndex?.status === 'FAILED'
+                  ? 'bad'
+                  : semanticIndex?.status === 'INDEXING'
+                    ? 'warn'
+                    : 'warn';
             const folderStatus = String(repo.executespecFolderStatus || 'NOT_BOOTSTRAPPED');
             const archStatus =
               (repo as {architectureStatus?: string}).architectureStatus ||
@@ -1432,24 +1574,43 @@ export function IdeProjectRepos() {
                         {localOnline ? 'connector online' : 'connector offline'}
                       </IdeBadge>
                       <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                      {semanticIndex && (
+                        <IdeBadge kind={semanticKind}>
+                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
+                          {semanticIndex.coveragePercent.toFixed(0)}%
+                        </IdeBadge>
+                      )}
                     </>
                   ) : (
                     <>
+                      <IdeBadge kind='ok'>
+                        {scmProvider === 'BITBUCKET' ? 'Bitbucket Cloud' : 'GitHub'}
+                      </IdeBadge>
                       <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
                       <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
-                      <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
-                        {folderStatus === 'BOOTSTRAPPED'
-                          ? '.executespec ready'
-                          : folderStatus === 'BOOTSTRAP_PR_OPEN'
-                            ? 'setup PR open'
-                            : folderStatus === 'BOOTSTRAP_FAILED'
-                              ? 'setup failed'
-                              : 'setup optional'}
-                      </IdeBadge>
-                      <IdeBadge kind={wh ? 'ok' : 'warn'}>
-                        {wh ? 'webhook ✓' : 'no webhook'}
-                      </IdeBadge>
-                      {fullName.includes('/') ? (
+                      {semanticIndex && (
+                        <IdeBadge kind={semanticKind}>
+                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
+                          {semanticIndex.coveragePercent.toFixed(0)}%
+                        </IdeBadge>
+                      )}
+                      {repoSupports(repo, 'BOOTSTRAP') && (
+                        <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
+                          {folderStatus === 'BOOTSTRAPPED'
+                            ? '.executespec ready'
+                            : folderStatus === 'BOOTSTRAP_PR_OPEN'
+                              ? 'setup PR open'
+                              : folderStatus === 'BOOTSTRAP_FAILED'
+                                ? 'setup failed'
+                                : 'setup optional'}
+                        </IdeBadge>
+                      )}
+                      {canWebhook && (
+                        <IdeBadge kind={wh ? 'ok' : 'warn'}>
+                          {wh ? 'webhook ✓' : 'no webhook'}
+                        </IdeBadge>
+                      )}
+                      {canPrLink && fullName.includes('/') ? (
                         <a
                           href={`https://github.com/${fullName}/pulls`}
                           target='_blank'
@@ -1459,9 +1620,9 @@ export function IdeProjectRepos() {
                         >
                           <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
                         </a>
-                      ) : (
+                      ) : canPrLink ? (
                         <IdeBadge kind='ok'>{open} open PR</IdeBadge>
-                      )}
+                      ) : null}
                     </>
                   )}
                 </div>
@@ -1508,15 +1669,32 @@ export function IdeProjectRepos() {
                     </span>
                   </div>
                 )}
+                {semanticIndex && (
+                  <>
+                    <div className='ide-kv'>
+                      <span>Semantic source coverage</span>
+                      <span>
+                        {semanticIndex.indexedFiles}/{semanticIndex.eligibleFiles} files ·{' '}
+                        {semanticIndex.coveragePercent.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className='ide-kv'>
+                      <span>Search fallback</span>
+                      <span>ripgrep available · relationship graph not available</span>
+                    </div>
+                  </>
+                )}
                 <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10}}>
-                  <Link
-                    to={`/projects/${projectId}/architecture`}
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px', textDecoration: 'none'}}
-                  >
-                    View architecture
-                  </Link>
-                  {!isLocal && (
+                  {canArchitecture && (
+                    <Link
+                      to={`/projects/${projectId}/architecture`}
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px', textDecoration: 'none'}}
+                    >
+                      View architecture
+                    </Link>
+                  )}
+                  {!isLocal && canSync && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
@@ -1527,7 +1705,7 @@ export function IdeProjectRepos() {
                       {busy === `sync${id}` ? '…' : 'Sync'}
                     </button>
                   )}
-                  {!isLocal && (
+                  {!isLocal && canArchitecture && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
@@ -1544,7 +1722,24 @@ export function IdeProjectRepos() {
                       {busy === `regen${id}` ? '…' : 'Regenerate'}
                     </button>
                   )}
-                  {!isLocal && !wh && (
+                  {!isLocal && semanticIndex?.status !== 'READY' && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `index${id}` || semanticIndex?.status === 'INDEXING'}
+                      title='Resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
+                      onClick={() =>
+                        act(
+                          `index${id}`,
+                          () => api.refreshProjectCodeIndex(projectId, id),
+                          'Semantic indexing queued. Ripgrep search remains available.',
+                        )
+                      }
+                    >
+                      {busy === `index${id}` ? '…' : 'Resume semantic index'}
+                    </button>
+                  )}
+                  {!isLocal && canWebhook && !wh && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}

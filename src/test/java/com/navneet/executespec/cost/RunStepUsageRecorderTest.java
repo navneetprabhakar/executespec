@@ -6,15 +6,28 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
+
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
+import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.tool.ExecutionContext;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.UserMessage;
 
 class RunStepUsageRecorderTest {
 
   private final RunStepUsageRepository repository =
       org.mockito.Mockito.mock(RunStepUsageRepository.class);
-  private final RunStepUsageRecorder recorder = new RunStepUsageRecorder(repository);
+  private final LlmUsageAttributionResolver attributionResolver =
+      org.mockito.Mockito.mock(LlmUsageAttributionResolver.class);
+  private final Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
+  private final RunStepUsageRecorder recorder =
+      new RunStepUsageRecorder(repository, attributionResolver, metrics);
 
   @Test
   @DisplayName("records role/step/retry attribution with per-call usage")
@@ -51,8 +64,73 @@ class RunStepUsageRecorderTest {
     assertThat(row.getReasoningTokens()).isEqualTo(2);
     assertThat(row.getCostUsd()).isEqualTo(0.0123);
     assertThat(row.getCallIndex()).isEqualTo(4);
+    assertThat(row.getAttemptStatus()).isEqualTo("SUCCESS");
+    assertThat(row.getKeySource()).isEqualTo("UNKNOWN");
     assertThat(row.getCreatedAt()).isNotNull();
     assertThat(row.getId()).isNotBlank();
+    verify(metrics).recordLlmUsagePersistence("SUCCESS", "ok");
+  }
+
+  @Test
+  @DisplayName("records failed physical attempts with tenant attribution and redacted errors")
+  void recordsFailedAttempt() {
+    LlmRequest request = request();
+    when(attributionResolver.resolve(request))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-1",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "WORKER",
+                "PIPELINE_RUN",
+                "run-1"));
+    when(repository.save(any(RunStepUsage.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    recorder.recordFailure(
+        request,
+        "deepseek",
+        "deepseek-v4",
+        "ORG",
+        2,
+        345,
+        new IllegalStateException("Authorization: Bearer sk-secret-value-123456789"));
+
+    ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
+    verify(repository).save(captor.capture());
+    RunStepUsage row = captor.getValue();
+    assertThat(row.getAttemptStatus()).isEqualTo("FAILED");
+    assertThat(row.getAttemptNumber()).isEqualTo(2);
+    assertThat(row.getLatencyMs()).isEqualTo(345);
+    assertThat(row.getLlmExecutionContextId()).isEqualTo("llmctx-1");
+    assertThat(row.getOrgId()).isEqualTo("org-1");
+    assertThat(row.getUserId()).isEqualTo("user-1");
+    assertThat(row.getProjectId()).isEqualTo("project-1");
+    assertThat(row.getKeySource()).isEqualTo("ORG");
+    assertThat(row.getRetryOf()).isEqualTo("WorkerAgent:worker.iteration#attempt-1");
+    assertThat(row.getErrorCode()).isEqualTo("ILLEGALSTATEEXCEPTION");
+    assertThat(row.getErrorRedacted())
+        .isEqualTo("IllegalStateException:PROVIDER_ERROR_DETAIL_OMITTED");
+    assertThat(row.getErrorRedacted()).doesNotContain("sk-secret-value");
+    assertThat(row.getInputTokens()).isZero();
+    assertThat(row.getCostUsd()).isZero();
+    verify(metrics).recordLlmUsagePersistence("FAILED", "ok");
+  }
+
+  @Test
+  @DisplayName("persistence failure is an alerting signal and never escapes")
+  void persistenceFailureSignalsMetric() {
+    LlmRequest request = request();
+    when(attributionResolver.resolve(request))
+        .thenReturn(LlmUsageAttributionResolver.Attribution.unattributed("run-1"));
+    when(repository.save(any(RunStepUsage.class))).thenThrow(new IllegalStateException("db down"));
+
+    recorder.recordFailure(
+        request, "openai", "gpt", "PLATFORM", 1, 1, new RuntimeException("timeout"));
+
+    verify(metrics).recordLlmUsagePersistence("FAILED", "failed");
   }
 
   @Test
@@ -63,5 +141,65 @@ class RunStepUsageRecorderTest {
         null, "task-1", "WorkerAgent", "worker.iteration-1", null, "openai", "gpt", null);
 
     verify(repository, never()).save(any());
+  }
+
+  @Test
+  void governedEmbeddingAttemptUsesDurableProjectAttribution() {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-embed", LlmExecutionScope.customer("org-1"));
+    when(attributionResolver.resolve(reference))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-embed",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "projectdocumentembedding",
+                "PROJECT_DOCUMENT",
+                "doc-1"));
+    when(repository.save(any(RunStepUsage.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    RunCostTracker.CallUsage call =
+        new RunCostTracker.CallUsage(
+            "openai", "text-embedding-3-small", 42, 0, 0, 0, 0.00000084, 1, 0);
+
+    recorder.recordProviderCapabilitySuccess(
+        reference,
+        "embedding:doc-1",
+        "ProjectDocumentEmbedding",
+        "embedding.batch",
+        "openai",
+        "text-embedding-3-small",
+        "ORG",
+        1,
+        91,
+        call);
+
+    ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
+    verify(repository).save(captor.capture());
+    RunStepUsage row = captor.getValue();
+    assertThat(row.getLlmExecutionContextId()).isEqualTo("llmctx-embed");
+    assertThat(row.getOrgId()).isEqualTo("org-1");
+    assertThat(row.getUserId()).isEqualTo("user-1");
+    assertThat(row.getProjectId()).isEqualTo("project-1");
+    assertThat(row.getSourceType()).isEqualTo("PROJECT_DOCUMENT");
+    assertThat(row.getSourceId()).isEqualTo("doc-1");
+    assertThat(row.getProvider()).isEqualTo("openai");
+    assertThat(row.getModel()).isEqualTo("text-embedding-3-small");
+    assertThat(row.getKeySource()).isEqualTo("ORG");
+    assertThat(row.getInputTokens()).isEqualTo(42);
+    assertThat(row.getAttemptStatus()).isEqualTo("SUCCESS");
+  }
+
+  private static LlmRequest request() {
+    return LlmRequest.builder()
+        .provider("deepseek")
+        .model("deepseek-v4")
+        .messages(java.util.List.of(new UserMessage("test")))
+        .context(new ExecutionContext("run-1", "task-1", Path.of(".").toAbsolutePath().normalize()))
+        .agentRole("WorkerAgent")
+        .stepId("worker.iteration")
+        .build();
   }
 }

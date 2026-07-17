@@ -13,6 +13,9 @@ import java.util.Optional;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -38,6 +41,10 @@ class RunLedgerAgentTest {
     MemoryCompactionService compactionService = mock(MemoryCompactionService.class);
     AgentProperties agentProperties = new AgentProperties();
     PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    LlmExecutionPolicyFactory executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionReference executionReference =
+        new LlmExecutionReference("ctx-1", LlmExecutionScope.customer("org-1"));
+    when(executionPolicyFactory.forRun("run-1")).thenReturn(executionReference);
     when(promptAssembler.assemble(eq("run-ledger.txt"), any())).thenReturn("ledger prompt");
 
     PipelineRun run =
@@ -65,7 +72,8 @@ class RunLedgerAgentTest {
             anyList(),
             eq("run-1"),
             eq("run-ledger"),
-            eq("generate")))
+            eq("generate"),
+            eq(executionReference)))
         .thenReturn(ok("API work and test coverage."));
 
     RunLedgerAgent agent =
@@ -77,7 +85,8 @@ class RunLedgerAgentTest {
             taskRepo,
             compactionService,
             agentProperties,
-            promptAssembler);
+            promptAssembler,
+            executionPolicyFactory);
 
     agent.generateLedgerEntry("run-1");
 
@@ -88,7 +97,8 @@ class RunLedgerAgentTest {
             anyList(),
             eq("run-1"),
             eq("run-ledger"),
-            eq("generate"));
+            eq("generate"),
+            eq(executionReference));
     verify(ledgerRepo).save(any(ProjectRunLedger.class));
   }
 

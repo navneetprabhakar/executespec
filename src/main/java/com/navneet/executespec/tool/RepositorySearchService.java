@@ -25,9 +25,9 @@ import org.springframework.stereotype.Service;
 
 /**
  * Deterministic, workspace-confined repository search contract. This is the typed seam shared by
- * worker tools, project chat, local-hands clients, and future optional explorers (for example
- * FastContext). It deliberately uses a bounded Java implementation first; an rg/tree-sitter adapter
- * can implement the same request/result contract without changing callers.
+ * worker tools, project chat, local-hands clients, and future optional explorers. It deliberately
+ * uses a bounded Java implementation first; another adapter can implement the same request/result
+ * contract without changing callers.
  */
 @Service
 public class RepositorySearchService {
@@ -232,8 +232,8 @@ public class RepositorySearchService {
   /**
    * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
    * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it can
-   * contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter backend
-   * can replace later without changing the search contract or callers.
+   * contribute a hit. This is the local-index seam that an optional external backend can replace
+   * later without changing the search contract or callers.
    */
   private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
     // Inventory discovery is intentionally outside the cache lock. A git ls-files/tree walk can

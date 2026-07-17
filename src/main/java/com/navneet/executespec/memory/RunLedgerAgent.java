@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -49,6 +50,7 @@ public class RunLedgerAgent {
   private final MemoryCompactionService compactionService;
   private final AgentProperties agentProperties;
   private final PromptAssembler promptAssembler;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   private static final int LEDGER_CHAR_CAP = 2000;
 
@@ -134,6 +136,7 @@ public class RunLedgerAgent {
 
   private String callLightweightLlm(String systemPrompt, PipelineRun run, String runId) {
     ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", run.getAiProviderEnum());
+    var executionReference = executionPolicyFactory.forRun(runId);
     ChatResponse response =
         llmRouter.callText(
             resolved.providerName(),
@@ -142,7 +145,8 @@ public class RunLedgerAgent {
                 new SystemMessage(systemPrompt), new UserMessage("Generate the ledger entry now.")),
             runId,
             "run-ledger",
-            "generate");
+            "generate",
+            executionReference);
     return response.getResult().getOutput().getText();
   }
 

@@ -332,7 +332,7 @@ public class AgentStreamTurnRunner {
       return "Agent stream failed.";
     }
     if (!looksLikeProviderCredentialFailure(raw)) {
-      return raw;
+      return new com.navneet.executespec.security.ContextSanitizer().sanitizeException(error);
     }
     String providerLabel =
         provider == null || provider.isBlank() ? "Selected provider" : provider.trim();

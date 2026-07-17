@@ -11,6 +11,11 @@ import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -45,10 +50,8 @@ public class RunCodeMapService {
   private final ProjectCodeMapRepository projectCodeMapRepo;
   private final ProjectRepoRepository projectRepoRepo;
   private final LlmRouter llmRouter;
-
-  @org.springframework.beans.factory.annotation.Value(
-      "${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
-  private String anthropicSummaryModel;
+  private final PipelineRunRepository runRepository;
+  private final ModelResolver modelResolver;
 
   public boolean isEligible(String userTier) {
     return userTier != null && ELIGIBLE_TIERS.contains(userTier.toUpperCase());
@@ -209,6 +212,25 @@ public class RunCodeMapService {
    * back to the deterministic raw codemap at the caller.
    */
   private String[] summarise(String runId, String repoFullName, String rawMarkdown) {
+    var run =
+        runRepository
+            .findById(runId)
+            .orElseThrow(() -> new IllegalStateException("Run not found for codemap routing"));
+    String providerValue = run.isRoutePinned() ? run.getRequestedProvider() : run.getAiProvider();
+    if (providerValue == null || providerValue.isBlank()) {
+      throw new IllegalStateException("Run provider missing for codemap routing");
+    }
+    LlmProvider provider = LlmProvider.valueOf(providerValue.toUpperCase());
+    ResolvedModel route =
+        run.isRoutePinned()
+            ? ResolvedModel.builder()
+                .requestedProvider(provider)
+                .actualProvider(provider)
+                .model(run.getRequestedModel())
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .fallback(false)
+                .build()
+            : modelResolver.resolve("RunCodeMapService", provider, AgentTier.LIGHTWEIGHT);
     String system =
         """
         You are a senior engineer summarising a code map for use as planner context.
@@ -227,8 +249,8 @@ public class RunCodeMapService {
             + truncate(rawMarkdown, MAX_RAW_CHARS);
     ChatResponse resp =
         llmRouter.callText(
-            "anthropic",
-            anthropicSummaryModel,
+            route.providerName(),
+            route.getModel(),
             java.util.List.of(new SystemMessage(system), new UserMessage(user)),
             runId,
             "RunCodeMapService",

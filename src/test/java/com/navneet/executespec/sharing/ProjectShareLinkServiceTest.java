@@ -20,8 +20,10 @@ import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.repository.ProjectShareLinkRepository;
+import com.navneet.executespec.sharing.service.ProjectShareLinkAuditService;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,6 +39,7 @@ class ProjectShareLinkServiceTest {
   private com.navneet.executespec.state.repository.PipelineRunRepository runRepo;
   private com.navneet.executespec.codereview.repository.CodeReviewScanRepository scanRepo;
   private com.navneet.executespec.prreview.repository.PrReviewRepository prReviewRepo;
+  private ProjectShareLinkAuditService auditService;
   private ProjectShareLinkService service;
 
   @BeforeEach
@@ -46,8 +49,11 @@ class ProjectShareLinkServiceTest {
     runRepo = mock(com.navneet.executespec.state.repository.PipelineRunRepository.class);
     scanRepo = mock(com.navneet.executespec.codereview.repository.CodeReviewScanRepository.class);
     prReviewRepo = mock(com.navneet.executespec.prreview.repository.PrReviewRepository.class);
-    service = new ProjectShareLinkService(linkRepo, tierRepo, runRepo, scanRepo, prReviewRepo);
-    lenient().when(linkRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    auditService = mock(ProjectShareLinkAuditService.class);
+    service =
+        new ProjectShareLinkService(
+            linkRepo, tierRepo, runRepo, scanRepo, prReviewRepo, auditService);
+    lenient().when(linkRepo.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
     lenient().when(linkRepo.countActiveByProject(anyString(), any())).thenReturn(0L);
   }
 
@@ -61,7 +67,7 @@ class ProjectShareLinkServiceTest {
             ResponseStatusException.class,
             () ->
                 service.createLink(
-                    "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", null, free));
+                    "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", expiry(), free));
     assertEquals(429, ex.getStatusCode().value());
   }
 
@@ -72,7 +78,7 @@ class ProjectShareLinkServiceTest {
     when(linkRepo.countActiveByProject(anyString(), any())).thenReturn(10_000L);
     ProjectShareLink link =
         service.createLink(
-            "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", null, ent);
+            "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", expiry(), ent);
     assertNotNull(link);
     assertEquals(ProjectShareLink.Surface.PROJECT_OVERVIEW, link.getSurface());
     assertNotNull(link.getToken());
@@ -87,7 +93,7 @@ class ProjectShareLinkServiceTest {
             ResponseStatusException.class,
             () ->
                 service.createLink(
-                    "p1", ProjectShareLink.Surface.RUN_DETAIL, null, "x", null, pro));
+                    "p1", ProjectShareLink.Surface.RUN_DETAIL, null, "x", expiry(), pro));
     assertEquals(400, ex.getStatusCode().value());
     assertTrue(ex.getReason().contains("scopeId"));
   }
@@ -106,7 +112,7 @@ class ProjectShareLinkServiceTest {
                     .build()));
     ProjectShareLink link =
         service.createLink(
-            "p1", ProjectShareLink.Surface.RUN_DETAIL, "run-abc", "run share", null, pro);
+            "p1", ProjectShareLink.Surface.RUN_DETAIL, "run-abc", "run share", expiry(), pro);
     assertEquals("run-abc", link.getScopeId());
   }
 
@@ -114,9 +120,10 @@ class ProjectShareLinkServiceTest {
   void resolve_active_returns_410_for_revoked() {
     ProjectShareLink revoked = newLink();
     revoked.setRevokedAt(Instant.now());
-    when(linkRepo.findByToken("rev-tok")).thenReturn(Optional.of(revoked));
+    String token = token('r');
+    when(linkRepo.findByTokenHash(DigestUtils.sha256Hex(token))).thenReturn(Optional.of(revoked));
     ResponseStatusException ex =
-        assertThrows(ResponseStatusException.class, () -> service.resolveActive("rev-tok"));
+        assertThrows(ResponseStatusException.class, () -> service.resolveActive(token));
     assertEquals(410, ex.getStatusCode().value());
   }
 
@@ -124,9 +131,10 @@ class ProjectShareLinkServiceTest {
   void resolve_active_returns_410_for_expired() {
     ProjectShareLink expired = newLink();
     expired.setExpiresAt(Instant.now().minusSeconds(60));
-    when(linkRepo.findByToken("exp-tok")).thenReturn(Optional.of(expired));
+    String token = token('e');
+    when(linkRepo.findByTokenHash(DigestUtils.sha256Hex(token))).thenReturn(Optional.of(expired));
     ResponseStatusException ex =
-        assertThrows(ResponseStatusException.class, () -> service.resolveActive("exp-tok"));
+        assertThrows(ResponseStatusException.class, () -> service.resolveActive(token));
     assertEquals(410, ex.getStatusCode().value());
   }
 
@@ -182,13 +190,25 @@ class ProjectShareLinkServiceTest {
   }
 
   private static ProjectShareLink newLink() {
+    String token = token('a');
     return ProjectShareLink.builder()
         .id(UUID.randomUUID())
         .projectId("p1")
-        .token("token-" + UUID.randomUUID())
+        .token(token)
+        .tokenHash(DigestUtils.sha256Hex(token))
+        .tokenPrefix(token.substring(0, 8))
         .surface(ProjectShareLink.Surface.PROJECT_OVERVIEW)
         .createdByUserId("u")
+        .expiresAt(expiry())
         .createdAt(Instant.now())
         .build();
+  }
+
+  private static Instant expiry() {
+    return Instant.now().plusSeconds(7L * 24 * 3600);
+  }
+
+  private static String token(char value) {
+    return String.valueOf(value).repeat(43);
   }
 }

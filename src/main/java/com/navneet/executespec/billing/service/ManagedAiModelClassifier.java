@@ -18,6 +18,7 @@ public class ManagedAiModelClassifier {
   private final ModelRegistry modelRegistry;
 
   public String costClass(String model) {
+    if (isEmbeddingModel(model)) return "CHEAP";
     ModelMatrixProperties.ModelConfig config =
         model == null ? null : modelMatrixProperties.getModels().get(model);
     if (config != null && config.getCostClass() != null && !config.getCostClass().isBlank()) {
@@ -32,6 +33,7 @@ public class ManagedAiModelClassifier {
   }
 
   public String qualityClass(String model) {
+    if (isEmbeddingModel(model)) return "BASIC";
     ModelMatrixProperties.ModelConfig config =
         model == null ? null : modelMatrixProperties.getModels().get(model);
     if (config != null && config.getQualityClass() != null && !config.getQualityClass().isBlank()) {
@@ -120,6 +122,10 @@ public class ManagedAiModelClassifier {
 
   private static String safe(String value) {
     return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+  }
+
+  private static boolean isEmbeddingModel(String model) {
+    return model != null && model.toLowerCase(Locale.ROOT).startsWith("text-embedding-");
   }
 
   public record ModelTarget(String provider, String model) {}

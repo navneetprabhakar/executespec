@@ -1,10 +1,13 @@
 package com.navneet.executespec.activity;
 
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
@@ -23,17 +26,20 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>{@code GET /api/projects/{id}/activity} — windowed list with filters (event types, actor,
  * target). Time window is mandatory so Postgres can prune partitions per the V133 monthly
- * partitioning scheme. Cursor pagination for stable pagination across page boundaries.
+ * partitioning scheme. Cursor pagination is stable across page boundaries via the descending {@code
+ * (occurredAt,id)} tuple.
  *
  * <p>RBAC: project membership for tier-1 events; tier-2 (admin-toggle) events require an explicit
- * {@code includeAdminEvents=true} query param + the caller has ORG_ADMIN/PROJECT_ADMIN role
- * (advisory in v1 — same RBAC scaffolding pattern as the rest of the eval branch).
+ * {@code includeAdminEvents=true} query param plus an enforced ORG_ADMIN/PROJECT_ADMIN capability.
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/activity")
 @RequiredArgsConstructor
 @Slf4j
 public class ActivityFeedController {
+
+  static final int MAX_RETENTION_DAYS = 366;
+  static final int MAX_PAGE_SIZE = 500;
 
   private final ActivityFeedEntryRepository feedRepo;
   private final ProjectAccessGuard projectAccessGuard;
@@ -48,6 +54,7 @@ public class ActivityFeedController {
       @RequestParam(required = false) String targetId,
       @RequestParam(required = false, defaultValue = "false") boolean includeAdminEvents,
       @RequestParam(required = false, defaultValue = "100") int limit,
+      @RequestParam(required = false) String cursor,
       Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
     UUID projectUuid = parseUuid(projectId);
@@ -60,65 +67,80 @@ public class ActivityFeedController {
     // existing test fixtures + caller arities don't break. Input validation
     // (auth-not-null + UUID shape) runs first so the 400/401 responses match
     // the existing controller test expectations exactly.
-    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
-    int safeLimit = Math.min(Math.max(limit, 1), 500);
-    Instant from = Instant.now().minus(Math.max(sinceDays, 1), ChronoUnit.DAYS);
-    Instant to = Instant.now().plus(1, ChronoUnit.DAYS); // include just-now events
+    AppUserDetails principal = principalOrNull(auth);
+    if (includeAdminEvents) {
+      projectAccessGuard.assertCanAdmin(projectId, principal);
+    } else {
+      projectAccessGuard.assertCanRead(projectId, principal);
+    }
 
-    // Pull a windowed page from the partitioned table — partition pruning
-    // kicks in via the (project_id, occurred_at) composite predicate. Audit 2026-05-12 review
-    // item P #80: use the LIMIT variant so we don't pull thousands of rows then filter
-    // in-memory on high-volume projects. Headroom of 3× safeLimit so the in-memory tier filter
-    // below still has some slack to skip ADMIN_TOGGLE rows.
+    int safeLimit = Math.min(Math.max(limit, 1), MAX_PAGE_SIZE);
+    int safeSinceDays = Math.min(Math.max(sinceDays, 1), MAX_RETENTION_DAYS);
+    Instant to = Instant.now().plusSeconds(1); // include an event committed during request setup
+    Instant from = to.minus(safeSinceDays, ChronoUnit.DAYS);
+    UUID actorUuid = parseOptionalUuid(actorId, "actorId");
+    ActivityCursor parsedCursor = parseCursor(cursor);
+
+    Set<String> requestedTypes =
+        eventTypes == null
+            ? Set.of()
+            : eventTypes.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+    List<String> permittedTypes =
+        Arrays.stream(ActivityEventType.values())
+            .filter(type -> type.tier() != ActivityEventType.Tier.AUDIT_ONLY)
+            .filter(
+                type -> includeAdminEvents || type.tier() != ActivityEventType.Tier.ADMIN_TOGGLE)
+            .map(Enum::name)
+            .filter(name -> requestedTypes.isEmpty() || requestedTypes.contains(name))
+            .toList();
+
+    if (permittedTypes.isEmpty()) {
+      return ResponseEntity.ok(
+          new ActivityPage(projectId, from.toString(), to.toString(), List.of(), false, null));
+    }
+
     List<ActivityFeedEntry> page =
-        feedRepo.findRecentForProjectLimited(
+        feedRepo.findFilteredPage(
             projectUuid,
             from,
             to,
-            org.springframework.data.domain.PageRequest.of(0, safeLimit * 3));
+            permittedTypes,
+            actorUuid,
+            blankToNull(targetType),
+            blankToNull(targetId),
+            parsedCursor == null ? null : parsedCursor.occurredAt(),
+            parsedCursor == null ? null : parsedCursor.id(),
+            org.springframework.data.domain.PageRequest.of(0, safeLimit + 1));
 
-    // Apply remaining filters in-memory (page is bounded by sinceDays so
-    // this stays cheap). Push down to the repo when filtering volume
-    // becomes a problem (logged for the perf follow-up).
-    List<ActivityEntry> entries = new ArrayList<>();
-    for (ActivityFeedEntry e : page) {
-      if (entries.size() >= safeLimit) break;
-
-      // Tier filter: skip ADMIN_TOGGLE events unless explicitly included
-      ActivityEventType type;
-      try {
-        type = ActivityEventType.valueOf(e.getEventType());
-      } catch (IllegalArgumentException ex) {
-        continue; // forward-compat: unknown type from a newer node
-      }
-      if (type.tier() == ActivityEventType.Tier.ADMIN_TOGGLE && !includeAdminEvents) {
-        continue;
-      }
-      if (type.tier() == ActivityEventType.Tier.AUDIT_ONLY) {
-        continue; // audit-only events never appear in the activity feed
-      }
-
-      // Optional filters
-      if (eventTypes != null && !eventTypes.isEmpty() && !eventTypes.contains(e.getEventType())) {
-        continue;
-      }
-      if (actorId != null && !actorId.isBlank()) {
-        if (e.getActorUserId() == null || !actorId.equals(e.getActorUserId().toString())) {
-          continue;
-        }
-      }
-      if (targetType != null && !targetType.isBlank() && !targetType.equals(e.getTargetType())) {
-        continue;
-      }
-      if (targetId != null && !targetId.isBlank() && !targetId.equals(e.getTargetId())) {
-        continue;
-      }
-      entries.add(toDto(e, type));
-    }
+    // Defence in depth: the repository owns filtering for performance, while this final allow-list
+    // prevents a future query regression from exposing an audit/admin row.
+    Set<String> permittedTypeSet = Set.copyOf(permittedTypes);
+    List<ActivityFeedEntry> allowedPage =
+        page.stream()
+            .filter(entry -> permittedTypeSet.contains(entry.getEventType()))
+            .filter(entry -> actorUuid == null || actorUuid.equals(entry.getActorUserId()))
+            .filter(
+                entry ->
+                    blankToNull(targetType) == null
+                        || blankToNull(targetType).equals(entry.getTargetType()))
+            .filter(
+                entry ->
+                    blankToNull(targetId) == null
+                        || blankToNull(targetId).equals(entry.getTargetId()))
+            .toList();
+    boolean hasMore = allowedPage.size() > safeLimit;
+    List<ActivityFeedEntry> visible = hasMore ? allowedPage.subList(0, safeLimit) : allowedPage;
+    List<ActivityEntry> entries =
+        visible.stream()
+            .map(entry -> toDto(entry, ActivityEventType.valueOf(entry.getEventType())))
+            .toList();
+    String nextCursor =
+        hasMore && !visible.isEmpty() ? encodeCursor(visible.get(visible.size() - 1)) : null;
 
     return ResponseEntity.ok(
-        new ActivityPage(
-            projectId, from.toString(), to.toString(), entries, entries.size() >= safeLimit));
+        new ActivityPage(projectId, from.toString(), to.toString(), entries, hasMore, nextCursor));
   }
 
   private static ActivityEntry toDto(ActivityFeedEntry e, ActivityEventType type) {
@@ -144,6 +166,38 @@ public class ActivityFeedController {
     }
   }
 
+  private static UUID parseOptionalUuid(String value, String field) {
+    if (value == null || value.isBlank()) return null;
+    UUID parsed = parseUuid(value);
+    if (parsed == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be a UUID");
+    }
+    return parsed;
+  }
+
+  private static ActivityCursor parseCursor(String cursor) {
+    if (cursor == null || cursor.isBlank()) return null;
+    int separator = cursor.lastIndexOf('|');
+    if (separator <= 0 || separator == cursor.length() - 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid activity cursor");
+    }
+    try {
+      Instant occurredAt = Instant.parse(cursor.substring(0, separator));
+      UUID id = UUID.fromString(cursor.substring(separator + 1));
+      return new ActivityCursor(occurredAt, id);
+    } catch (DateTimeParseException | IllegalArgumentException ex) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid activity cursor");
+    }
+  }
+
+  private static String encodeCursor(ActivityFeedEntry entry) {
+    return entry.getOccurredAt() + "|" + entry.getId();
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
+  }
+
   /**
    * Extract the {@link AppUserDetails} from a Spring {@link Authentication} principal, returning
    * null when the principal isn't of that type (e.g. tests that pass a {@code
@@ -157,7 +211,14 @@ public class ActivityFeedController {
   }
 
   public record ActivityPage(
-      String projectId, String from, String to, List<ActivityEntry> entries, boolean hasMore) {}
+      String projectId,
+      String from,
+      String to,
+      List<ActivityEntry> entries,
+      boolean hasMore,
+      String nextCursor) {}
+
+  private record ActivityCursor(Instant occurredAt, UUID id) {}
 
   public record ActivityEntry(
       String id,

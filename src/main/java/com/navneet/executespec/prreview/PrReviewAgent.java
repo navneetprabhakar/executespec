@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -49,6 +50,7 @@ public class PrReviewAgent {
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /**
    * Run the agent against the supplied diff + PR metadata. Returns the parsed agent output; caller
@@ -88,6 +90,15 @@ public class PrReviewAgent {
     messages.add(new UserMessage(userPrompt));
 
     SubmitReviewToolCallback submitTool = new SubmitReviewToolCallback();
+    var executionReference =
+        executionPolicyFactory.forProject(
+            req.projectId(),
+            "pr-review",
+            "PR_REVIEW",
+            req.prReviewId(),
+            req.prReviewId(),
+            provider,
+            null);
 
     ChatResponse resp;
     try {
@@ -107,7 +118,10 @@ public class PrReviewAgent {
                   // billing reports can pivot on it.
                   .context(
                       new ExecutionContext(
-                          "pr-review-" + req.prReviewId(), "review", java.nio.file.Paths.get("/")))
+                          "pr-review-" + req.prReviewId(),
+                          "review",
+                          java.nio.file.Paths.get("/"),
+                          executionReference))
                   .build());
     } catch (Exception e) {
       throw new PrReviewAgentException("LLM dispatch failed: " + e.getMessage());
@@ -280,6 +294,7 @@ public class PrReviewAgent {
   @Builder
   public record AgentRequest(
       String prReviewId,
+      String projectId,
       String repoFullName,
       Integer prNumber,
       String headSha,

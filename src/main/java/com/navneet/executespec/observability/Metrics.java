@@ -44,6 +44,9 @@ import lombok.RequiredArgsConstructor;
  *       calls per tool name.
  *   <li><b>{@code executespec.v2.llm.latency}</b> (timer) — tagged {provider, model, outcome} —
  *       LlmRouter dispatch latency per provider call.
+ *   <li><b>{@code executespec.v2.llm.usage.persistence}</b> (counter) — tagged {attemptStatus,
+ *       result} — canonical per-attempt ledger write success/failure. A {@code result=failed} alert
+ *       means provider spend may not be attributable even if the customer call succeeded.
  *   <li><b>{@code executespec.v2.reviewer.verdict}</b> (counter) — tagged {verdict} — CLEAN /
  *       FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED.
  *   <li><b>{@code executespec.v2.context.save}</b> (counter) — tagged {result} — ok | skipped |
@@ -166,6 +169,22 @@ public class Metrics {
   public void recordKeySource(String provider, String source) {
     Counter.builder(NS + "llm.key_source")
         .tags(Tags.of(Tag.of("provider", nonNull(provider)), Tag.of("source", nonNull(source))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordLlmUsagePersistence(String attemptStatus, String result) {
+    Counter.builder(NS + "llm.usage.persistence")
+        .tags(
+            Tags.of(
+                Tag.of("attemptStatus", nonNull(attemptStatus)), Tag.of("result", nonNull(result))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordLlmUsageAttribution(String result) {
+    Counter.builder(NS + "llm.usage.attribution")
+        .tag("result", nonNull(result))
         .register(registry)
         .increment();
   }

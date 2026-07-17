@@ -412,10 +412,10 @@ iterating needlessly.
                 r.setActualCostUsd(0d);
               }
               if (cost.inputTokens() > 0) {
-                r.setTotalInputTokens(cost.inputTokens());
+                r.setTotalInputTokens(RunCostTracker.saturatedInt(cost.inputTokens()));
               }
               if (cost.outputTokens() > 0) {
-                r.setTotalOutputTokens(cost.outputTokens());
+                r.setTotalOutputTokens(RunCostTracker.saturatedInt(cost.outputTokens()));
               }
               stateStore.saveRun(r);
             });

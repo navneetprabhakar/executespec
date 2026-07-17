@@ -387,6 +387,16 @@ public class OpenAiNativeToolClient {
       int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
 
+      // OpenAI-compatible providers expose reasoning as a subset of completion tokens under
+      // completion_tokens_details. Preserve it as a separate audit dimension without adding it to
+      // completion again. DeepSeek variants may also return a top-level reasoning_tokens field.
+      long reasoningTokens =
+          usage.path("completion_tokens_details").path("reasoning_tokens").asLong(0);
+      if (reasoningTokens == 0) reasoningTokens = usage.path("reasoning_tokens").asLong(0);
+      if (reasoningTokens > 0) {
+        metaBuilder.keyValue("reasoning_tokens", reasoningTokens);
+      }
+
       Double providerCost = numberOrNull(usage.path("cost"));
       if (providerCost != null) {
         metaBuilder.keyValue("provider_reported_cost_usd", providerCost);

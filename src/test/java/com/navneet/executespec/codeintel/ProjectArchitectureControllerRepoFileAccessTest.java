@@ -13,7 +13,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
@@ -21,6 +20,11 @@ import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubScmRepositoryClient;
+import com.navneet.executespec.repo.ScmCredential;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,8 +35,8 @@ class ProjectArchitectureControllerRepoFileAccessTest {
   private ProjectAccessGuard projectAccessGuard;
   private ProjectRepoRepository projectRepoRepo;
   private ProjectRepoLinkRepository projectRepoLinkRepo;
-  private AppUserRepository userRepo;
   private GitHubRepoService github;
+  private ScmCredentialResolver scmCredentials;
   private ProjectArchitectureController controller;
 
   @BeforeEach
@@ -40,8 +44,8 @@ class ProjectArchitectureControllerRepoFileAccessTest {
     projectAccessGuard = mock(ProjectAccessGuard.class);
     projectRepoRepo = mock(ProjectRepoRepository.class);
     projectRepoLinkRepo = mock(ProjectRepoLinkRepository.class);
-    userRepo = mock(AppUserRepository.class);
     github = mock(GitHubRepoService.class);
+    scmCredentials = mock(ScmCredentialResolver.class);
     controller =
         new ProjectArchitectureController(
             mock(ProjectArchitectureService.class),
@@ -49,10 +53,11 @@ class ProjectArchitectureControllerRepoFileAccessTest {
             mock(com.navneet.executespec.project.workspace.ProjectWorkspaceService.class),
             mock(ArchitectureDiffService.class),
             projectAccessGuard,
+            mock(com.navneet.executespec.project.service.ProjectRepoService.class),
             projectRepoRepo,
             projectRepoLinkRepo,
-            userRepo,
-            github);
+            new ScmRepositoryClientRegistry(List.of(new GitHubScmRepositoryClient(github))),
+            scmCredentials);
   }
 
   @Test
@@ -67,8 +72,6 @@ class ProjectArchitectureControllerRepoFileAccessTest {
             .githubRepoFullName("acme/private-api")
             .defaultBranch("main")
             .build();
-    var host =
-        AppUser.builder().id("host-user").email("host@example.com").githubPat("host-pat").build();
     var invited =
         new AppUserDetails(
             AppUser.builder()
@@ -82,7 +85,8 @@ class ProjectArchitectureControllerRepoFileAccessTest {
     when(projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, repoId))
         .thenReturn(Optional.of(link));
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
-    when(userRepo.findById("host-user")).thenReturn(Optional.of(host));
+    when(scmCredentials.require("host-user", ScmProvider.GITHUB))
+        .thenReturn(new ScmCredential(null, "host-pat"));
     when(github.listRepoFilesResult("https://github.com/acme/private-api", "main", "host-pat"))
         .thenReturn(
             GitHubRepoService.RepoFileListResult.success(List.of("README.md", "src/App.tsx")));
@@ -109,7 +113,6 @@ class ProjectArchitectureControllerRepoFileAccessTest {
             .githubRepoFullName("acme/private-api")
             .defaultBranch("main")
             .build();
-    var host = AppUser.builder().id("host-user").githubPat("host-pat").build();
     var caller =
         new AppUserDetails(
             AppUser.builder().id("invitee").email("invitee@example.com").status("ACTIVE").build(),
@@ -117,7 +120,8 @@ class ProjectArchitectureControllerRepoFileAccessTest {
     when(projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, repoId))
         .thenReturn(Optional.of(link));
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
-    when(userRepo.findById("host-user")).thenReturn(Optional.of(host));
+    when(scmCredentials.require("host-user", ScmProvider.GITHUB))
+        .thenReturn(new ScmCredential(null, "host-pat"));
     when(github.listRepoFilesResult("https://github.com/acme/private-api", "main", "host-pat"))
         .thenReturn(GitHubRepoService.RepoFileListResult.failed("GITHUB_TREE_HTTP_ERROR", 403));
 

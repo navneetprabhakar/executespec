@@ -126,6 +126,7 @@ export function orgKeyRows(org: api.OrgDto): OrgKeyRow[] {
   return [
     {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
     {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
+    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
     ...(isEnterprise
       ? [
           {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},

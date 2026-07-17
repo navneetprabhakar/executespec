@@ -25,6 +25,8 @@ import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.RunRoutePolicyService;
@@ -52,6 +54,8 @@ class LlmRouterTest {
   private GeminiNativeToolClient gemini;
   private RunKeyContextStore keyStore;
   private RunKeySourceModeResolver keySourceModeResolver;
+  private LlmExecutionDispatchGuard executionDispatchGuard;
+  private LlmExecutionPolicyFactory executionPolicyFactory;
   private ModelRegistry registry;
   private FeatureFlagService flags;
   private RunCostTracker costTracker;
@@ -77,6 +81,8 @@ class LlmRouterTest {
         .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
+    executionDispatchGuard = mock(LlmExecutionDispatchGuard.class);
+    executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
     lenient().when(keyStore.get(anyString())).thenReturn(null); // platform keys by default
     keySourceModeResolver = mock(RunKeySourceModeResolver.class);
     // Default: NOT a pure-BYOK run, so platform fallback is permitted (existing behavior).
@@ -109,6 +115,8 @@ class LlmRouterTest {
             stepUsageRecorder,
             broadcaster,
             keyStore,
+            executionDispatchGuard,
+            executionPolicyFactory,
             keySourceModeResolver,
             forced,
             registry,
@@ -117,6 +125,7 @@ class LlmRouterTest {
             routePolicyService,
             anthropicModelProvider);
     router = spy(real);
+    ReflectionTestUtils.setField(router, "executionContextEnforcementEnabled", false);
     doNothing().when(router).backoffSleep(anyLong()); // keep retry tests fast
     return router;
   }
@@ -353,14 +362,17 @@ class LlmRouterTest {
     assertThat(captor.getValue().model()).isEqualTo("gpt-mini");
     verify(costTracker).record(eq("run-1"), eq("T1"), eq("openai"), eq("gpt-mini"), any());
     verify(stepUsageRecorder)
-        .record(
-            eq("run-1"),
-            eq("T1"),
-            eq("WorkerAgent"),
-            eq("worker.iteration-1"),
-            eq(null),
+        .recordSuccess(
+            argThat(
+                request ->
+                    "WorkerAgent".equals(request.agentRole())
+                        && "worker.iteration-1".equals(request.stepId())),
             eq("openai"),
             eq("gpt-mini"),
+            eq("PLATFORM"),
+            eq(1),
+            anyLong(),
+            any(),
             any());
     verify(managedAiUsageService)
         .recordSuccessfulCall(
@@ -384,14 +396,23 @@ class LlmRouterTest {
     assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
     verify(openai, times(2)).call(any());
     verify(stepUsageRecorder)
-        .record(
-            eq("run-1"),
-            eq("T1"),
-            eq("WorkerAgent"),
-            eq("worker.iteration-1"),
-            eq("WorkerAgent:worker.iteration-1#attempt-1"),
+        .recordFailure(
+            argThat(request -> "WorkerAgent".equals(request.agentRole())),
             eq("openai"),
             eq("gpt-x"),
+            eq("PLATFORM"),
+            eq(1),
+            anyLong(),
+            any());
+    verify(stepUsageRecorder)
+        .recordSuccess(
+            argThat(request -> "worker.iteration-1".equals(request.stepId())),
+            eq("openai"),
+            eq("gpt-x"),
+            eq("PLATFORM"),
+            eq(2),
+            anyLong(),
+            any(),
             any());
   }
 
@@ -443,15 +464,24 @@ class LlmRouterTest {
             .build();
     assertThat(router.call(req)).isNotNull();
     verify(gemini, times(1)).call(any());
+    verify(stepUsageRecorder, times(4))
+        .recordFailure(
+            argThat(request -> "OutlinePlannerAgent".equals(request.agentRole())),
+            eq("openai"),
+            eq("gpt-x"),
+            eq("PLATFORM"),
+            any(Integer.class),
+            anyLong(),
+            any());
     verify(stepUsageRecorder)
-        .record(
-            eq("run-1"),
-            eq("T1"),
-            eq("OutlinePlannerAgent"),
-            eq("planner.outline"),
-            eq("OutlinePlannerAgent:planner.outline"),
+        .recordSuccess(
+            argThat(candidate -> "OutlinePlannerAgent:planner.outline".equals(candidate.retryOf())),
             eq("gemini"),
             eq("gem-x"),
+            eq("PLATFORM"),
+            eq(1),
+            anyLong(),
+            any(),
             any());
   }
 
@@ -485,14 +515,14 @@ class LlmRouterTest {
     assertThat(captor.getValue().model()).isEqualTo("gem-flash");
     verify(costTracker).record(eq("run-1"), eq("T1"), eq("gemini"), eq("gem-flash"), any());
     verify(stepUsageRecorder)
-        .record(
-            eq("run-1"),
-            eq("T1"),
-            eq("OutlinePlannerAgent"),
-            eq("planner.outline"),
-            eq("OutlinePlannerAgent:planner.outline"),
+        .recordSuccess(
+            argThat(candidate -> "OutlinePlannerAgent:planner.outline".equals(candidate.retryOf())),
             eq("gemini"),
             eq("gem-flash"),
+            eq("PLATFORM"),
+            eq(1),
+            anyLong(),
+            any(),
             any());
     verify(managedAiUsageService)
         .recordSuccessfulCall(

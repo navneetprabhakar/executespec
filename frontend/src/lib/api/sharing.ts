@@ -32,6 +32,20 @@ export const listShareLinks = (projectId: string) =>
 export const revokeShareLink = (projectId: string, linkId: string) =>
   req<void>(`/projects/${projectId}/share-links/${linkId}`, {method: 'DELETE'});
 
+export interface ShareLinkAuditDto {
+  id: string;
+  eventType: string;
+  outcome: string;
+  surface: ShareLinkSurface;
+  actorUserId: string | null;
+  clientIpHash: string | null;
+  userAgentHash: string | null;
+  occurredAt: string;
+}
+
+export const getShareLinkAudit = (projectId: string, linkId: string) =>
+  req<ShareLinkAuditDto[]>(`/projects/${projectId}/share-links/${linkId}/audit`);
+
 /**
  * Public share-link URL for the dashboard owner to copy. Frontend lives at
  * `/shared/:token` (added in v2.6.4) which calls these GETs to render the surface.
@@ -52,31 +66,23 @@ async function publicSharedJson<T>(token: string, suffix: string): Promise<T> {
 
 export interface SharedLinkMeta {
   surface: ShareLinkSurface;
-  scopeId: string | null;
   label: string | null;
-  projectId: string;
   createdAt: string;
   expiresAt: string | null;
 }
 
 export interface SharedRun {
-  runId: string;
   title: string | null;
   status: string;
-  statusReason: string | null;
   startedAt: string | null;
   completedAt: string | null;
-  costUsd: number | null;
   label: string | null;
 }
 
 export interface SharedProjectOverview {
-  projectId: string;
   name: string;
   description: string | null;
   status: string | null;
-  aiProvider: string | null;
-  githubOwner: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   label: string | null;
@@ -116,7 +122,6 @@ export interface SharedPrReview {
 }
 
 export interface SharedArchitecture {
-  projectId: string;
   version: number | null;
   content: string | null;
   generatedAt: string | null;

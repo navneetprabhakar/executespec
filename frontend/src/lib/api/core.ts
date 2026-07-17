@@ -1197,9 +1197,24 @@ export interface SsoConfig {
 }
 
 export interface GitHubRemoteRepo {
+  immutableId?: string;
   fullName: string;
+  cloneUrl?: string;
   defaultBranch: string;
   isPrivate: boolean;
+  sizeKb?: number | null;
+}
+
+export interface ScmRemoteRepository {
+  provider: 'GITHUB' | 'BITBUCKET';
+  immutableId: string;
+  fullName: string;
+  displayName: string;
+  cloneUrl: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+  sizeKb: number | null;
+  capabilities: string[];
 }
 
 // v2.5.2 — Spec templates (Phase 4.2 / UX-2.3).
@@ -1453,12 +1468,34 @@ export interface GeneratedDocRow {
 export interface ProjectDocumentRow {
   id: string;
   projectId: string;
-  pathRelative: string;
+  /** Legacy servers exposed this internal path; hardened servers intentionally omit it. */
+  pathRelative?: string;
   filename: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
-  status: 'UPLOADED' | 'EXTRACTING' | 'EMBEDDING' | 'READY' | 'FAILED';
-  failureReason: string | null;
+  status:
+    | 'UPLOADED'
+    | 'EXTRACTING'
+    | 'EMBEDDING'
+    | 'INDEXING'
+    | 'RETRY_PENDING'
+    | 'READY'
+    | 'LEXICAL_READY'
+    | 'FAILED'
+    | 'CANCELLED';
+  /** Stable client-safe code; raw parser/storage errors are never returned. */
+  errorCode?: string | null;
+  /** Legacy field omitted by hardened servers. */
+  failureReason?: string | null;
+  pageCount?: number | null;
+  extractedChars?: number | null;
+  estimatedTokens?: number | null;
+  retrievalMode?: 'PENDING' | 'SEMANTIC' | 'LEXICAL' | null;
+  semanticSearchAvailable?: boolean;
+  lexicalSearchAvailable?: boolean;
+  readinessReason?: string | null;
+  embeddingProvider?: string | null;
+  embeddingModel?: string | null;
   createdAt: string;
 }
 
@@ -1541,6 +1578,7 @@ export interface ProjectChatInfo {
   model: string;
   provider: string;
   contextWindow: number;
+  confirmedActionModels: Record<string, string>;
 }
 
 export interface ProjectChatMessageDto {
@@ -1586,6 +1624,7 @@ export type {
 export interface PrReviewDto {
   id: string;
   projectId: string;
+  repoId: string | null;
   repoFullName: string;
   prNumber: number;
   headSha: string;
@@ -1702,7 +1741,9 @@ export type ShareLinkSurface =
 export interface ShareLinkDto {
   id: string;
   projectId: string;
-  token: string;
+  /** Returned once by create; list responses always redact the bearer. */
+  token: string | null;
+  tokenPrefix: string;
   surface: ShareLinkSurface;
   scopeId: string | null;
   label: string | null;

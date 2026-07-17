@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
  *   <li>AUTH — login, register, forgot-password (keyed by IP)
  *   <li>RUNS — POST /api/runs (keyed by userId)
  *   <li>WEBHOOK — all webhook endpoints (keyed by IP, high limit)
+ *   <li>PUBLIC_SHARE — unauthenticated project-share reads (always keyed by IP)
  *   <li>READ — all GET requests (keyed by userId)
  *   <li>WRITE — all POST/PUT/DELETE not in other groups (keyed by userId)
  * </ul>
@@ -31,7 +32,8 @@ import org.springframework.stereotype.Component;
 public class RateLimitPolicy {
 
   /** MEDIUM-level multiplier for these groups; all others stay ×1.0. */
-  private static final Set<String> MEDIUM_HALVED_GROUPS = Set.of("WRITE", "DEPLOY", "PREVIEW");
+  private static final Set<String> MEDIUM_HALVED_GROUPS =
+      Set.of("WRITE", "DEPLOY", "PREVIEW", "PUBLIC_SHARE");
 
   private final GuardrailLevelResolver guardrailLevelResolver;
 
@@ -64,6 +66,9 @@ public class RateLimitPolicy {
                   "ENTERPRISE", 60,
                   "DEFAULT", 5)),
           Map.entry("WEBHOOK", Map.of("DEFAULT", 100)),
+          // Public bearer links are deliberately isolated from the broad authenticated READ
+          // budget. These calls are IP-keyed by RateLimitFilter and never inherit an org tier.
+          Map.entry("PUBLIC_SHARE", Map.of("FREE", 60, "DEFAULT", 60)),
           Map.entry(
               "READ",
               Map.of(
@@ -149,6 +154,10 @@ public class RateLimitPolicy {
     }
     if (path.contains("/preview/")) {
       return "PREVIEW";
+    }
+    if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
+        && path.startsWith("/api/shared/")) {
+      return "PUBLIC_SHARE";
     }
     if (path.contains("/deploy") || path.contains("/push-github")) {
       return "DEPLOY";

@@ -1,29 +1,36 @@
 package com.navneet.executespec.prreview.repository;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.prreview.entity.PrReview;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface PrReviewRepository extends JpaRepository<PrReview, UUID> {
 
   /**
-   * Look up the most recent review for a (repo, PR, sha) tuple. The unique constraint on those 3
-   * columns guarantees this returns at most one row, but the method signature stays Optional for
-   * callers that handle "never reviewed" cleanly.
+   * Look up the review for an immutable project/repo-id/PR/SHA tuple. V281 includes project_id and
+   * repo_id in the unique key so a shared or renamed repository cannot cross tenant or identity
+   * boundaries.
    */
-  Optional<PrReview> findByRepoFullNameAndPrNumberAndHeadSha(
-      String repoFullName, Integer prNumber, String headSha);
+  Optional<PrReview> findByProjectIdAndRepoIdAndPrNumberAndHeadSha(
+      String projectId, UUID repoId, Integer prNumber, String headSha);
 
   /** All reviews for a given PR, newest first — used to render historical reviews on the UI. */
-  List<PrReview> findByRepoFullNameAndPrNumberOrderByStartedAtDesc(
-      String repoFullName, Integer prNumber);
+  Slice<PrReview>
+      findByProjectIdAndRepoIdAndPrNumberAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+          String projectId,
+          UUID repoId,
+          Integer prNumber,
+          java.time.Instant since,
+          Pageable pageable);
 
   /** All reviews for a project, newest first — used for the project-level reviews dashboard. */
-  List<PrReview> findByProjectIdOrderByStartedAtDesc(String projectId);
+  Slice<PrReview> findByProjectIdAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+      String projectId, java.time.Instant since, Pageable pageable);
 
   /**
    * Per-month count for a given user — used by the tier-quota gate to enforce per-tier monthly caps

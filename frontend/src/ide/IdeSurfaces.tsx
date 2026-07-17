@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {repoSupports} from '@/ide/projectRepoUi';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {SpecChat} from '@/signal/components/SpecChat';
@@ -24,6 +25,7 @@ import {
   managedAiStatusLabel,
 } from '@/ide/planUtils';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
+import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -410,7 +412,7 @@ export function IdeCompose() {
   useEffect(() => {
     api
       .getAvailableModels()
-      .then((m) => setProviderOptions(m.providers || []))
+      .then((m) => setProviderOptions(productProviderCatalog(m.providers || [])))
       .catch(() => setProviderOptions([]));
   }, []);
 
@@ -458,7 +460,7 @@ export function IdeCompose() {
   }, [provider]);
 
   useEffect(() => {
-    if (user?.preferredAiProvider) {
+    if (user?.preferredAiProvider && isProductProvider(user.preferredAiProvider)) {
       setModelName('');
       setProvider(user.preferredAiProvider.toUpperCase());
     }
@@ -505,7 +507,12 @@ export function IdeCompose() {
       .then((rs) => {
         const list = rs as unknown as Array<Record<string, unknown>>;
         setProjectRepos(list);
-        setSelectedRepoIds(list.map((r) => repoIdFor(r)).filter(Boolean));
+        setSelectedRepoIds(
+          list
+            .filter((repo) => repoSupports(repo, 'CLOUD_RUN'))
+            .map((r) => repoIdFor(r))
+            .filter(Boolean),
+        );
       })
       .catch(() => {
         setProjectRepos([]);
@@ -857,7 +864,11 @@ export function IdeCompose() {
               <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
             )}
             <div className='ide-run-action ide-compose-submit-action'>
-              <button className='ide-btn' onClick={submit} disabled={busy}>
+              <button
+                className='ide-btn'
+                onClick={submit}
+                disabled={busy || (projectRepos.length > 0 && selectedRepoIds.length === 0)}
+              >
                 {busy ? 'Submitting...' : 'Create plan'}
               </button>
             </div>
@@ -871,14 +882,22 @@ export function IdeCompose() {
                   {projectRepos.map((r) => {
                     const rId = repoIdFor(r);
                     const selected = selectedRepoIds.includes(rId);
+                    const canRun = repoSupports(r, 'CLOUD_RUN');
                     return (
                       <button
                         key={rId}
                         className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                        disabled={!canRun}
+                        title={
+                          canRun
+                            ? undefined
+                            : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
+                        }
                         onClick={() => toggleRepo(rId)}
                       >
                         {selected ? '✓ ' : ''}
                         {repoDisplayName(r)}
+                        {!canRun ? ' · browse only' : ''}
                       </button>
                     );
                   })}

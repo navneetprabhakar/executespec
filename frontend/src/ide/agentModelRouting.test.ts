@@ -1,5 +1,9 @@
 import {describe, expect, it} from 'vitest';
-import {eligibleAgentProviderCatalog, exactModelMatchesProvider} from './agentModelRouting';
+import {
+  eligibleAgentProviderCatalog,
+  exactModelMatchesProvider,
+  productProviderCatalog,
+} from './agentModelRouting';
 import type {ProviderEntry, UserModel} from '@/lib/api';
 
 const catalog: ProviderEntry[] = [
@@ -61,5 +65,29 @@ describe('agent exact-route model catalog', () => {
     const result = eligibleAgentProviderCatalog(catalog, []);
     expect(result.every((provider) => provider.models.length === 0)).toBe(true);
     expect(exactModelMatchesProvider(result, 'ANTHROPIC', 'claude-sonnet')).toBe(false);
+  });
+
+  it('drops retired provider metadata from both public and authenticated catalogs', () => {
+    const staleCatalog = [
+      ...catalog,
+      {id: 'SARVAM', label: 'Retired', models: [{id: 'retired', label: 'Retired', tier: 'PRO'}]},
+    ];
+    const staleModels = [
+      ...accountModels,
+      {
+        id: 'retired',
+        provider: 'SARVAM',
+        label: 'Retired',
+        minTier: 'PRO',
+        available: true,
+      },
+    ];
+
+    expect(productProviderCatalog(staleCatalog).map((provider) => provider.id)).not.toContain(
+      'SARVAM',
+    );
+    expect(
+      eligibleAgentProviderCatalog(staleCatalog, staleModels).map((provider) => provider.id),
+    ).not.toContain('SARVAM');
   });
 });

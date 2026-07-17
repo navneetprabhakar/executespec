@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.AgentTier;
@@ -30,9 +31,9 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -51,7 +52,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ChatService {
 
   /** Matches frontend {@code MAX_MESSAGES = 50} in RunConversation.tsx. */
@@ -72,7 +72,37 @@ public class ChatService {
   private final AgentProperties agentProps;
   private final ValidationReportRepository validationReportRepo;
   private final RunChatTools runChatTools;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final ObjectMapper mapper = new ObjectMapper();
+
+  @Autowired
+  public ChatService(
+      PipelineRunRepository runRepo,
+      LlmRouter router,
+      ModelResolver modelResolver,
+      AgentProperties agentProps,
+      ValidationReportRepository validationReportRepo,
+      RunChatTools runChatTools,
+      LlmExecutionPolicyFactory executionPolicyFactory) {
+    this.runRepo = runRepo;
+    this.router = router;
+    this.modelResolver = modelResolver;
+    this.agentProps = agentProps;
+    this.validationReportRepo = validationReportRepo;
+    this.runChatTools = runChatTools;
+    this.executionPolicyFactory = executionPolicyFactory;
+  }
+
+  /** Compatibility constructor for deterministic unit callers. */
+  public ChatService(
+      PipelineRunRepository runRepo,
+      LlmRouter router,
+      ModelResolver modelResolver,
+      AgentProperties agentProps,
+      ValidationReportRepository validationReportRepo,
+      RunChatTools runChatTools) {
+    this(runRepo, router, modelResolver, agentProps, validationReportRepo, runChatTools, null);
+  }
 
   public record ChatMessage(String role, String content) {}
 
@@ -115,14 +145,10 @@ public class ChatService {
 
     // Resolve provider + model (LIGHTWEIGHT tier — chat is Q&A, not planning).
     LlmProvider provider;
-    try {
-      provider =
-          run.getAiProvider() == null
-              ? LlmProvider.ANTHROPIC
-              : LlmProvider.valueOf(run.getAiProvider().toUpperCase());
-    } catch (IllegalArgumentException ex) {
-      provider = LlmProvider.ANTHROPIC;
+    if (run.getAiProvider() == null || run.getAiProvider().isBlank()) {
+      throw new IllegalStateException("Run provider is missing");
     }
+    provider = LlmProvider.valueOf(run.getAiProvider().toUpperCase());
     ResolvedModel model;
     if (run.isRoutePinned()) {
       if (run.getRequestedProvider() == null
@@ -140,16 +166,7 @@ public class ChatService {
               .fallback(false)
               .build();
     } else {
-      try {
-        model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
-      } catch (Exception e) {
-        log.warn(
-            "ChatService model resolve failed for provider={}: {} — falling back to ANTHROPIC",
-            provider,
-            e.getMessage());
-        provider = LlmProvider.ANTHROPIC;
-        model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
-      }
+      model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
     }
     String providerName = model.getActualProvider().name().toLowerCase();
 
@@ -170,7 +187,9 @@ public class ChatService {
     // Read-only run tools (list_run_files / read_run_file) let the copilot drill into the
     // actual generated code to ground a suggestion. ExecutionContext is run-scoped so
     // LlmRouter attributes token cost to this run.
-    ExecutionContext ctx = new ExecutionContext(runId, "chat", workspace);
+    var executionReference =
+        executionPolicyFactory == null ? null : executionPolicyFactory.forRun(runId);
+    ExecutionContext ctx = new ExecutionContext(runId, "chat", workspace, executionReference);
     List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId, ctx));
 
     String reply;

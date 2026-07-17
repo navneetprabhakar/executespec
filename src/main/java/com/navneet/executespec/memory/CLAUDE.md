@@ -27,7 +27,37 @@ loop gives it one final no-tools answer turn instead of spending the remaining r
 duplicate reads; this is especially important for Gemini project-chat tool selection.
 Exact duplicate read/search calls are also served from the first bounded envelope instead of being
 dispatched again. This avoids paying for repeated reads while preserving the original result for
-the model to use; mutating project actions remain retryable when a provider repeats them.
+the model to use.
+
+Project chat is a strict read-only model tool surface. `ProjectChatTools` classifies every tool as
+`PROJECT_READ` / `PROJECT_ANALYSE` / `SPEND_AI` / `WRITE_REPO` and currently binds only
+`PROJECT_READ`; architecture/doc generation and code-review scans remain available through their
+explicit dashboard/API actions. `ProjectChatService` resolves the immutable
+`specchat/policy/ProjectChatPolicy` before send, compaction, or compile dispatch, attaches its exact
+V282 execution-context reference, and revalidates its turn guard before each model round. Every
+bound callback is wrapped by that guard, which rechecks actor/tenant/role/context/capability and the
+tool-call ceiling immediately before invocation; the callback then repeats project read access,
+emits allow/deny/result decisions to the hash-chained activity audit, sanitizes/redacts its
+envelope, and labels repository/document payloads as untrusted data. `PROJECT_VIEWER` may read
+persisted history but cannot create a paid turn.
+
+## Explicit confirmed actions (V292)
+
+Paid/mutating project actions are still absent from the model's callback registry. Web and
+CLI/OpenTUI explicitly initiate `REGENERATE_ARCHITECTURE`, `GENERATE_PROJECT_DOC`, or
+`RUN_CODE_REVIEW`, show the server-resolved action route and hard cap, and then issue/consume a
+one-shot Project Chat confirmation. `ProjectChatController.info` resolves the chat model and the
+three action-specific models while the host org's matrix overrides are bound, restoring any prior
+thread binding afterward. This prevents a PLANNING chat model from being incorrectly reused for a
+WORKHORSE document action.
+
+Each confirmed execution shares one exact V282 provider/model reference across every downstream
+architecture/doc/review call; adaptive switching and failover are forbidden, including on Code
+Review's async executor. Actor attribution follows the confirming member, while key resolution
+stays bound to the host project subject. Caps are architecture 1,000,000 tokens/$10/64 calls,
+generated docs 200,000/$3/2, and code review 300,000/$5/2. A missing/drifting exact route fails with
+503 and a consumed grant cannot be replayed or revived after failure. This is an explicit action
+surface, not a chat-model proposal protocol.
 
 ## Persistence
 

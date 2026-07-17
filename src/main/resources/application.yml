@@ -1,3 +1,44 @@
+# Project-document admission is fail-closed and content-derived. These are hard server ceilings;
+# the browser's multipart declarations are not security controls.
+project:
+  rag:
+    embedding:
+      openai:
+        model: text-embedding-3-small
+        dimensions: 1536
+        input-cost-per-million-usd: 0.02
+  exports:
+    max-jobs-per-project-per-day: 5
+    retention-hours: 24
+    max-repos: 1000
+    max-contracts: 10000
+    max-activity-events: 100000
+    max-uncompressed-bytes: 268435456
+    page-size: 500
+    max-attempts: 3
+    lease-seconds: 600
+    max-parallel-jobs: 2
+    list-limit: 25
+    poll-interval-millis: 2000
+    gcs-enabled: ${PROJECT_EXPORT_GCS_ENABLED:false}
+  documents:
+    max-file-bytes: 10485760
+    max-project-bytes: 104857600
+    max-documents-per-project: 100
+    max-pages-per-file: 500
+    max-project-pages: 5000
+    max-extracted-chars-per-file: 2000000
+    max-project-extracted-chars: 20000000
+    max-tokens-per-file: 500000
+    max-project-tokens: 5000000
+    max-archive-entries: 5000
+    max-archive-inflated-bytes: 52428800
+    max-compression-ratio: 100
+    max-processing-attempts: 3
+    malware-scan-required: true
+    stale-processing-millis: 900000
+    recovery-interval-millis: 60000
+
 spring:
   application:
     name: executespec
@@ -1050,6 +1091,11 @@ preview:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
+  cleanup:
+    # Fail-safe for multi-node deployments: never infer ownership from a JVM-local map.
+    orphan-discovery-enabled: ${PREVIEW_ORPHAN_DISCOVERY_ENABLED:false}
+    # Rolling deploys preserve previews; expiration/explicit stop owns teardown.
+    teardown-on-shutdown: ${PREVIEW_TEARDOWN_ON_SHUTDOWN:false}
 
   engine:
     route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}

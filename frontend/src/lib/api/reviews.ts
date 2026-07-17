@@ -48,13 +48,24 @@ export const fetchPrReviewComments = (projectId: string, prNumber: number, repoF
     `/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`,
   );
 
-export const submitPrReview = (body: {projectId: string; repoFullName: string; prNumber: number}) =>
-  req<PrReviewDto>('/pr-reviews', {method: 'POST', body: JSON.stringify(body)});
+export const submitPrReview = (body: {
+  projectId: string;
+  repoId: string;
+  repoFullName: string;
+  prNumber: number;
+}) => req<PrReviewDto>('/pr-reviews', {method: 'POST', body: JSON.stringify(body)});
 
 export const getPrReview = (id: string) => req<PrReviewWithComments>(`/pr-reviews/${id}`);
 
-export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
-  req<PrReviewDto[]>(`/pr-reviews?repo=${encodeURIComponent(repoFullName)}&number=${prNumber}`);
+export const listPrReviewsForPr = (
+  projectId: string,
+  repoId: string,
+  repoFullName: string,
+  prNumber: number,
+) =>
+  req<PrReviewDto[]>(
+    `/pr-reviews?projectId=${encodeURIComponent(projectId)}&repoId=${encodeURIComponent(repoId)}&repo=${encodeURIComponent(repoFullName)}&number=${prNumber}`,
+  );
 
 /**
  * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR
@@ -65,11 +76,8 @@ export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
 export const dispatchPrReviewAutofix = (reviewId: string) =>
   req<PrReviewAutofixResponse>(`/pr-reviews/${reviewId}/autofix`, {method: 'POST'});
 
-export const submitCodeReview = (body: {
-  projectId: string;
-  repoId?: string;
-  repoFullName: string;
-}) => req<CodeReviewScanDto>('/code-reviews', {method: 'POST', body: JSON.stringify(body)});
+export const submitCodeReview = (body: {projectId: string; repoId: string; repoFullName: string}) =>
+  req<CodeReviewScanDto>('/code-reviews', {method: 'POST', body: JSON.stringify(body)});
 
 export const getCodeReview = (id: string) => req<CodeReviewScanWithIssues>(`/code-reviews/${id}`);
 

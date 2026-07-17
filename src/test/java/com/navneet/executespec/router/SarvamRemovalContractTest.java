@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
 
@@ -38,6 +39,28 @@ class SarvamRemovalContractTest {
                   throw new IllegalStateException("Unable to inspect " + file, e);
                 }
               });
+    }
+  }
+
+  @Test
+  void customerWebAndWebsiteSourcesContainNoRetiredSarvamToken() throws Exception {
+    for (Path root : List.of(Path.of("frontend/src"), Path.of("website"))) {
+      try (Stream<Path> files = Files.walk(root)) {
+        files
+            .filter(Files::isRegularFile)
+            .filter(SarvamRemovalContractTest::isProductionText)
+            .filter(SarvamRemovalContractTest::isNotTestSource)
+            .forEach(
+                file -> {
+                  try {
+                    assertThat(Files.readString(file).toLowerCase(Locale.ROOT))
+                        .as("retired Sarvam token in customer source %s", file)
+                        .doesNotContain("sarvam");
+                  } catch (Exception e) {
+                    throw new IllegalStateException("Unable to inspect " + file, e);
+                  }
+                });
+      }
     }
   }
 
@@ -81,6 +104,15 @@ class SarvamRemovalContractTest {
         || name.endsWith(".yaml")
         || name.endsWith(".properties")
         || name.endsWith(".json")
-        || name.endsWith(".xml");
+        || name.endsWith(".xml")
+        || name.endsWith(".ts")
+        || name.endsWith(".tsx")
+        || name.endsWith(".html")
+        || name.endsWith(".txt");
+  }
+
+  private static boolean isNotTestSource(Path file) {
+    String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+    return !name.contains(".test.") && !name.contains(".spec.");
   }
 }

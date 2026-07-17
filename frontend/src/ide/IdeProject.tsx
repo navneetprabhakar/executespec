@@ -5,8 +5,9 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
-import {explicitLinkedRepoSelection} from '@/ide/projectRepoUi';
+import {explicitLinkedRepoSelection, repoSupports} from '@/ide/projectRepoUi';
 import {
+  PRODUCT_PROVIDER_OPTIONS,
   providerIsDispatchable,
   providerOptionLabel,
   providerReadinessLabel,
@@ -61,7 +62,11 @@ export default function IdeProject() {
         // Project runs are explicit about their code boundary. The previous UI displayed every
         // linked repo as selected while leaving this array empty, so the request omitted
         // selectedRepoIds and the backend created a seed-only workspace.
-        setSelected(explicitLinkedRepoSelection(loadedRepos));
+        setSelected(
+          explicitLinkedRepoSelection(
+            loadedRepos.filter((repo) => repoSupports(repo, 'CLOUD_RUN')),
+          ),
+        );
       })
       .catch(() => setRepos([]));
     api
@@ -143,10 +148,7 @@ export default function IdeProject() {
   const lastRun = runs[0];
   const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
   const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
-  const projectProviderOptions = ['ANTHROPIC', 'OPENAI', 'DEEPSEEK'].map((id) => ({
-    id,
-    label: id === 'OPENAI' ? 'OpenAI' : id[0] + id.slice(1).toLowerCase(),
-  }));
+  const projectProviderOptions = PRODUCT_PROVIDER_OPTIONS;
 
   return (
     <div className='ide-pane'>
@@ -223,19 +225,29 @@ export default function IdeProject() {
             {repos.map((r) => {
               const id = repoIdFor(r);
               const on = selected.includes(id);
+              const canRun = repoSupports(r, 'CLOUD_RUN');
               return (
                 <button
                   key={id}
                   className='ide-badge interactive'
+                  disabled={!canRun}
+                  title={
+                    canRun
+                      ? undefined
+                      : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
+                  }
                   style={{
                     cursor: 'pointer',
                     borderColor: on ? 'var(--ide-accent)' : undefined,
                     color: on ? 'var(--ide-accent)' : undefined,
                   }}
-                  onClick={() => setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))}
+                  onClick={() =>
+                    canRun && setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))
+                  }
                 >
                   {on ? '✓ ' : ''}
                   {repoDisplayName(r)}
+                  {!canRun ? ' · browse only' : ''}
                 </button>
               );
             })}

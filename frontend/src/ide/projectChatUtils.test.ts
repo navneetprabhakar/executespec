@@ -47,9 +47,21 @@ describe('projectChatUtils', () => {
       kind: 'provider',
       provider: 'ANTHROPIC',
     });
+    expect(resolveProjectChatSlashAction('/provider google', context)).toEqual({
+      kind: 'provider',
+      provider: 'GEMINI',
+    });
+    expect(resolveProjectChatSlashAction('/provider openrouter', context)).toEqual({
+      kind: 'provider',
+      provider: 'OPENROUTER',
+    });
+    expect(resolveProjectChatSlashAction('/provider fireworks', context)).toEqual({
+      kind: 'provider',
+      provider: 'FIREWORKS',
+    });
     expect(resolveProjectChatSlashAction('/provider unknown', context)).toEqual({
       kind: 'provider-usage',
-      content: 'Usage: /provider anthropic|openai|deepseek',
+      content: 'Usage: /provider anthropic|openai|gemini|deepseek|openrouter|fireworks',
     });
   });
 

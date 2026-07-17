@@ -111,6 +111,16 @@ class OrgServiceAiKeysTest {
   }
 
   @Test
+  void keySourcePolicyAcceptsGeminiAndNormalizesLegacyGoogleAlias() {
+    Org org = seedOrg("ENTERPRISE", null, null, "gemini-key", null);
+
+    svc.updateKeySourceSettings("org-1", "OWN_KEYS", java.util.List.of("google"), "actor");
+
+    assertThat(org.getKeySourceMode()).isEqualTo("OWN_KEYS");
+    assertThat(org.getEnabledProviders()).isEqualTo("gemini");
+  }
+
+  @Test
   void deepSeekAndFireworksRejectedOnNonEnterprise() {
     seedOrg("TEAM", null, null, null, null);
 

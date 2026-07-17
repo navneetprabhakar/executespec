@@ -38,15 +38,29 @@ class CodeGenEngineImplTest {
   private final FeatureFlagService featureFlagService = mock(FeatureFlagService.class);
   private final PromptAssembler promptAssembler = mock(PromptAssembler.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
+  private final com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory
+      executionPolicyFactory =
+          mock(com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory.class);
   private final CodeGenEngineImpl engine =
       new CodeGenEngineImpl(
-          workerAgent, runRepo, featureFlagService, promptAssembler, costTracker, null);
+          workerAgent,
+          runRepo,
+          featureFlagService,
+          promptAssembler,
+          costTracker,
+          executionPolicyFactory,
+          null);
 
   @BeforeEach
   void setUp() {
     when(promptAssembler.assemble("patch-agent.md")).thenReturn("PATCH SYSTEM");
     when(featureFlagService.isEnabled(anyString())).thenReturn(false);
     when(runRepo.findById(anyString())).thenReturn(Optional.empty());
+    when(executionPolicyFactory.forRun(anyString()))
+        .thenReturn(
+            new com.navneet.executespec.executioncontext.LlmExecutionReference(
+                "ctx-test",
+                com.navneet.executespec.executioncontext.LlmExecutionScope.customer("org-test")));
     engine.loadPatchPrompt();
   }
 

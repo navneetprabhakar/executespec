@@ -155,6 +155,19 @@ public class SmartClassifierAgent {
       String projectType,
       LlmProvider aiProvider,
       String projectMemorySnippet) {
+    return classify(
+        spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet, null);
+  }
+
+  /** Production pipeline overload carrying the exact durable run policy into the verifier call. */
+  public ClassificationResult classify(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference) {
     String cacheKey = cacheKey(spec, repoFullNames, projectId);
     if (cacheKey != null) {
       try {
@@ -207,7 +220,8 @@ public class SmartClassifierAgent {
             projectMemorySnippet,
             heuristic,
             aiProvider,
-            projectId);
+            projectId,
+            executionReference);
     cachePut(cacheKey, verified);
     return verified;
   }
@@ -289,7 +303,8 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       HeuristicVerdict heuristic,
       LlmProvider aiProvider,
-      String projectId) {
+      String projectId,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference) {
     ResolvedModel resolved;
     try {
       resolved =
@@ -358,7 +373,8 @@ public class SmartClassifierAgent {
         new ExecutionContext(
             "classify-" + (projectId == null ? "anon" : projectId),
             "__planner_classifier__",
-            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
+            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath(),
+            executionReference);
 
     try {
       ChatResponse resp =

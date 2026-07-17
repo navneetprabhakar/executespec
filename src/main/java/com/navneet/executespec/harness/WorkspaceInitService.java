@@ -117,6 +117,12 @@ public class WorkspaceInitService {
    * @param pat personal access token (may be null for public repos)
    */
   public void cloneFromRepo(String runId, String repoUrl, String pat) throws Exception {
+    cloneFromRepo(runId, repoUrl, null, pat);
+  }
+
+  /** Provider-neutral clone overload (e.g. Bitbucket app-password username + secret). */
+  public void cloneFromRepo(String runId, String repoUrl, String username, String secret)
+      throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
@@ -127,7 +133,8 @@ public class WorkspaceInitService {
     log.info("Cloning {} into workspace for run {}", repoUrl, runId);
     // Credential-gate 2026-07-17: the PAT rides the child environment via GitProcessAuth — never
     // argv, never the persisted origin URL (the workspace .git/config stays token-free).
-    runGitStrictAuth(workspace.getParent(), pat, "clone", repoUrl, workspace.toString());
+    runGitStrictAuthWithUsername(
+        workspace.getParent(), username, secret, "clone", repoUrl, workspace.toString());
 
     // Override commit identity for agent commits
     runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
@@ -467,8 +474,15 @@ public class WorkspaceInitService {
    */
   private void runGitStrictAuth(Path dir, String pat, String... gitArgs)
       throws IOException, InterruptedException {
+    runGitStrictAuthWithUsername(dir, null, pat, gitArgs);
+  }
+
+  private void runGitStrictAuthWithUsername(
+      Path dir, String username, String secret, String... gitArgs)
+      throws IOException, InterruptedException {
     ProcessBuilder pb =
-        com.navneet.executespec.repo.GitProcessAuth.git(pat, java.util.List.of(gitArgs));
+        com.navneet.executespec.repo.GitProcessAuth.git(
+            secret, username, java.util.List.of(gitArgs));
     pb.directory(dir.toFile());
     pb.redirectErrorStream(true);
     Process p = pb.start();

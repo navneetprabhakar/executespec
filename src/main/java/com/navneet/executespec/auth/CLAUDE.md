@@ -53,9 +53,25 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - `DELETE /api/org/me/invitations/{id}` cancels pending/escalated org invites by marking them `EXPIRED` and writing an `INVITATION_CANCELLED` audit row.
 - Project member add/remove accepts org admins and super admins in addition to project admins; `ProjectService.requireProjectAdmin` mirrors the controller/access-guard semantics.
 
+## Append-only security audit (V292)
+
+- `activity_audit` is a hash-chained security record, not a mutable application table. V292 installs
+  a PostgreSQL trigger that rejects every UPDATE and DELETE; retention must therefore use an
+  approved archival/partition procedure rather than row mutation.
+- `ActivityAuditService.record` takes a transaction-scoped PostgreSQL advisory lock before reading
+  the chain tail and assigning the next sequence/hash. The database, not a JVM-local monitor,
+  serializes append order across instances.
+- Project Chat confirmation issue/allow/deny/consume/replay/expiry/action-complete/action-fail events
+  record secret-free scope identifiers and hashes. Bearer tokens, canonical target JSON, prompts,
+  tool arguments/results, provider responses, and credentials must never enter the audit payload.
+- Real PostgreSQL evidence covers V291→V292 upgrade, mutation rejection, idempotent rerun, and a
+  concurrent two-consumer race yielding exactly one consume and one replay denial.
+
 ## Migration Trail
 
 - `V215__personal_access_token.sql` creates hashed PATs for programmatic auth.
 - `V237__provider_key_lanes.sql` adds DeepSeek and Fireworks BYOK lanes on `org` and `app_user`.
 - `V242__user_preferred_ai_provider.sql` adds `app_user.preferred_ai_provider`.
 - `V253__ai_credit_pricing_ladder.sql` refreshes Free/Pro/Pro+/BYOK/Team seed rows and restores Team's 2-seat minimum.
+- `V292__project_chat_scoped_confirmations.sql` adds hashed, actor/tenant/project/route/target-scoped
+  one-shot Project Chat authority and makes the existing `activity_audit` table database-append-only.

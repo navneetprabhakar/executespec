@@ -15,17 +15,18 @@ import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
 import com.navneet.executespec.prreview.entity.PrReview;
 import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
+import com.navneet.executespec.sharing.entity.ProjectShareLinkAudit;
 import com.navneet.executespec.sharing.repository.ProjectShareLinkRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * V175 — orchestrator for public read-only project share links.
@@ -39,16 +40,19 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ProjectShareLinkService {
 
   private static final SecureRandom RNG = new SecureRandom();
+  public static final int DEFAULT_EXPIRY_DAYS = 7;
+  public static final int MAX_EXPIRY_DAYS = 90;
+  private static final int MAX_LABEL_CHARS = 120;
 
   private final ProjectShareLinkRepository linkRepo;
   private final TierConfigRepository tierConfigRepo;
   private final PipelineRunRepository runRepo;
   private final CodeReviewScanRepository scanRepo;
   private final PrReviewRepository prReviewRepo;
+  private final ProjectShareLinkAuditService auditService;
 
   /** Active link count must be below the per-tier cap. {@code -1} on the cap means unlimited. */
   void assertCanCreate(AppUser caller, String projectId) {
@@ -89,24 +93,39 @@ public class ProjectShareLinkService {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "scopeId is required for surface " + surface);
     }
+    Instant now = Instant.now();
+    validateExpiry(expiresAt, now);
+    String normalizedLabel = normalizeLabel(label);
     assertCanCreate(creator, projectId);
     // IDOR defense (create side): the scope entity referenced by scopeId MUST belong to the same
     // project the caller is authorized to write. Without this a project admin could mint a public,
     // unauthenticated link whose scopeId points at another org's run / scan / PR review.
     assertScopeBelongsToProject(surface, scopeId, projectId);
+    String plaintextToken = generateToken();
     ProjectShareLink link =
         ProjectShareLink.builder()
             .id(UUID.randomUUID())
             .projectId(projectId)
-            .token(generateToken())
+            .token(plaintextToken)
+            .tokenHash(hashToken(plaintextToken))
+            .tokenPrefix(plaintextToken.substring(0, 8))
             .surface(surface)
             .scopeId(scopeId)
-            .label(label)
+            .label(normalizedLabel)
             .createdByUserId(creator.getId())
             .expiresAt(expiresAt)
-            .createdAt(Instant.now())
+            .createdAt(now)
             .build();
-    return linkRepo.save(link);
+    // Flush the owning row before the audit insert; the audit FK is intentionally RESTRICT and
+    // Hibernate is otherwise free to reorder unrelated entity inserts at transaction flush.
+    ProjectShareLink saved = linkRepo.saveAndFlush(link);
+    auditService.record(
+        saved,
+        "CREATE",
+        "CREATED",
+        creator.getId(),
+        ProjectShareLinkAuditService.AccessContext.none());
+    return saved;
   }
 
   @Transactional
@@ -125,6 +144,12 @@ public class ProjectShareLinkService {
     link.setRevokedAt(Instant.now());
     if (actor != null) link.setRevokedByUserId(actor.getId());
     linkRepo.save(link);
+    auditService.record(
+        link,
+        "REVOKE",
+        "REVOKED",
+        actor == null ? null : actor.getId(),
+        ProjectShareLinkAuditService.AccessContext.none());
   }
 
   /**
@@ -132,30 +157,56 @@ public class ProjectShareLinkService {
    * matches the public-share-report convention from {@code ValidationReportController}.
    */
   public ProjectShareLink resolveActive(String token) {
+    return resolveActive(token, ProjectShareLinkAuditService.AccessContext.none());
+  }
+
+  public ProjectShareLink resolveActive(
+      String token, ProjectShareLinkAuditService.AccessContext accessContext) {
+    if (!isTokenShapeValid(token)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found");
+    }
     ProjectShareLink link =
         linkRepo
-            .findByToken(token)
+            .findByTokenHash(hashToken(token))
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found"));
     if (!link.isActive()) {
+      auditService.record(
+          link, "DENIED", link.getRevokedAt() != null ? "REVOKED" : "EXPIRED", null, accessContext);
       throw new ResponseStatusException(HttpStatus.GONE, "Share link has been revoked or expired");
     }
     return link;
   }
 
   /**
-   * Bump the {@code views} counter + {@code last_viewed_at} on a successful read. Best-effort — the
-   * counter is for the dashboard, not for billing, so a missed update is fine.
+   * Append an immutable access fact and atomically bump the aggregate dashboard counter. Audit
+   * persistence is mandatory; a failed write does not silently expose the public payload.
    */
   @Transactional
   public void recordView(ProjectShareLink link) {
-    try {
-      link.setViews((link.getViews() == null ? 0 : link.getViews()) + 1);
-      link.setLastViewedAt(Instant.now());
-      linkRepo.save(link);
-    } catch (Exception e) {
-      log.warn("share link view counter bump failed for {}: {}", link.getId(), e.getMessage());
+    recordView(link, ProjectShareLinkAuditService.AccessContext.none());
+  }
+
+  @Transactional
+  public void recordView(
+      ProjectShareLink link, ProjectShareLinkAuditService.AccessContext accessContext) {
+    auditService.record(link, "ACCESS", "ALLOWED", null, accessContext);
+    int updated = linkRepo.recordView(link.getId(), Instant.now());
+    if (updated != 1) {
+      throw new IllegalStateException("Share-link view audit could not update the owning link");
     }
+  }
+
+  @Transactional
+  public void recordDeniedSurface(
+      ProjectShareLink link, ProjectShareLinkAuditService.AccessContext accessContext) {
+    auditService.record(link, "DENIED", "WRONG_SURFACE", null, accessContext);
+  }
+
+  @Transactional
+  public void recordMetadataAccess(
+      ProjectShareLink link, ProjectShareLinkAuditService.AccessContext accessContext) {
+    auditService.record(link, "ACCESS", "METADATA_ALLOWED", null, accessContext);
   }
 
   public List<ProjectShareLink> listForProject(String projectId) {
@@ -164,6 +215,18 @@ public class ProjectShareLinkService {
 
   public long activeCountForProject(String projectId) {
     return linkRepo.countActiveByProject(projectId, Instant.now());
+  }
+
+  public List<ProjectShareLinkAudit> auditForLink(String projectId, UUID linkId) {
+    ProjectShareLink link =
+        linkRepo
+            .findById(linkId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found"));
+    if (!projectId.equals(link.getProjectId())) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Share link not found");
+    }
+    return auditService.latest(linkId);
   }
 
   static boolean surfaceRequiresScope(ProjectShareLink.Surface surface) {
@@ -240,5 +303,36 @@ public class ProjectShareLinkService {
     byte[] buf = new byte[32];
     RNG.nextBytes(buf);
     return Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
+  }
+
+  static String hashToken(String token) {
+    return DigestUtils.sha256Hex(token);
+  }
+
+  private static boolean isTokenShapeValid(String token) {
+    return token != null && token.length() == 43 && token.matches("[A-Za-z0-9_-]{43}");
+  }
+
+  private static void validateExpiry(Instant expiresAt, Instant now) {
+    if (expiresAt == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "share links require an expiry");
+    }
+    if (!expiresAt.isAfter(now)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "share-link expiry must be future");
+    }
+    if (expiresAt.isAfter(now.plusSeconds(MAX_EXPIRY_DAYS * 24L * 3600L + 60))) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "share-link expiry cannot exceed " + MAX_EXPIRY_DAYS + " days");
+    }
+  }
+
+  private static String normalizeLabel(String label) {
+    if (label == null || label.isBlank()) return null;
+    String normalized = label.trim();
+    if (normalized.length() > MAX_LABEL_CHARS) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "share-link label cannot exceed " + MAX_LABEL_CHARS + " chars");
+    }
+    return normalized;
   }
 }

@@ -12,7 +12,7 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
   const meta = surface.meta;
   const surfaceText = meta.surface.replace(/_/g, ' ');
   const label = meta.label || surfaceText.toLowerCase();
-  const expires = meta.expiresAt ? new Date(meta.expiresAt).toLocaleDateString() : 'No expiry';
+  const expires = meta.expiresAt ? new Date(meta.expiresAt).toLocaleDateString() : 'Unavailable';
 
   return (
     <div className='public-share-console'>
@@ -31,7 +31,6 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
           <KvList
             pairs={[
               {k: 'Surface', v: surfaceText},
-              {k: 'Project', v: meta.projectId},
               {
                 k: 'Created',
                 v: meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : '—',
@@ -47,10 +46,8 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Name', v: surface.project.name || surface.project.projectId},
+                  {k: 'Name', v: surface.project.name || 'Untitled project'},
                   {k: 'Status', v: surface.project.status || '—'},
-                  {k: 'Provider', v: surface.project.aiProvider || '—'},
-                  {k: 'GitHub owner', v: surface.project.githubOwner || '—'},
                   {
                     k: 'Updated',
                     v: surface.project.updatedAt
@@ -82,13 +79,8 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Title', v: surface.run.title || surface.run.runId},
+                  {k: 'Title', v: surface.run.title || 'Untitled run'},
                   {k: 'Status', v: surface.run.status || '—'},
-                  {k: 'Reason', v: surface.run.statusReason || '—'},
-                  {
-                    k: 'Cost',
-                    v: surface.run.costUsd != null ? `$${surface.run.costUsd.toFixed(2)}` : '—',
-                  },
                   {
                     k: 'Completed',
                     v: surface.run.completedAt

@@ -34,6 +34,9 @@ export function IdeProjectMembers() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [newShareUrl, setNewShareUrl] = useState('');
+  const [shareAuditLinkId, setShareAuditLinkId] = useState<string | null>(null);
+  const [shareAudit, setShareAudit] = useState<api.ShareLinkAuditDto[] | null>(null);
   const [revokeFor, setRevokeFor] = useState<string | null>(null);
   const [revokeInviteFor, setRevokeInviteFor] = useState<string | null>(null);
   const [removeFor, setRemoveFor] = useState<string | null>(null);
@@ -117,8 +120,13 @@ export function IdeProjectMembers() {
     setErr('');
     setMsg('');
     try {
-      await api.createShareLink(projectId, {surface: 'PROJECT_OVERVIEW', expiresInDays: 30});
-      setMsg('Share link created.');
+      const created = await api.createShareLink(projectId, {
+        surface: 'PROJECT_OVERVIEW',
+        expiresInDays: 30,
+      });
+      if (!created.token) throw new Error('Server did not return the one-time share credential.');
+      setNewShareUrl(api.shareLinkPublicUrl(created.token));
+      setMsg('Share link created. Copy it now; the credential will not be shown again.');
       const r = await api.listShareLinks(projectId);
       setShareLinks(r.links ?? []);
     } catch (e: unknown) {
@@ -135,6 +143,23 @@ export function IdeProjectMembers() {
       setMsg('Share link revoked.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Revoke failed.');
+    }
+  }
+
+  async function showShareAudit(linkId: string) {
+    if (shareAuditLinkId === linkId) {
+      setShareAuditLinkId(null);
+      setShareAudit(null);
+      return;
+    }
+    setShareAuditLinkId(linkId);
+    setShareAudit(null);
+    setErr('');
+    try {
+      setShareAudit(await api.getShareLinkAudit(projectId, linkId));
+    } catch (e: unknown) {
+      setShareAuditLinkId(null);
+      setErr(e instanceof Error ? e.message : 'Audit lookup failed.');
     }
   }
 
@@ -446,6 +471,27 @@ export function IdeProjectMembers() {
       )}
 
       <div className='ide-h2'>Share links · {shareLinks?.length ?? 0}</div>
+      {newShareUrl && (
+        <div className='ide-card' style={{marginBottom: 10}} role='status'>
+          <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
+          <div className='ide-mono' style={{fontSize: 11, overflowWrap: 'anywhere'}}>
+            {newShareUrl}
+          </div>
+          <div style={{display: 'flex', gap: 8, marginTop: 10}}>
+            <button
+              className='ide-btn'
+              onClick={() =>
+                void navigator.clipboard.writeText(newShareUrl).then(() => setMsg('Link copied.'))
+              }
+            >
+              Copy link
+            </button>
+            <button className='ide-btn ghost' onClick={() => setNewShareUrl('')}>
+              I have saved it
+            </button>
+          </div>
+        </div>
+      )}
       {shareLinks === null ? (
         <IdeLoader label='Loading share links…' />
       ) : shareLinks.length === 0 ? (
@@ -453,7 +499,6 @@ export function IdeProjectMembers() {
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {shareLinks.map((s, i) => {
-            const url = canManage && s.token ? `${window.location.origin}/shared/${s.token}` : '';
             return (
               <div
                 key={s.id}
@@ -477,7 +522,9 @@ export function IdeProjectMembers() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {canManage ? url : 'Share link details are managed by project writers.'}
+                    {canManage
+                      ? `Credential ${s.tokenPrefix}… · URL hidden after creation`
+                      : 'Share link details are managed by project writers.'}
                     {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
                   </div>
                 </div>
@@ -486,11 +533,9 @@ export function IdeProjectMembers() {
                     <button
                       className='ide-btn ghost'
                       style={{padding: '3px 8px'}}
-                      onClick={() =>
-                        void navigator.clipboard.writeText(url).then(() => setMsg('Link copied.'))
-                      }
+                      onClick={() => void showShareAudit(s.id)}
                     >
-                      Copy
+                      {shareAuditLinkId === s.id ? 'Hide audit' : 'Audit'}
                     </button>
                     <button
                       className='ide-btn ghost'
@@ -504,6 +549,35 @@ export function IdeProjectMembers() {
               </div>
             );
           })}
+        </div>
+      )}
+      {shareAuditLinkId && (
+        <div className='ide-card' style={{marginTop: 10}} aria-live='polite'>
+          <div style={{fontWeight: 650, marginBottom: 8}}>Latest share-link activity</div>
+          {shareAudit === null ? (
+            <IdeLoader label='Loading audit…' />
+          ) : shareAudit.length === 0 ? (
+            <div className='ide-empty'>No activity recorded.</div>
+          ) : (
+            shareAudit.map((event) => (
+              <div
+                key={event.id}
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  padding: '7px 0',
+                  borderBottom: '1px solid var(--ide-border)',
+                  fontSize: 12,
+                }}
+              >
+                <span style={{fontWeight: 650}}>{event.eventType}</span>
+                <span>{event.outcome}</span>
+                <span style={{marginLeft: 'auto', color: 'var(--ide-fg-muted)'}}>
+                  {new Date(event.occurredAt).toLocaleString()}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       )}
       {canManage && (

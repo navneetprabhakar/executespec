@@ -42,8 +42,10 @@ turns separately from runs.
   Both the decision and spawn paths require the authenticated session owner; child execution is
   read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
-  The canonical chat turn exposes the bounded `spawn_subagent` and `spawn_subagents` tools to the
-  model; both use the same service/protocol seam and return structured child evidence. The batch
+  The canonical chat turn does not expose `spawn_subagent` / `spawn_subagents` to the model because
+  those calls spend provider budget and the turn protocol does not carry a scoped, expiring,
+  single-use spend confirmation. Explicit REST/coordinator calls still use the same service/protocol
+  seam and return structured child evidence. The batch
   tool accepts one to four independent role-contract requests, reserves every child before
   execution, and returns partial results/failures without granting write, shell, run, or approval
   authority. The REST endpoints are
@@ -188,7 +190,7 @@ turns separately from runs.
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
 | `AgentText.java`                           | Package-local string helper for repeated blank, fallback, trim, and path-leaf handling across agent-session services.                                                                                               |
-| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; the effective session provider/model is passed into the classifier (legacy callers retain the Anthropic default); malformed/unavailable output fails closed to the non-run fallback. |
+| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; the effective session provider/model is passed into the classifier. Missing provider policy skips provider dispatch and uses the deterministic non-run classifier; malformed/unavailable output does the same. There is no implicit Anthropic fallback. |
 | `AgentIntentDecisions.java`                | Package-local decision/policy construction and billing-impact mapping helper for deterministic route outputs.                                                                                                       |
 | `AgentGuardIntents.java`                   | Package-local pre-routing guard for empty input, unsafe requests, and explicit no-edit/chat-only instructions.                                                                                                      |
 | `AgentCodeChangeIntents.java`              | Package-local code-change router for local code tasks, missing-project implementation proposals, and confirmation-gated cloud-run proposals.                                                                        |

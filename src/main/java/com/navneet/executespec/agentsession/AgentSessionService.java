@@ -163,7 +163,7 @@ public class AgentSessionService {
   @Transactional
   public TurnResponse recordTurn(String sessionId, TurnRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    return recordedTurnService.record(session, sessionId, request);
+    return recordedTurnService.record(session, sessionId, request, user);
   }
 
   @Transactional

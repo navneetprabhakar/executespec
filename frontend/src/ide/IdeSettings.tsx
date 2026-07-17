@@ -143,22 +143,14 @@ export function IdeIntegrations() {
         };
       case 'bitbucket':
         return {
-          title: 'Connect Bitbucket',
-          body: 'Provide a Bitbucket workspace + repo + app password (scopes: repository, pullrequest).',
+          title: 'Connect Bitbucket Cloud',
+          body: 'Provide a Bitbucket username and app password. Workspace is an optional catalogue hint; projects choose repositories when linking.',
           fields: [
             {
               name: 'workspace',
-              label: 'Workspace',
+              label: 'Preferred workspace (optional)',
               placeholder: 'your-workspace',
               defaultValue: user?.bitbucketWorkspace ?? '',
-              required: true,
-            },
-            {
-              name: 'repoSlug',
-              label: 'Default repo slug',
-              placeholder: 'main-repo',
-              defaultValue: user?.bitbucketRepoSlug ?? '',
-              required: true,
             },
             {
               name: 'username',
@@ -169,8 +161,7 @@ export function IdeIntegrations() {
             },
             {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
           ],
-          run: (v) =>
-            api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, v.repoSlug),
+          run: (v) => api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, ''),
         };
       default:
         throw new Error(`Unknown integration provider: ${String(p)}`);

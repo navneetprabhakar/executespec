@@ -28,9 +28,7 @@ final class AgentStreamTurnSupport {
         "search_project_docs",
         "get_tech_debt_summary",
         "web_search",
-        "web_fetch",
-        "spawn_subagent",
-        "spawn_subagents");
+        "web_fetch");
   }
 
   static List<Map<String, Object>> conversationOrCurrentMessage(StreamTurnRequest request) {

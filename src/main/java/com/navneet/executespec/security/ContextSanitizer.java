@@ -35,7 +35,8 @@ public class ContextSanitizer {
 
   private static final List<Pattern> INJECTION_PATTERNS =
       List.of(
-          Pattern.compile("ignore\\s+previous\\s+instructions?", Pattern.CASE_INSENSITIVE),
+          Pattern.compile(
+              "ignore\\s+(all\\s+)?previous\\s+instructions?", Pattern.CASE_INSENSITIVE),
           Pattern.compile(
               "disregard\\s+(all\\s+)?previous\\s+instructions?", Pattern.CASE_INSENSITIVE),
           Pattern.compile("you\\s+are\\s+now\\s+\\w+", Pattern.CASE_INSENSITIVE),
@@ -60,6 +61,12 @@ public class ContextSanitizer {
           Pattern.compile("\\bsk-[A-Za-z0-9\\-_]{20,}"), // OpenAI sk- keys
           Pattern.compile("\\bsk-ant-[A-Za-z0-9\\-_]{20,}"), // Anthropic sk-ant- keys
           Pattern.compile("\\bAIza[A-Za-z0-9\\-_]{30,}"), // Google API keys
+          Pattern.compile("\\bes_pat_[A-Za-z0-9\\-_]{16,}"), // ExecuteSpec PATs
+          Pattern.compile("\\bghp_[A-Za-z0-9]{20,}"), // GitHub classic PATs
+          Pattern.compile("\\bgithub_pat_[A-Za-z0-9_]{20,}"), // GitHub fine-grained PATs
+          Pattern.compile("\\bAKIA[0-9A-Z]{16}\\b"), // AWS access-key ids
+          Pattern.compile(
+              "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
           // Authorization headers
           Pattern.compile("Bearer\\s+[A-Za-z0-9\\-_.~+/]{20,}"), // Bearer tokens
           // Generic secrets
@@ -141,5 +148,20 @@ public class ContextSanitizer {
       }
     }
     return result;
+  }
+
+  /**
+   * Produce a bounded, secret-free exception description for logs and tool envelopes. Provider
+   * exceptions frequently echo request headers or response bodies, so raw messages must never be
+   * returned to chat clients or models.
+   */
+  public String sanitizeException(Throwable error) {
+    if (error == null) return "operation failed";
+    String type = error.getClass().getSimpleName();
+    String message = sanitizeOutput(error.getMessage());
+    if (message == null || message.isBlank()) return type;
+    String bounded =
+        message.length() > 240 ? message.substring(0, 240) + "...[truncated]" : message;
+    return type + ": " + bounded;
   }
 }

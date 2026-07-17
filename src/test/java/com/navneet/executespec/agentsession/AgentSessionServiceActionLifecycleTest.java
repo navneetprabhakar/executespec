@@ -38,6 +38,7 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -63,6 +64,7 @@ class AgentSessionServiceActionLifecycleTest {
   @Mock PipelineRunRepository pipelineRunRepo;
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock ModelAccessService modelAccessService;
+  @Mock ChatSecurityAuditService chatSecurityAuditService;
   @Mock AgentRunSubmissionGate runSubmissionGate;
 
   private AgentSessionService service;
@@ -115,7 +117,11 @@ class AgentSessionServiceActionLifecycleTest {
                 eventRecorder,
                 tracePayloadFactory,
                 sessionRepo,
-                aiProviderPreferenceService),
+                aiProviderPreferenceService,
+                modelAccessService,
+                null,
+                projectAccessGuard,
+                chatSecurityAuditService),
             new AgentStreamTurnLifecycle(turnRepo, eventRecorder, usageRepo),
             contextResolver);
     lenient()

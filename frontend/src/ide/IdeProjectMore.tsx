@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {repoSupports} from '@/ide/projectRepoUi';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
@@ -12,6 +13,11 @@ import {uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
 import {ArchDocView} from '@/ide/projectArchitecturePanels';
+import {ProjectChatConfirmationCard} from '@/ide/ProjectChatConfirmationCard';
+import {
+  ProjectChatConfirmationSession,
+  type PendingProjectChatConfirmation,
+} from '@/ide/projectChatConfirmation';
 import {
   agentTurnToChatBubbles,
   sortAgentChatBubbles,
@@ -52,6 +58,13 @@ export function IdeProjectChat() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [chatInfo, setChatInfo] = useState<api.ProjectChatInfo | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingProjectChatConfirmation | null>(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const confirmationSession = useRef<ProjectChatConfirmationSession | null>(null);
+  if (!confirmationSession.current)
+    confirmationSession.current = new ProjectChatConfirmationSession(api);
   // Backend gates project chat behind TEAM+ (TierConfig.isExecutionViewEnabled).
   // FREE / PRO hit a 403 on chat/info → show an upgrade card instead of a broken shell.
   const [gated, setGated] = useState(false);
@@ -76,8 +89,11 @@ export function IdeProjectChat() {
     }
     api
       .getProjectChatInfo(projectId)
-      .then(() => {
-        if (!cancelled) setGated(false);
+      .then((info) => {
+        if (!cancelled) {
+          setChatInfo(info);
+          setGated(false);
+        }
       })
       .catch((e: unknown) => {
         const m = e instanceof Error ? e.message : '';
@@ -115,8 +131,23 @@ export function IdeProjectChat() {
     return () => {
       cancelled = true;
       if (memTimer) clearTimeout(memTimer);
+      confirmationSession.current?.cancel();
     };
   }, [projectId]);
+
+  useEffect(() => {
+    if (!pendingConfirmation) return;
+    const remaining = Date.parse(pendingConfirmation.confirmation.expiresAt) - Date.now();
+    const timer = window.setTimeout(
+      () => {
+        confirmationSession.current?.cancel();
+        setPendingConfirmation(null);
+        setErr('Project action confirmation expired. Prepare the action again.');
+      },
+      Math.max(0, remaining),
+    );
+    return () => window.clearTimeout(timer);
+  }, [pendingConfirmation]);
 
   useEffect(() => endRef.current?.scrollIntoView({behavior: 'smooth'}), [msgs]);
 
@@ -217,6 +248,69 @@ export function IdeProjectChat() {
       ...(prev ?? []),
       {role: 'assistant', content, ts: new Date().toISOString()},
     ]);
+  }
+
+  async function prepareProjectAction(action: api.ProjectChatConfirmedAction) {
+    if (!chatInfo || !projectId || confirmationBusy) return;
+    setConfirmationBusy(true);
+    setErr('');
+    try {
+      const model = chatInfo.confirmedActionModels?.[action] || '';
+      let target: Record<string, string>;
+      if (action === 'REGENERATE_ARCHITECTURE') {
+        target = {branch: ''};
+      } else if (action === 'GENERATE_PROJECT_DOC') {
+        target = {docType: 'EXPLANATION'};
+      } else {
+        const repos = (await api.getProjectRepos(projectId)) as unknown as Array<
+          Record<string, unknown>
+        >;
+        const repo = repos[0];
+        if (!repo) throw new Error('Code review needs at least one linked repository.');
+        target = {repoId: repoIdFor(repo)};
+      }
+      if (!model) throw new Error('This action has no exact confirmed model route.');
+      const scope: api.ProjectChatActionScope = {
+        action,
+        provider: chatInfo.provider,
+        model,
+        target,
+      };
+      const session = confirmationSession.current;
+      if (!session) throw new Error('Project action confirmation is unavailable.');
+      const pending = await session.issue(projectId, scope);
+      setPendingConfirmation(pending);
+    } catch (e: unknown) {
+      confirmationSession.current?.cancel();
+      setPendingConfirmation(null);
+      setErr(e instanceof Error ? e.message : 'Could not prepare project action.');
+    } finally {
+      setConfirmationBusy(false);
+    }
+  }
+
+  async function consumeProjectAction() {
+    if (!pendingConfirmation || confirmationBusy) return;
+    setConfirmationBusy(true);
+    setErr('');
+    try {
+      const session = confirmationSession.current;
+      if (!session) throw new Error('Project action confirmation is unavailable.');
+      const completed = await session.consume();
+      setPendingConfirmation(null);
+      note(`Project action completed:\n${JSON.stringify(completed.result, null, 2)}`);
+    } catch (e: unknown) {
+      // consume() clears before dispatch. Never keep or retry the bearer after any outcome.
+      setPendingConfirmation(null);
+      setErr(e instanceof Error ? e.message : 'Project action failed. Prepare it again to retry.');
+    } finally {
+      setConfirmationBusy(false);
+    }
+  }
+
+  function cancelProjectAction() {
+    confirmationSession.current?.cancel();
+    setPendingConfirmation(null);
   }
 
   async function handleSlashCommand(raw: string): Promise<boolean> {
@@ -488,6 +582,49 @@ export function IdeProjectChat() {
               ))
             )}
           </div>
+
+          <div className='ide-card ide-project-chat-artifacts-card'>
+            <div className='ide-project-chat-rail-head static'>Confirmed actions</div>
+            <div className='ide-project-chat-rail-body' style={{display: 'grid', gap: 8}}>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('REGENERATE_ARCHITECTURE')}
+              >
+                Prepare architecture regeneration
+              </button>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('GENERATE_PROJECT_DOC')}
+              >
+                Prepare explanation doc
+              </button>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('RUN_CODE_REVIEW')}
+              >
+                Prepare code review
+              </button>
+              <div className='muted' style={{fontSize: 11}}>
+                Semantic search, subagents, and plan mutations are not confirmable from project
+                chat.
+              </div>
+            </div>
+          </div>
+
+          {pendingConfirmation && (
+            <ProjectChatConfirmationCard
+              pending={pendingConfirmation}
+              busy={confirmationBusy}
+              onConfirm={() => void consumeProjectAction()}
+              onCancel={cancelProjectAction}
+            />
+          )}
         </aside>
       </div>
 
@@ -698,7 +835,15 @@ export function IdeProjectCode() {
   // Code-review target — the repo currently chosen in the shared header
   // <select> (falls back to the first linked repo). The full review surface
   // (scan / severity-grouped issues / autofix / report) is per-repo.
-  const reviewRepoId = repoId || (repos[0] ? repoIdFor(repos[0]) : '');
+  const reviewRepos = useMemo(
+    () => repos.filter((repo) => repoSupports(repo, 'CODE_REVIEW')),
+    [repos],
+  );
+  const reviewRepoId = reviewRepos.some((repo) => repoIdFor(repo) === repoId)
+    ? repoId
+    : reviewRepos[0]
+      ? repoIdFor(reviewRepos[0])
+      : '';
   const reviewRepo = useMemo(
     () => repos.find((r) => repoIdFor(r) === reviewRepoId) ?? null,
     [repos, reviewRepoId],
@@ -739,7 +884,7 @@ export function IdeProjectCode() {
               onChange={(e) => setRepoId(e.target.value)}
               style={{width: 'auto'}}
             >
-              {repos.map((r) => (
+              {(sub === 'review' ? reviewRepos : repos).map((r) => (
                 <option key={repoIdFor(r)} value={repoIdFor(r)}>
                   {repoDisplayName(r)}
                 </option>
@@ -897,6 +1042,10 @@ export function IdeProjectCode() {
         <div style={{overflowY: 'auto', minHeight: 0}}>
           {repos.length === 0 ? (
             <div className='ide-empty'>No repos linked — link one to review code.</div>
+          ) : reviewRepos.length === 0 ? (
+            <div className='ide-empty'>
+              Code Review currently requires a linked GitHub repository.
+            </div>
           ) : !reviewRepo ? (
             <IdeLoader label='Loading…' />
           ) : (

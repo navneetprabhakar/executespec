@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   providerIsDispatchable,
+  providerIsProjectSelectable,
   providerOptionLabel,
   providerReadinessLabel,
   readinessByProvider,
@@ -30,6 +31,12 @@ describe('provider readiness presentation', () => {
 
   it('fails closed on a contradictory dispatchable response', () => {
     expect(providerIsDispatchable(row('POLICY_BLOCKED', true))).toBe(false);
+  });
+
+  it('keeps a credentialed circuit-open provider selectable as durable project policy', () => {
+    expect(providerIsProjectSelectable(row('CIRCUIT_OPEN', false))).toBe(true);
+    expect(providerIsDispatchable(row('CIRCUIT_OPEN', false))).toBe(false);
+    expect(providerIsProjectSelectable(row('UNAVAILABLE', false))).toBe(false);
   });
 
   it('normalizes provider identifiers and gives actionable, secret-free labels', () => {

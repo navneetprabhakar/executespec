@@ -18,6 +18,9 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubScmRepositoryClient;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +39,8 @@ class ProjectRepoServiceSourceReadinessTest {
           mock(ProjectMemberRepository.class),
           stackDetector,
           gitHub,
+          new ScmRepositoryClientRegistry(List.of(new GitHubScmRepositoryClient(gitHub))),
+          mock(ScmCredentialResolver.class),
           mock(AppUserRepository.class),
           mock(TierEnforcementService.class),
           mock(GovernanceGuard.class),
@@ -57,6 +62,10 @@ class ProjectRepoServiceSourceReadinessTest {
             .build();
     when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(repoRepo.save(any(ProjectRepo.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(gitHub.getRemoteRepo("acme/api", "pat"))
+        .thenReturn(
+            new GitHubRepoService.RemoteRepo(
+                "123", "acme/api", "https://github.com/acme/api", "main", true, 10L));
   }
 
   @Test

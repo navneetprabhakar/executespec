@@ -12,7 +12,9 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.report.ValidationReportService;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -52,6 +54,8 @@ public class ProjectChatActionTools {
   private final ValidationReportService validationReportService;
   private final GateStore gateStore;
   private final RunAccessGuard runAccessGuard;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final ContextSanitizer contextSanitizer;
   private final ObjectMapper json;
 
   /** Per-turn context the chat session carries through to each tool. */
@@ -68,13 +72,46 @@ public class ProjectChatActionTools {
    * LLM can dispatch action tools.
    */
   public List<ToolCallback> bind(ToolContext ctx) {
-    return List.of(
-        submitRun(ctx),
-        approvePlan(ctx),
-        rejectPlan(ctx),
-        cancelRun(ctx),
-        listRecentRuns(ctx),
-        getRunReport(ctx));
+    List<ToolCallback> all =
+        List.of(
+            submitRun(ctx),
+            approvePlan(ctx),
+            rejectPlan(ctx),
+            cancelRun(ctx),
+            listRecentRuns(ctx),
+            getRunReport(ctx));
+    // Model-selected state changes do not have an expiring/single-use confirmation token in this
+    // compatibility protocol. Expose reads only; run submission/approval/cancellation use the
+    // structured agent action + confirmation endpoints.
+    return ChatToolPolicy.readOnly(all.stream().map(tool -> authorize(ctx, tool)).toList());
+  }
+
+  private ToolCallback authorize(ToolContext ctx, ToolCallback delegate) {
+    return new ToolCallback() {
+      @Override
+      public ToolDefinition getToolDefinition() {
+        return delegate.getToolDefinition();
+      }
+
+      @Override
+      public String call(String input) {
+        String name = delegate.getToolDefinition().name();
+        ChatToolPolicy.Capability capability = ChatToolPolicy.capability(name);
+        if (ctx.projectId() != null && !ctx.projectId().isBlank()) {
+          if (capability == ChatToolPolicy.Capability.PROJECT_READ) {
+            projectAccessGuard.assertCanRead(ctx.projectId(), ctx.userDetails());
+          } else {
+            projectAccessGuard.assertCanWrite(ctx.projectId(), ctx.userDetails());
+          }
+        }
+        if (ChatToolPolicy.requiresConfirmation(capability)) {
+          return errorEnvelope(
+                  "confirmation_required: use the structured agent action confirmation endpoint")
+              .toString();
+        }
+        return contextSanitizer.sanitizeOutput(delegate.call(input));
+      }
+    };
   }
 
   private ToolCallback submitRun(ToolContext ctx) {
@@ -424,7 +461,7 @@ public class ProjectChatActionTools {
   private ObjectNode errorEnvelope(String message) {
     ObjectNode out = json.createObjectNode();
     out.put("ok", false);
-    out.put("error", message);
+    out.put("error", contextSanitizer.sanitizeOutput(message));
     return out;
   }
 
@@ -452,18 +489,17 @@ public class ProjectChatActionTools {
                 ? json.createObjectNode()
                 : json.readTree(toolInput);
       } catch (Exception parseEx) {
-        return errorEnvelope("invalid JSON input: " + parseEx.getMessage()).toString();
+        return errorEnvelope("invalid JSON input").toString();
       }
       try {
         ObjectNode result = body.run(args);
         return result.toString();
       } catch (Exception ex) {
         log.warn(
-            "spec-chat action tool '{}' threw {}: {}",
+            "spec-chat action tool '{}' failed: {}",
             def.name(),
-            ex.getClass().getSimpleName(),
-            ex.getMessage());
-        return errorEnvelope(ex.getClass().getSimpleName() + ": " + ex.getMessage()).toString();
+            contextSanitizer.sanitizeException(ex));
+        return errorEnvelope("tool execution failed").toString();
       }
     }
   }

@@ -112,6 +112,11 @@ class AccessGuardCoverageTest {
           "/executions/{",
           "/launches/{",
           "/repos/{",
+          // Review rows expose source paths, diffs, comments, and paid mutation entrypoints. Their
+          // direct-id/body/query routes do not carry /projects/{...} in the URL, so pin the whole
+          // surfaces explicitly against future tenant-guard regressions.
+          "/code-reviews",
+          "/pr-reviews",
           // C2 (audit 2026-05-29) — the readymade/migration libraries take the tenant projectId
           // in the body/param (not a path id) and reference the recipe by a public {slug}. Scoping
           // their {slug} surfaces forces a guard on resolve / instantiate / dry-run / apply, the
@@ -207,7 +212,6 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkContract",
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkProject",
               "com.navneet.executespec.contracts.drift.ContractDriftController#checkRepo",
-              "com.navneet.executespec.export.ProjectExportController#export",
               // Read-only POST computations gated by assertCanRead (mutate no tenant state):
               // resolve picks a variant; dry-run computes applicability + cost + sample diff.
               // C2 — audit 2026-05-29.

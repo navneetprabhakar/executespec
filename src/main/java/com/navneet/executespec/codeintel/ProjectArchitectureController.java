@@ -25,14 +25,15 @@ public class ProjectArchitectureController {
   private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
   private final ArchitectureDiffService diffService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
   // 2026-05-16 — Browse-tab file-fetch endpoints below need the per-repo
   // entity (for the github slug + default branch) and the GitHub client
   // (for the actual list + read calls).
   private final com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
   private final com.navneet.executespec.project.repository.ProjectRepoLinkRepository
       projectRepoLinkRepo;
-  private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
-  private final com.navneet.executespec.repo.GitHubRepoService github;
+  private final com.navneet.executespec.repo.ScmRepositoryClientRegistry scmClients;
+  private final com.navneet.executespec.repo.ScmCredentialResolver scmCredentials;
 
   public record ArchDocDto(
       UUID id, Integer version, String content, String userAnnotations, Instant generatedAt) {
@@ -64,6 +65,10 @@ public class ProjectArchitectureController {
       @PathVariable String projectId) {
     // Audit 2026-05-12 review item B #13 — regenerate is a paid LLM call + workspace mutation.
     projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectRepoService.requireProjectCapability(
+        projectId,
+        com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
+        "generate project architecture");
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
     ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
     stalenessService.invalidate(projectId);
@@ -79,6 +84,10 @@ public class ProjectArchitectureController {
       @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false)
           String branch) {
     projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectRepoService.requireProjectCapability(
+        projectId,
+        com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
+        "analyse project architecture");
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
     ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
     stalenessService.invalidate(projectId);
@@ -226,6 +235,11 @@ public class ProjectArchitectureController {
       @PathVariable UUID repoId) {
     // Paid LLM call + workspace mutation — same write-gate as generate()/analyse().
     projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectRepoService.requireLinkedCapability(
+        projectId,
+        repoId,
+        com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
+        "regenerate repository architecture");
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
     RepoArchitectureDoc doc = service.regenerateForRepo(projectId, repoId, pat);
     stalenessService.invalidate(projectId);
@@ -263,10 +277,14 @@ public class ProjectArchitectureController {
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
     var repo = linkedRepo(projectId, repoId);
-    String pat = projectRepoReadPat(projectId, repoId, userDetails);
-    String slug = repo.getGithubRepoFullName();
+    projectRepoService.requireCapability(
+        repo, com.navneet.executespec.repo.ScmCapability.SOURCE_BROWSE, "browse source files");
+    var provider = com.navneet.executespec.repo.ScmProvider.require(repo.getScmProvider());
+    var client = scmClients.require(provider);
+    var credential = projectRepoReadCredential(projectId, repoId, userDetails, provider);
+    String slug = repoDisplayIdentity(repo);
     String branch = repo.getDefaultBranch();
-    var result = github.listRepoFilesResult("https://github.com/" + slug, branch, pat);
+    var result = client.inventory(toRemote(repo, client), branch, credential);
     if (!result.successful()) {
       throw new ResponseStatusException(
           HttpStatus.BAD_GATEWAY,
@@ -296,10 +314,14 @@ public class ProjectArchitectureController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file path");
     }
     var repo = linkedRepo(projectId, repoId);
-    String pat = projectRepoReadPat(projectId, repoId, userDetails);
-    String slug = repo.getGithubRepoFullName();
+    projectRepoService.requireCapability(
+        repo, com.navneet.executespec.repo.ScmCapability.SOURCE_BROWSE, "read source files");
+    var provider = com.navneet.executespec.repo.ScmProvider.require(repo.getScmProvider());
+    var client = scmClients.require(provider);
+    var credential = projectRepoReadCredential(projectId, repoId, userDetails, provider);
+    String slug = repoDisplayIdentity(repo);
     String branch = repo.getDefaultBranch();
-    String content = github.readRepoFile("https://github.com/" + slug, path, branch, pat);
+    String content = client.readFile(toRemote(repo, client), branch, path, credential);
     // Defensive size cap — repos with massive generated SQL dumps or vendored
     // bundles shouldn't drag the chat thread. 1 MB matches what the worker's
     // tool dispatcher already enforces.
@@ -321,24 +343,58 @@ public class ProjectArchitectureController {
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
   }
 
-  /**
-   * Project members read host-project source through the actor who linked the repo. External
-   * invitees often do not have direct GitHub access to the host repo, so using their PAT first
-   * makes the project shell visible while the file tree silently comes back empty for private
-   * repos.
-   */
-  private String projectRepoReadPat(
+  private com.navneet.executespec.repo.ScmCredential projectRepoReadCredential(
       String projectId,
       UUID repoId,
-      com.navneet.executespec.auth.security.AppUserDetails userDetails) {
-    String linkPat =
+      com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      com.navneet.executespec.repo.ScmProvider provider) {
+    String linkedBy =
         projectRepoLinkRepo
             .findByProjectIdAndRepoId(projectId, repoId)
-            .flatMap(link -> userRepo.findById(link.getLinkedBy()))
-            .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
-            .filter(pat -> pat != null && !pat.isBlank())
+            .map(com.navneet.executespec.project.entity.ProjectRepoLink::getLinkedBy)
             .orElse(null);
-    if (linkPat != null) return linkPat;
-    return userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    if (linkedBy != null) {
+      try {
+        return scmCredentials.require(linkedBy, provider);
+      } catch (ResponseStatusException ignored) {
+        // Fall through to the requesting user's provider credential.
+      }
+    }
+    if (userDetails == null) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY, "SCM credentials unavailable");
+    }
+    return scmCredentials.require(userDetails.getUser().getId(), provider);
+  }
+
+  private static String repoDisplayIdentity(
+      com.navneet.executespec.project.entity.ProjectRepo repo) {
+    if (repo.getSourceKey() != null && !repo.getSourceKey().isBlank()) return repo.getSourceKey();
+    return repo.getGithubRepoFullName();
+  }
+
+  private static com.navneet.executespec.repo.ScmRemoteRepository toRemote(
+      com.navneet.executespec.project.entity.ProjectRepo repo,
+      com.navneet.executespec.repo.ScmRepositoryClient client) {
+    String fullName = repoDisplayIdentity(repo);
+    String cloneUrl = repo.getScmCloneUrl();
+    if (cloneUrl == null || cloneUrl.isBlank()) {
+      cloneUrl =
+          client.provider() == com.navneet.executespec.repo.ScmProvider.BITBUCKET
+              ? "https://bitbucket.org/" + fullName + ".git"
+              : "https://github.com/" + fullName;
+    }
+    return new com.navneet.executespec.repo.ScmRemoteRepository(
+        client.provider().name(),
+        repo.getScmRepositoryId(),
+        fullName,
+        repo.getSourceDisplayName() == null ? fullName : repo.getSourceDisplayName(),
+        cloneUrl,
+        repo.getDefaultBranch(),
+        false,
+        repo.getSizeKb(),
+        client.capabilities().stream()
+            .map(Enum::name)
+            .collect(java.util.stream.Collectors.toSet()));
   }
 }

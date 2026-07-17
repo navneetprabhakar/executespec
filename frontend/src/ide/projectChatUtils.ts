@@ -1,5 +1,5 @@
 import type * as api from '@/lib/api';
-import {normalizeUiProvider, uiSlashHelp} from '@/lib/uiSlash';
+import {normalizeUiProvider, UI_PROVIDER_USAGE, uiSlashHelp} from '@/lib/uiSlash';
 
 export type ProjectChatSlashAction =
   | {kind: 'none'}
@@ -50,7 +50,7 @@ export function resolveProjectChatSlashAction(
       const provider = normalizeUiProvider(arg);
       return provider
         ? {kind: 'provider', provider}
-        : {kind: 'provider-usage', content: 'Usage: /provider anthropic|openai|deepseek'};
+        : {kind: 'provider-usage', content: `Usage: ${UI_PROVIDER_USAGE}`};
     }
     default:
       return {kind: 'none'};

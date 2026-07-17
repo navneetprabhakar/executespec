@@ -50,6 +50,7 @@ import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -177,6 +178,7 @@ public class RunOrchestrator implements RunControlPort {
   private final GateStore gateStore;
   private final ModelResolver modelResolver;
   private final AvailableProviderResolver availableProviderResolver;
+  private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final com.navneet.executespec.smoketest.CliSmokeRunner cliSmokeRunner;
@@ -1419,7 +1421,9 @@ public class RunOrchestrator implements RunControlPort {
         }
       }
 
-      ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
+      var llmExecutionReference = llmExecutionPolicyFactory.forRun(runId);
+      ExecutionContext rootCtx =
+          new ExecutionContext(runId, "__root__", workspace.toRealPath(), llmExecutionReference);
       persistenceWriter.setWorkspacePath(runId, workspace.toString());
 
       // Bench services (swebench / programbench) submit runs with
@@ -1861,8 +1865,8 @@ public class RunOrchestrator implements RunControlPort {
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
       RunCostTracker.Snapshot afterExec = costTracker.snapshot(runId);
-      int workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
-      int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
+      long workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
+      long workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
       // 2.5 Code-gen-only stop (benchmark)
@@ -1997,8 +2001,8 @@ public class RunOrchestrator implements RunControlPort {
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
-        int reviewerIn = afterReview.inputTokens() - afterExec.inputTokens();
-        int reviewerOut = afterReview.outputTokens() - afterExec.outputTokens();
+        long reviewerIn = afterReview.inputTokens() - afterExec.inputTokens();
+        long reviewerOut = afterReview.outputTokens() - afterExec.outputTokens();
         tokenAttributor.attributePhase(
             runId,
             com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,
@@ -2900,8 +2904,12 @@ public class RunOrchestrator implements RunControlPort {
               // already persisted. Never shrink the persisted total.
               int persistedIn = r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens();
               int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
-              if (cost.inputTokens() > persistedIn) r.setTotalInputTokens(cost.inputTokens());
-              if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
+              if (cost.inputTokens() > persistedIn) {
+                r.setTotalInputTokens(RunCostTracker.saturatedInt(cost.inputTokens()));
+              }
+              if (cost.outputTokens() > persistedOut) {
+                r.setTotalOutputTokens(RunCostTracker.saturatedInt(cost.outputTokens()));
+              }
               runRepo.save(r);
               persistenceWriter.writeRunCostLog(r, cost);
 
@@ -3425,8 +3433,8 @@ public class RunOrchestrator implements RunControlPort {
               new SequentialExecutor.ResumeRequest(targetTaskKey));
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
       RunCostTracker.Snapshot afterPostReviewExec = costTracker.snapshot(runId);
-      int workerIn = afterPostReviewExec.inputTokens() - beforePostReviewAction.inputTokens();
-      int workerOut = afterPostReviewExec.outputTokens() - beforePostReviewAction.outputTokens();
+      long workerIn = afterPostReviewExec.inputTokens() - beforePostReviewAction.inputTokens();
+      long workerOut = afterPostReviewExec.outputTokens() - beforePostReviewAction.outputTokens();
       tokenAttributor.attributeWorkerAdditionalTask(
           runId,
           targetTaskId,
@@ -3457,8 +3465,8 @@ public class RunOrchestrator implements RunControlPort {
                     .build());
         persistenceWriter.persistReview(runId, rerunReviewResult);
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
-        int reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
-        int reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
+        long reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
+        long reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
         tokenAttributor.attributePhaseAdditional(
             runId,
             com.navneet.executespec.cost.RunTokenAttributor.Phase.REVIEWER,

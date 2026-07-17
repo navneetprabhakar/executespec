@@ -47,6 +47,7 @@ public class ExecutespecMigrationController {
   private final ProjectRepoRepository repoRepo;
   private final AppUserRepository userRepo;
   private final BootstrapService bootstrap;
+  private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
 
   @PostMapping("/{projectId}/migrate-codemaps")
   public ResponseEntity<MigrateResponse> migrate(
@@ -82,6 +83,20 @@ public class ExecutespecMigrationController {
         continue;
       }
       ProjectRepo repo = maybe.get();
+      try {
+        projectRepoService.requireCapability(
+            repo,
+            com.navneet.executespec.repo.ScmCapability.BOOTSTRAP,
+            "bootstrap the .executespec folder");
+      } catch (ResponseStatusException unsupported) {
+        results.add(
+            new RepoMigrationResult(
+                repo.getId().toString(),
+                repo.getSourceKey() == null ? repo.getGithubRepoFullName() : repo.getSourceKey(),
+                "SKIPPED_UNSUPPORTED_PROVIDER",
+                unsupported.getReason()));
+        continue;
+      }
       ProjectRepo.FolderStatus pre = repo.folderStatusEnum();
       if (pre == ProjectRepo.FolderStatus.BOOTSTRAPPED) {
         results.add(

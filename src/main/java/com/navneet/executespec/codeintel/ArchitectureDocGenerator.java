@@ -6,10 +6,12 @@ import java.util.Map;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -39,6 +41,7 @@ public class ArchitectureDocGenerator {
   // (RL-2026-06-002).
   private final ObjectProvider<LlmRouter> llmRouter;
   private final ModelResolver modelResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   private static final String SYSTEM_PROMPT =
       """
@@ -95,18 +98,52 @@ public class ArchitectureDocGenerator {
       List<RepoArchitectureDoc> repoArchDocs,
       List<String> repoFullNames,
       LlmProvider provider) {
+    return generate(projectId, repoArchDocs, repoFullNames, provider, null);
+  }
+
+  public Result generate(
+      String projectId,
+      List<RepoArchitectureDoc> repoArchDocs,
+      List<String> repoFullNames,
+      LlmProvider provider,
+      String actorUserId) {
+    return generate(projectId, repoArchDocs, repoFullNames, provider, actorUserId, null);
+  }
+
+  public Result generate(
+      String projectId,
+      List<RepoArchitectureDoc> repoArchDocs,
+      List<String> repoFullNames,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     if (repoArchDocs == null || repoArchDocs.isEmpty()) {
       throw new IllegalArgumentException(
           "combined arch needs at least one per-repo arch doc; got 0");
     }
 
-    LlmProvider effective = provider != null ? provider : ProjectProviderResolver.CANONICAL_DEFAULT;
+    if (provider == null) throw new IllegalArgumentException("provider required");
+    LlmProvider effective = provider;
     ResolvedModel resolved = modelResolver.resolve("ArchitectureDocGenerator", effective);
+    String exactModel = RunModelOverrides.lookup(effective, resolved.getAgentTier());
 
     String userPayload = buildPayload(projectId, repoArchDocs, repoFullNames);
 
     List<Message> messages =
         List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
+    String contextId = "combined-arch-" + java.util.UUID.randomUUID();
+    var executionReference =
+        confirmedActionReference != null
+            ? confirmedActionReference
+            : executionPolicyFactory.forProject(
+                projectId,
+                "project-architecture",
+                "ARCHITECTURE",
+                contextId,
+                contextId,
+                effective.name(),
+                exactModel,
+                actorUserId);
 
     // All providers use the canonical text router; architecture generation has no tool callbacks.
     ChatResponse response =
@@ -115,7 +152,8 @@ public class ArchitectureDocGenerator {
             resolved,
             messages,
             "combined-arch-" + projectId,
-            "combined-arch");
+            "combined-arch",
+            executionReference);
 
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {

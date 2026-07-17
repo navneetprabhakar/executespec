@@ -142,7 +142,10 @@ class AsyncAllowlistTest {
 
               // project workspace — @Async + writeRawFile (file I/O, DB read only)
               "ProjectWorkspaceWarmer#warmDiskCache",
-              "ProjectDocumentService#indexAsync",
+              // Project-document ingestion now crosses the async boundary through a primitive-id
+              // event. The listener reloads state in ProjectDocumentService#processDocument, so
+              // no caller-owned JPA entity crosses threads.
+              "ProjectDocumentIndexJob#onQueued",
               // code-RAG — clone + walk + embed into project_code_chunk (file I/O + DB;
               // RL-2026-05-052)
               "CodeIndexingService#indexRepoAsync",

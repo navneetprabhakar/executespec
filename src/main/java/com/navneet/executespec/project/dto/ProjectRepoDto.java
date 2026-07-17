@@ -32,6 +32,8 @@ public record ProjectRepoDto(
     // V278 — additive neutral source identity. Legacy GitHub fields above remain unchanged.
     String sourceType,
     String scmProvider,
+    String scmRepositoryId,
+    String scmCloneUrl,
     String sourceKey,
     String sourceDisplayName,
     UUID localFolderId,
@@ -73,6 +75,8 @@ public record ProjectRepoDto(
         r.getScmProvider() == null && r.getGithubRepoFullName() != null
             ? "GITHUB"
             : r.getScmProvider(),
+        r.getScmRepositoryId(),
+        r.getScmCloneUrl(),
         r.getSourceKey() == null ? r.getGithubRepoFullName() : r.getSourceKey(),
         r.getSourceDisplayName() == null ? r.getGithubRepoFullName() : r.getSourceDisplayName(),
         r.getLocalFolderId(),

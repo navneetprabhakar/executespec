@@ -60,7 +60,7 @@ describe('orgUtils', () => {
 
   it('builds org provider key rows by tier', () => {
     const teamRows = orgKeyRows({tier: 'TEAM', hasOpenAiKey: true} as api.OrgDto);
-    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai']);
+    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai', 'gemini']);
     expect(teamRows.find((row) => row.provider === 'openai')?.connected).toBe(true);
 
     const enterpriseRows = orgKeyRows({
@@ -72,6 +72,7 @@ describe('orgUtils', () => {
     expect(enterpriseRows.map((row) => row.provider)).toEqual([
       'anthropic',
       'openai',
+      'gemini',
       'openrouter',
       'deepseek',
       'fireworks',

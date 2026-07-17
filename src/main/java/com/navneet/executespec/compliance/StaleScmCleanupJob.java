@@ -13,6 +13,7 @@ import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -85,15 +86,9 @@ public class StaleScmCleanupJob {
    */
   int closeStalePrs() {
     Instant cutoff = Instant.now().minus(Duration.ofDays(STALE_PR_DAYS));
-    // We don't have a direct query for "PRs whose backing run failed > Nd ago" so we walk OPEN
-    // PRs older than cutoff and check the backing run. Cheap because OPEN-PR count is small
-    // (terminated successful PRs are MERGED, terminal failed PRs are usually closed quickly).
     List<PullRequestRecord> candidates =
-        prRepo.findAll().stream()
-            .filter(pr -> pr.getStatus() == PullRequestRecord.Status.OPEN)
-            .filter(pr -> pr.getCreatedAt() != null && pr.getCreatedAt().isBefore(cutoff))
-            .limit(MAX_PER_PASS)
-            .toList();
+        prRepo.findByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+            PullRequestRecord.Status.OPEN, cutoff, PageRequest.of(0, MAX_PER_PASS));
 
     int closed = 0;
     int skippedActive = 0;
@@ -155,14 +150,8 @@ public class StaleScmCleanupJob {
   int deleteStaleBranches() {
     Instant cutoff = Instant.now().minus(Duration.ofDays(STALE_BRANCH_DAYS));
     List<PullRequestRecord> candidates =
-        prRepo.findAll().stream()
-            // Only consider terminal PRs — never touch a branch with an OPEN PR pointing at it
-            .filter(pr -> pr.getStatus() != PullRequestRecord.Status.OPEN)
-            .filter(
-                pr -> pr.getHeadBranch() != null && pr.getHeadBranch().startsWith("executespec/"))
-            .filter(pr -> pr.getCreatedAt() != null && pr.getCreatedAt().isBefore(cutoff))
-            .limit(MAX_PER_PASS)
-            .toList();
+        prRepo.findStaleTerminalExecutespecBranches(
+            PullRequestRecord.Status.OPEN, cutoff, PageRequest.of(0, MAX_PER_PASS));
 
     int deleted = 0;
     for (PullRequestRecord pr : candidates) {

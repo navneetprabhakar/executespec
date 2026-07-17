@@ -11,7 +11,10 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilit
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.IntentDecision;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.InputSanitizer;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -29,7 +32,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class AgentIntentService {
 
-  private static final String ROUTING_PROVIDER = "anthropic";
   private static final String ROUTING_ROLE = "AgentIntentService";
   private static final String ROUTING_STEP = "orchestrator.intent.classify";
 
@@ -44,10 +46,45 @@ public class AgentIntentService {
   private final ModelRegistry modelRegistry;
   private final ObjectMapper objectMapper;
   private final OrchestratorRoutingPromptCatalog promptCatalog;
+  private final InputSanitizer inputSanitizer;
+  private final ContextSanitizer contextSanitizer;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /** Compatibility constructor for deterministic callers and tests without a provider transport. */
   public AgentIntentService() {
-    this(null, null, new ObjectMapper(), null);
+    this(null, null, new ObjectMapper(), null, new InputSanitizer(), new ContextSanitizer(), null);
+  }
+
+  public AgentIntentService(
+      LlmRouter llmRouter,
+      ModelRegistry modelRegistry,
+      ObjectMapper objectMapper,
+      OrchestratorRoutingPromptCatalog promptCatalog) {
+    this(
+        llmRouter,
+        modelRegistry,
+        objectMapper,
+        promptCatalog,
+        new InputSanitizer(),
+        new ContextSanitizer(),
+        null);
+  }
+
+  public AgentIntentService(
+      LlmRouter llmRouter,
+      ModelRegistry modelRegistry,
+      ObjectMapper objectMapper,
+      OrchestratorRoutingPromptCatalog promptCatalog,
+      InputSanitizer inputSanitizer,
+      ContextSanitizer contextSanitizer) {
+    this(
+        llmRouter,
+        modelRegistry,
+        objectMapper,
+        promptCatalog,
+        inputSanitizer,
+        contextSanitizer,
+        null);
   }
 
   @Autowired
@@ -55,11 +92,17 @@ public class AgentIntentService {
       LlmRouter llmRouter,
       ModelRegistry modelRegistry,
       ObjectMapper objectMapper,
-      OrchestratorRoutingPromptCatalog promptCatalog) {
+      OrchestratorRoutingPromptCatalog promptCatalog,
+      InputSanitizer inputSanitizer,
+      ContextSanitizer contextSanitizer,
+      LlmExecutionPolicyFactory executionPolicyFactory) {
     this.llmRouter = llmRouter;
     this.modelRegistry = modelRegistry;
     this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     this.promptCatalog = promptCatalog;
+    this.inputSanitizer = inputSanitizer;
+    this.contextSanitizer = contextSanitizer;
+    this.executionPolicyFactory = executionPolicyFactory;
   }
 
   public IntentDecision interpret(InterpretIntentRequest request) {
@@ -72,13 +115,22 @@ public class AgentIntentService {
 
   /**
    * Classify using the effective session route. The route decision is advisory, but it must use the
-   * same provider/model selected for the session instead of silently spending Anthropic tokens for
-   * every surface. A blank route is intentionally kept backward compatible with the historical
-   * Anthropic default.
+   * same provider/model selected for the session instead of silently spending through a platform
+   * default. A blank route skips model classification and uses deterministic routing.
    */
   public OrchestratorDecision decide(
       InterpretIntentRequest request, String effectiveProvider, String effectiveModel) {
-    String message = request == null || request.message() == null ? "" : request.message().trim();
+    String raw = request == null || request.message() == null ? "" : request.message().trim();
+    String message = sanitizeMessage(raw);
+    if (request != null) {
+      request =
+          new InterpretIntentRequest(
+              request.sessionId(),
+              message,
+              request.projectId(),
+              request.repoContext(),
+              request.clientCapabilities());
+    }
     String lower = message.toLowerCase(Locale.ROOT);
     ClientCapabilities caps = request == null ? null : request.clientCapabilities();
 
@@ -119,6 +171,20 @@ public class AgentIntentService {
     return AgentChatFallbackIntent.decide();
   }
 
+  private String sanitizeMessage(String raw) {
+    String normalized = inputSanitizer.normalize(raw == null ? "" : raw);
+    int localContext = normalized.indexOf("EXECUTESPEC_LOCAL_CONTEXT:");
+    String instruction = localContext < 0 ? normalized : normalized.substring(0, localContext);
+    inputSanitizer.scan(instruction);
+    if (localContext < 0) return normalized;
+    return instruction
+        + "\n\n"
+        + com.navneet.executespec.agent.PromptTrustBoundary.wrap(
+            "LOCAL_CONTEXT",
+            contextSanitizer.sanitizeInput(
+                normalized.substring(localContext), "intent-local-context"));
+  }
+
   private java.util.Optional<OrchestratorDecision> decideWithStructuredClassifier(
       String message,
       String lower,
@@ -129,6 +195,12 @@ public class AgentIntentService {
       return java.util.Optional.empty();
     }
     String provider = normalizeRoutingProvider(effectiveProvider, effectiveModel);
+    // No provider means the caller's account/session/org policy did not resolve an allowed route.
+    // Intent classification is advisory, so fail closed to the deterministic classifier instead
+    // of spending through a hidden platform-provider default.
+    if (provider == null) {
+      return java.util.Optional.empty();
+    }
     String model =
         effectiveModel == null || effectiveModel.isBlank()
             ? modelRegistry.lightweightModelFor(provider)
@@ -141,17 +213,40 @@ public class AgentIntentService {
           "Classify this orchestrator turn. Return only one JSON object matching the schema.\n\n"
               + objectMapper.writeValueAsString(
                   Map.of("message", message, "context", requestContext(request)));
-      ChatResponse response =
-          llmRouter.callText(
-              provider,
-              model,
-              List.of(
-                  new SystemMessage(promptCatalog.fullPromptFor(promptProvider(provider))),
-                  new UserMessage(userPrompt)),
-              "intent-routing-" + Integer.toHexString(message.hashCode()),
-              ROUTING_ROLE,
-              ROUTING_STEP,
-              400);
+      List<org.springframework.ai.chat.messages.Message> messages =
+          List.of(
+              new SystemMessage(promptCatalog.fullPromptFor(promptProvider(provider))),
+              new UserMessage(userPrompt));
+      ChatResponse response;
+      if (executionPolicyFactory == null) {
+        response =
+            llmRouter.callText(
+                provider,
+                model,
+                messages,
+                "intent-routing-" + Integer.toHexString(message.hashCode()),
+                ROUTING_ROLE,
+                ROUTING_STEP,
+                400);
+      } else {
+        if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
+          return java.util.Optional.empty();
+        }
+        var executionReference =
+            executionPolicyFactory.forAgentSession(
+                request.sessionId(), "intent-" + Integer.toHexString(message.hashCode()));
+        response =
+            llmRouter.callText(
+                provider,
+                model,
+                messages,
+                "intent-routing-" + Integer.toHexString(message.hashCode()),
+                ROUTING_ROLE,
+                ROUTING_STEP,
+                400,
+                com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
+                executionReference);
+      }
       String raw =
           response == null
                   || response.getResult() == null
@@ -173,7 +268,7 @@ public class AgentIntentService {
       String inferred = modelRegistry.providerFor(model);
       if (inferred != null && !inferred.isBlank()) return inferred.toLowerCase(Locale.ROOT);
     }
-    return ROUTING_PROVIDER;
+    return null;
   }
 
   private String promptProvider(String provider) {

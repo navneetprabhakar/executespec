@@ -17,6 +17,8 @@ import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.LocalProjectSourceService;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -29,7 +31,13 @@ class ProjectRepoControllerLocalSourceTest {
     LocalProjectSourceService localService = mock(LocalProjectSourceService.class);
     ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
     ProjectRepoController controller =
-        new ProjectRepoController(repoService, localService, mock(GitHubRepoService.class), guard);
+        new ProjectRepoController(
+            repoService,
+            localService,
+            mock(GitHubRepoService.class),
+            mock(ScmRepositoryClientRegistry.class),
+            mock(ScmCredentialResolver.class),
+            guard);
     AppUserDetails principal =
         new AppUserDetails(
             AppUser.builder()
