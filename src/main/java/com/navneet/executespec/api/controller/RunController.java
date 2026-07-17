@@ -391,8 +391,8 @@ public class RunController {
     // cost accumulator).
     if ("v2".equals(run.getHarnessVersion())) {
       var snap = v2CostTracker.snapshot(runId);
-      int liveIn = Math.max(snap.inputTokens(), safeTok(run.getTotalInputTokens()));
-      int liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
+      long liveIn = Math.max(snap.inputTokens(), safeTok(run.getTotalInputTokens()));
+      long liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
       Map<String, Object> body = baseCostBody(runId, snap.costUsd());
       body.put("inputTokens", liveIn);
       body.put("outputTokens", liveOut);

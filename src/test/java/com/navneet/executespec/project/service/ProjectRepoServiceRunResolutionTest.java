@@ -19,6 +19,9 @@ import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubScmRepositoryClient;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -36,6 +39,9 @@ class ProjectRepoServiceRunResolutionTest {
           mock(ProjectMemberRepository.class),
           mock(StackDetector.class),
           mock(GitHubRepoService.class),
+          new ScmRepositoryClientRegistry(
+              List.of(new GitHubScmRepositoryClient(mock(GitHubRepoService.class)))),
+          mock(ScmCredentialResolver.class),
           mock(AppUserRepository.class),
           mock(TierEnforcementService.class),
           mock(GovernanceGuard.class),
@@ -100,6 +106,90 @@ class ProjectRepoServiceRunResolutionTest {
             () -> service.resolveForRunStrict("project-1", List.of(repoId)));
 
     assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void reviewResolutionRequiresRepoId() {
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveGitHubReviewRepoStrict("project-1", null, "org/repo"));
+
+    assertEquals(400, error.getStatusCode().value());
+  }
+
+  @Test
+  void reviewResolutionRejectsRepositoryNotLinkedToProject() {
+    UUID foreignRepoId = UUID.randomUUID();
+    when(linkRepo.findByProjectId("project-1")).thenReturn(List.of());
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveGitHubReviewRepoStrict("project-1", foreignRepoId, "other/repo"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void reviewResolutionRejectsClaimedNameThatDoesNotMatchLinkedIdentity() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider("GITHUB")
+            .githubRepoFullName("canonical/repo")
+            .build();
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.resolveGitHubReviewRepoStrict(
+                    "project-1", repoId, "attacker/arbitrary-repo"));
+
+    assertEquals(400, error.getStatusCode().value());
+  }
+
+  @Test
+  void reviewResolutionRejectsNonGitHubScm() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider("BITBUCKET")
+            .sourceKey("workspace/repo")
+            .githubRepoFullName("workspace/repo")
+            .build();
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveGitHubReviewRepoStrict("project-1", repoId, "workspace/repo"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void reviewResolutionReturnsCanonicalLinkedGitHubRepository() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider("GITHUB")
+            .githubRepoFullName("Canonical/Repo")
+            .build();
+    linkAndResolve(repoId, repo);
+
+    ProjectRepo resolved =
+        service.resolveGitHubReviewRepoStrict("project-1", repoId, "canonical/repo");
+
+    assertEquals(repo, resolved);
   }
 
   /* ── V278 local-run binding contract ── */

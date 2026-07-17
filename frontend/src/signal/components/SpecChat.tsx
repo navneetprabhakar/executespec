@@ -5,7 +5,13 @@ import {Spinner} from '@/signal/components/Loaders';
 import {Markdown} from '@/signal/components/Markdown';
 import {Modal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
-import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {
+  normalizeUiProvider,
+  UI_PROVIDER_USAGE,
+  uiSlashHelp,
+  uiSlashSuggestions,
+  uiSlashUsage,
+} from '@/lib/uiSlash';
 
 // Sparkle / "build" mark used on the chat trigger + bubble label.
 function SparkleIcon({size = 14, color}: {size?: number; color?: string}) {
@@ -131,7 +137,7 @@ export function SpecChat({
     if (cmd === '/provider') {
       const provider = normalizeUiProvider(arg);
       if (!provider) {
-        note('Usage: /provider anthropic|openai|deepseek');
+        note(`Usage: ${UI_PROVIDER_USAGE}`);
         return true;
       }
       const saved = await api.updateProviderPreference(provider);

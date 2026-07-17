@@ -43,6 +43,8 @@ public class PreviewProperties {
 
   private ConcurrencyConfig concurrency = new ConcurrencyConfig();
 
+  private CleanupConfig cleanup = new CleanupConfig();
+
   /**
    * Route previews through the external preview-engine service instead of running docker-compose
    * locally. When ON + eligible, main app builds the image, pushes to {@link
@@ -62,6 +64,22 @@ public class PreviewProperties {
     private int freeMax = 1;
     private int proMax = 3;
     private int enterpriseMax = 10;
+  }
+
+  @Data
+  public static class CleanupConfig {
+    /**
+     * Destructive discovery of resources that are absent from this JVM's in-memory map. This is
+     * unsafe in a multi-node deployment and therefore stays off until a durable resource registry
+     * is authoritative for Docker and Cloud Run previews.
+     */
+    private boolean orphanDiscoveryEnabled = false;
+
+    /**
+     * Tear down previews during JVM shutdown. Disabled by default so rolling deployment does not
+     * destroy customer previews; TTL cleanup remains authoritative.
+     */
+    private boolean teardownOnShutdown = false;
   }
 
   @Data

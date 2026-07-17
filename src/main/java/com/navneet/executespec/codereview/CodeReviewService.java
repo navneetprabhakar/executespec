@@ -30,10 +30,14 @@ import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.codereview.repository.CodeReviewIssueRepository;
 import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -91,6 +95,7 @@ public class CodeReviewService {
   private final ProjectRepoRepository projectRepoRepo;
   private final GitHubRepoService github;
   private final TierConfigRepository tierConfigRepo;
+  private final ProjectProviderResolver projectProviderResolver;
 
   /**
    * Dispatch pool — sized as {@code clamp(2, 8, cores × 1)}. Code-review scans clone a repo, shell
@@ -150,8 +155,47 @@ public class CodeReviewService {
   @Transactional
   public CodeReviewScan submitScan(
       String projectId, UUID repoId, String repoFullName, AppUser user) {
-    if (projectId == null || repoFullName == null) {
-      throw new IllegalArgumentException("projectId and repoFullName are required");
+    return submitScanInternal(projectId, repoId, repoFullName, user, null, null, null);
+  }
+
+  /**
+   * Project Chat path: preserve the consumed confirmation's exact provider/model asynchronously.
+   */
+  @Transactional
+  public CodeReviewScan submitConfirmedScan(
+      String projectId,
+      UUID repoId,
+      String repoFullName,
+      AppUser user,
+      LlmProvider confirmedProvider,
+      String confirmedModel,
+      LlmExecutionReference confirmedActionReference) {
+    if (confirmedProvider == null || confirmedModel == null || confirmedModel.isBlank()) {
+      throw new IllegalArgumentException("confirmed provider and model are required");
+    }
+    if (confirmedActionReference == null) {
+      throw new IllegalArgumentException("confirmed action execution reference is required");
+    }
+    return submitScanInternal(
+        projectId,
+        repoId,
+        repoFullName,
+        user,
+        confirmedProvider,
+        confirmedModel.trim(),
+        confirmedActionReference);
+  }
+
+  private CodeReviewScan submitScanInternal(
+      String projectId,
+      UUID repoId,
+      String repoFullName,
+      AppUser user,
+      LlmProvider confirmedProvider,
+      String confirmedModel,
+      LlmExecutionReference confirmedActionReference) {
+    if (projectId == null || repoId == null || repoFullName == null) {
+      throw new IllegalArgumentException("projectId, repoId, and repoFullName are required");
     }
     String pat = user == null ? null : user.getGithubPat();
     // Resolve default branch + head sha for an idempotency-safe scan key.
@@ -198,21 +242,48 @@ public class CodeReviewService {
 
     final UUID scanId = saved.getId();
     final String patForDispatch = pat;
+    final String actorUserId = user == null ? null : user.getId();
+    final Map<String, String> routeSnapshot =
+        confirmedProvider == null
+            ? RunModelOverrides.capture()
+            : RunModelOverrides.withRunPin(Map.of(), confirmedProvider, confirmedModel);
     pool.submit(
-        () -> {
-          try {
-            runScan(scanId, projectId, repoId, repoFullName, resolvedSha, patForDispatch);
-          } catch (Throwable t) {
-            log.error("CodeReview dispatch threw for scan={}", scanId, t);
-            failScan(scanId, "dispatch error: " + t.getMessage());
-            broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", t.getMessage()));
-          }
-        });
+        () ->
+            RunModelOverrides.runWith(
+                routeSnapshot,
+                () -> {
+                  try {
+                    runScan(
+                        scanId,
+                        projectId,
+                        repoId,
+                        repoFullName,
+                        resolvedSha,
+                        patForDispatch,
+                        confirmedProvider,
+                        confirmedModel,
+                        actorUserId,
+                        confirmedActionReference);
+                  } catch (Throwable t) {
+                    log.error("CodeReview dispatch threw for scan={}", scanId, t);
+                    failScan(scanId, "dispatch error: " + t.getMessage());
+                    broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", t.getMessage()));
+                  }
+                }));
     return saved;
   }
 
   void runScan(
-      UUID scanId, String projectId, UUID repoId, String repoFullName, String sha, String pat) {
+      UUID scanId,
+      String projectId,
+      UUID repoId,
+      String repoFullName,
+      String sha,
+      String pat,
+      LlmProvider confirmedProvider,
+      String confirmedModel,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     String channel = "code-review-" + scanId;
     long start = System.currentTimeMillis();
 
@@ -293,6 +364,7 @@ public class CodeReviewService {
     CodeReviewAgent.AgentRequest agentReq =
         CodeReviewAgent.AgentRequest.builder()
             .scanId(scanId.toString())
+            .projectId(projectId)
             .repoFullName(repoFullName)
             .scannedSha(sha)
             .languages(new ArrayList<>(languages))
@@ -300,7 +372,13 @@ public class CodeReviewService {
             .totalLoc(totalLoc)
             .staticFindings(staticForAgent)
             .fileSamples(samples.samples())
-            .provider("anthropic")
+            .provider(
+                confirmedProvider == null
+                    ? resolveProvider(projectId)
+                    : confirmedProvider.name().toLowerCase())
+            .model(confirmedModel)
+            .actorUserId(actorUserId)
+            .executionReference(confirmedActionReference)
             .build();
 
     CodeReviewAgent.AgentResult agentResult;
@@ -339,6 +417,11 @@ public class CodeReviewService {
                 + summary.droppedCount()
                 + " static findings dropped as false positives."));
     broadcaster.emit(channel, RunEvent.complete(channel, "COMPLETE", "scan complete"));
+  }
+
+  /** Resolve the linked project's configured provider; never hardcode a review-only provider. */
+  String resolveProvider(String projectId) {
+    return projectProviderResolver.resolve(projectId).name().toLowerCase(java.util.Locale.ROOT);
   }
 
   /** Dedicated transactional method so the persistence step is atomic. */
@@ -625,8 +708,10 @@ public class CodeReviewService {
     return scanRepo.findById(id).orElse(null);
   }
 
-  public List<CodeReviewScan> listForProject(String projectId) {
-    return scanRepo.findByProjectIdOrderByStartedAtDesc(projectId);
+  public org.springframework.data.domain.Slice<CodeReviewScan> listForProject(
+      String projectId, Instant since, org.springframework.data.domain.Pageable pageable) {
+    return scanRepo.findByProjectIdAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+        projectId, since, pageable);
   }
 
   /**
@@ -658,14 +743,15 @@ public class CodeReviewService {
   }
 
   private String resolveCloneUrl(UUID repoId, String repoFullName) {
-    if (repoId != null) {
-      return projectRepoRepo
-          .findById(repoId)
-          .map(ProjectRepo::getGithubRepoFullName)
-          .map(name -> "https://github.com/" + name + ".git")
-          .orElse("https://github.com/" + repoFullName + ".git");
+    ProjectRepo repo =
+        projectRepoRepo
+            .findById(repoId)
+            .orElseThrow(() -> new IllegalStateException("linked repository no longer exists"));
+    String canonicalName = repo.getGithubRepoFullName();
+    if (canonicalName == null || !canonicalName.equalsIgnoreCase(repoFullName)) {
+      throw new IllegalStateException("review repository identity changed after admission");
     }
-    return "https://github.com/" + repoFullName + ".git";
+    return "https://github.com/" + canonicalName + ".git";
   }
 
   static String shortSha(String sha) {

@@ -20,10 +20,15 @@ class AgentStreamTurnSupportTest {
             "get_run_report",
             "search_repo_files",
             "search_code",
-            "get_tech_debt_summary",
+            "get_tech_debt_summary")
+        .doesNotContain(
+            "submit_run",
+            "approve_run",
+            "local_code_task",
             "spawn_subagent",
-            "spawn_subagents")
-        .doesNotContain("submit_run", "approve_run", "local_code_task", "shell", "writeFile");
+            "spawn_subagents",
+            "shell",
+            "writeFile");
   }
 
   @Test

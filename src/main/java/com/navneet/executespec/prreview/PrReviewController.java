@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.prreview.entity.PrReview;
 import com.navneet.executespec.prreview.entity.PrReviewComment;
 
@@ -38,12 +39,18 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PrReviewController {
 
+  static final int MAX_HISTORY_DAYS = 366;
+  static final int MAX_HISTORY_PAGE_SIZE = 200;
+  static final int MAX_HISTORY_PAGE = 1000;
+
   private final PrReviewService service;
   private final ProjectAccessGuard projectAccessGuard;
+  private final ProjectRepoService projectRepoService;
   private final PrReviewAutofixService autofixService;
 
   /** Body for {@link #submit}. */
-  public record SubmitPrReviewRequest(String projectId, String repoFullName, Integer prNumber) {}
+  public record SubmitPrReviewRequest(
+      String projectId, UUID repoId, String repoFullName, Integer prNumber) {}
 
   /**
    * Kick off a PR review. Returns the (possibly QUEUED, possibly already-COMPLETE if a re-run on
@@ -55,13 +62,15 @@ public class PrReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    if (req == null
-        || req.projectId() == null
-        || req.repoFullName() == null
-        || req.prNumber() == null) {
+    if (req == null || req.projectId() == null || req.repoId() == null || req.prNumber() == null) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "projectId, repoFullName, and prNumber are required");
+          HttpStatus.BAD_REQUEST, "projectId, repoId, and prNumber are required");
     }
+    projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
+    var repo =
+        projectRepoService.resolveGitHubReviewRepoStrict(
+            req.projectId(), req.repoId(), req.repoFullName());
+    String canonicalFullName = repo.getGithubRepoFullName();
     try {
       service.assertTierAndQuota(userDetails.getUser());
     } catch (PrReviewService.TierBlockedException e) {
@@ -74,7 +83,11 @@ public class PrReviewController {
     try {
       row =
           service.submitReview(
-              req.projectId(), req.repoFullName(), req.prNumber(), userDetails.getUser());
+              req.projectId(),
+              repo.getId(),
+              canonicalFullName,
+              req.prNumber(),
+              userDetails.getUser());
     } catch (IllegalStateException e) {
       // GitHub fetch failed — treat as 502 because it's an upstream-dependency error,
       // not a request validation error.
@@ -128,6 +141,7 @@ public class PrReviewController {
     if (row == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such PR review");
     }
+    projectAccessGuard.assertCanRead(row.getProjectId(), userDetails);
     List<PrReviewComment> comments = service.commentsFor(id);
     return ResponseEntity.ok(PrReviewWithComments.from(row, comments));
   }
@@ -136,33 +150,70 @@ public class PrReviewController {
   @GetMapping("/api/pr-reviews")
   public ResponseEntity<List<PrReviewDto>> listForPr(
       @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestParam("projectId") String projectId,
+      @RequestParam("repoId") UUID repoId,
       @RequestParam("repo") String repoFullName,
-      @RequestParam("number") int prNumber) {
+      @RequestParam("number") int prNumber,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(defaultValue = "366") int sinceDays) {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    return ResponseEntity.ok(
-        service.findByPr(repoFullName, prNumber).stream().map(PrReviewDto::from).toList());
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    var repo = projectRepoService.resolveGitHubReviewRepoStrict(projectId, repoId, repoFullName);
+    int safePage = Math.min(Math.max(page, 0), MAX_HISTORY_PAGE);
+    int safeLimit = Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
+    int safeSinceDays = Math.min(Math.max(sinceDays, 1), MAX_HISTORY_DAYS);
+    var rows =
+        service.findByPr(
+            projectId,
+            repo.getId(),
+            prNumber,
+            Instant.now().minusSeconds((long) safeSinceDays * 86_400L),
+            org.springframework.data.domain.PageRequest.of(safePage, safeLimit));
+    return historyResponse(rows, safePage, safeLimit);
   }
 
   /** All reviews for a project, newest first — used by the project-level dashboard. */
   @GetMapping("/api/projects/{projectId}/pr-reviews")
   public ResponseEntity<List<PrReviewDto>> listForProject(
-      @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+      @PathVariable String projectId,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(defaultValue = "366") int sinceDays,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
     // GA-readiness P4.1-followup — tenant guard. PR review payload includes
     // line-anchored comments which can leak code structure across orgs.
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    return ResponseEntity.ok(
-        service.findByProject(projectId).stream().map(PrReviewDto::from).toList());
+    int safePage = Math.min(Math.max(page, 0), MAX_HISTORY_PAGE);
+    int safeLimit = Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
+    int safeSinceDays = Math.min(Math.max(sinceDays, 1), MAX_HISTORY_DAYS);
+    var rows =
+        service.findByProject(
+            projectId,
+            Instant.now().minusSeconds((long) safeSinceDays * 86_400L),
+            org.springframework.data.domain.PageRequest.of(safePage, safeLimit));
+    return historyResponse(rows, safePage, safeLimit);
+  }
+
+  private static ResponseEntity<List<PrReviewDto>> historyResponse(
+      org.springframework.data.domain.Slice<PrReview> rows, int page, int limit) {
+    return ResponseEntity.ok()
+        .header("X-Page", Integer.toString(page))
+        .header("X-Page-Size", Integer.toString(limit))
+        .header("X-Has-More", Boolean.toString(rows.hasNext()))
+        .body(rows.getContent().stream().map(PrReviewDto::from).toList());
   }
 
   /** Trim the entity for JSON; client never needs the raw cost columns sliced separately. */
   public record PrReviewDto(
       UUID id,
       String projectId,
+      UUID repoId,
       String repoFullName,
       Integer prNumber,
       String headSha,
@@ -178,6 +229,7 @@ public class PrReviewController {
       return new PrReviewDto(
           r.getId(),
           r.getProjectId(),
+          r.getRepoId(),
           r.getRepoFullName(),
           r.getPrNumber(),
           r.getHeadSha(),

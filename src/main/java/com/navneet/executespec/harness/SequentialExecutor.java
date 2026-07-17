@@ -881,7 +881,7 @@ to boot — skip it for those.""";
         taskLanguage(task),
         outcome.retryAttempted() ? 2 : 1,
         outcome,
-        usage == null ? 0 : usage.outputTokens(),
+        usage == null ? 0 : RunCostTracker.saturatedInt(usage.outputTokens()),
         maxOutputTokens(task.complexity()),
         iterations,
         usage == null ? 0.0 : usage.costUsd());
@@ -1797,8 +1797,7 @@ to boot — skip it for those.""";
       List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
     rememberRecoveryAttempt(req.runContext().runId(), task.id());
-    ExecutionContext taskCtx =
-        new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
+    ExecutionContext taskCtx = req.runContext().child(task.id());
     String requestedProvider =
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
@@ -3743,11 +3742,11 @@ to boot — skip it for those.""";
         .maxStaleExplanations(maxStaleExplanations())
         .budgetCeilingReached(budgetCeilingReached)
         .budgetCeilingReason(budgetCeilingReason)
-        .inputTokens(cost.inputTokens())
-        .outputTokens(cost.outputTokens())
-        .cacheReadTokens(cost.cacheReadTokens())
-        .cacheWriteTokens(cost.cacheWriteTokens())
-        .reasoningTokens(cost.reasoningTokens())
+        .inputTokens(RunCostTracker.saturatedInt(cost.inputTokens()))
+        .outputTokens(RunCostTracker.saturatedInt(cost.outputTokens()))
+        .cacheReadTokens(RunCostTracker.saturatedInt(cost.cacheReadTokens()))
+        .cacheWriteTokens(RunCostTracker.saturatedInt(cost.cacheWriteTokens()))
+        .reasoningTokens(RunCostTracker.saturatedInt(cost.reasoningTokens()))
         .totalTokens(totalTokens)
         .costUsd(cost.costUsd())
         .wallClockMs(wallClockMs)

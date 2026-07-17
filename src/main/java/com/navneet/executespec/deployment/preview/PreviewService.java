@@ -1854,6 +1854,9 @@ public class PreviewService {
    */
   @Scheduled(fixedRate = 1800000) // every 30 minutes
   void cleanupOrphans() {
+    if (!props.getCleanup().isOrphanDiscoveryEnabled()) {
+      return;
+    }
     // Docker Compose orphans
     try {
       List<String> projects = composeExecutor.listProjects(COMPOSE_PREFIX);
@@ -1893,6 +1896,14 @@ public class PreviewService {
 
   @PreDestroy
   void shutdownAll() {
+    if (!props.getCleanup().isTeardownOnShutdown()) {
+      if (!active.isEmpty()) {
+        log.info(
+            "Preserving {} active previews across JVM shutdown; TTL cleanup remains authoritative",
+            active.size());
+      }
+      return;
+    }
     int count = active.size();
     if (count > 0) {
       log.info("Shutting down {} active previews", count);

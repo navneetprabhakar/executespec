@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,15 @@ class SpecChatControllerAccessTest {
 
     SpecChatController controller =
         new SpecChatController(
-            audit, service, flags, providers, access, mock(AgentIntentService.class));
+            audit,
+            service,
+            flags,
+            providers,
+            access,
+            mock(AgentIntentService.class),
+            new com.navneet.executespec.security.InputSanitizer(),
+            new com.navneet.executespec.security.ContextSanitizer(),
+            mock(ChatSecurityAuditService.class));
     var request =
         new SpecChatController.SpecChatRequest(
             "session-1", "foreign", null, List.of(Map.of("role", "user", "content", "list")), null);
@@ -57,6 +66,51 @@ class SpecChatControllerAccessTest {
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void cannotReuseAnotherUsersLegacySessionId() {
+    SpecChatAuditRepository audit = mock(SpecChatAuditRepository.class);
+    SpecChatService service = mock(SpecChatService.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    AiProviderPreferenceService providers = mock(AiProviderPreferenceService.class);
+    when(audit.findBySessionId("shared-session"))
+        .thenReturn(
+            java.util.Optional.of(
+                SpecChatAudit.builder()
+                    .id("audit-1")
+                    .sessionId("shared-session")
+                    .userId("another-user")
+                    .orgId("org-1")
+                    .turnCount(1)
+                    .build()));
+    SpecChatController controller =
+        new SpecChatController(
+            audit,
+            service,
+            flags,
+            providers,
+            mock(ProjectAccessGuard.class),
+            mock(AgentIntentService.class),
+            new com.navneet.executespec.security.InputSanitizer(),
+            new com.navneet.executespec.security.ContextSanitizer(),
+            mock(ChatSecurityAuditService.class));
+    var request =
+        new SpecChatController.SpecChatRequest(
+            "shared-session",
+            null,
+            null,
+            List.of(Map.of("role", "user", "content", "hello")),
+            null);
+
+    assertThatThrownBy(() -> controller.chat(user(), request, null, mock(HttpServletRequest.class)))
+        .isInstanceOf(ResponseStatusException.class)
+        .matches(
+            error ->
+                ((ResponseStatusException) error).getStatusCode()
+                    == org.springframework.http.HttpStatus.FORBIDDEN);
+    verify(audit, never()).save(any());
+    verify(service, never()).runTurn(any(), any(), any(), any(), any(), any(), any());
   }
 
   private static AppUserDetails user() {

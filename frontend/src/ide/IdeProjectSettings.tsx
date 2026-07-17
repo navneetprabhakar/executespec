@@ -18,13 +18,14 @@ import {
   projectSettingsFormFromProject,
 } from '@/ide/projectSettingsUtils';
 import {
-  providerIsDispatchable,
+  PRODUCT_PROVIDER_OPTIONS,
+  providerIsProjectSelectable,
   providerOptionLabel,
   providerReadinessLabel,
 } from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 
-type SettingsSub = 'settings' | 'documents' | 'memory';
+type SettingsSub = 'settings' | 'documents' | 'memory' | 'exports';
 
 export function IdeProjectSettings() {
   const {projectId = ''} = useParams();
@@ -51,6 +52,12 @@ export function IdeProjectSettings() {
   const [docs, setDocs] = useState<api.ProjectDocumentRow[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [memory, setMemory] = useState<api.ProjectMemoryResponse | null>(null);
+  const [exports, setExports] = useState<api.ProjectExportJob[] | null>(null);
+  const [exportAudit, setExportAudit] = useState<{
+    jobId: string;
+    rows: api.ProjectExportAuditEvent[];
+  } | null>(null);
+  const exportRequestKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -72,6 +79,7 @@ export function IdeProjectSettings() {
       .getProjectMemory(projectId)
       .then(setMemory)
       .catch(() => setMemory(null));
+    if (canEdit) refreshExports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -80,6 +88,13 @@ export function IdeProjectSettings() {
       .listProjectDocuments(projectId)
       .then(setDocs)
       .catch(() => setDocs([]));
+  }
+
+  function refreshExports() {
+    api
+      .listProjectExports(projectId)
+      .then(setExports)
+      .catch(() => setExports([]));
   }
 
   const indexing = isProjectDocumentIndexing(docs);
@@ -101,6 +116,19 @@ export function IdeProjectSettings() {
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indexing]);
+
+  const exportRunning =
+    exports?.some((job) =>
+      ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'EXPIRING'].includes(job.status),
+    ) ?? false;
+  useEffect(() => {
+    if (!exportRunning) return;
+    const id = window.setInterval(() => {
+      if (!document.hidden) refreshExports();
+    }, 2500);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportRunning, projectId]);
 
   async function saveSettings() {
     setBusy('save');
@@ -165,6 +193,68 @@ export function IdeProjectSettings() {
     }
   }
 
+  async function createExport() {
+    setBusy('create-export');
+    setErr('');
+    setMsg('');
+    exportRequestKey.current ??= crypto.randomUUID();
+    try {
+      const job = await api.createProjectExport(projectId, exportRequestKey.current);
+      exportRequestKey.current = null;
+      await refreshExports();
+      setMsg(
+        job.status === 'SUCCEEDED'
+          ? 'The existing export is ready to download.'
+          : 'Export queued. You can leave this page and return later.',
+      );
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not queue export.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function cancelExport(jobId: string) {
+    setBusy(`cancel-export-${jobId}`);
+    setErr('');
+    try {
+      await api.cancelProjectExport(projectId, jobId);
+      await refreshExports();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not cancel export.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function downloadExport(job: api.ProjectExportJob) {
+    setBusy(`download-export-${job.id}`);
+    setErr('');
+    try {
+      await api.downloadProjectExport(projectId, job);
+      await refreshExports();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not download export.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function toggleExportAudit(jobId: string) {
+    if (exportAudit?.jobId === jobId) {
+      setExportAudit(null);
+      return;
+    }
+    setBusy(`audit-export-${jobId}`);
+    try {
+      setExportAudit({jobId, rows: await api.getProjectExportAudit(projectId, jobId)});
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Could not load export history.');
+    } finally {
+      setBusy('');
+    }
+  }
+
   return (
     <div className='ide-pane' style={{maxWidth: 820}}>
       <ProjectTabs projectId={projectId} />
@@ -180,6 +270,7 @@ export function IdeProjectSettings() {
               {key: 'settings', label: 'Settings'},
               {key: 'documents', label: `Reference docs · ${docs?.length ?? '—'}`},
               {key: 'memory', label: 'Project context'},
+              ...(canEdit ? [{key: 'exports', label: 'Exports'}] : []),
             ]}
           />
           <Banner err={err} msg={msg} />
@@ -214,17 +305,13 @@ export function IdeProjectSettings() {
                     disabled={!canEdit}
                     onChange={(e) => setProvider(e.target.value)}
                   >
-                    {[
-                      ['ANTHROPIC', 'Anthropic'],
-                      ['OPENAI', 'OpenAI'],
-                      ['DEEPSEEK', 'DeepSeek'],
-                    ].map(([id, label]) => (
+                    {PRODUCT_PROVIDER_OPTIONS.map(({id, label}) => (
                       <option
                         key={id}
                         value={id}
                         disabled={
                           providerReadiness.supported &&
-                          !providerIsDispatchable(providerReadiness.byProvider.get(id))
+                          !providerIsProjectSelectable(providerReadiness.byProvider.get(id))
                         }
                       >
                         {providerReadiness.supported
@@ -387,10 +474,15 @@ export function IdeProjectSettings() {
                             {display.sizeLabel}
                             {d.mimeType ? ` · ${d.mimeType}` : ''}
                           </div>
+                          {display.readiness && (
+                            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                              {display.readiness.replace(/_/g, ' ').toLowerCase()}
+                            </div>
+                          )}
                         </div>
                         <IdeBadge
                           kind={
-                            display.status === 'READY'
+                            display.status === 'SEMANTIC READY'
                               ? 'ok'
                               : display.status === 'FAILED'
                                 ? 'bad'
@@ -459,6 +551,126 @@ export function IdeProjectSettings() {
               </div>
             </>
           )}
+
+          {sub === 'exports' && canEdit && (
+            <>
+              <div className='ide-card' style={{marginBottom: 12}}>
+                <div style={{fontSize: 13, lineHeight: 1.55, marginBottom: 10}}>
+                  Create a redacted project metadata and governance archive. Exports run in the
+                  background, survive an application restart, and expire after 24 hours. Source code
+                  and uploaded document bytes are deliberately excluded.
+                </div>
+                <button
+                  className='ide-btn'
+                  disabled={busy === 'create-export' || exportRunning}
+                  onClick={createExport}
+                >
+                  {busy === 'create-export'
+                    ? 'Queueing…'
+                    : exportRunning
+                      ? 'Export in progress'
+                      : 'Create export'}
+                </button>
+              </div>
+
+              {exports === null ? (
+                <IdeLoader label='Loading exports…' />
+              ) : exports.length === 0 ? (
+                <div className='ide-empty'>No project exports yet.</div>
+              ) : (
+                <div className='ide-card' style={{padding: 0}}>
+                  {exports.map((job, index) => (
+                    <div
+                      key={job.id}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom:
+                          index < exports.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      }}
+                    >
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                        <div style={{flex: 1, minWidth: 0}}>
+                          <div className='ide-mono' style={{fontSize: 11}}>
+                            {job.id.slice(0, 8)}
+                          </div>
+                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}>
+                            {new Date(job.createdAt).toLocaleString()}
+                            {job.sizeBytes != null ? ` · ${formatBytes(job.sizeBytes)}` : ''}
+                            {job.expiresAt
+                              ? ` · expires ${new Date(job.expiresAt).toLocaleString()}`
+                              : ''}
+                          </div>
+                        </div>
+                        <IdeBadge
+                          kind={
+                            job.status === 'SUCCEEDED'
+                              ? 'ok'
+                              : ['FAILED', 'EXPIRED'].includes(job.status)
+                                ? 'bad'
+                                : 'warn'
+                          }
+                        >
+                          {job.status.replace(/_/g, ' ')}
+                        </IdeBadge>
+                      </div>
+                      {job.errorCode && (
+                        <div style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 6}}>
+                          {job.errorCode.replace(/_/g, ' ')}
+                        </div>
+                      )}
+                      {job.sha256 && (
+                        <div
+                          className='ide-mono'
+                          style={{fontSize: 10, color: 'var(--ide-fg-muted)', marginTop: 5}}
+                        >
+                          SHA-256 {job.sha256}
+                        </div>
+                      )}
+                      <div style={{display: 'flex', gap: 6, marginTop: 9}}>
+                        {job.downloadable && (
+                          <button
+                            className='ide-btn'
+                            disabled={busy === `download-export-${job.id}`}
+                            onClick={() => downloadExport(job)}
+                          >
+                            {busy === `download-export-${job.id}` ? 'Downloading…' : 'Download'}
+                          </button>
+                        )}
+                        {job.cancellable && job.status !== 'CANCEL_REQUESTED' && (
+                          <button
+                            className='ide-btn ghost'
+                            disabled={busy === `cancel-export-${job.id}`}
+                            onClick={() => cancelExport(job.id)}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          className='ide-btn ghost'
+                          disabled={busy === `audit-export-${job.id}`}
+                          onClick={() => toggleExportAudit(job.id)}
+                        >
+                          {exportAudit?.jobId === job.id ? 'Hide history' : 'History'}
+                        </button>
+                      </div>
+                      {exportAudit?.jobId === job.id && (
+                        <div style={{marginTop: 10, fontSize: 11}}>
+                          {exportAudit.rows.map((event) => (
+                            <div key={event.id} className='ide-kv'>
+                              <span>{event.eventType.replace(/_/g, ' ')}</span>
+                              <span>
+                                {event.outcome} · {new Date(event.occurredAt).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
 
@@ -505,4 +717,10 @@ export function IdeProjectSettings() {
       />
     </div>
   );
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }

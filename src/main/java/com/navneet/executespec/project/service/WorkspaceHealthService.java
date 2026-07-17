@@ -6,8 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -16,7 +14,13 @@ import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
-import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmCapability;
+import com.navneet.executespec.repo.ScmCredential;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmRemoteRepository;
+import com.navneet.executespec.repo.ScmRepositoryClient;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -54,8 +58,8 @@ public class WorkspaceHealthService {
   private final ProjectRepoRepository repoRepo;
   private final ProjectCodeMapRepository codeMapRepo;
   private final PullRequestRecordRepository prRepo;
-  private final GitHubRepoService gitHub;
-  private final AppUserRepository userRepo;
+  private final ScmRepositoryClientRegistry scmClients;
+  private final ScmCredentialResolver scmCredentials;
   private final StringRedisTemplate redis;
 
   public record RepoHealth(
@@ -73,11 +77,6 @@ public class WorkspaceHealthService {
   public record Report(List<RepoHealth> repos, Instant lastRefreshedAt) {}
 
   public Report report(String projectId, String callerUserId) {
-    String pat =
-        callerUserId == null
-            ? null
-            : userRepo.findById(callerUserId).map(AppUser::getGithubPat).orElse(null);
-
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     Map<java.util.UUID, ProjectCodeMap> latestByRepo = new java.util.HashMap<>();
     for (ProjectCodeMap cm : codeMapRepo.findByProjectId(projectId)) {
@@ -95,16 +94,18 @@ public class WorkspaceHealthService {
       if (repo == null) continue;
       ProjectCodeMap cm = latestByRepo.get(repo.getId());
       String lastSha = cm == null ? null : cm.getGeneratedFromSha();
-      String currentSha = resolveOriginSha(repo, pat);
+      String currentSha = resolveOriginSha(repo, callerUserId);
       boolean stale = currentSha != null && (lastSha == null || !lastSha.equals(currentSha));
       String syncStatus = currentSha == null ? "UNKNOWN" : stale ? "DRIFTED" : "IN_SYNC";
       long openPrs =
-          prRepo.countByRepoFullNameAndStatus(
-              repo.getGithubRepoFullName(), PullRequestRecord.Status.OPEN);
+          isGitHub(repo) && repo.getGithubRepoFullName() != null
+              ? prRepo.countByRepoFullNameAndStatus(
+                  repo.getGithubRepoFullName(), PullRequestRecord.Status.OPEN)
+              : 0;
       rows.add(
           new RepoHealth(
               repo.getId().toString(),
-              repo.getGithubRepoFullName(),
+              displayName(repo),
               repo.getDefaultBranch(),
               lastSha,
               currentSha,
@@ -117,8 +118,11 @@ public class WorkspaceHealthService {
     return new Report(rows, Instant.now());
   }
 
-  /** Cached origin-HEAD SHA for the repo's default branch. Null on GitHub failure. */
-  private String resolveOriginSha(ProjectRepo repo, String pat) {
+  /** Cached origin-HEAD SHA for the repo's default branch. Null on provider failure. */
+  private String resolveOriginSha(ProjectRepo repo, String callerUserId) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType()) || callerUserId == null) {
+      return null;
+    }
     String key = ORIGIN_SHA_PREFIX + repo.getId();
     try {
       String cached = redis.opsForValue().get(key);
@@ -126,9 +130,23 @@ public class WorkspaceHealthService {
     } catch (Exception e) {
       log.debug("Redis origin-sha read failed for {}: {}", repo.getId(), e.getMessage());
     }
-    String fresh =
-        gitHub.getBranchHeadSha(
-            "https://github.com/" + repo.getGithubRepoFullName(), repo.getDefaultBranch(), pat);
+    String fresh;
+    try {
+      ScmProvider provider = ScmProvider.require(repo.getScmProvider());
+      ScmRepositoryClient client = scmClients.require(provider);
+      if (!client.supports(ScmCapability.SOURCE_READINESS)) return null;
+      ScmCredential credential = scmCredentials.require(callerUserId, provider);
+      ScmRemoteRepository remote =
+          client.inspect(displayName(repo), repo.getScmRepositoryId(), credential);
+      fresh = client.branchHeadSha(remote, repo.getDefaultBranch(), credential);
+    } catch (Exception e) {
+      log.debug(
+          "SCM origin-sha read failed for {} ({}): {}",
+          repo.getId(),
+          repo.getScmProvider(),
+          e.getMessage());
+      return null;
+    }
     if (fresh != null && !fresh.isBlank()) {
       try {
         redis.opsForValue().set(key, fresh, ORIGIN_SHA_TTL);
@@ -137,5 +155,17 @@ public class WorkspaceHealthService {
       }
     }
     return fresh;
+  }
+
+  private static boolean isGitHub(ProjectRepo repo) {
+    return repo.getScmProvider() == null || "GITHUB".equalsIgnoreCase(repo.getScmProvider());
+  }
+
+  private static String displayName(ProjectRepo repo) {
+    if (repo.getSourceKey() != null && !repo.getSourceKey().isBlank()) return repo.getSourceKey();
+    if (repo.getGithubRepoFullName() != null && !repo.getGithubRepoFullName().isBlank()) {
+      return repo.getGithubRepoFullName();
+    }
+    return repo.getSourceDisplayName();
   }
 }

@@ -1,113 +1,281 @@
 package com.navneet.executespec.project.rag;
 
-import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+
+import com.navneet.executespec.agent.RunKeyContext;
+import com.navneet.executespec.billing.service.ManagedAiUsageService;
+import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
+import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Embeds short text passages with OpenAI text-embedding-3-small (1536 dims). Uses a direct REST
- * call so we don't depend on the Spring AI auto-configured EmbeddingModel bean (which only
- * registers when a chat-side property triggers it). Shares the {@code spring.ai.openai.api-key} the
- * rest of the platform already uses.
+ * Governed 1536-dimensional project embedding dispatcher.
+ *
+ * <p>The pgvector schema is intentionally pinned to OpenAI {@value #DEFAULT_MODEL}. A project whose
+ * selected provider is not OpenAI, or whose V282 policy does not authorize a current OpenAI key,
+ * receives an explicit lexical-only result. No customer path reads the global OpenAI credential
+ * until the durable context authorizes PLATFORM as its exact key source.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class EmbeddingService {
 
+  public static final String DEFAULT_MODEL = "text-embedding-3-small";
+  public static final int VECTOR_DIMENSIONS = 1536;
+  public static final String PROVIDER = "openai";
   private static final int BATCH_SIZE = 100;
-  private static final String DEFAULT_BASE_URL = "https://api.openai.com";
-  private static final String EMBEDDING_PATH = "/v1/embeddings";
-  private static final String MODEL = "text-embedding-3-small";
 
-  @Value("${spring.ai.openai.api-key:}")
-  private String apiKey;
+  private final EmbeddingPolicyResolver policyResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final LlmExecutionDispatchGuard dispatchGuard;
+  private final OpenAiEmbeddingTransport transport;
+  private final RunStepUsageRecorder usageRecorder;
+  private final ManagedAiUsageService managedAiUsageService;
 
-  @Value("${spring.ai.openai.base-url:" + DEFAULT_BASE_URL + "}")
-  private String baseUrl;
+  @Value("${project.rag.embedding.openai.input-cost-per-million-usd:0.02}")
+  private double inputCostPerMillionUsd = 0.02d;
 
-  private final ObjectMapper objectMapper;
+  @Value("${project.rag.embedding.openai.model:text-embedding-3-small}")
+  private String model = DEFAULT_MODEL;
 
-  public List<float[]> embed(List<String> texts) {
+  @Value("${project.rag.embedding.openai.dimensions:1536}")
+  private int dimensions = VECTOR_DIMENSIONS;
+
+  /**
+   * Vector columns cannot safely mix dimensions or model families. Refuse startup instead of
+   * silently comparing newly generated query vectors with an older persisted corpus.
+   */
+  @PostConstruct
+  void validateVectorContract() {
+    if (!DEFAULT_MODEL.equals(model) || dimensions != VECTOR_DIMENSIONS) {
+      throw new IllegalStateException(
+          "Project RAG vector contract is pinned to "
+              + DEFAULT_MODEL
+              + "/"
+              + VECTOR_DIMENSIONS
+              + "; migrate persisted vector provenance before changing it");
+    }
+  }
+
+  public EmbeddingPolicyResolver.Availability availability(String projectId) {
+    return policyResolver.resolve(projectId);
+  }
+
+  public List<float[]> embedForProject(
+      String projectId, List<String> texts, String feature, String sourceType, String sourceId) {
+    return embedForProject(projectId, texts, feature, sourceType, sourceId, null);
+  }
+
+  public List<float[]> embedForProject(
+      String projectId,
+      List<String> texts,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String actorUserId) {
     if (texts == null || texts.isEmpty()) return List.of();
-    if (apiKey == null || apiKey.isBlank()) {
-      throw new IllegalStateException("OpenAI api-key not configured (set OPENAI_API_KEY)");
+    var availability = policyResolver.resolve(projectId);
+    if (!availability.semanticSearchAvailable()) {
+      throw new EmbeddingUnavailableException(availability.reason());
     }
-    List<float[]> out = new ArrayList<>(texts.size());
-    for (int i = 0; i < texts.size(); i += BATCH_SIZE) {
-      List<String> batch = texts.subList(i, Math.min(i + BATCH_SIZE, texts.size()));
-      out.addAll(callOnce(batch));
-    }
-    return out;
-  }
 
-  public float[] embedQuery(String text) {
-    return embed(List.of(text)).get(0);
-  }
-
-  private List<float[]> callOnce(List<String> batch) {
-    RestClient client = RestClient.builder().baseUrl(baseUrl).build();
-    Map<String, Object> body = Map.of("model", MODEL, "input", batch);
+    var reference =
+        executionPolicyFactory.forProjectEmbedding(
+            projectId,
+            feature,
+            sourceType,
+            requireSource(sourceId),
+            requireSource(sourceId),
+            PROVIDER,
+            actorUserId);
+    LlmExecutionDispatchGuard.ResolvedDispatch dispatch;
     try {
-      String response =
-          client
-              .post()
-              .uri(EMBEDDING_PATH)
-              .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-              .contentType(MediaType.APPLICATION_JSON)
-              .body(body)
-              .retrieve()
-              .body(String.class);
-      return parse(response);
-    } catch (Exception first) {
-      log.warn("OpenAI embeddings call failed, retrying once: {}", first.getMessage());
+      dispatch = dispatchGuard.authorizeProviderCapability(reference, PROVIDER);
+    } catch (LlmDispatchPolicyException rejected) {
+      throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
+    }
+    String key = dispatch.apiKey();
+    if (key == null || key.isBlank()) {
+      throw new EmbeddingUnavailableException("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
+    }
+
+    String runId = usageRunId(sourceId);
+    RunKeyContext managedKeys = managedAiContext(dispatch);
+    managedAiUsageService.authorizeFixedCapabilityCall(
+        runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
+
+    List<float[]> vectors = new ArrayList<>(texts.size());
+    int batchNumber = 0;
+    for (int from = 0; from < texts.size(); from += BATCH_SIZE) {
+      batchNumber++;
+      List<String> batch = texts.subList(from, Math.min(from + BATCH_SIZE, texts.size()));
+      long started = System.currentTimeMillis();
+      OpenAiEmbeddingTransport.Result result;
       try {
-        Thread.sleep(Duration.ofSeconds(1).toMillis());
-      } catch (InterruptedException ie) {
-        Thread.currentThread().interrupt();
+        result = transport.embed(key, model, batch);
+      } catch (RuntimeException providerFailure) {
+        long latency = Math.max(0, System.currentTimeMillis() - started);
+        usageRecorder.recordProviderCapabilityFailure(
+            reference,
+            runId,
+            feature,
+            "embedding.batch",
+            PROVIDER,
+            model,
+            dispatch.keySource().name(),
+            batchNumber,
+            latency,
+            providerFailure);
+        throw providerFailure;
       }
-      String response =
-          client
-              .post()
-              .uri(EMBEDDING_PATH)
-              .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-              .contentType(MediaType.APPLICATION_JSON)
-              .body(body)
-              .retrieve()
-              .body(String.class);
-      return parse(response);
+      long latency = Math.max(0, System.currentTimeMillis() - started);
+      long inputTokens =
+          result.inputTokens() > 0 ? result.inputTokens() : estimatedInputTokens(batch);
+      double cost = inputTokens * inputCostPerMillionUsd / 1_000_000d;
+      RunCostTracker.CallUsage callUsage =
+          new RunCostTracker.CallUsage(PROVIDER, model, inputTokens, 0, 0, 0, cost, batchNumber, 0);
+      usageRecorder.recordProviderCapabilitySuccess(
+          reference,
+          runId,
+          feature,
+          "embedding.batch",
+          PROVIDER,
+          model,
+          dispatch.keySource().name(),
+          batchNumber,
+          latency,
+          callUsage);
+      try {
+        managedAiUsageService.recordSuccessfulCall(
+            runId,
+            feature,
+            feature,
+            "embedding.batch",
+            PROVIDER,
+            model,
+            callUsage,
+            managedKeys,
+            dispatch.keySource());
+      } catch (RuntimeException accountingFailure) {
+        // The provider succeeded and V283 already holds the canonical physical-attempt row. Do not
+        // misclassify or repeat the provider call because the secondary managed-credit projection
+        // failed; reconciliation will expose the discrepancy for operator repair.
+        log.error(
+            "Managed-AI embedding projection failed run={} feature={} batch={}",
+            runId,
+            feature,
+            batchNumber);
+      }
+      vectors.addAll(result.vectors());
     }
+    if (vectors.size() != texts.size()) {
+      throw new IllegalStateException("Embedding result count mismatch");
+    }
+    return List.copyOf(vectors);
   }
 
-  private List<float[]> parse(String response) {
+  public float[] embedQueryForProject(
+      String projectId, String text, String feature, String sourceType, String sourceId) {
+    return embedQueryForProject(projectId, text, feature, sourceType, sourceId, null);
+  }
+
+  public float[] embedQueryForProject(
+      String projectId,
+      String text,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String actorUserId) {
+    return embedForProject(projectId, List.of(text), feature, sourceType, sourceId, actorUserId)
+        .get(0);
+  }
+
+  public String model() {
+    return model;
+  }
+
+  /**
+   * Legacy context-free dispatch is prohibited; retained only to make stale callers fail closed.
+   */
+  @Deprecated(forRemoval = true)
+  public List<float[]> embed(List<String> texts) {
+    throw new EmbeddingUnavailableException("PROJECT_EXECUTION_CONTEXT_REQUIRED");
+  }
+
+  /**
+   * Legacy context-free dispatch is prohibited; retained only to make stale callers fail closed.
+   */
+  @Deprecated(forRemoval = true)
+  public float[] embedQuery(String text) {
+    throw new EmbeddingUnavailableException("PROJECT_EXECUTION_CONTEXT_REQUIRED");
+  }
+
+  private static long estimatedInputTokens(List<String> texts) {
+    long chars = 0;
+    for (String text : texts) {
+      if (text != null) chars = Math.min(Long.MAX_VALUE - chars, chars + text.length());
+    }
+    return Math.max(1, (chars + 3) / 4);
+  }
+
+  private static RunKeyContext managedAiContext(
+      LlmExecutionDispatchGuard.ResolvedDispatch dispatch) {
+    var context = dispatch.context();
+    if (context == null) return null;
+    RunKeyContext.Source source = dispatch.keySource();
+    return new RunKeyContext(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        source,
+        source,
+        source,
+        source,
+        source,
+        source,
+        context.getKeySubjectUserId(),
+        context.getOrgId());
+  }
+
+  private static String usageRunId(String sourceId) {
+    String safe = requireSource(sourceId).replaceAll("[^A-Za-z0-9._:-]", "_");
+    String value = "embedding:" + safe;
+    return value.substring(0, Math.min(96, value.length()));
+  }
+
+  private static String requireSource(String sourceId) {
+    if (sourceId == null || sourceId.isBlank()) {
+      throw new IllegalArgumentException("embedding sourceId required");
+    }
+    String normalized = sourceId.trim();
+    if (normalized.length() <= 150) return normalized;
     try {
-      JsonNode root = objectMapper.readTree(response);
-      JsonNode data = root.path("data");
-      List<float[]> out = new ArrayList<>(data.size());
-      for (JsonNode item : data) {
-        JsonNode embedding = item.path("embedding");
-        float[] vec = new float[embedding.size()];
-        for (int j = 0; j < embedding.size(); j++) {
-          vec[j] = (float) embedding.get(j).asDouble();
-        }
-        out.add(vec);
-      }
-      return out;
-    } catch (Exception e) {
-      throw new RuntimeException("Failed to parse OpenAI embeddings response", e);
+      String hash =
+          HexFormat.of()
+              .formatHex(
+                  MessageDigest.getInstance("SHA-256")
+                      .digest(normalized.getBytes(StandardCharsets.UTF_8)));
+      return normalized.substring(0, 80) + ":sha256:" + hash;
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
     }
   }
 }

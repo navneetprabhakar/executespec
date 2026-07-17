@@ -102,6 +102,13 @@ public class StalenessService {
     for (ProjectRepoLink link : links) {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
       if (repo == null) continue;
+      // Architecture/codemap generation is currently a GitHub-only capability. Exclude LOCAL and
+      // Bitbucket browse-only sources from this GitHub SHA/diff metric instead of fabricating a
+      // github.com/null URL and presenting the result as provider-neutral evidence.
+      if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())
+          || (repo.getScmProvider() != null && !"GITHUB".equalsIgnoreCase(repo.getScmProvider()))) {
+        continue;
+      }
       String generated = generatedShas.get(repo.getGithubRepoFullName());
       // V192 (PR-M) — probe the branch the codemap was generated from. Legacy rows
       // (generatedBranches empty for this repo) keep the old defaultBranch behaviour.

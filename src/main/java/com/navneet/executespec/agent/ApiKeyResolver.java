@@ -1,6 +1,8 @@
 package com.navneet.executespec.agent;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -48,6 +50,18 @@ public class ApiKeyResolver {
    * @return resolved keys; null values mean "use the system singleton bean"
    */
   public ResolvedKeys resolve(String userId) {
+    return resolveWithProvenance(userId).keys();
+  }
+
+  /**
+   * Resolves the current credentials together with the exact winning subject for every provider.
+   * The returned secret values are request-local only; callers must never persist or log them.
+   *
+   * <p>This is the dispatch-time counterpart to the secret-free V282 policy snapshot. It keeps an
+   * OWN_KEYS context pinned to the same USER/ORG source that was authorized when the context was
+   * created, and lets the router detect credential removal or source drift after a restart.
+   */
+  public CredentialResolution resolveWithProvenance(String userId) {
     String anthropic = null;
     String openAi = null;
     String gemini = null;
@@ -57,6 +71,7 @@ public class ApiKeyResolver {
     String orgId = null;
     String keySourceMode = "HYBRID";
     Set<String> enabledProviders = null;
+    Map<String, CredentialOrigin> origins = new LinkedHashMap<>();
 
     if (userId != null) {
       AppUser user = userRepo.findById(userId).orElse(null);
@@ -66,6 +81,11 @@ public class ApiKeyResolver {
         gemini = blankToNull(user.getGeminiApiKey());
         deepSeek = blankToNull(user.getDeepSeekApiKey());
         fireworks = blankToNull(user.getFireworksApiKey());
+        if (anthropic != null) origins.put("anthropic", CredentialOrigin.USER);
+        if (openAi != null) origins.put("openai", CredentialOrigin.USER);
+        if (gemini != null) origins.put("gemini", CredentialOrigin.USER);
+        if (deepSeek != null) origins.put("deepseek", CredentialOrigin.USER);
+        if (fireworks != null) origins.put("fireworks", CredentialOrigin.USER);
         orgId = user.getOrgId();
       }
     }
@@ -87,14 +107,33 @@ public class ApiKeyResolver {
         openRouter = null;
         deepSeek = null;
         fireworks = null;
+        origins.clear();
       } else {
         // Fill in gaps from org-level keys (OWN_KEYS and HYBRID both resolve org keys)
-        if (anthropic == null) anthropic = blankToNull(org.getAnthropicApiKey());
-        if (openAi == null) openAi = blankToNull(org.getOpenAiApiKey());
-        if (gemini == null) gemini = blankToNull(org.getGeminiApiKey());
-        if (openRouter == null) openRouter = blankToNull(org.getOpenRouterApiKey());
-        if (deepSeek == null) deepSeek = blankToNull(org.getDeepSeekApiKey());
-        if (fireworks == null) fireworks = blankToNull(org.getFireworksApiKey());
+        if (anthropic == null) {
+          anthropic = blankToNull(org.getAnthropicApiKey());
+          if (anthropic != null) origins.put("anthropic", CredentialOrigin.ORG);
+        }
+        if (openAi == null) {
+          openAi = blankToNull(org.getOpenAiApiKey());
+          if (openAi != null) origins.put("openai", CredentialOrigin.ORG);
+        }
+        if (gemini == null) {
+          gemini = blankToNull(org.getGeminiApiKey());
+          if (gemini != null) origins.put("gemini", CredentialOrigin.ORG);
+        }
+        if (openRouter == null) {
+          openRouter = blankToNull(org.getOpenRouterApiKey());
+          if (openRouter != null) origins.put("openrouter", CredentialOrigin.ORG);
+        }
+        if (deepSeek == null) {
+          deepSeek = blankToNull(org.getDeepSeekApiKey());
+          if (deepSeek != null) origins.put("deepseek", CredentialOrigin.ORG);
+        }
+        if (fireworks == null) {
+          fireworks = blankToNull(org.getFireworksApiKey());
+          if (fireworks != null) origins.put("fireworks", CredentialOrigin.ORG);
+        }
       }
     }
 
@@ -122,7 +161,7 @@ public class ApiKeyResolver {
         openRouter != null,
         deepSeek != null,
         fireworks != null);
-    return keys;
+    return new CredentialResolution(keys, orgId, Map.copyOf(origins));
   }
 
   /**
@@ -196,5 +235,20 @@ public class ApiKeyResolver {
   public String resolveOrgIdForUser(String userId) {
     if (userId == null || userId.isBlank()) return null;
     return userRepo.findById(userId).map(AppUser::getOrgId).orElse(null);
+  }
+
+  public enum CredentialOrigin {
+    USER,
+    ORG
+  }
+
+  /** Secret-bearing request-local result. Never serialize, persist, or log this record. */
+  public record CredentialResolution(
+      ResolvedKeys keys, String orgId, Map<String, CredentialOrigin> origins) {
+
+    public CredentialOrigin originFor(String provider) {
+      if (provider == null) return null;
+      return origins.get(provider.trim().toLowerCase(java.util.Locale.ROOT));
+    }
   }
 }

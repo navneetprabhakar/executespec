@@ -8,7 +8,13 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
-import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {
+  normalizeUiProvider,
+  UI_PROVIDER_USAGE,
+  uiSlashHelp,
+  uiSlashSuggestions,
+  uiSlashUsage,
+} from '@/lib/uiSlash';
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
@@ -588,7 +594,7 @@ export default function IdeRunResult() {
     if (cmd === '/provider') {
       const provider = normalizeUiProvider(arg);
       if (!provider) {
-        appendRunChatNote('Usage: /provider anthropic|openai|deepseek');
+        appendRunChatNote(`Usage: ${UI_PROVIDER_USAGE}`);
         return true;
       }
       const saved = await api.updateProviderPreference(provider);

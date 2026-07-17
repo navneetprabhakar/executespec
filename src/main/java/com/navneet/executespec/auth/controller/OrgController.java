@@ -28,11 +28,11 @@ import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.FireworksModelMapper;
-import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
+import com.navneet.executespec.router.ProviderReadinessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -54,6 +54,7 @@ public class OrgController {
   private final OrgMemberRepository orgMemberRepo;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
+  private final ProviderReadinessService providerReadinessService;
 
   @PostMapping
   public ResponseEntity<OrgDto> createOrg(
@@ -310,7 +311,7 @@ public class OrgController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     String orgId = userDetails.getUser().getOrgId();
     if (orgId == null) return ResponseEntity.badRequest().build();
-    return ResponseEntity.ok(buildMatrixView(orgId));
+    return ResponseEntity.ok(buildMatrixView(orgId, userDetails.getUser().getId()));
   }
 
   @PutMapping("/me/model-matrix")
@@ -320,17 +321,25 @@ public class OrgController {
     String orgId = userDetails.getUser().getOrgId();
     if (orgId == null) return ResponseEntity.badRequest().build();
     orgModelOverrideService.updateOverrides(orgId, req.overrides(), userDetails.getUser().getId());
-    return ResponseEntity.ok(buildMatrixView(orgId));
+    return ResponseEntity.ok(buildMatrixView(orgId, userDetails.getUser().getId()));
   }
 
-  private ModelMatrixView buildMatrixView(String orgId) {
+  private ModelMatrixView buildMatrixView(String orgId, String userId) {
     Org org = orgRepo.findById(orgId).orElse(null);
     String tier = org != null ? org.getTier() : null;
     boolean editable = orgModelOverrideService.canEditMatrix(tier);
 
     List<String> providers = new ArrayList<>();
-    for (LlmProvider p : LlmProvider.values()) {
-      if (!ModelAccessService.isDisabledProvider(p.name())) providers.add(p.name().toLowerCase());
+    for (ProviderReadinessService.ProviderReadiness readiness :
+        providerReadinessService.resolve(userId)) {
+      // The org matrix is an effective-policy surface. Unkeyed and policy-blocked providers must
+      // not retain active cells merely because they exist in global YAML. CIRCUIT_OPEN remains
+      // visible because the route is credentialed and policy-allowed; the outage is transient.
+      if ((readiness.dispatchable()
+              || readiness.state() == ProviderReadinessService.State.CIRCUIT_OPEN)
+          && !ModelAccessService.isDisabledProvider(readiness.provider())) {
+        providers.add(readiness.provider().toLowerCase(java.util.Locale.ROOT));
+      }
     }
     List<String> tiers = new ArrayList<>();
     for (AgentTier t : AgentTier.values()) tiers.add(t.name().toLowerCase());
@@ -352,15 +361,19 @@ public class OrgController {
       }
     }
 
+    Map<String, String> activeOverrides = new LinkedHashMap<>();
+    orgModelOverrideService
+        .currentOverrides(orgId)
+        .forEach(
+            (key, model) -> {
+              int separator = key.indexOf(':');
+              if (separator > 0 && providers.contains(key.substring(0, separator).toLowerCase())) {
+                activeOverrides.put(key, model);
+              }
+            });
+
     return new ModelMatrixView(
-        tier,
-        editable,
-        providers,
-        tiers,
-        defaults,
-        orgModelOverrideService.currentOverrides(orgId),
-        modelsByProvider,
-        modelLabels);
+        tier, editable, providers, tiers, defaults, activeOverrides, modelsByProvider, modelLabels);
   }
 
   private static void putIfPresent(Map<String, String> m, String k, String v) {

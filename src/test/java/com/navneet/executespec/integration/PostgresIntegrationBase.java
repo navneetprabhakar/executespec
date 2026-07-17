@@ -12,7 +12,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Shared base for all Testcontainers integration tests. Spins up a single PostgreSQL container
  * reused across all subclasses. Tagged "integration" so Maven Surefire excludes these from the
- * default mvn test run. Run explicitly with: mvn test -Dgroups=integration
+ * default mvn test run. Run explicitly with: mvn test -Pintegration -Dgroups=integration
  */
 @Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

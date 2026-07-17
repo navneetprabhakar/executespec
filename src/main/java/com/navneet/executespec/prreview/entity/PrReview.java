@@ -14,8 +14,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * One row per (repo, PR, head_sha) review the PR Review Agent has produced. See V172 migration for
- * column semantics + paid-tier gating.
+ * One row per project-scoped (repo, PR, head_sha) review the PR Review Agent has produced. See V172
+ * for the original schema and V281 for durable linked-repository identity + tenant-scoped
+ * uniqueness.
  *
  * <p>The {@link #status} column tracks the agent run lifecycle (QUEUED → RUNNING → COMPLETE /
  * FAILED). The {@link #verdict} column carries the agent's verdict (APPROVE / REQUEST_CHANGES /
@@ -34,6 +35,10 @@ public class PrReview {
 
   @Column(name = "project_id", nullable = false, length = 36)
   private String projectId;
+
+  /** V281 — durable linked-repository identity used at submit admission. */
+  @Column(name = "repo_id")
+  private UUID repoId;
 
   @Column(name = "repo_full_name", nullable = false)
   private String repoFullName;

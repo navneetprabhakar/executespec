@@ -10,6 +10,7 @@ import jakarta.annotation.PostConstruct;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -49,6 +50,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private final FeatureFlagService featureFlagService;
   private final PromptAssembler promptAssembler;
   private final RunCostTracker costTracker;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final RepoOrientationService repoOrientationService;
@@ -61,7 +63,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
     ExecutionContext ctx;
     try {
       String taskId = request.taskId() != null ? request.taskId() : "__root__";
-      ctx = new ExecutionContext(request.runId(), taskId, workspace.toRealPath());
+      ctx =
+          new ExecutionContext(
+              request.runId(),
+              taskId,
+              workspace.toRealPath(),
+              executionPolicyFactory.forRun(request.runId()));
     } catch (IOException ioe) {
       log.error("engine: workspace realpath failed for run {}", request.runId(), ioe);
       return EngineResult.builder()

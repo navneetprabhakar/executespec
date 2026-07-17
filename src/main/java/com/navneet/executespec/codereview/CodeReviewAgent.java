@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -57,6 +59,7 @@ public class CodeReviewAgent {
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /**
    * Invoke the agent. Throws {@link CodeReviewAgentException} on LLM dispatch failure or malformed
@@ -72,6 +75,12 @@ public class CodeReviewAgent {
       throw new CodeReviewAgentException("unknown provider: " + provider);
     }
     ResolvedModel resolved = modelResolver.resolve("CodeReviewAgent", providerEnum);
+    if (req.model() != null
+        && (!req.model().equals(resolved.getModel())
+            || resolved.getActualProvider() != providerEnum)) {
+      throw new CodeReviewAgentException(
+          "confirmed provider/model route changed before code review dispatch");
+    }
 
     String systemPrompt;
     try {
@@ -89,6 +98,18 @@ public class CodeReviewAgent {
     messages.add(new UserMessage(userPrompt));
 
     SubmitCodeReviewToolCallback submitTool = new SubmitCodeReviewToolCallback();
+    var executionReference =
+        req.executionReference() != null
+            ? req.executionReference()
+            : executionPolicyFactory.forProject(
+                req.projectId(),
+                "code-review",
+                "CODE_REVIEW",
+                req.scanId(),
+                req.scanId(),
+                provider,
+                req.model(),
+                req.actorUserId());
 
     ChatResponse resp;
     try {
@@ -103,7 +124,10 @@ public class CodeReviewAgent {
                   .toolsOverride(List.of(submitTool))
                   .context(
                       new ExecutionContext(
-                          "code-review-" + req.scanId(), "review", java.nio.file.Paths.get("/")))
+                          "code-review-" + req.scanId(),
+                          "review",
+                          java.nio.file.Paths.get("/"),
+                          executionReference))
                   .agentRole("CodeReviewAgent")
                   .stepId("code-review.scan")
                   .build());
@@ -351,6 +375,7 @@ public class CodeReviewAgent {
   @Builder
   public record AgentRequest(
       String scanId,
+      String projectId,
       String repoFullName,
       String scannedSha,
       List<String> languages,
@@ -358,7 +383,10 @@ public class CodeReviewAgent {
       int totalLoc,
       List<StaticFinding> staticFindings,
       List<FileSample> fileSamples,
-      String provider) {}
+      String provider,
+      String model,
+      String actorUserId,
+      LlmExecutionReference executionReference) {}
 
   /** One issue surfaced by the agent — already triaged + categorized. */
   public record AgentIssue(

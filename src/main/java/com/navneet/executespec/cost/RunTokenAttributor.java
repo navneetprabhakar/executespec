@@ -42,21 +42,23 @@ public class RunTokenAttributor {
    * usage even if the in-memory tracker is later evicted (deploy restart, accumulator eviction).
    */
   public void attributePhase(
-      String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
+      String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
+    int persistedIn = RunCostTracker.saturatedInt(inTok);
+    int persistedOut = RunCostTracker.saturatedInt(outTok);
     runRepo
         .findById(runId)
         .ifPresent(
             r -> {
               switch (phase) {
                 case PLANNER -> {
-                  r.setPlannerInputTokens(inTok);
-                  r.setPlannerOutputTokens(outTok);
+                  r.setPlannerInputTokens(persistedIn);
+                  r.setPlannerOutputTokens(persistedOut);
                   r.setPlannerProvider(providerUpper);
                   r.setPlannerActualModel(model);
                 }
                 case REVIEWER -> {
-                  r.setReviewerInputTokens(inTok);
-                  r.setReviewerOutputTokens(outTok);
+                  r.setReviewerInputTokens(persistedIn);
+                  r.setReviewerOutputTokens(persistedOut);
                   r.setReviewerProvider(providerUpper);
                   r.setReviewerActualModel(model);
                 }
@@ -65,7 +67,7 @@ public class RunTokenAttributor {
             });
     if (inTok > 0 || outTok > 0) {
       try {
-        runRepo.addTokens(runId, inTok, outTok);
+        runRepo.addTokens(runId, persistedIn, persistedOut);
       } catch (Exception e) {
         log.warn("attributePhase addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -78,22 +80,27 @@ public class RunTokenAttributor {
    * still adding only the provided delta to the run total.
    */
   public void attributePhaseAdditional(
-      String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
+      String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
+    int persistedIn = RunCostTracker.saturatedInt(inTok);
+    int persistedOut = RunCostTracker.saturatedInt(outTok);
     runRepo
         .findById(runId)
         .ifPresent(
             r -> {
               switch (phase) {
                 case PLANNER -> {
-                  r.setPlannerInputTokens(safe(r.getPlannerInputTokens()) + Math.max(0, inTok));
-                  r.setPlannerOutputTokens(safe(r.getPlannerOutputTokens()) + Math.max(0, outTok));
+                  r.setPlannerInputTokens(
+                      saturatingAdd(safe(r.getPlannerInputTokens()), persistedIn));
+                  r.setPlannerOutputTokens(
+                      saturatingAdd(safe(r.getPlannerOutputTokens()), persistedOut));
                   r.setPlannerProvider(providerUpper);
                   r.setPlannerActualModel(model);
                 }
                 case REVIEWER -> {
-                  r.setReviewerInputTokens(safe(r.getReviewerInputTokens()) + Math.max(0, inTok));
+                  r.setReviewerInputTokens(
+                      saturatingAdd(safe(r.getReviewerInputTokens()), persistedIn));
                   r.setReviewerOutputTokens(
-                      safe(r.getReviewerOutputTokens()) + Math.max(0, outTok));
+                      saturatingAdd(safe(r.getReviewerOutputTokens()), persistedOut));
                   r.setReviewerProvider(providerUpper);
                   r.setReviewerActualModel(model);
                 }
@@ -102,7 +109,7 @@ public class RunTokenAttributor {
             });
     if (inTok > 0 || outTok > 0) {
       try {
-        runRepo.addTokens(runId, inTok, outTok);
+        runRepo.addTokens(runId, persistedIn, persistedOut);
       } catch (Exception e) {
         log.warn("attributePhaseAdditional addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -118,15 +125,17 @@ public class RunTokenAttributor {
   public void attributeWorker(
       String runId,
       ExecutionResult execResult,
-      int totalIn,
-      int totalOut,
+      long totalIn,
+      long totalOut,
       String providerUpper,
       String model) {
+    int persistedTotalIn = RunCostTracker.saturatedInt(totalIn);
+    int persistedTotalOut = RunCostTracker.saturatedInt(totalOut);
     int n = execResult.perTask().size();
     if (n == 0) return;
     if (totalIn > 0 || totalOut > 0) {
       try {
-        runRepo.addTokens(runId, totalIn, totalOut);
+        runRepo.addTokens(runId, persistedTotalIn, persistedTotalOut);
       } catch (Exception e) {
         log.warn("attributeWorker addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -136,19 +145,21 @@ public class RunTokenAttributor {
     java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
     for (var outcome : execResult.perTask()) {
       RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
-      realPerTask.put(outcome.taskId(), new int[] {s.inputTokens(), s.outputTokens()});
-      sumIn += s.inputTokens();
-      sumOut += s.outputTokens();
+      int taskIn = RunCostTracker.saturatedInt(s.inputTokens());
+      int taskOut = RunCostTracker.saturatedInt(s.outputTokens());
+      realPerTask.put(outcome.taskId(), new int[] {taskIn, taskOut});
+      sumIn = saturatingAdd(sumIn, taskIn);
+      sumOut = saturatingAdd(sumOut, taskOut);
     }
-    int residualIn = Math.max(0, totalIn - sumIn);
-    int residualOut = Math.max(0, totalOut - sumOut);
+    int residualIn = Math.max(0, persistedTotalIn - sumIn);
+    int residualOut = Math.max(0, persistedTotalOut - sumOut);
     int residualPerTaskIn = residualIn / n;
     int residualPerTaskOut = residualOut / n;
     for (var outcome : execResult.perTask()) {
       String taskRowId = idPrefix + outcome.taskId();
       int[] real = realPerTask.get(outcome.taskId());
-      int finalIn = real[0] + residualPerTaskIn;
-      int finalOut = real[1] + residualPerTaskOut;
+      int finalIn = saturatingAdd(real[0], residualPerTaskIn);
+      int finalOut = saturatingAdd(real[1], residualPerTaskOut);
       // 2026-05-02 — write the model the worker ACTUALLY ran on (tier-resolved from
       // SequentialExecutor.tierConfigFor) instead of the run-level default. Previously every
       // task row got the run default (e.g. claude-haiku for anthropic), masking the workhorse/
@@ -184,13 +195,19 @@ public class RunTokenAttributor {
    * target task row from its real task snapshot.
    */
   public void attributeWorkerAdditionalTask(
-      String runId, String taskId, int totalIn, int totalOut, String providerUpper, String model) {
+      String runId,
+      String taskId,
+      long totalIn,
+      long totalOut,
+      String providerUpper,
+      String model) {
     if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
       return;
     }
     if (totalIn > 0 || totalOut > 0) {
       try {
-        runRepo.addTokens(runId, totalIn, totalOut);
+        runRepo.addTokens(
+            runId, RunCostTracker.saturatedInt(totalIn), RunCostTracker.saturatedInt(totalOut));
       } catch (Exception e) {
         log.warn(
             "attributeWorkerAdditionalTask addTokens failed run={}: {}", runId, e.getMessage());
@@ -206,8 +223,8 @@ public class RunTokenAttributor {
         .findById(taskRowId)
         .ifPresent(
             task -> {
-              task.setInputTokens(snapshot.inputTokens());
-              task.setOutputTokens(snapshot.outputTokens());
+              task.setInputTokens(RunCostTracker.saturatedInt(snapshot.inputTokens()));
+              task.setOutputTokens(RunCostTracker.saturatedInt(snapshot.outputTokens()));
               task.setProvider(providerUpper);
               task.setModel(model);
               taskRepo.save(task);
@@ -216,5 +233,9 @@ public class RunTokenAttributor {
 
   private static int safe(Integer value) {
     return value == null ? 0 : Math.max(0, value);
+  }
+
+  private static int saturatingAdd(int left, int right) {
+    return RunCostTracker.saturatedInt((long) left + right);
   }
 }

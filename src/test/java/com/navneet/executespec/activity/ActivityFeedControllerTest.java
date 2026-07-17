@@ -3,6 +3,7 @@ package com.navneet.executespec.activity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -44,7 +45,9 @@ class ActivityFeedControllerTest {
   @Test
   void rejectsNonUuidProjectId() {
     assertThatThrownBy(
-            () -> controller.list("not-a-uuid", 30, null, null, null, null, false, 100, fakeAuth()))
+            () ->
+                controller.list(
+                    "not-a-uuid", 30, null, null, null, null, false, 100, null, fakeAuth()))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
         .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -53,7 +56,7 @@ class ActivityFeedControllerTest {
   @Test
   void rejectsUnauthenticatedCallers() {
     assertThatThrownBy(
-            () -> controller.list(projectId, 30, null, null, null, null, false, 100, null))
+            () -> controller.list(projectId, 30, null, null, null, null, false, 100, null, null))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
         .isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -61,7 +64,8 @@ class ActivityFeedControllerTest {
 
   @Test
   void filtersAuditOnlyEvents_evenWhenNoExplicitFilter() {
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -69,7 +73,7 @@ class ActivityFeedControllerTest {
                 entry(ActivityEventType.RUN_COMPLETED)));
 
     ResponseEntity<ActivityFeedController.ActivityPage> res =
-        controller.list(projectId, 30, null, null, null, null, false, 100, fakeAuth());
+        controller.list(projectId, 30, null, null, null, null, false, 100, null, fakeAuth());
 
     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(res.getBody().entries()).hasSize(2);
@@ -78,7 +82,8 @@ class ActivityFeedControllerTest {
 
   @Test
   void filtersAdminToggleEvents_unlessIncludeAdminEventsTrue() {
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -86,17 +91,21 @@ class ActivityFeedControllerTest {
                 entry(ActivityEventType.CODEMAP_REGENERATED))); // ADMIN_TOGGLE
 
     ResponseEntity<ActivityFeedController.ActivityPage> hidden =
-        controller.list(projectId, 30, null, null, null, null, false, 100, fakeAuth());
+        controller.list(projectId, 30, null, null, null, null, false, 100, null, fakeAuth());
     assertThat(hidden.getBody().entries()).hasSize(1);
 
     ResponseEntity<ActivityFeedController.ActivityPage> included =
-        controller.list(projectId, 30, null, null, null, null, true, 100, fakeAuth());
+        controller.list(projectId, 30, null, null, null, null, true, 100, null, fakeAuth());
     assertThat(included.getBody().entries()).hasSize(3);
+    verify(projectAccessGuard)
+        .assertCanAdmin(
+            org.mockito.ArgumentMatchers.eq(projectId), org.mockito.ArgumentMatchers.isNull());
   }
 
   @Test
   void filtersByEventTypeWhenProvided() {
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -113,6 +122,7 @@ class ActivityFeedControllerTest {
             null,
             false,
             100,
+            null,
             fakeAuth());
 
     assertThat(res.getBody().entries()).hasSize(2);
@@ -129,10 +139,12 @@ class ActivityFeedControllerTest {
     ActivityFeedEntry e2 = entry(ActivityEventType.RUN_SUBMITTED);
     e2.setActorUserId(UUID.randomUUID());
 
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(List.of(e1, e2));
     ResponseEntity<ActivityFeedController.ActivityPage> res =
-        controller.list(projectId, 30, null, actor.toString(), null, null, false, 100, fakeAuth());
+        controller.list(
+            projectId, 30, null, actor.toString(), null, null, false, 100, null, fakeAuth());
     assertThat(res.getBody().entries()).hasSize(1);
     assertThat(res.getBody().entries().get(0).actorUserId()).isEqualTo(actor.toString());
   }
@@ -143,22 +155,69 @@ class ActivityFeedControllerTest {
     // after 100 → hasMore=true
     List<ActivityFeedEntry> many = new java.util.ArrayList<>();
     for (int i = 0; i < 101; i++) many.add(entry(ActivityEventType.RUN_SUBMITTED));
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any())).thenReturn(many);
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(many);
 
     ResponseEntity<ActivityFeedController.ActivityPage> res =
-        controller.list(projectId, 30, null, null, null, null, false, 100, fakeAuth());
+        controller.list(projectId, 30, null, null, null, null, false, 100, null, fakeAuth());
     assertThat(res.getBody().entries()).hasSize(100);
     assertThat(res.getBody().hasMore()).isTrue();
   }
 
   @Test
   void clampsLimitToValidRange() {
-    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(List.of(entry(ActivityEventType.RUN_SUBMITTED)));
     // limit=0 → clamped to 1; limit=10000 → clamped to 500. Both should
     // succeed without throwing.
-    controller.list(projectId, 30, null, null, null, null, false, 0, fakeAuth());
-    controller.list(projectId, 30, null, null, null, null, false, 10000, fakeAuth());
+    controller.list(projectId, 30, null, null, null, null, false, 0, null, fakeAuth());
+    controller.list(projectId, 30, null, null, null, null, false, 10000, null, fakeAuth());
+  }
+
+  @Test
+  void rejectsInvalidActorAndCursorBeforeQuerying() {
+    assertThatThrownBy(
+            () ->
+                controller.list(
+                    projectId,
+                    Integer.MAX_VALUE,
+                    null,
+                    "not-a-uuid",
+                    null,
+                    null,
+                    false,
+                    100,
+                    null,
+                    fakeAuth()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+
+    assertThatThrownBy(
+            () ->
+                controller.list(
+                    projectId, 30, null, null, null, null, false, 100, "bad-cursor", fakeAuth()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void returnsStableNextCursorOnlyWhenAnotherDbRowExists() {
+    ActivityFeedEntry first = entry(ActivityEventType.RUN_SUBMITTED);
+    ActivityFeedEntry second = entry(ActivityEventType.RUN_COMPLETED);
+    when(feedRepo.findFilteredPage(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(List.of(first, second));
+
+    ResponseEntity<ActivityFeedController.ActivityPage> res =
+        controller.list(projectId, 999999, null, null, null, null, false, 1, null, fakeAuth());
+
+    assertThat(res.getBody().entries()).hasSize(1);
+    assertThat(res.getBody().hasMore()).isTrue();
+    assertThat(res.getBody().nextCursor()).isEqualTo(first.getOccurredAt() + "|" + first.getId());
   }
 
   private ActivityFeedEntry entry(ActivityEventType type) {

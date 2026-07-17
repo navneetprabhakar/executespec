@@ -1,5 +1,6 @@
 import type {
   ProjectDashboardDTO,
+  ProjectCodeIndexStatus,
   ProjectRepo,
   ProjectRepoLink,
   ArchitectureDoc,
@@ -22,6 +23,7 @@ import {
   GeneratedDocRow,
   GeneratedDocType,
   GitHubRemoteRepo,
+  ScmRemoteRepository,
   InvariantSummary,
   InvariantViolation,
   InvitePreview,
@@ -91,6 +93,106 @@ export async function downloadWorkspace(runId: string): Promise<void> {
 export const getProjects = () => req<ProjectDto[]>('/projects');
 
 export const getProject = (id: string) => req<ProjectDto>(`/projects/${id}`);
+
+export interface ProjectExportJob {
+  id: string;
+  status:
+    | 'QUEUED'
+    | 'RUNNING'
+    | 'CANCEL_REQUESTED'
+    | 'CANCELLED'
+    | 'SUCCEEDED'
+    | 'FAILED'
+    | 'EXPIRING'
+    | 'EXPIRED';
+  fileName: string;
+  sizeBytes: number | null;
+  sha256: string | null;
+  attemptCount: number;
+  errorCode: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  expiresAt: string | null;
+  cancelRequestedAt: string | null;
+  lastDownloadedAt: string | null;
+  downloadCount: number;
+  cancellable: boolean;
+  downloadable: boolean;
+}
+
+export interface ProjectExportAuditEvent {
+  id: string;
+  eventType: string;
+  outcome: string;
+  actorUserId: string | null;
+  details: string;
+  occurredAt: string;
+}
+
+export const createProjectExport = (projectId: string, idempotencyKey: string) =>
+  req<ProjectExportJob>(`/projects/${projectId}/export`, {
+    method: 'POST',
+    headers: {'Idempotency-Key': idempotencyKey},
+  });
+
+export const listProjectExports = (projectId: string) =>
+  req<ProjectExportJob[]>(`/projects/${projectId}/export`);
+
+export const getProjectExport = (projectId: string, jobId: string) =>
+  req<ProjectExportJob>(`/projects/${projectId}/export/${jobId}`);
+
+export const cancelProjectExport = (projectId: string, jobId: string) =>
+  req<ProjectExportJob>(`/projects/${projectId}/export/${jobId}/cancel`, {method: 'POST'});
+
+export const getProjectExportAudit = (projectId: string, jobId: string) =>
+  req<ProjectExportAuditEvent[]>(`/projects/${projectId}/export/${jobId}/audit`);
+
+/**
+ * Stream directly into the File System Access API where available. Older browsers retain the
+ * existing Blob fallback, bounded by the server's export byte ceiling.
+ */
+export async function downloadProjectExport(
+  projectId: string,
+  job: Pick<ProjectExportJob, 'id' | 'fileName'>,
+): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${projectId}/export/${job.id}/download`, {
+    headers: {...authHeader()},
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
+  }
+
+  type SaveHandle = {createWritable: () => Promise<WritableStream<Uint8Array>>};
+  const picker = (
+    window as unknown as {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: Array<{description: string; accept: Record<string, string[]>}>;
+      }) => Promise<SaveHandle>;
+    }
+  ).showSaveFilePicker;
+  if (picker && res.body) {
+    const handle = await picker({
+      suggestedName: job.fileName,
+      types: [{description: 'Gzip archive', accept: {'application/gzip': ['.tar.gz']}}],
+    });
+    await res.body.pipeTo(await handle.createWritable());
+    return;
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = job.fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export const createProject = (body: {
   name: string;
@@ -255,6 +357,11 @@ export const listRepos = (scope: RepoScope | 'ALL' = 'ALL') =>
 export const listGitHubRepos = (owner?: string) =>
   req<GitHubRemoteRepo[]>(`/repos/github${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`);
 
+export const listScmRepos = (provider: 'GITHUB' | 'BITBUCKET', owner?: string) =>
+  req<ScmRemoteRepository[]>(
+    `/repos/scm?provider=${provider}${owner ? `&owner=${encodeURIComponent(owner)}` : ''}`,
+  );
+
 export const createRepo = (data: LinkRepoRequest) =>
   req<ProjectRepo>('/repos', {method: 'POST', body: JSON.stringify(data)});
 
@@ -266,6 +373,15 @@ export const syncRepo = (repoId: string) =>
 // Repos — project link
 export const getProjectRepos = (projectId: string) =>
   req<ProjectRepoLink[]>(`/projects/${projectId}/repos`);
+
+export const getProjectCodeIndex = (projectId: string) =>
+  req<ProjectCodeIndexStatus[]>(`/projects/${projectId}/code-index`);
+
+export const refreshProjectCodeIndex = (projectId: string, repoId: string) =>
+  req<{repoId: string; status: 'QUEUED'; fallback: 'RIPGREP'; relationshipGraphAvailable: false}>(
+    `/projects/${projectId}/code-index/${repoId}/refresh`,
+    {method: 'POST'},
+  );
 
 export const linkProjectRepo = (projectId: string, repoId: string) =>
   req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}`, {method: 'POST'});
@@ -526,6 +642,66 @@ export const getProjectChatInfo = (projectId: string) =>
 
 export const getProjectChatHistory = (projectId: string) =>
   req<ProjectChatMessageDto[]>(`/projects/${projectId}/chat`);
+
+export type ProjectChatConfirmedAction =
+  | 'REGENERATE_ARCHITECTURE'
+  | 'GENERATE_PROJECT_DOC'
+  | 'RUN_CODE_REVIEW';
+
+export interface ProjectChatActionScope {
+  action: ProjectChatConfirmedAction;
+  provider: string;
+  model: string;
+  target: Record<string, string>;
+}
+
+export interface ProjectChatConfirmationReference {
+  confirmationId: string;
+  projectId: string;
+  action: ProjectChatConfirmedAction;
+  capabilities: string[];
+  provider: string;
+  model: string;
+  targetHash: string;
+  expiresAt: string;
+  consumed: boolean;
+  budget: {
+    maxTotalTokens: number;
+    maxCostUsd: number;
+    maxProviderCalls: number;
+  };
+}
+
+export interface IssuedProjectChatConfirmation {
+  confirmation: ProjectChatConfirmationReference;
+  /** One-time bearer. Callers must retain it only in memory and clear it after any outcome. */
+  confirmationToken: string;
+}
+
+export interface ProjectChatConfirmationExecutionResult {
+  confirmation: ProjectChatConfirmationReference;
+  result: Record<string, unknown>;
+}
+
+export const issueProjectChatConfirmation = (projectId: string, scope: ProjectChatActionScope) =>
+  req<IssuedProjectChatConfirmation>(`/projects/${projectId}/chat/confirmations`, {
+    method: 'POST',
+    body: JSON.stringify(scope),
+  });
+
+export const consumeProjectChatConfirmation = (
+  projectId: string,
+  confirmationId: string,
+  confirmationToken: string,
+  scope: ProjectChatActionScope,
+) =>
+  req<ProjectChatConfirmationExecutionResult>(
+    `/projects/${projectId}/chat/confirmations/${confirmationId}/consume`,
+    {
+      method: 'POST',
+      body: JSON.stringify({confirmationToken, ...scope}),
+    },
+  );
 
 export const listPrReviewsForProject = (projectId: string) =>
   req<PrReviewDto[]>(`/projects/${projectId}/pr-reviews`);

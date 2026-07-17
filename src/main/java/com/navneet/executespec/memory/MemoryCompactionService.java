@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.memory.entity.ProjectMemorySnapshot;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
@@ -41,6 +42,7 @@ public class MemoryCompactionService {
   private final ProjectMemorySnapshotRepository snapshotRepo;
   private final PromptAssembler promptAssembler;
   private final ProjectProviderResolver projectProviderResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   @Autowired
   public MemoryCompactionService(
@@ -49,13 +51,15 @@ public class MemoryCompactionService {
       ProjectRunLedgerRepository ledgerRepo,
       ProjectMemorySnapshotRepository snapshotRepo,
       PromptAssembler promptAssembler,
-      ProjectProviderResolver projectProviderResolver) {
+      ProjectProviderResolver projectProviderResolver,
+      LlmExecutionPolicyFactory executionPolicyFactory) {
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.ledgerRepo = ledgerRepo;
     this.snapshotRepo = snapshotRepo;
     this.promptAssembler = promptAssembler;
     this.projectProviderResolver = projectProviderResolver;
+    this.executionPolicyFactory = executionPolicyFactory;
   }
 
   /** Compatibility constructor for older unit callers. */
@@ -65,7 +69,7 @@ public class MemoryCompactionService {
       ProjectRunLedgerRepository ledgerRepo,
       ProjectMemorySnapshotRepository snapshotRepo,
       PromptAssembler promptAssembler) {
-    this(llmRouter, modelResolver, ledgerRepo, snapshotRepo, promptAssembler, null);
+    this(llmRouter, modelResolver, ledgerRepo, snapshotRepo, promptAssembler, null, null);
   }
 
   /**
@@ -162,10 +166,23 @@ public class MemoryCompactionService {
   }
 
   private String callLightweightLlm(String systemPrompt, String projectId) {
-    LlmProvider provider =
-        projectProviderResolver == null
-            ? ProjectProviderResolver.CANONICAL_DEFAULT
-            : projectProviderResolver.resolve(projectId);
+    if (projectProviderResolver == null) {
+      throw new IllegalStateException("ProjectProviderResolver is required for customer memory");
+    }
+    LlmProvider provider = projectProviderResolver.resolve(projectId);
+    if (executionPolicyFactory == null) {
+      throw new IllegalStateException("Execution policy factory is required for customer memory");
+    }
+    String contextId = "memory-compact-" + java.util.UUID.randomUUID();
+    var executionReference =
+        executionPolicyFactory.forProject(
+            projectId,
+            "memory-compaction",
+            "PROJECT_MEMORY",
+            contextId,
+            contextId,
+            provider.name(),
+            null);
     ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", provider);
     ChatResponse response =
         llmRouter.callText(
@@ -175,7 +192,8 @@ public class MemoryCompactionService {
                 new SystemMessage(systemPrompt), new UserMessage("Emit the updated snapshot now.")),
             "compact-" + projectId,
             "memory-compaction",
-            "compact");
+            "compact",
+            executionReference);
     return response.getResult().getOutput().getText();
   }
 

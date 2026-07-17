@@ -2,6 +2,8 @@ package com.navneet.executespec.sharing.controller;
 
 import java.time.Instant;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -19,6 +21,7 @@ import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
+import com.navneet.executespec.sharing.service.ProjectShareLinkAuditService;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -59,64 +62,62 @@ public class ProjectSharePublicController {
    * endpoint below to pull the payload.
    */
   @GetMapping("/api/shared/{token}/meta")
-  public ResponseEntity<SharedLinkMeta> meta(@PathVariable String token) {
-    ProjectShareLink link = linkService.resolveActive(token);
+  public ResponseEntity<SharedLinkMeta> meta(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = linkService.resolveActive(token, access);
+    linkService.recordMetadataAccess(link, access);
     return ResponseEntity.ok(
         new SharedLinkMeta(
-            link.getSurface().name(),
-            link.getScopeId(),
-            link.getLabel(),
-            link.getProjectId(),
-            link.getCreatedAt(),
-            link.getExpiresAt()));
+            link.getSurface().name(), link.getLabel(), link.getCreatedAt(), link.getExpiresAt()));
   }
 
   @GetMapping("/api/shared/{token}/run")
-  public ResponseEntity<SharedRun> sharedRun(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.RUN_DETAIL);
+  public ResponseEntity<SharedRun> sharedRun(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.RUN_DETAIL, access);
     PipelineRun run =
         runRepo
             .findById(link.getScopeId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
     assertSameProject(run.getProjectId(), link);
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     return ResponseEntity.ok(
         new SharedRun(
-            run.getRunId(),
             run.getRunTitle(),
             run.getStatus(),
-            run.getStatusReason(),
             run.getStartedAt(),
             run.getCompletedAt(),
-            run.getActualCostUsd(),
             link.getLabel()));
   }
 
   @GetMapping("/api/shared/{token}/project")
-  public ResponseEntity<SharedProjectOverview> sharedProject(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.PROJECT_OVERVIEW);
+  public ResponseEntity<SharedProjectOverview> sharedProject(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.PROJECT_OVERVIEW, access);
     Project project =
         projectRepo
             .findById(link.getProjectId())
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     return ResponseEntity.ok(
         new SharedProjectOverview(
-            project.getId(),
             project.getName(),
             project.getDescription(),
             project.getStatus(),
-            project.getAiProvider() != null ? project.getAiProvider().name() : null,
-            project.getGithubOwner(),
             project.getCreatedAt(),
             project.getUpdatedAt(),
             link.getLabel()));
   }
 
   @GetMapping("/api/shared/{token}/validation-report")
-  public ResponseEntity<SharedValidationReport> sharedReport(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.VALIDATION_REPORT);
+  public ResponseEntity<SharedValidationReport> sharedReport(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.VALIDATION_REPORT, access);
     ValidationReport report =
         reportRepo
             .findByRunId(link.getScopeId())
@@ -141,7 +142,7 @@ public class ProjectSharePublicController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Validation report not found"));
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     return ResponseEntity.ok(
         new SharedValidationReport(
             report.getRunId(),
@@ -158,8 +159,10 @@ public class ProjectSharePublicController {
   }
 
   @GetMapping("/api/shared/{token}/code-review")
-  public ResponseEntity<SharedCodeReview> sharedCodeReview(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.CODE_REVIEW);
+  public ResponseEntity<SharedCodeReview> sharedCodeReview(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.CODE_REVIEW, access);
     java.util.UUID scanId = java.util.UUID.fromString(link.getScopeId());
     CodeReviewScan scan =
         scanRepo
@@ -167,7 +170,7 @@ public class ProjectSharePublicController {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Code review not found"));
     assertSameProject(scan.getProjectId(), link);
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     java.util.List<CodeReviewIssue> issues =
         issueRepo.findByScanIdOrderBySeverityAscFilePathAscLineStartAsc(scanId);
     return ResponseEntity.ok(
@@ -183,8 +186,10 @@ public class ProjectSharePublicController {
   }
 
   @GetMapping("/api/shared/{token}/pr-review")
-  public ResponseEntity<SharedPrReview> sharedPrReview(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.PR_REVIEW);
+  public ResponseEntity<SharedPrReview> sharedPrReview(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.PR_REVIEW, access);
     java.util.UUID reviewId = java.util.UUID.fromString(link.getScopeId());
     PrReview review =
         prReviewRepo
@@ -192,7 +197,7 @@ public class ProjectSharePublicController {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found"));
     assertSameProject(review.getProjectId(), link);
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     java.util.List<PrReviewComment> comments =
         prCommentRepo.findByPrReviewIdOrderByFilePathAscLineNumberAsc(reviewId);
     return ResponseEntity.ok(
@@ -207,8 +212,10 @@ public class ProjectSharePublicController {
   }
 
   @GetMapping("/api/shared/{token}/architecture")
-  public ResponseEntity<SharedArchitecture> sharedArchitecture(@PathVariable String token) {
-    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.ARCHITECTURE_DOC);
+  public ResponseEntity<SharedArchitecture> sharedArchitecture(
+      @PathVariable String token, HttpServletRequest request) {
+    var access = accessContext(request);
+    ProjectShareLink link = mustBe(token, ProjectShareLink.Surface.ARCHITECTURE_DOC, access);
     ProjectArchitectureDoc doc =
         archRepo
             .findFirstByProjectIdOrderByVersionDesc(link.getProjectId())
@@ -216,23 +223,31 @@ public class ProjectSharePublicController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Architecture doc not generated"));
-    linkService.recordView(link);
+    linkService.recordView(link, access);
     return ResponseEntity.ok(
         new SharedArchitecture(
-            doc.getProjectId(),
-            doc.getVersion(),
-            doc.getContent(),
-            doc.getGeneratedAt(),
-            link.getLabel()));
+            doc.getVersion(), doc.getContent(), doc.getGeneratedAt(), link.getLabel()));
   }
 
-  private ProjectShareLink mustBe(String token, ProjectShareLink.Surface expected) {
-    ProjectShareLink link = linkService.resolveActive(token);
+  private ProjectShareLink mustBe(
+      String token,
+      ProjectShareLink.Surface expected,
+      ProjectShareLinkAuditService.AccessContext accessContext) {
+    ProjectShareLink link = linkService.resolveActive(token, accessContext);
     if (link.getSurface() != expected) {
+      linkService.recordDeniedSurface(link, accessContext);
       throw new ResponseStatusException(
           HttpStatus.NOT_FOUND, "Share link does not target this surface");
     }
     return link;
+  }
+
+  private static ProjectShareLinkAuditService.AccessContext accessContext(
+      HttpServletRequest request) {
+    String clientIp = request.getHeader("CF-Connecting-IP");
+    if (clientIp == null || clientIp.isBlank()) clientIp = request.getRemoteAddr();
+    return new ProjectShareLinkAuditService.AccessContext(
+        clientIp, request.getHeader("User-Agent"));
   }
 
   /**
@@ -255,30 +270,15 @@ public class ProjectSharePublicController {
   // Public-safe DTOs (never include internal tokens / credentials)
 
   public record SharedLinkMeta(
-      String surface,
-      String scopeId,
-      String label,
-      String projectId,
-      Instant createdAt,
-      Instant expiresAt) {}
+      String surface, String label, Instant createdAt, Instant expiresAt) {}
 
   public record SharedRun(
-      String runId,
-      String title,
-      String status,
-      String statusReason,
-      Instant startedAt,
-      Instant completedAt,
-      Double costUsd,
-      String label) {}
+      String title, String status, Instant startedAt, Instant completedAt, String label) {}
 
   public record SharedProjectOverview(
-      String projectId,
       String name,
       String description,
       String status,
-      String aiProvider,
-      String githubOwner,
       Instant createdAt,
       Instant updatedAt,
       String label) {}
@@ -317,5 +317,5 @@ public class ProjectSharePublicController {
       String label) {}
 
   public record SharedArchitecture(
-      String projectId, Integer version, String content, Instant generatedAt, String label) {}
+      Integer version, String content, Instant generatedAt, String label) {}
 }

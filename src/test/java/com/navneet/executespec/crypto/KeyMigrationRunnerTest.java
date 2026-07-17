@@ -1,6 +1,7 @@
 package com.navneet.executespec.crypto;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,6 +56,8 @@ class KeyMigrationRunnerTest {
             "gemini_api_key",
             "jira_api_token",
             "confluence_api_token");
+    assertThat(KeyMigrationRunner.PIPELINE_RUN_SECRET_COLUMNS)
+        .containsExactlyInAnyOrder("github_pat", "bitbucket_app_password");
     // token_hash is one-way SHA-256 by design and must NOT be enveloped.
     assertThat(KeyMigrationRunner.APP_USER_SECRET_COLUMNS).doesNotContain("token_hash");
   }
@@ -74,7 +77,7 @@ class KeyMigrationRunnerTest {
                 Map.of("id", 2L, "bot_token", legacy),
                 Map.of("id", 3L, "bot_token", alreadyEnveloped)));
 
-    new KeyMigrationRunner(service, jdbc).migrateExistingKeys();
+    new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
 
     ArgumentCaptor<Object> written = ArgumentCaptor.forClass(Object.class);
     verify(jdbc).update(contains("org_slack_integration"), written.capture(), eq(1L));
@@ -90,6 +93,25 @@ class KeyMigrationRunnerTest {
   }
 
   @Test
+  void pipelineRunCredentialsUseRunIdAsTheMigrationKey() {
+    SimpleKeyEncryptionService service = liveService();
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString())).thenReturn(List.of());
+    when(jdbc.queryForList(contains("SELECT run_id, github_pat FROM pipeline_run")))
+        .thenReturn(List.of(Map.of("run_id", "run-1", "github_pat", "ghp-legacy")));
+
+    new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
+
+    ArgumentCaptor<Object> written = ArgumentCaptor.forClass(Object.class);
+    verify(jdbc)
+        .update(
+            contains("UPDATE pipeline_run SET github_pat = ? WHERE run_id = ?"),
+            written.capture(),
+            eq("run-1"));
+    assertThat(service.decrypt(written.getValue().toString())).isEqualTo("ghp-legacy");
+  }
+
+  @Test
   void skipsEntirelyWhenEncryptionIsNotActive() {
     CryptoProperties props = new CryptoProperties();
     props.setEnabled(false);
@@ -97,8 +119,40 @@ class KeyMigrationRunnerTest {
     disabled.init();
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
 
-    new KeyMigrationRunner(disabled, jdbc).migrateExistingKeys();
+    new KeyMigrationRunner(disabled, jdbc, properties(false)).migrateExistingKeys();
 
     verify(jdbc, never()).queryForList(anyString());
+  }
+
+  @Test
+  void requiredEncryptionFailsStartupWhenAnyCredentialColumnCannotBeMigrated() {
+    SimpleKeyEncryptionService service = liveService();
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString()))
+        .thenThrow(new IllegalStateException("database unavailable"));
+
+    KeyMigrationRunner runner = new KeyMigrationRunner(service, jdbc, properties(true));
+
+    assertThatThrownBy(runner::migrateExistingKeys)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("app_user.openai_api_key")
+        .hasRootCauseMessage("database unavailable");
+  }
+
+  @Test
+  void optionalEncryptionKeepsDevelopmentBootCompatibleButSurfacesMigrationFailure() {
+    SimpleKeyEncryptionService service = liveService();
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString())).thenThrow(new IllegalStateException("table unavailable"));
+
+    new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
+
+    verify(jdbc, org.mockito.Mockito.times(20)).queryForList(anyString());
+  }
+
+  private static CryptoProperties properties(boolean required) {
+    CryptoProperties properties = new CryptoProperties();
+    properties.setRequireEncryption(required);
+    return properties;
   }
 }

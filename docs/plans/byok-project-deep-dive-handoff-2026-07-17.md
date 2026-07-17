@@ -536,39 +536,57 @@ This is a product capability gap, not merely missing UI. A CommerceIQ-style Bitb
 - Run-level cost evidence exposes `stepCalls`, attributed cost, unattributed cost, and a reconciliation flag.
 - Atomic SQL `addTokens()` avoids ordinary read-modify-write races when phase attribution persists totals.
 
-### 11.2 P1: OpenAI/DeepSeek reasoning tokens are not extracted
+### 11.2 Resolved by V283 tranche: OpenAI/DeepSeek reasoning tokens
 
-`OpenAiNativeToolClient` parses `prompt_tokens`, `completion_tokens`, cache tokens, and provider cost, but does not parse `usage.completion_tokens_details.reasoning_tokens` (or the equivalent DeepSeek field) into the `reasoning_tokens` metadata key. `RunCostTracker` supports that key, but the OpenAI-wire client never supplies it. Therefore DeepSeek/OpenAI reasoning usage is reported as zero even when the provider returns it. Visible output tokens remain present, so this is primarily an observability and model-quality measurement defect, but it also makes cross-model cost/quality comparisons misleading.
+`OpenAiNativeToolClient` now extracts OpenAI-wire reasoning-token metadata, including the supported
+DeepSeek response shapes, into `RunCostTracker` and V283 rows. Deterministic response fixtures cover
+the parser; bounded live native-DeepSeek reconciliation remains provider QA, not local proof.
 
-### 11.3 P1: failed provider attempts are absent from the usage ledger
+### 11.3 Resolved by V283: failed provider attempts are present, cost uncertainty remains
 
-`LlmRouter` records usage only after `dispatch(...)` returns a successful `ChatResponse`. Transient failures, timeouts, rate-limit responses, and failed provider attempts that may still incur upstream billing are not represented in `run_step_usage` or `RunCostTracker`. A later retry/failover can therefore show less provider spend than was actually incurred, and the cost evidence cannot explain failed attempts.
+`LlmRouter` now records one V283 row for every physical success/failure, retry and failover target.
+A failed response may still lack provider usage metadata. The Enterprise report therefore returns
+`knownCostUsd=null`/`UNKNOWN_PROVIDER_NOT_REPORTED` and labels totals as a known-cost lower bound;
+it does not reinterpret the schema's stored zero as proof that the provider charged nothing.
 
-### 11.4 P1: planner phase attribution includes earlier calls
+### 11.4 Canonical report no longer relies on cumulative planner phase attribution
 
-`RunOrchestrator` calls `costTracker.snapshot(runId)` after planning and writes that absolute snapshot into the planner phase via `attributePhase`. The snapshot already includes classifier and any pre-planner context calls. The classifier is persisted separately by `RunPlanningCoordinator`, but the planner phase columns therefore include classifier/context tokens as well. Run totals are less affected because the atomic total is incremented from this same aggregate, but phase-level reports and provider attribution are incorrect.
+V283 records producer `agentRole`, `stepId` and feature on each physical provider attempt. The
+Enterprise report uses those facts instead of reconstructing phases from cumulative snapshots.
+Legacy phase columns remain compatibility projections and are not the canonical FinOps source.
 
-Required fix: capture a phase baseline immediately before each phase and attribute only the delta. Do not infer phase boundaries from one cumulative snapshot.
+### 11.5 Resolved at the canonical boundary: long counters/BIGINT
 
-### 11.5 P1: integer narrowing can overflow long runs
+Canonical snapshots/call usage use `long`, and V283 widens attempt call index/token accounting
+boundaries to BIGINT. Saturation is retained only at documented legacy integer DTO/entity edges;
+synthetic `>2^31` tests pin that those edges cannot wrap negative.
 
-`RunCostTracker` stores counters as `AtomicLong`, but `Snapshot`, `CallUsage`, `RunTokenAttributor`, and `PipelineRunRepository.addTokens(...)` narrow token counts and deltas to `int`. A large repository, long multi-task run, or repeated continuation can exceed the signed 32-bit range and produce negative or wrapped totals. Database entity fields are wider, but the aggregation API is not.
+### 11.6 Partially resolved: project/background context adoption
 
-### 11.6 P1: project/background calls are not reconciled into run cost
-
-Project chat, architecture, document generation, memory, RAG embeddings, code review, and PR review use synthetic run IDs or direct provider calls. Their calls either do not enter the run ledger at all or are not associated with the customer project’s durable cost record. This leaves a gap between actual provider spend and the run/project cost evidence, even where the provider call itself succeeds.
+V282 durable execution contexts now cover the primary run, agent-turn, project chat/architecture,
+generated-doc, brief/memory and Code/PR Review paths and attribute them into V283. Provider-routed
+embedding governance and any remaining legacy/synthetic operator path remain separate release gates.
 
 ### 11.7 Verification note
 
-The focused token-accounting test command was attempted, but Maven compilation is currently blocked by an unrelated existing error: `benchmark/ProviderHandoffFixtureHarness.java:360` references `File` without a resolvable symbol/import. No token-accounting test result can therefore be treated as a fresh green build until that compile blocker is repaired.
+The earlier unrelated `ProviderHandoffFixtureHarness` compile blocker is historical. V283's focused
+40-test attribution/router/cost cohort and real PostgreSQL V282→V283 rehearsal passed. The expanded
+calendar/CSV/RBAC/reconciliation tests are added but must use the root-coordinated Maven window
+before their status can be promoted from VERIFYING.
 
-### 11.8 P2: durable usage writes fail open
+### 11.8 Partially resolved: durable usage-write failure alerts, replay still open
 
-`RunStepUsageRecorder.record` catches every persistence exception and logs only at debug level. A database outage or schema mismatch can silently erase the per-call audit ledger while the in-memory/run-total path continues. The API can then report a misleadingly large `unattributedCostUsd` without an operational alert. Usage persistence should use an outbox/retry path or at minimum emit a metric and durable warning when a row cannot be written.
+`RunStepUsageRecorder` now emits WARN plus
+`executespec.v2.llm.usage.persistence{result="failed"}`. Prometheus loads a critical paging rule with
+owner, runbook, test procedure and silence policy. The provider result still is not replaced by an
+audit-write failure, so durable outbox/replay remains open; an alert makes loss visible but does not
+reconstruct the missing physical attempt.
 
 ## 12. Required token audit report
 
-The current `/api/admin/analytics` surfaces do not satisfy the requested audit. They provide run counts, aggregate cost, a model cost map, and a coarse user/project cost breakdown, but not a reconciled token ledger by user × provider × model × role × step.
+The V283-backed Enterprise surface now provides a bounded, reconciled physical-attempt report. The
+requirements below remain the audit contract; the implemented/residual boundary is recorded in
+12.4-12.5.
 
 ### 12.1 Required dimensions
 
@@ -590,17 +608,32 @@ For each row and every roll-up: input tokens, output tokens, cache-read tokens, 
 6. Run/session drill-down: ordered calls with retries, failovers, route changes, and failed attempts.
 7. BYOK/system split: customer-key spend versus platform-key spend, with policy violations surfaced as hard errors.
 
-### 12.4 Current data gaps blocking this report
+### 12.4 Implemented report contract
 
-- `run_step_usage` has role/provider/model/tokens but no direct `userId`, `orgId`, `projectId`, source type, or key source; it requires joins and cannot cover synthetic project calls reliably.
-- `agent_usage_ledger` has user/org/source/provider/model/tokens but no agent role or step.
-- `managed_ai_usage_event` has user/org/role/step and credits, but only represents managed-AI accounting, not every BYOK/system call.
-- `CodeReviewScan` and `PrReview` store aggregate tokens but do not expose a uniform per-call ledger.
-- Existing `costByModel` is cost-only and is based on `model_task_metric`, not the authoritative token ledger.
+- `run_step_usage` is the V283 canonical physical-attempt fact with org/user/project/repo, source,
+  feature, role/step/retry, provider/model/key source, status/error, latency, tokens and known cost.
+- JSON accepts inclusive `from`/`to` org-calendar dates plus an IANA timezone, page and size. It
+  caps windows at 366 days, page/roll-up rows at 500, and resolves run/session identity only by
+  exact tenant-scoped primary keys.
+- The combined roll-up is user × provider × model × agent role × feature × project × run/session ×
+  key source × outcome. Detail rows expose unknown failed-attempt cost as null.
+- Spreadsheet-safe CSV is capped at 10,000 rows with explicit truncation headers.
+- Reconciliation compares known canonical cost with `pipeline_run.actual_cost_usd`, and compares
+  exact managed-AI cost/token groups using `max($0.000001, 0.5%)` cost tolerance and exact tokens.
+- Detailed attempts are own-org ORG_ADMIN or SUPER_ADMIN only; BILLING_ADMIN remains restricted to
+  aggregate billing/cost surfaces.
 
-### 12.5 Recommended implementation
+### 12.5 Residual reporting boundaries
 
-Create one append-only `llm_usage_event` table as the canonical audit fact, emitted by `LlmRouter` for successful and failed attempts. Keep the current tables as compatibility projections, but build the admin report exclusively from this event table. Add indexed dimensions for `(org_id, user_id, created_at)`, `(provider, model, agent_role)`, `(run_id, task_id)`, and `(project_id, feature)`. Expose CSV/JSON export with timezone and date-range filters, plus a reconciliation footer comparing event totals with run totals, managed-AI events, and provider invoices where available.
+- V283 has no provider invoice/export ingestion or upstream invoice/request identifier. The report
+  returns `NOT_AVAILABLE_NO_PROVIDER_INVOICE_OR_REQUEST_IDENTIFIER`; provider-invoice
+  reconciliation is not claimed.
+- Managed-AI events cover only managed platform-key calls. Unmatched platform attempts are reported
+  as `COVERAGE_INCOMPLETE_OR_NOT_MANAGED`, because absence may be a legitimate unmanaged tier/model
+  or a ledger gap.
+- The high-volume ledger still needs retention/partitioning and a measured query/load threshold for
+  materialized aggregates. The top-500 combined roll-up declares truncation.
+- A durable usage outbox/replay path remains missing. Alerting is present, recovery is not.
 
 ## 13. Project feature gaps and security concerns
 

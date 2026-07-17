@@ -242,7 +242,9 @@ public class SecurityConfig {
                     .authenticated()
                     // Entity-scoped analytics is under /api/admin for legacy frontend routes, but
                     // the controller has its own org/user RBAC. Keep it before the blanket
-                    // SUPER_ADMIN admin matcher so ORG_ADMIN/BILLING_ADMIN can read their own org.
+                    // SUPER_ADMIN admin matcher so entity-scoped controller RBAC can apply.
+                    // Detailed LLM attempt JSON/CSV is stricter: own-org ORG_ADMIN or
+                    // SUPER_ADMIN only; BILLING_ADMIN receives aggregate billing surfaces only.
                     .requestMatchers("/api/admin/analytics/**")
                     .authenticated()
                     // Admin endpoints — SUPER_ADMIN only

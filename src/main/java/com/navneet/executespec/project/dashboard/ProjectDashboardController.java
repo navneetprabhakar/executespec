@@ -300,7 +300,7 @@ public class ProjectDashboardController {
   /**
    * v2.5.2 — Tech Debt rollup: issues-by-category/severity, top-5 file hotspots, dimension-score
    * trend. All derived from existing ValidationReport rows; no LLM call. {@code since} filters to
-   * the last N days (default: all history).
+   * the last N days (default and operational maximum: 366 days; at most 1,000 reports).
    */
   @GetMapping("/api/projects/{projectId}/tech-debt")
   public ResponseEntity<com.navneet.executespec.project.techdebt.TechDebtService.Report> techDebt(

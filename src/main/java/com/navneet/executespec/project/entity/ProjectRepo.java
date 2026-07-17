@@ -80,6 +80,17 @@ public class ProjectRepo {
   @Builder.Default
   private String scmProvider = "GITHUB";
 
+  /**
+   * Immutable provider repository id (GitHub numeric id / Bitbucket UUID). Required on new SCM
+   * rows.
+   */
+  @Column(name = "scm_repository_id", length = 160)
+  private String scmRepositoryId;
+
+  /** Public HTTPS clone coordinate. It must never contain userinfo or an embedded credential. */
+  @Column(name = "scm_clone_url", columnDefinition = "TEXT")
+  private String scmCloneUrl;
+
   /** Provider-neutral stable key: SCM full name or the opaque localFolderId. Never a local path. */
   @Column(name = "source_key", length = 512)
   private String sourceKey;

@@ -82,8 +82,8 @@ public class TaskStatusPersistenceService {
       try {
         var snapshot = costTracker.snapshotTask(runId, taskIdShort);
         if (snapshot != null && (snapshot.inputTokens() > 0 || snapshot.outputTokens() > 0)) {
-          task.setInputTokens(snapshot.inputTokens());
-          task.setOutputTokens(snapshot.outputTokens());
+          task.setInputTokens(RunCostTracker.saturatedInt(snapshot.inputTokens()));
+          task.setOutputTokens(RunCostTracker.saturatedInt(snapshot.outputTokens()));
         }
       } catch (Exception exception) {
         log.debug("Task token snapshot failed for {}: {}", key, exception.getMessage());

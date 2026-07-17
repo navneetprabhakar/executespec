@@ -1,5 +1,21 @@
 import type {ProviderReadiness, ProviderReadinessState} from '@/lib/api';
 
+export const PRODUCT_PROVIDER_OPTIONS = [
+  {id: 'ANTHROPIC', label: 'Anthropic'},
+  {id: 'OPENAI', label: 'OpenAI'},
+  {id: 'GEMINI', label: 'Gemini'},
+  {id: 'DEEPSEEK', label: 'DeepSeek'},
+  {id: 'OPENROUTER', label: 'OpenRouter'},
+  {id: 'FIREWORKS', label: 'Fireworks'},
+] as const;
+
+export function providerDisplayName(provider: string): string {
+  return (
+    PRODUCT_PROVIDER_OPTIONS.find((option) => option.id === provider.trim().toUpperCase())?.label ??
+    provider
+  );
+}
+
 const AVAILABLE_STATES = new Set<ProviderReadinessState>([
   'AVAILABLE_MANAGED',
   'AVAILABLE_USER_KEY',
@@ -14,6 +30,14 @@ export function readinessByProvider(
 
 export function providerIsDispatchable(row?: ProviderReadiness | null): boolean {
   return Boolean(row?.dispatchable && AVAILABLE_STATES.has(row.state));
+}
+
+/**
+ * A circuit-open provider is still policy-allowed and credentialed. Runs stay disabled until the
+ * transient outage recovers, but durable project policy may retain or select that provider.
+ */
+export function providerIsProjectSelectable(row?: ProviderReadiness | null): boolean {
+  return providerIsDispatchable(row) || row?.state === 'CIRCUIT_OPEN';
 }
 
 export function providerReadinessLabel(row?: ProviderReadiness | null): string {

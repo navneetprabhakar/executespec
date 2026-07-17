@@ -1,6 +1,6 @@
 # `codereview/` — Whole-repo Code Review agent
 
-> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+> Last reviewed: 2026-07-17. **Current worktree contract; not yet released.**
 >
 > Paid-tier feature (FREE → 403; PRO=4/month, TEAM/ENTERPRISE=unlimited). Schema in V172.
 > Phase 4 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `CodeReviewAutofixService` dispatches a patch-mode run per severity bucket on demand.
@@ -27,11 +27,28 @@ by `CodeReviewMarkdownRenderer` (severity-grouped, file-anchored, suggested-fix
 blocks). The markdown is the chat surface's primary handoff to the user — same
 shape as `ProjectGeneratedDoc` / `RepoArchitectureDoc`.
 
+## V292 Project Chat confirmed route
+
+`RUN_CODE_REVIEW` can also be started from the explicit Web or CLI/OpenTUI Project Chat action.
+This is not a model-generated proposal: the human selects the linked `repoId`, sees the
+action-specific route and budget, and confirms it. The server validates that provider/model against
+the current host-project policy with Enterprise org matrix overrides bound, then consumes a hashed,
+actor/org/project/action/target/route/budget-scoped bearer before scheduling the scan.
+
+`CodeReviewService.submitConfirmedScan` accepts the exact provider/model and one shared
+`LlmExecutionReference`. It propagates the route into the asynchronous executor with
+`RunModelOverrides` and clears it afterward. `CodeReviewAgent.AgentRequest` repeats the expected
+model and rejects provider/model drift before dispatch, so the async boundary cannot silently
+switch provider, step models, or fail over. Usage is attributed to the initiating project member;
+credential resolution stays bound to the host project subject. The confirmed-action cap is 300,000
+total tokens, $5, and two provider calls. Failure to construct or honor the exact route returns 503,
+and the already-consumed grant remains burned.
+
 ## Files
 
 - `CodeReviewAgent.java` — single-call PLANNING-tier agent. Emits `submitCodeReview` tool call. Parser drops malformed issues + normalizes unknown source/severity values.
 - `CodeReviewService.java` — orchestrator. Tier gate → idempotency → CLONING → STATIC_RUNNING (semgrep) → LLM_RUNNING (`CodeReviewAgent`) → COMPLETE / FAILED. SSE on `code-review-{scanId}`. Persists issues + markdown report atomically. Cost attribution via `RunCostTracker.snapshot("code-review-{id}")`.
-- `CodeReviewController.java` — REST surface. `POST /api/code-reviews` returns 202 + QUEUED row. List, detail, latest-for-repo, and markdown download endpoints.
+- `CodeReviewController.java` — REST surface. `POST /api/code-reviews` requires a linked `repoId`, write-guards the project, and replaces the caller's `repoFullName` with the canonical durable identity before tier/quota checks. Direct detail/report reads are project-read-guarded. List, latest-for-repo, and markdown download endpoints remain available to authorised project readers.
 - `SemgrepRunner.java` — wraps the `semgrep` subprocess. Configurable via `codereview.semgrep.{ruleset,timeout-seconds,binary}` properties; default `p/ci`. Streams stdout/stderr concurrently to avoid pipe-buffer deadlock; tolerates exit codes 0 (no findings) and 1 (findings present), warns + returns empty on 2+.
 - `CodeReviewAgent.java` — single-call PLANNING-tier agent. Emits `submitCodeReview` tool call.
 - `CodeReviewMarkdownRenderer.java` — pure formatter. No LLM calls, no DB queries. Severity-grouped (CRITICAL → MAJOR → MINOR → INFO), file-anchored, with suggested-fix code blocks.
@@ -84,7 +101,9 @@ code_review_issue
 
 `CodeReviewService.submitScan` short-circuits when a COMPLETE scan exists for
 `(projectId, repoFullName, scannedSha)`. Re-running on the same HEAD is safe and
-returns the existing row.
+returns the existing row. The service no longer falls back to cloning an arbitrary caller-supplied
+GitHub full name if the admitted `repoId` disappears or changes identity before dispatch; it fails
+the scan instead.
 
 ## Outstanding (post-PR follow-ups)
 

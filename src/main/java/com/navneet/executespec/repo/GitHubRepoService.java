@@ -1180,7 +1180,46 @@ public class GitHubRepoService {
   }
 
   /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */
-  public record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate) {}
+  public record RemoteRepo(
+      String immutableId,
+      String fullName,
+      String cloneUrl,
+      String defaultBranch,
+      boolean isPrivate,
+      Long sizeKb) {}
+
+  /** Reads canonical repository metadata, including GitHub's immutable numeric repository id. */
+  public RemoteRepo getRemoteRepo(String fullName, String overridePat) {
+    if (overridePat == null || overridePat.isBlank() || fullName == null || fullName.isBlank()) {
+      return null;
+    }
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(URI.create("https://api.github.com/repos/" + fullName.trim()))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) return null;
+      JsonNode node = new ObjectMapper().readTree(response.body());
+      String canonical = node.path("full_name").asText(null);
+      if (canonical == null || node.path("id").isMissingNode()) return null;
+      return new RemoteRepo(
+          Long.toString(node.path("id").asLong()),
+          canonical,
+          node.path("clone_url").asText("https://github.com/" + canonical + ".git"),
+          node.path("default_branch").asText("main"),
+          node.path("private").asBoolean(false),
+          node.path("size").isNumber() ? node.path("size").asLong() : null);
+    } catch (Exception ex) {
+      log.warn("[GitHubRepoService] getRemoteRepo failed for {}: {}", fullName, ex.getMessage());
+      return null;
+    }
+  }
 
   /**
    * Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff).
@@ -1438,9 +1477,12 @@ public class GitHubRepoService {
           }
           out.add(
               new RemoteRepo(
+                  Long.toString(node.path("id").asLong()),
                   full,
+                  node.path("clone_url").asText("https://github.com/" + full + ".git"),
                   node.path("default_branch").asText("main"),
-                  node.path("private").asBoolean(false)));
+                  node.path("private").asBoolean(false),
+                  node.path("size").isNumber() ? node.path("size").asLong() : null));
         }
         if (arr.size() < 100) break; // last page
       }

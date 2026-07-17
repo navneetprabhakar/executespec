@@ -106,8 +106,8 @@ public class RunCostTracker {
     if (runId == null || response == null) return CallUsage.empty(provider, model);
 
     Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
-    int inTok = usage == null ? 0 : safe(usage.getPromptTokens());
-    int outTok = usage == null ? 0 : safe(usage.getCompletionTokens());
+    long inTok = usage == null ? 0 : safeLong(usage.getPromptTokens());
+    long outTok = usage == null ? 0 : safeLong(usage.getCompletionTokens());
 
     // 2026-05-04 — billing audit: Spring AI 1.1.4's AnthropicChatModel.getDefaultUsage
     // (decompiled) only sets inputTokens + outputTokens on DefaultUsage; cache fields
@@ -119,33 +119,33 @@ public class RunCostTracker {
     // OpenAI + Gemini use our own native tool clients (OpenAiNativeToolClient,
     // GeminiNativeToolClient). Those now write their cache + thinking fields into the
     // ChatResponse metadata map under stable keys (see "Cache field convention" below);
-    // we read them via readMetaInt.
+    // we read them via readMetaLong.
     //
     // Cache field convention (used by all 3 providers):
     //   cache_read_input_tokens  → tokens read from cache (billed at provider's cache rate)
     //   cache_write_input_tokens → tokens written to cache (Anthropic 5-min: 125%; absent for
     // OpenAI/Gemini)
     //   thinking_tokens          → Gemini 2.5+ reasoning tokens (billed at output rate)
-    int cacheWrite = readMetaInt(response, "cache_creation_input_tokens");
-    int cacheRead = readMetaInt(response, "cache_read_input_tokens");
+    long cacheWrite = readMetaLong(response, "cache_creation_input_tokens");
+    long cacheRead = readMetaLong(response, "cache_read_input_tokens");
     if (cacheWrite == 0 && cacheRead == 0) {
       // Spring AI 1.1.4 path — try the typed Anthropic Usage via DefaultUsage.nativeUsage().
       Object nativeUsage = callUsageMethod0(usage, "getNativeUsage");
       if (nativeUsage != null) {
-        cacheWrite = callUsageMethodInt(nativeUsage, "cacheCreationInputTokens");
-        cacheRead = callUsageMethodInt(nativeUsage, "cacheReadInputTokens");
+        cacheWrite = callUsageMethodLong(nativeUsage, "cacheCreationInputTokens");
+        cacheRead = callUsageMethodLong(nativeUsage, "cacheReadInputTokens");
       }
     }
     // Final fallback — older Spring AI 1.0 versions where the typed Usage WAS exposed
     // directly without the nativeUsage indirection. Cheap; harmless if it returns 0.
     if ((cacheWrite == 0 && cacheRead == 0) && usage != null) {
-      cacheWrite = callUsageMethodInt(usage, "cacheCreationInputTokens");
-      cacheRead = callUsageMethodInt(usage, "cacheReadInputTokens");
+      cacheWrite = callUsageMethodLong(usage, "cacheCreationInputTokens");
+      cacheRead = callUsageMethodLong(usage, "cacheReadInputTokens");
     }
     // Gemini 2.5+ thinking tokens — Gemini bills these at the OUTPUT rate, so we add
     // them to outTok before pricing. Our native client surfaces them via this metadata
     // key; Anthropic + OpenAI don't have an equivalent, so the read returns 0.
-    int thinkingTok = readMetaInt(response, "thinking_tokens");
+    long thinkingTok = readMetaLong(response, "thinking_tokens");
     if (thinkingTok > 0) outTok += thinkingTok;
     // W0 (vix-leverage telemetry) — capture reasoning tokens as a first-class metric (previously
     // thinking_tokens was folded into outTok for pricing and lost as a separate signal). Gemini
@@ -153,7 +153,7 @@ public class RunCostTracker {
     // /
     // DeepSeek reasoner surface `reasoning_tokens` (a SUBSET of completion — NOT re-added to
     // outTok).
-    int reasoningTok = thinkingTok > 0 ? thinkingTok : readMetaInt(response, "reasoning_tokens");
+    long reasoningTok = thinkingTok > 0 ? thinkingTok : readMetaLong(response, "reasoning_tokens");
 
     Double providerReportedCost = readMetaDouble(response, "provider_reported_cost_usd");
     double callCost =
@@ -202,15 +202,7 @@ public class RunCostTracker {
           String.format("%.6f", acc.costMicros.get() / 1_000_000.0));
     }
     return new CallUsage(
-        provider,
-        model,
-        inTok,
-        outTok,
-        cacheWrite,
-        cacheRead,
-        callCost,
-        (int) callIndex,
-        reasoningTok);
+        provider, model, inTok, outTok, cacheWrite, cacheRead, callCost, callIndex, reasoningTok);
   }
 
   /** Current live cost snapshot, or zero-init if unknown. */
@@ -288,13 +280,13 @@ public class RunCostTracker {
   public record CallUsage(
       String provider,
       String model,
-      int inputTokens,
-      int outputTokens,
-      int cacheWriteTokens,
-      int cacheReadTokens,
+      long inputTokens,
+      long outputTokens,
+      long cacheWriteTokens,
+      long cacheReadTokens,
       double costUsd,
-      int callIndex,
-      int reasoningTokens) {
+      long callIndex,
+      long reasoningTokens) {
     static CallUsage empty(String provider, String model) {
       return new CallUsage(provider, model, 0, 0, 0, 0, 0.0, 0, 0);
     }
@@ -774,7 +766,7 @@ public class RunCostTracker {
    * </ul>
    */
   private double priceCall(
-      String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
+      String provider, String model, long inTok, long outTok, long cacheWrite, long cacheRead) {
     String pricingProvider = provider;
     Optional<ModelPricing> found =
         pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
@@ -803,7 +795,7 @@ public class RunCostTracker {
     // Anthropic returns uncached input tokens directly; OpenAI + Gemini bundle cached + uncached
     // into a single count and require subtraction. This is a wire-level distinction, not a
     // pricing one — the rates above already capture the discount.
-    final int normalIn =
+    final long normalIn =
         "anthropic".equalsIgnoreCase(pricingProvider) ? inTok : Math.max(0, inTok - cacheRead);
 
     double cost = 0.0;
@@ -843,18 +835,18 @@ public class RunCostTracker {
   }
 
   /**
-   * Reflectively invokes a no-arg accessor on whatever object is passed and returns the result as
-   * an int. Used by the cache-token extraction path: Spring AI 1.1.4's generic {@link Usage}
-   * doesn't expose Anthropic's cache fields, but the underlying {@code AnthropicApi.Usage} record
-   * does via {@code cacheCreationInputTokens()} / {@code cacheReadInputTokens()}. Returns 0 on any
+   * Reflectively invokes a no-arg accessor on whatever object is passed and returns the result as a
+   * long. Used by the cache-token extraction path: Spring AI 1.1.4's generic {@link Usage} doesn't
+   * expose Anthropic's cache fields, but the underlying {@code AnthropicApi.Usage} record does via
+   * {@code cacheCreationInputTokens()} / {@code cacheReadInputTokens()}. Returns 0 on any
    * reflection failure or non-numeric result — silent fallback rather than throwing.
    */
-  private static int callUsageMethodInt(Object target, String methodName) {
+  private static long callUsageMethodLong(Object target, String methodName) {
     if (target == null) return 0;
     try {
       var m = target.getClass().getMethod(methodName);
       Object v = m.invoke(target);
-      if (v instanceof Number n) return n.intValue();
+      if (v instanceof Number n) return n.longValue();
     } catch (Exception ignored) {
     }
     return 0;
@@ -863,7 +855,7 @@ public class RunCostTracker {
   /**
    * Reflectively invokes a no-arg accessor and returns the raw Object — used to walk one
    * indirection (e.g. {@code DefaultUsage.getNativeUsage()} returns the original Anthropic Usage
-   * record, on which we then call {@link #callUsageMethodInt} to read the cache fields).
+   * record, on which we then call {@link #callUsageMethodLong} to read the cache fields).
    */
   private static Object callUsageMethod0(Object target, String methodName) {
     if (target == null) return null;
@@ -875,10 +867,10 @@ public class RunCostTracker {
     }
   }
 
-  private static int readMetaInt(ChatResponse response, String key) {
+  private static long readMetaLong(ChatResponse response, String key) {
     try {
       Object v = response.getMetadata() == null ? null : response.getMetadata().get(key);
-      if (v instanceof Number n) return n.intValue();
+      if (v instanceof Number n) return n.longValue();
     } catch (Exception ignored) {
     }
     return 0;
@@ -901,8 +893,14 @@ public class RunCostTracker {
         && cost >= 0.0;
   }
 
-  private static int safe(Integer v) {
-    return v == null ? 0 : v;
+  private static long safeLong(Number value) {
+    return value == null ? 0 : Math.max(0L, value.longValue());
+  }
+
+  /** Explicit compatibility boundary for legacy INTEGER token columns and DTOs. */
+  public static int saturatedInt(long value) {
+    if (value <= 0) return 0;
+    return value >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
   }
 
   private static final class Accumulator {
@@ -916,36 +914,36 @@ public class RunCostTracker {
 
     Snapshot toSnapshot() {
       return new Snapshot(
-          (int) inputTokens.get(),
-          (int) outputTokens.get(),
-          (int) cacheWriteTokens.get(),
-          (int) cacheReadTokens.get(),
+          inputTokens.get(),
+          outputTokens.get(),
+          cacheWriteTokens.get(),
+          cacheReadTokens.get(),
           costMicros.get() / 1_000_000.0,
-          (int) calls.get(),
-          (int) reasoningTokens.get());
+          calls.get(),
+          reasoningTokens.get());
     }
   }
 
   public record Snapshot(
-      int inputTokens,
-      int outputTokens,
-      int cacheWriteTokens,
-      int cacheReadTokens,
+      long inputTokens,
+      long outputTokens,
+      long cacheWriteTokens,
+      long cacheReadTokens,
       double costUsd,
-      int calls,
-      int reasoningTokens) {
+      long calls,
+      long reasoningTokens) {
     /**
      * W0 (vix-leverage telemetry) — backward-compatible 6-arg constructor (reasoningTokens=0) so
      * the many existing call sites that predate the reasoning-token field keep compiling unchanged.
      * Only {@link Accumulator#toSnapshot()} populates the reasoning field.
      */
     public Snapshot(
-        int inputTokens,
-        int outputTokens,
-        int cacheWriteTokens,
-        int cacheReadTokens,
+        long inputTokens,
+        long outputTokens,
+        long cacheWriteTokens,
+        long cacheReadTokens,
         double costUsd,
-        int calls) {
+        long calls) {
       this(inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, costUsd, calls, 0);
     }
   }

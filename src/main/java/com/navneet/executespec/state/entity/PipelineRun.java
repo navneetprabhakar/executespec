@@ -4,6 +4,7 @@ import java.time.Instant;
 
 import jakarta.persistence.*;
 
+import com.navneet.executespec.crypto.EncryptedValueConverter;
 import com.navneet.executespec.tenant.TenantInterceptor;
 
 import lombok.AllArgsConstructor;
@@ -417,7 +418,9 @@ public class PipelineRun {
   // GitHub credentials (captured from user at submission)
 
   /** Submitting user's GitHub PAT — captured at run creation for immutability. */
+  @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "github_pat")
+  @lombok.ToString.Exclude
   private String githubPat;
 
   /** GitHub username or org to create/push repos under. */
@@ -445,7 +448,9 @@ public class PipelineRun {
   @Column(name = "bitbucket_username")
   private String bitbucketUsername;
 
+  @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "bitbucket_app_password")
+  @lombok.ToString.Exclude
   private String bitbucketAppPassword;
 
   @Column(name = "bitbucket_workspace")

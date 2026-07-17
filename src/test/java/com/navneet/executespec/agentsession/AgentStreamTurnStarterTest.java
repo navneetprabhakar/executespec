@@ -21,8 +21,10 @@ import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,8 @@ class AgentStreamTurnStarterTest {
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock ModelAccessService modelAccessService;
   @Mock ModelRegistry modelRegistry;
+  @Mock ProjectAccessGuard projectAccessGuard;
+  @Mock ChatSecurityAuditService chatSecurityAuditService;
 
   private AgentStreamTurnStarter starter;
 
@@ -56,7 +60,9 @@ class AgentStreamTurnStarterTest {
             sessionRepo,
             aiProviderPreferenceService,
             modelAccessService,
-            modelRegistry);
+            modelRegistry,
+            projectAccessGuard,
+            chatSecurityAuditService);
     lenient().when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
     lenient()
         .when(eventRepo.save(any(AgentActionEvent.class)))

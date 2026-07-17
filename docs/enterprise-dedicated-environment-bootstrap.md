@@ -604,6 +604,25 @@ Minimum paging alerts:
 - security/audit anomalies such as SUPER_ADMIN creation, key-source change, model-matrix change,
   external-sharing enablement or repeated authorization denial.
 
+### Canonical LLM usage persistence failure
+
+`CanonicalLlmUsagePersistenceFailure` fires when
+`executespec_v2_llm_usage_persistence_total{result="failed"}` increases. Treat it as potential
+provider spend without a canonical tenant-attributed ledger row:
+
+1. Pause new LLM submissions for the affected environment; do not silence while dispatch continues.
+2. Capture the deployment SHA, failure interval, provider/model route and affected run/session ids
+   from secret-free application logs and traces.
+3. Restore database write health/schema compatibility, then compare provider-side usage, run totals
+   and managed-AI events for that interval. V283 cannot reconstruct an attempt without provider
+   evidence, so retain `UNKNOWN` instead of inventing a zero-cost row.
+4. Record every unrecovered attempt and cost uncertainty in the incident. Resume only after a
+   synthetic fixture write increments the `result="ok"` series and no new failure fires.
+
+Test only in an isolated environment: temporarily deny `INSERT` on `run_step_usage`, dispatch a
+non-paid fixture path, verify the platform pager receives the alert, then restore the grant. Silence
+is allowed only for a recorded database-maintenance window with submissions paused.
+
 Every alert needs severity, owner, runbook URL, notification channel, test procedure and silence
 policy. Send a synthetic alert and acknowledge it before go-live.
 

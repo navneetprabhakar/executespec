@@ -13,11 +13,15 @@ import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
@@ -34,6 +38,20 @@ class MemoryCompactionServiceTest {
     ProjectRunLedgerRepository ledgerRepo = mock(ProjectRunLedgerRepository.class);
     ProjectMemorySnapshotRepository snapshotRepo = mock(ProjectMemorySnapshotRepository.class);
     PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    ProjectProviderResolver providerResolver = mock(ProjectProviderResolver.class);
+    LlmExecutionPolicyFactory executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionReference executionReference =
+        new LlmExecutionReference("ctx-1", LlmExecutionScope.customer("org-1"));
+    when(providerResolver.resolve("project-1")).thenReturn(LlmProvider.ANTHROPIC);
+    when(executionPolicyFactory.forProject(
+            eq("project-1"),
+            eq("memory-compaction"),
+            eq("PROJECT_MEMORY"),
+            any(),
+            any(),
+            eq("ANTHROPIC"),
+            eq(null)))
+        .thenReturn(executionReference);
     when(promptAssembler.assemble(eq("memory-compaction.txt"), any())).thenReturn("compact prompt");
     when(ledgerRepo.findUncompactedBeforeRunNumber("project-1", Integer.MAX_VALUE))
         .thenReturn(
@@ -58,12 +76,19 @@ class MemoryCompactionServiceTest {
             anyList(),
             eq("compact-project-1"),
             eq("memory-compaction"),
-            eq("compact")))
+            eq("compact"),
+            eq(executionReference)))
         .thenReturn(ok("API work and test coverage."));
 
     MemoryCompactionService service =
         new MemoryCompactionService(
-            llmRouter, modelResolver, ledgerRepo, snapshotRepo, promptAssembler);
+            llmRouter,
+            modelResolver,
+            ledgerRepo,
+            snapshotRepo,
+            promptAssembler,
+            providerResolver,
+            executionPolicyFactory);
 
     assertThat(service.compactNow("project-1", "org-1")).isEqualTo(1);
     verify(llmRouter)
@@ -73,7 +98,8 @@ class MemoryCompactionServiceTest {
             anyList(),
             eq("compact-project-1"),
             eq("memory-compaction"),
-            eq("compact"));
+            eq("compact"),
+            eq(executionReference));
   }
 
   private static ChatResponse ok(String text) {

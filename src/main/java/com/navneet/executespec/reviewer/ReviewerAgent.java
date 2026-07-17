@@ -470,11 +470,7 @@ public class ReviewerAgent {
       String systemPrompt,
       long wallClockSeconds,
       String preBuildError) {
-    ExecutionContext passCtx =
-        new ExecutionContext(
-            req.context().runId(),
-            req.context().taskId() + "-" + taskIdSuffix,
-            req.context().workspaceRoot());
+    ExecutionContext passCtx = req.context().child(req.context().taskId() + "-" + taskIdSuffix);
     // v2.5.12 — resolve from the model matrix.
     com.navneet.executespec.router.LlmProvider reviewerProvider;
     try {

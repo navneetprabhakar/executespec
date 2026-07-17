@@ -3,6 +3,7 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.ai.chat.messages.Message;
@@ -35,7 +36,8 @@ final class ArchLlmDispatch {
       ResolvedModel resolved,
       List<Message> messages,
       String source,
-      String label) {
+      String label,
+      LlmExecutionReference reference) {
     return llmRouter.callText(
         resolved.providerName(),
         resolved.getModel(),
@@ -43,6 +45,8 @@ final class ArchLlmDispatch {
         source,
         "ArchLlmDispatch",
         label,
-        MAX_OUTPUT_TOKENS);
+        MAX_OUTPUT_TOKENS,
+        com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference);
   }
 }

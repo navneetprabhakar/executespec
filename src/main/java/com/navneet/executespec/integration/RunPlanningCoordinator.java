@@ -20,6 +20,7 @@ import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.RepoOrientationService;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -69,6 +70,7 @@ class RunPlanningCoordinator {
   private final RepoOrientationService repoOrientationService;
 
   private final FeatureFlagService featureFlagService;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   PlanStrategy runClassifierShadow(
       String runId,
@@ -122,7 +124,13 @@ class RunPlanningCoordinator {
       RunCostTracker.Snapshot before = costTracker.snapshot(runId);
       ClassificationResult result =
           smartClassifier.classify(
-              userRequest, repoNames, projectId, projectType, providerEnum, projectMemorySnippet);
+              userRequest,
+              repoNames,
+              projectId,
+              projectType,
+              providerEnum,
+              projectMemorySnippet,
+              executionPolicyFactory.forRun(runId));
       RunCostTracker.Snapshot after = costTracker.snapshot(runId);
 
       long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());
@@ -314,9 +322,7 @@ class RunPlanningCoordinator {
                                 expandEpic(runId, t, skeleton, effectiveReq, rootCtx);
                             expanded.put(t.id(), children);
                           } else {
-                            ExecutionContext taskCtx =
-                                new ExecutionContext(
-                                    runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
+                            ExecutionContext taskCtx = rootCtx.child("_expand_" + t.id());
                             PlannedTask full =
                                 taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
                             expanded.put(t.id(), List.of(full));
@@ -400,8 +406,7 @@ class RunPlanningCoordinator {
         String.format("%.6f", expandCost));
 
     RunCostTracker.Snapshot beforeCoherence = costTracker.snapshot(runId);
-    ExecutionContext coherenceCtx =
-        new ExecutionContext(runId, "_coherence_", rootCtx.workspaceRoot());
+    ExecutionContext coherenceCtx = rootCtx.child("_coherence_");
     CoherencePlannerAgent.PatchResult patchResult;
     try {
       patchResult = coherencePlanner.patchIfNeeded(assembled, effectiveReq, coherenceCtx);
@@ -572,9 +577,7 @@ class RunPlanningCoordinator {
                       subRouteContext,
                       () -> {
                         try {
-                          ExecutionContext childCtx =
-                              new ExecutionContext(
-                                  runId, "_expand_" + child.id(), rootCtx.workspaceRoot());
+                          ExecutionContext childCtx = rootCtx.child("_expand_" + child.id());
                           bodied.put(
                               child.id(),
                               taskExpander.expand(child, subPlanForContext, parentReq, childCtx));

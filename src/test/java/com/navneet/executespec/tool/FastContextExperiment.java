@@ -8,10 +8,10 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * Offline, adapter-only experiment contract for comparing an optional repository explorer with the
- * built-in deterministic search. This class deliberately has no FastContext dependency and is not a
- * Spring bean: a licensed/external explorer can be supplied by an operator-owned harness, never by
- * the production worker classpath.
+ * Test-only, offline experiment contract for comparing an optional repository explorer with the
+ * built-in deterministic search. It deliberately has no external runtime dependency and is not
+ * packaged in the production application. A candidate explorer can be supplied only by an
+ * operator-owned test harness.
  *
  * <p>The report carries repository/inventory/query fingerprints from each search result so a paired
  * result is auditable against an exact fixture. The invocation policy is conservative: an optional

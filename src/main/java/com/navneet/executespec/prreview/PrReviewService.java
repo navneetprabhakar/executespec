@@ -38,8 +38,8 @@ import lombok.extern.slf4j.Slf4j;
  * <ol>
  *   <li>Tier-gate: caller must be PRO / TEAM / MAX / ENTERPRISE; FREE blocked.
  *   <li>Quota-gate: per-tier monthly cap (PRO=10, TEAM/MAX/ENTERPRISE=unlimited).
- *   <li>Idempotency: if a review for (repo, pr, head_sha) already exists in COMPLETE status, return
- *       the existing row instead of re-running.
+ *   <li>Idempotency: if a review for (project, immutable repo id, PR, head SHA) already exists in
+ *       COMPLETE status, return the existing row instead of re-running.
  *   <li>Persist a row in {@code QUEUED} status.
  *   <li>Submit the actual review work to a small dedicated executor pool — async, doesn't block the
  *       controller. Status flips QUEUED → RUNNING → COMPLETE / FAILED with SSE events at each
@@ -133,13 +133,18 @@ public class PrReviewService {
    * one is returned so the caller can subscribe to its progress.
    *
    * @param projectId project the PR belongs to (for dashboard scoping)
-   * @param repoFullName e.g. "pplai-app/pplai-api"
+   * @param repoId canonical linked repository id admitted by the controller
+   * @param repoFullName canonical repository full name from the durable repo row
    * @param prNumber PR number
    * @param user the requesting user (must be paid-tier; tier check fires before this is called)
    * @return persisted {@link PrReview} row in QUEUED / RUNNING / COMPLETE state
    */
   @Transactional
-  public PrReview submitReview(String projectId, String repoFullName, int prNumber, AppUser user) {
+  public PrReview submitReview(
+      String projectId, UUID repoId, String repoFullName, int prNumber, AppUser user) {
+    if (repoId == null) {
+      throw new IllegalArgumentException("repoId is required");
+    }
     String pat = user == null ? null : user.getGithubPat();
     GitHubRepoService.PullRequestSnapshot snap =
         github.getPullRequestSnapshot(repoFullName, prNumber, pat, 200_000);
@@ -156,7 +161,8 @@ public class PrReviewService {
 
     // Idempotency — if a recent review exists for this exact head SHA, return it.
     var existing =
-        reviewRepo.findByRepoFullNameAndPrNumberAndHeadSha(repoFullName, prNumber, headSha);
+        reviewRepo.findByProjectIdAndRepoIdAndPrNumberAndHeadSha(
+            projectId, repoId, prNumber, headSha);
     if (existing.isPresent()) {
       PrReview r = existing.get();
       if ("COMPLETE".equals(r.getStatus()) || "RUNNING".equals(r.getStatus())) {
@@ -178,11 +184,13 @@ public class PrReviewService {
             () ->
                 PrReview.builder()
                     .projectId(projectId)
+                    .repoId(repoId)
                     .repoFullName(repoFullName)
                     .prNumber(prNumber)
                     .headSha(headShaForBuilder)
                     .build());
     row.setRepoFullName(repoFullName);
+    row.setRepoId(repoId);
     row.setPrNumber(prNumber);
     row.setHeadSha(headSha);
     row.setProjectId(projectId);
@@ -260,6 +268,7 @@ public class PrReviewService {
     PrReviewAgent.AgentRequest agentReq =
         PrReviewAgent.AgentRequest.builder()
             .prReviewId(reviewId.toString())
+            .projectId(projectId)
             .repoFullName(repoFullName)
             .prNumber(prNumber)
             .headSha(headSha)
@@ -367,12 +376,21 @@ public class PrReviewService {
     return reviewRepo.findById(id).orElse(null);
   }
 
-  public List<PrReview> findByPr(String repoFullName, int prNumber) {
-    return reviewRepo.findByRepoFullNameAndPrNumberOrderByStartedAtDesc(repoFullName, prNumber);
+  public org.springframework.data.domain.Slice<PrReview> findByPr(
+      String projectId,
+      UUID repoId,
+      int prNumber,
+      Instant since,
+      org.springframework.data.domain.Pageable pageable) {
+    return reviewRepo
+        .findByProjectIdAndRepoIdAndPrNumberAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+            projectId, repoId, prNumber, since, pageable);
   }
 
-  public List<PrReview> findByProject(String projectId) {
-    return reviewRepo.findByProjectIdOrderByStartedAtDesc(projectId);
+  public org.springframework.data.domain.Slice<PrReview> findByProject(
+      String projectId, Instant since, org.springframework.data.domain.Pageable pageable) {
+    return reviewRepo.findByProjectIdAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+        projectId, since, pageable);
   }
 
   public List<PrReviewComment> commentsFor(UUID reviewId) {

@@ -1,11 +1,13 @@
 package com.navneet.executespec.memory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Map;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.entity.AppUser;
@@ -18,10 +20,16 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.memory.entity.ProjectChatMessage;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.security.InputSanitizer;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -35,6 +43,9 @@ class ProjectChatControllerProjectMemberTest {
   private final TierConfigRepository tierConfigRepo = mock(TierConfigRepository.class);
   private final ModelResolver modelResolver = mock(ModelResolver.class);
   private final ModelRegistry modelRegistry = mock(ModelRegistry.class);
+  private final OrgModelOverrideService orgModelOverrides = mock(OrgModelOverrideService.class);
+  private final ProjectAccessGuard projectAccessGuard = mock(ProjectAccessGuard.class);
+  private final InputSanitizer inputSanitizer = new InputSanitizer();
   private final ProjectChatController controller =
       new ProjectChatController(
           chatService,
@@ -43,7 +54,11 @@ class ProjectChatControllerProjectMemberTest {
           orgRepo,
           tierConfigRepo,
           modelResolver,
-          modelRegistry);
+          modelRegistry,
+          orgModelOverrides,
+          projectAccessGuard,
+          inputSanitizer,
+          mock(ChatSecurityAuditService.class));
 
   @Test
   void infoAllowsFreeInvitedMemberWhenHostProjectOrgTierAllowsChat() {
@@ -72,11 +87,43 @@ class ProjectChatControllerProjectMemberTest {
                 .agentTier(com.navneet.executespec.router.AgentTier.PLANNING)
                 .build());
     when(modelRegistry.contextLimitForOrPrefixFallback("claude")).thenReturn(200000);
+    when(orgModelOverrides.overridesForRun("host-org"))
+        .thenReturn(
+            Map.of(
+                RunModelOverrides.key(LlmProvider.ANTHROPIC, AgentTier.PLANNING),
+                "confirmed-planning",
+                RunModelOverrides.key(LlmProvider.ANTHROPIC, AgentTier.WORKHORSE),
+                "confirmed-workhorse"));
+    when(modelResolver.resolve(anyString(), eq(LlmProvider.ANTHROPIC)))
+        .thenAnswer(
+            invocation -> {
+              String role = invocation.getArgument(0);
+              AgentTier tier =
+                  "ProjectDocGeneratorService".equals(role)
+                      ? AgentTier.WORKHORSE
+                      : AgentTier.PLANNING;
+              String model = RunModelOverrides.lookup(LlmProvider.ANTHROPIC, tier);
+              return ResolvedModel.builder()
+                  .requestedProvider(LlmProvider.ANTHROPIC)
+                  .actualProvider(LlmProvider.ANTHROPIC)
+                  .model(model)
+                  .agentTier(tier)
+                  .build();
+            });
 
     var response = controller.info(new AppUserDetails(invitee, null), "project-1");
 
     assertEquals(HttpStatus.OK, response.getStatusCode());
     assertEquals("claude", response.getBody().model());
+    assertEquals(
+        "confirmed-planning",
+        response.getBody().confirmedActionModels().get("REGENERATE_ARCHITECTURE"));
+    assertEquals(
+        "confirmed-workhorse",
+        response.getBody().confirmedActionModels().get("GENERATE_PROJECT_DOC"));
+    assertEquals(
+        "confirmed-planning", response.getBody().confirmedActionModels().get("RUN_CODE_REVIEW"));
+    assertEquals(Map.of(), RunModelOverrides.capture());
   }
 
   @Test
@@ -102,18 +149,16 @@ class ProjectChatControllerProjectMemberTest {
         .thenReturn(
             Optional.of(Org.builder().id("host-org").name("Host").tier("ENTERPRISE").build()));
     when(tierConfigRepo.findById("ENTERPRISE")).thenReturn(Optional.of(enterprise));
-    when(chatService.send(eq("project-1"), eq("host-org"), eq("invitee"), eq("hello"), eq(null)))
+    AppUserDetails principal = new AppUserDetails(invitee, null);
+    when(chatService.send(eq("project-1"), eq("host-org"), eq(principal), eq("hello"), eq(null)))
         .thenReturn(reply);
 
     var response =
-        controller.send(
-            new AppUserDetails(invitee, null),
-            "project-1",
-            new ProjectChatController.ChatRequest("hello"));
+        controller.send(principal, "project-1", new ProjectChatController.ChatRequest("hello"));
 
     assertEquals(HttpStatus.OK, response.getStatusCode());
     assertEquals("host-org", response.getBody().getOrgId());
-    verify(chatService).send("project-1", "host-org", "invitee", "hello", null);
+    verify(chatService).send("project-1", "host-org", principal, "hello", null);
   }
 
   private static AppUser invitedFreeUser() {

@@ -16,6 +16,9 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.sse.RunEvent;
@@ -60,13 +63,15 @@ import lombok.extern.slf4j.Slf4j;
  *       1.1.4's broken {@code extra_body} serialization. Verified working in Phase 0.
  * </ul>
  *
- * <p><b>Per-run API-key resolution (V165+):</b> the router resolves customer-configured BYOK keys
- * via {@link RunKeyContextStore} keyed by {@code request.context().runId()} and threads them into
- * provider-side dispatch. When no customer key is present the call falls through to the platform
- * default (HYBRID semantics). For Anthropic the per-key model cache ({@link #anthropicByKey}) wraps
- * Spring AI's singleton bean — keyed by SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer
- * prompt-caching stays on the customer's API account. OpenAI + Gemini wrappers already accept a
- * per-request key, so the router just threads it through.
+ * <p><b>Durable API-key resolution (V282+):</b> every customer request carries an exact execution
+ * context id plus tenant scope. {@link LlmExecutionDispatchGuard} reloads its immutable
+ * provider/model/key-source policy and resolves the current encrypted credential immediately before
+ * each physical attempt. Missing, stale, cross-tenant, out-of-policy or exhausted contexts fail
+ * before transport; OWN_KEYS never falls through to a platform key. The legacy per-run key cache
+ * remains only as compatibility plumbing when enforcement is explicitly disabled. For Anthropic the
+ * per-key model cache ({@link #anthropicByKey}) wraps Spring AI's singleton bean — keyed by
+ * SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer prompt-caching stays on the customer's
+ * API account. OpenAI + Gemini wrappers accept the per-request resolved key directly.
  *
  * <p><strong>Audit 2026-05-12 review item M #68 — CLOSED (RL-2026-05-062):</strong> multi-provider
  * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
@@ -98,6 +103,8 @@ public class LlmRouter {
   private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
+  private final LlmExecutionDispatchGuard executionDispatchGuard;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final RunKeySourceModeResolver runKeySourceModeResolver;
   private final AnthropicForcedToolClient anthropicForcedToolClient;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
@@ -121,6 +128,9 @@ public class LlmRouter {
    */
   @Value("${executespec.live-llm.enabled:true}")
   private boolean liveLlmEnabled = true;
+
+  @Value("${executespec.llm.execution-context-enforcement.enabled:true}")
+  private boolean executionContextEnforcementEnabled = true;
 
   @Value("${executespec.live-llm.test-mode:false}")
   private boolean liveLlmTestMode;
@@ -160,7 +170,76 @@ public class LlmRouter {
       String runId,
       String agentRole,
       String stepId) {
-    return callText(provider, model, messages, runId, agentRole, stepId, null);
+    return callText(provider, model, messages, runId, agentRole, stepId, (Integer) null);
+  }
+
+  /** Customer-safe text seam: the durable tenant/policy identity is explicit on the request. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        null,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference,
+        false);
+  }
+
+  /** Customer-safe strict text seam for an exact provider/model pin. */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference,
+        true);
+  }
+
+  /** Customer-safe bounded text seam with an explicit prompt-cache policy. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        reference,
+        false);
   }
 
   /** Text seam with strict provider pinning; transient failures never fail over cross-provider. */
@@ -182,28 +261,17 @@ public class LlmRouter {
       String agentRole,
       String stepId,
       Integer maxTokens) {
-    return call(
-        LlmRequest.builder()
-            .provider(provider)
-            .model(model)
-            .messages(messages)
-            .context(
-                new com.navneet.executespec.tool.ExecutionContext(
-                    (runId == null || runId.isBlank())
-                        ? "text-" + Integer.toHexString(messages.hashCode())
-                        : runId,
-                    (agentRole == null || agentRole.isBlank())
-                        ? "__text__"
-                        : "__text__-" + agentRole,
-                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
-                        .toAbsolutePath()
-                        .normalize()))
-            .toolsOverride(List.of())
-            .agentRole(agentRole)
-            .stepId(stepId)
-            .maxTokens(maxTokens)
-            .strictProvider(true)
-            .build());
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        null,
+        true);
   }
 
   /** Text seam with an explicit output cap for compatibility surfaces with a bounded contract. */
@@ -240,10 +308,37 @@ public class LlmRouter {
       String stepId,
       Integer maxTokens,
       LlmRequest.PromptCacheStrategy promptCacheStrategy) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        null,
+        false);
+  }
+
+  private ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference,
+      boolean strictProvider) {
     String effectiveRunId =
         (runId == null || runId.isBlank())
             ? "text-" + Integer.toHexString(messages.hashCode())
             : runId;
+    if (reference == null) {
+      reference = executionPolicyFactory.findForRun(effectiveRunId).orElse(null);
+    }
     String taskId =
         (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
     // Anthropic's current API requires an explicit max_tokens field even for text-only calls.
@@ -266,11 +361,13 @@ public class LlmRouter {
                     taskId,
                     Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
                         .toAbsolutePath()
-                        .normalize()))
+                        .normalize(),
+                    reference))
             .toolsOverride(List.of())
             .agentRole(agentRole)
             .stepId(stepId)
             .maxTokens(effectiveMaxTokens)
+            .strictProvider(strictProvider)
             .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
@@ -344,6 +441,12 @@ public class LlmRouter {
       ProviderTestBudgetGuard.authorize(
           liveLlmReservationId, request.provider(), request.model(), request.context().runId());
     }
+    if (executionContextEnforcementEnabled && request.llmExecutionContextId() == null) {
+      throw new com.navneet.executespec.executioncontext.LlmDispatchPolicyException(
+          com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
+              .CONTEXT_REQUIRED,
+          "Provider dispatch requires an explicit durable customer or PLATFORM_INTERNAL context");
+    }
     var routePolicy = runRoutePolicyService.forRun(request.context().runId());
     request = enforceDurableRoutePolicy(request, routePolicy);
     // If the caller supplied an explicit tool list (e.g. the planner restricting
@@ -353,15 +456,29 @@ public class LlmRouter {
             ? request.toolsOverride()
             : toolRegistry.bind(request.context());
 
+    // V282 exact dispatch policy takes precedence over every cache. Legacy internal/test callers
+    // without a durable reference keep the old path only until their explicit PLATFORM_INTERNAL
+    // contexts are migrated; customer entry points attach the reference before reaching here.
+    LlmExecutionDispatchGuard.ResolvedDispatch durableDispatch =
+        request.llmExecutionContextId() == null ? null : executionDispatchGuard.authorize(request);
+
     // Per-run BYOK lookup — null when the run hasn't pre-resolved keys
     // (test harnesses, smoke endpoints) or when the customer has no
     // configured keys. Either case falls through to platform defaults
     // for HYBRID semantics; OWN_KEYS hard-fail mode is enforced by
     // ApiKeyResolver.validateKeyAvailability at submit time.
-    RunKeyContext keys = keyContextStore.get(request.context().runId());
-    String resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+    RunKeyContext keys =
+        durableDispatch == null
+            ? keyContextStore.get(request.context().runId())
+            : contextForManagedAi(durableDispatch);
+    String resolvedKey =
+        durableDispatch == null
+            ? ((keys == null) ? null : keys.keyFor(request.provider()))
+            : durableDispatch.apiKey();
     RunKeyContext.Source source =
-        (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+        durableDispatch == null
+            ? ((keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider()))
+            : durableDispatch.keySource();
     // No-key fallback is reflected as PLATFORM source for the metric,
     // even when the run has BYOK configured for *another* provider.
     if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
@@ -384,8 +501,16 @@ public class LlmRouter {
               .provider(authorization.provider())
               .model(authorization.model())
               .build();
-      resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
-      source = (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      if (durableDispatch != null) {
+        durableDispatch = executionDispatchGuard.authorize(request);
+        resolvedKey = durableDispatch.apiKey();
+        source = durableDispatch.keySource();
+        keys = contextForManagedAi(durableDispatch);
+      } else {
+        resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+        source =
+            (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      }
       if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
       broadcaster.emit(
           request.context().runId(),
@@ -426,6 +551,28 @@ public class LlmRouter {
       if (failed != null) return failed;
       throw primaryError;
     }
+  }
+
+  private static RunKeyContext contextForManagedAi(
+      LlmExecutionDispatchGuard.ResolvedDispatch dispatch) {
+    var context = dispatch.context();
+    RunKeyContext.Source source = dispatch.keySource();
+    String key = dispatch.apiKey();
+    return new RunKeyContext(
+        "anthropic".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "openai".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "gemini".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "openrouter".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "deepseek".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "fireworks".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        source,
+        source,
+        source,
+        source,
+        source,
+        source,
+        context.getUserId(),
+        context.getOrgId());
   }
 
   LlmRequest enforceDurableRoutePolicy(
@@ -479,15 +626,15 @@ public class LlmRouter {
         String taskId = request.context().taskId();
         RunCostTracker.CallUsage callUsage =
             costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-        stepUsageRecorder.record(
-            runId,
-            taskId,
-            request.agentRole(),
-            request.stepId(),
-            retryOf(request, attempt),
+        stepUsageRecorder.recordSuccess(
+            request,
             request.provider(),
             request.model(),
-            callUsage);
+            source.name(),
+            attempt,
+            elapsed,
+            callUsage,
+            resp);
         managedAiUsageService.recordSuccessfulCall(
             runId,
             taskId,
@@ -513,6 +660,8 @@ public class LlmRouter {
         metrics.recordLlmLatency(
             request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
         metrics.recordKeySource(request.provider(), source.name());
+        stepUsageRecorder.recordFailure(
+            request, request.provider(), request.model(), source.name(), attempt, elapsed, e);
         log.warn(
             "LlmRouter <- {} {} FAILED in {}ms (attempt {}/{}): {}",
             request.provider(),
@@ -580,17 +729,41 @@ public class LlmRouter {
       String altModel = entry[1];
       if (altProvider.isEmpty() || altModel == null) continue;
       if (altProvider.equals(primaryProvider)) continue;
-      String altKey = (keys == null) ? null : keys.keyFor(altProvider);
+      LlmRequest altRequest =
+          request.toBuilder()
+              .provider(altProvider)
+              .model(altModel)
+              .retryOf(attributionKey(request))
+              .build();
+      LlmExecutionDispatchGuard.ResolvedDispatch durableAlt = null;
+      if (request.llmExecutionContextId() != null) {
+        try {
+          durableAlt = executionDispatchGuard.authorize(altRequest);
+        } catch (com.navneet.executespec.executioncontext.LlmDispatchPolicyException rejected) {
+          log.info(
+              "LlmRouter failover skipping {}/{} — durable policy rejected it ({})",
+              altProvider,
+              altModel,
+              rejected.reason());
+          continue;
+        }
+      }
+      String altKey =
+          durableAlt == null
+              ? ((keys == null) ? null : keys.keyFor(altProvider))
+              : durableAlt.apiKey();
       // Don't cross a BYOK run onto a platform key for a provider it never keyed.
-      if (primaryUsedCustomerKey && altKey == null) {
+      if (durableAlt == null && primaryUsedCustomerKey && altKey == null) {
         log.info(
             "LlmRouter failover skipping {} — BYOK run has no customer key for it", altProvider);
         continue;
       }
       RunKeyContext.Source altSource =
-          (altKey == null || keys == null)
-              ? RunKeyContext.Source.PLATFORM
-              : keys.sourceFor(altProvider);
+          durableAlt == null
+              ? ((altKey == null || keys == null)
+                  ? RunKeyContext.Source.PLATFORM
+                  : keys.sourceFor(altProvider))
+              : durableAlt.keySource();
 
       log.warn(
           "LlmRouter FAILOVER {} {} -> {} {} (primary error: {})",
@@ -612,12 +785,6 @@ public class LlmRouter {
                   + " ("
                   + altModel
                   + ")"));
-      LlmRequest altRequest =
-          request.toBuilder()
-              .provider(altProvider)
-              .model(altModel)
-              .retryOf(attributionKey(request))
-              .build();
       ManagedAiUsageService.CallAuthorization authorization =
           managedAiUsageService.authorizeCall(
               altRequest.context().runId(),
@@ -632,11 +799,17 @@ public class LlmRouter {
                 .provider(authorization.provider())
                 .model(authorization.model())
                 .build();
-        altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
-        altSource =
-            (altKey == null || keys == null)
-                ? RunKeyContext.Source.PLATFORM
-                : keys.sourceFor(altRequest.provider());
+        if (durableAlt != null) {
+          durableAlt = executionDispatchGuard.authorize(altRequest);
+          altKey = durableAlt.apiKey();
+          altSource = durableAlt.keySource();
+        } else {
+          altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
+          altSource =
+              (altKey == null || keys == null)
+                  ? RunKeyContext.Source.PLATFORM
+                  : keys.sourceFor(altRequest.provider());
+        }
         broadcaster.emit(
             runId, RunEvent.log(runId, altRequest.context().taskId(), authorization.reason()));
       }
@@ -649,11 +822,6 @@ public class LlmRouter {
       }
     }
     return null;
-  }
-
-  private static String retryOf(LlmRequest request, int attempt) {
-    if (attempt > 1) return attributionKey(request) + "#attempt-" + (attempt - 1);
-    return request.retryOf();
   }
 
   private static String attributionKey(LlmRequest request) {

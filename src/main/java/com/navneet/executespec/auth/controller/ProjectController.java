@@ -151,14 +151,14 @@ public class ProjectController {
   }
 
   @PostMapping("/{id}/members")
-  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<Void> addMember(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
     // GA-readiness P4.1-followup — closes the access-control mutation gap.
-    // Adding members is the most sensitive write surface on a project; the
-    // guard ensures the caller is an admin of THIS project's org.
+    // Adding members is the most sensitive write surface on a project. The guard establishes
+    // tenant/project write membership; ProjectService then requires PROJECT_ADMIN, host
+    // ORG_ADMIN, or SUPER_ADMIN and validates that direct additions stay inside the host org.
     projectAccessGuard.assertCanWrite(id, userDetails);
     projectService.addMember(
         id, body.get("userId"), body.get("role"), userDetails.getUser().getId());
@@ -166,7 +166,6 @@ public class ProjectController {
   }
 
   @DeleteMapping("/{id}/members/{userId}")
-  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<Void> removeMember(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String id,

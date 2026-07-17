@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import com.navneet.executespec.report.entity.ValidationReport;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -42,6 +43,23 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
           """,
       nativeQuery = true)
   List<ValidationReport> findAllByProjectId(@Param("projectId") String projectId);
+
+  /**
+   * Bounded recent report window for score charts and tech-debt analysis. Newest-first makes the
+   * database limit retain current evidence; callers reverse the final chart slice when needed.
+   */
+  @Query(
+      value =
+          """
+          SELECT v.* FROM validation_report v
+          JOIN pipeline_run r ON r.run_id = v.run_id
+          WHERE r.project_id = :projectId
+            AND v.created_at >= :since
+          ORDER BY v.created_at DESC, v.id DESC
+          """,
+      nativeQuery = true)
+  List<ValidationReport> findRecentByProjectId(
+      @Param("projectId") String projectId, @Param("since") Instant since, Pageable pageable);
 
   // The next four queries power the public, anonymized /api/v3/landing/*
   // surfaces. Kept native so we can index-hit fast paths and so we don't

@@ -12,8 +12,11 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -32,6 +35,8 @@ class AgentStreamTurnStarter {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final ModelAccessService modelAccessService;
   private final ModelRegistry modelRegistry;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final ChatSecurityAuditService chatSecurityAuditService;
 
   /** Compatibility seam for focused tests and older package-local callers. */
   AgentStreamTurnStarter(
@@ -49,11 +54,49 @@ class AgentStreamTurnStarter {
         sessionRepo,
         aiProviderPreferenceService,
         null,
+        null,
+        null,
         null);
   }
 
   AgentSessionService.StreamTurnContext begin(
       AgentSession session, String sessionId, StreamTurnRequest request, AppUserDetails user) {
+    if (session.getProjectId() != null && !session.getProjectId().isBlank()) {
+      if (projectAccessGuard == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "project authorization unavailable");
+      }
+      // Streaming a turn can invoke the routing model and therefore spends provider tokens.
+      try {
+        projectAccessGuard.assertCanWrite(session.getProjectId(), user);
+      } catch (RuntimeException denied) {
+        if (chatSecurityAuditService != null) {
+          chatSecurityAuditService.record(
+              "CHAT_TURN_DENIED",
+              sessionId,
+              session.getProjectId(),
+              user,
+              "agent_stream_turn",
+              ChatToolPolicy.Capability.SPEND_AI,
+              "DENIED");
+        }
+        throw denied;
+      }
+      if (chatSecurityAuditService == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "chat security audit unavailable");
+      }
+      chatSecurityAuditService.record(
+          "CHAT_TURN_ALLOWED",
+          sessionId,
+          session.getProjectId(),
+          user,
+          "agent_stream_turn",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "ALLOWED");
+    }
     String message = request == null ? "" : request.message();
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
@@ -96,16 +139,31 @@ class AgentStreamTurnStarter {
       session.setDefaultModel(
           modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel));
     }
-    var decision =
-        intentService.decide(
-            new InterpretIntentRequest(
-                sessionId,
-                message,
-                session.getProjectId(),
-                request == null ? null : request.repoContext(),
-                request == null ? null : request.clientCapabilities()),
-            effectiveProvider,
-            session.getDefaultModel());
+    com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision decision;
+    try {
+      decision =
+          intentService.decide(
+              new InterpretIntentRequest(
+                  sessionId,
+                  message,
+                  session.getProjectId(),
+                  request == null ? null : request.repoContext(),
+                  request == null ? null : request.clientCapabilities()),
+              effectiveProvider,
+              session.getDefaultModel());
+    } catch (org.springframework.web.server.ResponseStatusException inputDenied) {
+      if (chatSecurityAuditService != null) {
+        chatSecurityAuditService.record(
+            "CHAT_INPUT_DENIED",
+            sessionId,
+            session.getProjectId(),
+            user,
+            "agent_stream_input",
+            ChatToolPolicy.Capability.SPEND_AI,
+            "DENIED");
+      }
+      throw inputDenied;
+    }
     AgentTurn turn =
         turnRecorder.record(
             session,

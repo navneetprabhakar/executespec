@@ -274,6 +274,37 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void fixedEmbeddingCapabilityStaysOnItsModelAndObeysTheManagedCreditGate() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1500); // CHEAP_ONLY
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    when(modelClassifier.costClass("text-embedding-3-small")).thenReturn("CHEAP");
+
+    service.authorizeFixedCapabilityCall(
+        "embedding:document-1",
+        "openai",
+        "text-embedding-3-small",
+        "ProjectDocumentEmbedding",
+        keys(),
+        RunKeyContext.Source.PLATFORM);
+
+    verify(modelClassifier, never()).sameProviderStepDown(anyString(), anyString());
+
+    period.setAiCreditsUsed(2000); // EXHAUSTED
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                service.authorizeFixedCapabilityCall(
+                    "embedding:document-1",
+                    "openai",
+                    "text-embedding-3-small",
+                    "ProjectDocumentEmbedding",
+                    keys(),
+                    RunKeyContext.Source.PLATFORM))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("EXHAUSTED");
+  }
+
+  @Test
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);

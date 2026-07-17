@@ -274,7 +274,9 @@ class AgentIntentServiceTest {
                 "Please handle \"fix\".",
                 "project-1",
                 null,
-                new ClientCapabilities(false, true, true, true)));
+                new ClientCapabilities(false, true, true, true)),
+            "anthropic",
+            null);
 
     assertThat(decision.route()).isEqualTo("CLARIFY");
     assertThat(decision.policy().runApiAllowed()).isFalse();
@@ -307,7 +309,9 @@ class AgentIntentServiceTest {
                 "Could you tell me what changed?",
                 "project-1",
                 null,
-                new ClientCapabilities(false, true, true, true)));
+                new ClientCapabilities(false, true, true, true)),
+            "anthropic",
+            null);
 
     assertThat(decision.route()).isEqualTo("READ_ONLY_CODE_HELP");
     assertThat(decision.policy().runApiAllowed()).isFalse();

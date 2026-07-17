@@ -1,4 +1,11 @@
 export type RepoBadge = {kind: 'ok' | 'warn' | 'bad'; label: string};
+const BITBUCKET_READ_CAPABILITIES = new Set([
+  'CATALOG',
+  'ATTACH',
+  'SYNC',
+  'SOURCE_READINESS',
+  'SOURCE_BROWSE',
+]);
 
 export function repoIdFromUnknown(value: unknown): string {
   const row = (value || {}) as {
@@ -13,12 +20,30 @@ export function explicitLinkedRepoSelection(rows: unknown[]): string[] {
   return rows.map(repoIdFromUnknown).filter(Boolean);
 }
 
-export function normalizeGitHubRepoQuery(input: string): string {
+export function normalizeScmRepoQuery(input: string, provider: 'GITHUB' | 'BITBUCKET'): string {
+  const host = provider === 'BITBUCKET' ? 'bitbucket.org' : 'github.com';
   return input
     .trim()
-    .replace(/^https?:\/\/github\.com\//i, '')
+    .replace(new RegExp(`^https?://${host.replace('.', '\\.')}\\/`, 'i'), '')
     .replace(/\.git$/i, '')
     .replace(/^\/+|\/+$/g, '');
+}
+
+/** Backward-compatible helper retained for older imports/tests. */
+export function normalizeGitHubRepoQuery(input: string): string {
+  return normalizeScmRepoQuery(input, 'GITHUB');
+}
+
+export function repoSupports(repo: unknown, capability: string): boolean {
+  const row = ((repo || {}) as {repo?: unknown}).repo || repo || {};
+  const value = row as {sourceCapabilities?: string[] | null; scmProvider?: string | null};
+  const provider = String(value.scmProvider || 'GITHUB').toUpperCase();
+  if (provider === 'BITBUCKET' && !BITBUCKET_READ_CAPABILITIES.has(capability)) return false;
+  if (Array.isArray(value.sourceCapabilities) && value.sourceCapabilities.length > 0) {
+    return value.sourceCapabilities.includes(capability);
+  }
+  // Legacy rows predate capability persistence. Preserve GitHub behavior, fail closed otherwise.
+  return provider === 'GITHUB';
 }
 
 export function syncBadge(status?: string | null): RepoBadge {

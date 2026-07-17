@@ -1,0 +1,23 @@
+groups:
+  - name: executespec-enterprise-audit
+    rules:
+      - alert: CanonicalLlmUsagePersistenceFailure
+        expr: increase(executespec_v2_llm_usage_persistence_total{result="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM attempt usage is not being persisted"
+          description: >-
+            At least one physical provider attempt could not be written to run_step_usage.
+            Provider spend may have occurred without a canonical tenant-attributed audit row.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec/blob/main/docs/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+          test_procedure: >-
+            In an isolated environment, deny INSERT on run_step_usage, dispatch a fixture attempt,
+            and verify this alert reaches the platform pager before restoring the grant.
+          silence_policy: >-
+            Silence only during a recorded database maintenance window with submissions paused;
+            reconcile affected provider attempts before clearing the incident.

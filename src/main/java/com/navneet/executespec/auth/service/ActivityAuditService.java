@@ -19,6 +19,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,7 @@ public class ActivityAuditService {
    * write-time. Multi-node deploys would need a Postgres advisory lock; for now we have one app
    * instance.
    */
+  @Transactional
   public synchronized void record(ActivityAudit entry) {
     if (entry.getId() == null) {
       entry.setId(UUID.randomUUID().toString());
@@ -51,6 +53,13 @@ public class ActivityAuditService {
     if (entry.getCreatedAt() == null) {
       entry.setCreatedAt(Instant.now());
     }
+
+    // V292: serialize chain appends across JVMs before reading the tail. The transaction-scoped
+    // advisory lock releases automatically at commit/rollback and does not require a lock row.
+    em.createNativeQuery(
+            "SELECT pg_advisory_xact_lock(hashtext('executespec'),"
+                + " hashtext('activity_audit_chain'))")
+        .getSingleResult();
 
     // Stamp chain triple. Read tail → compute hash → assign next seq.
     String prevHash = repo.findChainTail().map(ActivityAudit::getRowHash).orElse(GENESIS_HASH);
