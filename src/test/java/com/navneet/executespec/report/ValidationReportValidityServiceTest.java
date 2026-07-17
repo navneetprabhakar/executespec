@@ -33,6 +33,16 @@ class ValidationReportValidityServiceTest {
     assertThat(service.isCanonical(report(90, 2, PipelineResult.PASSED, false, "CLEAN"))).isFalse();
   }
 
+  @Test
+  void rejectsPersistedExecutableVerificationFailureEvenWhenHeadlineFieldsLookGreen() {
+    ValidationReport report = report(90, 2, PipelineResult.PASSED, true, "CLEAN");
+    report.setExecutableVerificationStatus("FAILED");
+    report.setExecutionFailureStage("TESTS");
+
+    assertThat(service.assess(report).valid()).isFalse();
+    assertThat(service.assess(report).reason()).contains("executable verification is failed");
+  }
+
   private static ValidationReport report(
       int score, int files, PipelineResult result, boolean build, String verdict) {
     return ValidationReport.builder()

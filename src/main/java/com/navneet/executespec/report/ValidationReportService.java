@@ -254,6 +254,10 @@ public class ValidationReportService {
                   endpointCoveragePercent,
                   testCoverageLevel);
 
+      ExecutableVerificationEvidence executableVerification =
+          executableVerification(
+              finalBuildPassed, ts != null, testsPassedCount, testsTotalCount, evidenceFailure);
+
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
       // 3c. Pilot R6 — six-dimension score derived deterministically from
@@ -308,6 +312,11 @@ public class ValidationReportService {
                   input.bootVerification() == null ? null : input.bootVerification().healthy())
               .bootReason(
                   input.bootVerification() == null ? null : input.bootVerification().reason())
+              .executableTestsRun(executableVerification.testsRun())
+              .executableTestsPassed(executableVerification.testsPassed())
+              .executableVerificationStatus(executableVerification.status())
+              .executionFailureStage(executableVerification.failureStage())
+              .executableEvidenceJson(executableVerification.evidenceJson())
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -463,6 +472,14 @@ public class ValidationReportService {
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
+    ExecutableVerificationEvidence executableVerification =
+        executableVerification(
+            report.getFinalBuildPassed(), true, passed, total, scoreEvidenceFailure(report));
+    report.setExecutableTestsRun(executableVerification.testsRun());
+    report.setExecutableTestsPassed(executableVerification.testsPassed());
+    report.setExecutableVerificationStatus(executableVerification.status());
+    report.setExecutionFailureStage(executableVerification.failureStage());
+    report.setExecutableEvidenceJson(executableVerification.evidenceJson());
     // Keep the existing six-dimension test axis in sync for callers that still render it.
     report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
     report.setVerifiedScore(
@@ -507,6 +524,69 @@ public class ValidationReportService {
     if (ratio >= 0.30) return 55;
     return 35;
   }
+
+  private String scoreEvidenceFailure(ValidationReport report) {
+    AccuracyReport accuracy = null;
+    if (report.getAccuracyJson() != null && !report.getAccuracyJson().isBlank()) {
+      try {
+        accuracy = objectMapper.readValue(report.getAccuracyJson(), AccuracyReport.class);
+      } catch (Exception ex) {
+        log.debug(
+            "Executable verification could not parse accuracy evidence for run={}: {}",
+            report.getRunId(),
+            ex.getMessage());
+      }
+    }
+    return scoreEvidenceFailure(report.getFilesGenerated(), accuracy);
+  }
+
+  private ExecutableVerificationEvidence executableVerification(
+      Boolean buildPassed,
+      boolean testSummaryPresent,
+      int testsPassed,
+      int testsTotal,
+      String provenanceFailure) {
+    boolean testsRun = testSummaryPresent && testsTotal > 0;
+    Boolean testsPassedSignal = testsRun ? testsPassed == testsTotal : null;
+    String status;
+    String failureStage = null;
+    if (provenanceFailure != null) {
+      status = "FAILED";
+      failureStage = "PRODUCT_EVIDENCE";
+    } else if (Boolean.FALSE.equals(buildPassed)) {
+      status = "FAILED";
+      failureStage = "BUILD";
+    } else if (testsRun && !Boolean.TRUE.equals(testsPassedSignal)) {
+      status = "FAILED";
+      failureStage = "TESTS";
+    } else if (!Boolean.TRUE.equals(buildPassed)) {
+      status = "UNAVAILABLE";
+      failureStage = "BUILD";
+    } else if (testsRun) {
+      status = "PASSED";
+    } else {
+      status = "BUILD_ONLY";
+    }
+
+    var evidence = objectMapper.createObjectNode();
+    if (buildPassed == null) evidence.putNull("buildPassed");
+    else evidence.put("buildPassed", buildPassed);
+    evidence.put("testsRun", testsRun);
+    evidence.put("testsPassed", Math.max(0, testsPassed));
+    evidence.put("testsTotal", Math.max(0, testsTotal));
+    evidence.put("status", status);
+    if (failureStage != null) evidence.put("failureStage", failureStage);
+    if (provenanceFailure != null) evidence.put("provenanceFailure", provenanceFailure);
+    return new ExecutableVerificationEvidence(
+        testsRun, testsPassedSignal, status, failureStage, evidence.toString());
+  }
+
+  private record ExecutableVerificationEvidence(
+      Boolean testsRun,
+      Boolean testsPassed,
+      String status,
+      String failureStage,
+      String evidenceJson) {}
 
   public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
     return repository.findByShareToken(shareToken).map(this::toShareDTO);

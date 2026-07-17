@@ -2340,9 +2340,51 @@ public class WorkerAgent {
     return args.length() > 80 ? args.substring(0, 80) + "..." : args;
   }
 
-  private static String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
+  private String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
     String status = "ok".equals(envelopeStatus(envelope)) ? "OK" : "ERR";
-    return tc.name() + "(" + previewArgs(tc.arguments()) + ") -> " + status;
+    String target = mutationTarget(tc.name(), tc.arguments());
+    return tc.name()
+        + "("
+        + previewArgs(tc.arguments())
+        + ")"
+        + (target.isBlank() ? "" : " [target=" + target + "]")
+        + " -> "
+        + status;
+  }
+
+  /**
+   * Preserve the exact mutation target outside the bounded argument preview. Provider JSON key
+   * order is not stable, so a path that occurs after byte 80 must not disappear from durable goal
+   * evidence.
+   */
+  private String mutationTarget(String toolName, String arguments) {
+    if (toolName == null || arguments == null) return "";
+    String normalized = toolName.replace("_", "").toLowerCase(java.util.Locale.ROOT);
+    if (!java.util.Set.of("writefile", "editfile", "multiedit", "applypatch").contains(normalized))
+      return "";
+    try {
+      JsonNode node = objectMapper.readTree(arguments);
+      for (String field : List.of("path", "file", "filePath")) {
+        if (node.hasNonNull(field)) return safeMutationTarget(node.get(field).asText());
+      }
+      String patch = node.path("patch").asText("");
+      for (String line : patch.lines().toList()) {
+        String trimmed = line.trim();
+        for (String marker : List.of("*** Add File:", "*** Update File:")) {
+          if (trimmed.startsWith(marker)) {
+            return safeMutationTarget(trimmed.substring(marker.length()).trim());
+          }
+        }
+      }
+    } catch (Exception ignored) {
+      // Malformed arguments fail closed: no target is attributed to the task.
+    }
+    return "";
+  }
+
+  private static String safeMutationTarget(String path) {
+    if (path == null) return "";
+    return path.replace('\n', ' ').replace('\r', ' ').replace(']', '_').trim();
   }
 
   private WorkerResult errorResult(

@@ -29,6 +29,11 @@ public class ValidationReportValidityService {
     if (!Boolean.TRUE.equals(report.getFinalBuildPassed())) {
       return Validity.invalid("final build was not deterministically proven");
     }
+    if ("FAILED".equals(report.getExecutableVerificationStatus())
+        || "UNAVAILABLE".equals(report.getExecutableVerificationStatus())) {
+      return Validity.invalid(
+          "executable verification is " + report.getExecutableVerificationStatus().toLowerCase());
+    }
     if ("REVIEW_FAILED".equals(report.getReviewerVerdict())
         || "UNRESOLVED_ISSUES".equals(report.getReviewerVerdict())) {
       return Validity.invalid("review evidence is unresolved");

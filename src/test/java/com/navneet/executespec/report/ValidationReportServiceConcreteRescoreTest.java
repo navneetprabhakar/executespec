@@ -78,6 +78,11 @@ class ValidationReportServiceConcreteRescoreTest {
     assertEquals(96, report.getRubricScore());
     assertEquals(Verdict.BUILD_FAILED.name(), report.getBootVerdict());
     assertFalse(report.getBootHealthy());
+    assertTrue(report.getExecutableTestsRun());
+    assertFalse(report.getExecutableTestsPassed());
+    assertEquals("FAILED", report.getExecutableVerificationStatus());
+    assertEquals("TESTS", report.getExecutionFailureStage());
+    assertTrue(report.getExecutableEvidenceJson().contains("\"testsTotal\":10"));
     verify(repository).save(report);
     var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
     verify(events).publishEvent(eventCaptor.capture());
@@ -90,6 +95,13 @@ class ValidationReportServiceConcreteRescoreTest {
             .findFirst()
             .orElseThrow();
     assertEquals("8/10 tests passed.", tests.summary());
+    VerificationEvidenceDTO executable =
+        event.verificationLedger().stream()
+            .filter(e -> "executable-verification".equals(e.id()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("FAIL", executable.status());
+    assertTrue(executable.summary().contains("failure stage: TESTS"));
     VerificationEvidenceDTO boot =
         event.verificationLedger().stream()
             .filter(e -> "boot-verification".equals(e.id()))

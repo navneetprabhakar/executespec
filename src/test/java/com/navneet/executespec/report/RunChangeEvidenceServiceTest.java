@@ -63,6 +63,32 @@ class RunChangeEvidenceServiceTest {
     assertThat(evidence.productFiles().getFirst().provenance())
         .isEqualTo(RunChangeEvidenceService.Provenance.WORKER);
     assertThat(service.meaningfulProductDiffCount(runId)).isEqualTo(1);
+
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId,
+                List.of("writeFile({\"path\":\"README.md\",\"content\":\"metadata\"}) -> OK")))
+        .isZero();
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile({\"path\":\"src/f500.java\",\"edits\":[{}]}) -> OK")))
+        .isEqualTo(1);
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile({\"path\":\"src/f500.java\",\"edits\":[{}]}) -> ERR")))
+        .isZero();
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId,
+                List.of(
+                    "editFile({\"content\":\""
+                        + "x".repeat(100)
+                        + "...}) [target=src/f500.java] -> OK")))
+        .isEqualTo(1);
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile({\"path\":\"src/f500.java\"})")))
+        .isZero();
   }
 
   private static void git(Path dir, String... args) throws Exception {

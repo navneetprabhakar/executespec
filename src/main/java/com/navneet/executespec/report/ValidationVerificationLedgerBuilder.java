@@ -86,6 +86,32 @@ final class ValidationVerificationLedgerBuilder {
               1));
     }
 
+    if (entity.getExecutableVerificationStatus() != null) {
+      String executableStatus = entity.getExecutableVerificationStatus();
+      out.add(
+          evidence(
+              "executable-verification",
+              "Executable verification",
+              "VERIFICATION",
+              switch (executableStatus) {
+                case "PASSED" -> "PASS";
+                case "BUILD_ONLY" -> "WARN";
+                case "FAILED" -> "FAIL";
+                default -> "UNKNOWN";
+              },
+              "DETERMINISTIC",
+              "HIGH",
+              "The admitted product diff has reloadable build and concrete-test evidence.",
+              "Executable verification: "
+                  + executableStatus
+                  + (entity.getExecutionFailureStage() == null
+                      ? "."
+                      : "; failure stage: " + entity.getExecutionFailureStage() + "."),
+              "validation_report.executable_verification_status",
+              "PASSED".equals(executableStatus) ? 1 : 0,
+              1));
+    }
+
     Integer testsPassed = entity.getTestsPassed();
     Integer testsTotal = entity.getTestsTotal();
     int total = testsTotal == null ? 0 : testsTotal;

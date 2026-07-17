@@ -21,6 +21,10 @@ invalid reports are excluded and counted separately.
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
   preview verifier supplied a `BootVerification`. Concrete-test rescoring rehydrates that signal;
   it must never pass `null` merely because the original `ReportInput` is gone.
+- V273 persists executable-test run/pass state, verification status, failure stage, and bounded
+  deterministic JSON. New reports and concrete-test rescoring populate those columns, and the
+  reloadable ledger exposes the same evidence. `FAILED` and `UNAVAILABLE` rows are excluded from
+  project health; historical nullable rows remain readable for backward compatibility.
 - Ledger entries label provenance (`DETERMINISTIC`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `HYBRID`, or
   `INTERNAL_FORMULA`). A score is a summary, not independent proof.
 - Public/shared report DTOs expose score metadata and the same sanitized ledger, but not run-goal
@@ -42,3 +46,6 @@ invalid reports are excluded and counted separately.
 
 - `V270__persist_validation_boot_evidence.sql` adds nullable provenance columns. Historical rows remain
   valid and compile-only reports retain their prior scoring behavior.
+- `V273__persist_executable_verification_evidence.sql` adds nullable executable-verification columns.
+  The migration is immutable; Java persistence and ledger reconstruction are owned by
+  `ValidationReportService`, `ValidationReport`, and `ValidationVerificationLedgerBuilder`.

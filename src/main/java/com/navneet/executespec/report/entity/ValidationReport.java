@@ -172,6 +172,22 @@ public class ValidationReport {
   @Column(name = "boot_reason", columnDefinition = "TEXT")
   private String bootReason;
 
+  /** V273 deterministic executable-verification contract. */
+  @Column(name = "executable_tests_run")
+  private Boolean executableTestsRun;
+
+  @Column(name = "executable_tests_passed")
+  private Boolean executableTestsPassed;
+
+  @Column(name = "executable_verification_status", length = 40)
+  private String executableVerificationStatus;
+
+  @Column(name = "execution_failure_stage", length = 40)
+  private String executionFailureStage;
+
+  @Column(name = "executable_evidence_json", columnDefinition = "TEXT")
+  private String executableEvidenceJson;
+
   /**
    * Preview URL captured at report generation time. Null if preview expired or was never started.
    */
