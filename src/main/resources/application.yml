@@ -201,6 +201,10 @@ managed-ai:
       concurrency-enforced: false
       rate-limits-enabled: false
       notification-thresholds-pct: [50, 75, 90, 100]
+      # F2 (founder decision 2026-07-18): FREE is native-DeepSeek-Flash only. Every managed
+      # platform-key call is forced to this route regardless of the requested provider/model.
+      locked-provider: deepseek
+      locked-model: deepseek-v4-flash-native
     PRO:
       included-credits: 2000
       raw-cogs-cap-usd: 16.00
