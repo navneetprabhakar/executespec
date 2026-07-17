@@ -580,6 +580,15 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+          <!-- spring-boot:run forks the application JVM. Propagate the same fail-closed live-test
+               properties used by Surefire so -Plive-llm-test actually enables the guarded runtime
+               after an exact provider-budget reservation is supplied. Packaged production JARs are
+               unaffected; the default Maven properties above remain false. -->
+          <systemPropertyVariables>
+            <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
+            <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
+            <executespec.live-llm.reservation-id>${executespec.live-llm.reservation-id}</executespec.live-llm.reservation-id>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <plugin>
