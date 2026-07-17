@@ -2,6 +2,7 @@ package com.navneet.executespec.execution.controller;
 
 import java.util.*;
 
+import com.navneet.executespec.api.PageBounds;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
@@ -70,8 +71,8 @@ public class ProjectLaunchController {
     // v2.5.2 — use @EntityGraph-backed finder so solutions + repoMappings
     // come back in the same query chain, avoiding the per-row solution
     // fetch that caused N+1 on the Launches list.
-    Page<ExecutionRun> execRuns =
-        execRunRepo.findListByProjectId(projectId, PageRequest.of(page, size));
+    PageRequest requestedPage = PageBounds.request(page, size, 100);
+    Page<ExecutionRun> execRuns = execRunRepo.findListByProjectId(projectId, requestedPage);
 
     // 2026-05-02 — also pull project-scoped pipeline_run rows (the runs submitted from
     // the V3 project-home composer / project-chat Launch button). User report: "no
@@ -94,11 +95,11 @@ public class ProjectLaunchController {
           return bd.compareTo(ad);
         });
 
-    int from = Math.min(page * size, merged.size());
+    int from = Math.min((int) requestedPage.getOffset(), merged.size());
     int to = Math.min(from + size, merged.size());
     return ResponseEntity.ok(
         new org.springframework.data.domain.PageImpl<>(
-            merged.subList(from, to), PageRequest.of(page, size), merged.size()));
+            merged.subList(from, to), requestedPage, merged.size()));
   }
 
   // PR rollup (cross-launch)

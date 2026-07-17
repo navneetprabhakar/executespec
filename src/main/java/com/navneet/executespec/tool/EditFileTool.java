@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.security.CodeAbuseScanner;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -37,6 +38,7 @@ public class EditFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
   private final CodeAbuseScanner codeAbuseScanner;
+  private final GeneratedSecretScanner generatedSecretScanner;
 
   /**
    * PR-C (2026-05-13) — pushes {@code FILE_WRITTEN} events to RunDetail SSE subscribers the moment
@@ -201,6 +203,16 @@ public class EditFileTool implements Tool {
                 + applied.how()
                 + ")");
         idx++;
+      }
+      var secretFinding = generatedSecretScanner.scan(working);
+      if (secretFinding.isPresent()) {
+        log.warn(
+            "editFile blocked generated credential path={} category={}",
+            path,
+            secretFinding.get().category());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "edited content contains a high-confidence credential pattern and cannot be written");
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, working);
       if (scanResult.flagged()) {

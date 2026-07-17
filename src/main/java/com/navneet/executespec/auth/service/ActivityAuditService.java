@@ -9,6 +9,7 @@ import java.util.UUID;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
+import com.navneet.executespec.api.PageBounds;
 import com.navneet.executespec.auth.dto.AuditLogEntry;
 import com.navneet.executespec.auth.dto.AuditLogPage;
 import com.navneet.executespec.auth.entity.ActivityAudit;
@@ -16,7 +17,6 @@ import com.navneet.executespec.auth.repository.ActivityAuditRepository;
 import com.navneet.executespec.auth.repository.ActivityAuditSpec;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -198,7 +198,7 @@ public class ActivityAuditService {
         ActivityAuditSpec.buildFilter(orgId, entityType, eventType, actorId, entityId, from, to);
 
     return AuditLogPage.from(
-        repo.findAll(spec, PageRequest.of(page, Math.min(size, 100))).map(this::toEntry));
+        repo.findAll(spec, PageBounds.request(page, size, 100)).map(this::toEntry));
   }
 
   private AuditLogEntry toEntry(ActivityAudit a) {

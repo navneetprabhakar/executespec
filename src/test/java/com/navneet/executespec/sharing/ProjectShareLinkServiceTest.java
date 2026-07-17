@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -16,7 +17,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.repository.ProjectShareLinkRepository;
@@ -36,6 +39,7 @@ class ProjectShareLinkServiceTest {
 
   private ProjectShareLinkRepository linkRepo;
   private TierConfigRepository tierRepo;
+  private ProjectRepository projectRepo;
   private com.navneet.executespec.state.repository.PipelineRunRepository runRepo;
   private com.navneet.executespec.codereview.repository.CodeReviewScanRepository scanRepo;
   private com.navneet.executespec.prreview.repository.PrReviewRepository prReviewRepo;
@@ -46,13 +50,17 @@ class ProjectShareLinkServiceTest {
   void setUp() {
     linkRepo = mock(ProjectShareLinkRepository.class);
     tierRepo = mock(TierConfigRepository.class);
+    projectRepo = mock(ProjectRepository.class);
     runRepo = mock(com.navneet.executespec.state.repository.PipelineRunRepository.class);
     scanRepo = mock(com.navneet.executespec.codereview.repository.CodeReviewScanRepository.class);
     prReviewRepo = mock(com.navneet.executespec.prreview.repository.PrReviewRepository.class);
     auditService = mock(ProjectShareLinkAuditService.class);
     service =
         new ProjectShareLinkService(
-            linkRepo, tierRepo, runRepo, scanRepo, prReviewRepo, auditService);
+            linkRepo, tierRepo, projectRepo, runRepo, scanRepo, prReviewRepo, auditService);
+    lenient()
+        .when(projectRepo.findByIdForQuotaUpdate(anyString()))
+        .thenReturn(Optional.of(Project.builder().id("p1").build()));
     lenient().when(linkRepo.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
     lenient().when(linkRepo.countActiveByProject(anyString(), any())).thenReturn(0L);
   }
@@ -82,6 +90,7 @@ class ProjectShareLinkServiceTest {
     assertNotNull(link);
     assertEquals(ProjectShareLink.Surface.PROJECT_OVERVIEW, link.getSurface());
     assertNotNull(link.getToken());
+    verify(projectRepo).findByIdForQuotaUpdate("p1");
   }
 
   @Test

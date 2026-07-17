@@ -2701,7 +2701,11 @@ paths:
   /runs/{runId}/report/share:
     post:
       tags: [Validation Report]
-      summary: Generate share link
+      summary: Generate governed project-scoped validation-report share link
+      description: >-
+        Returns a one-time plaintext bearer for /shared/{token}. The server stores only its digest;
+        the link defaults to seven-day expiry and can be revoked/audited through project share-link
+        management. Standalone runs must first be attached to a project.
       parameters:
         - $ref: "#/components/parameters/runId"
       responses:
@@ -2715,6 +2719,9 @@ paths:
                     type: string
                   shareUrl:
                     type: string
+                    example: /shared/one-time-bearer
+        "409":
+          description: Run is not attached to a project, so governed public sharing is unavailable
 
   /runs/{runId}/report/pdf:
     get:
@@ -2733,7 +2740,10 @@ paths:
   /reports/shared/{shareToken}:
     get:
       tags: [Validation Report]
-      summary: View shared report (public)
+      summary: View historical shared report during the bounded V294 compatibility window (public)
+      description: >-
+        Compatibility-only path for pre-V294 validation-report links. Bearers are stored by digest
+        and expire no later than the migration grace deadline. New links use /shared/{token}.
       security: []
       parameters:
         - name: shareToken
@@ -2747,6 +2757,52 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /projects/{projectId}/prs/{prNumber}/reviews:
+    get:
+      tags: [Projects]
+      summary: Fetch GitHub review comments for a linked project repository
+      description: >-
+        The repoId is authoritative and must be linked to the project. repo is a compatibility
+        assertion only and must match the canonical stored GitHub identity; arbitrary repository
+        coordinates are rejected before the caller PAT is used.
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: prNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: repoId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: repo
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [comments]
+                properties:
+                  comments:
+                    type: string
+        "400":
+          description: Repository assertion does not match the linked repository
+        "403":
+          description: Caller cannot read the project
+        "404":
+          description: Repository is not linked to the project
+        "422":
+          description: Linked source is not a GitHub repository with PR-review capability
 
   # ──────────────────────────────────────────────────
   # TEST GEN
@@ -4207,6 +4263,13 @@ components:
       description: JWT access token (1h TTL). Obtain via POST /auth/login. Refresh token (7d TTL) set as httpOnly cookie.
 
   parameters:
+    projectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     runId:
       name: runId
       in: path

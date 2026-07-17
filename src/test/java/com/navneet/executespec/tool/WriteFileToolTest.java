@@ -34,6 +34,7 @@ class WriteFileToolTest {
         new WriteFileTool(
             new FileSandboxPolicy(),
             new CodeAbuseScanner(),
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
             mock(SseBroadcaster.class),
             readState,
             null);
@@ -53,6 +54,18 @@ class WriteFileToolTest {
 
     assertThat(result).isInstanceOf(ToolResult.Ok.class);
     assertThat(Files.readString(workspace.resolve("src/App.java"))).isEqualTo("class App {}\n");
+  }
+
+  @Test
+  void rejectsHighConfidenceCredentialWithoutWritingIt() {
+    String secret = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6";
+
+    ToolResult result = tool.execute(args(".env", "OPENAI_API_KEY=" + secret + "\n"), ctx);
+
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(Files.exists(workspace.resolve(".env"))).isFalse();
+    assertThat(((ToolResult.Err) result).message()).doesNotContain(secret);
   }
 
   // ---- harness-resolution T4: overwrite=true gated on read-recency ----

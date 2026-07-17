@@ -90,6 +90,10 @@ for existing rows, and adds scoped unique/indexed local identities and lease loo
   `(owner, scm_provider, scm_repository_id)` while leaving unverified legacy rows nullable.
   Bitbucket reads and syncs use the stored UUID after attach, then refresh the display slug from
   canonical provider metadata.
+- Repo-level mutations use ownership authority, not visibility authority: syncing shared source
+  metadata and installing a GitHub webhook require ORG_ADMIN for ORG-scoped repos and the owner for
+  USER-scoped repos. The service repeats this check before any SCM credential lookup, provider call,
+  or persistence even when a controller has already admitted the request.
 - Provider credentials are resolved server-side as short-lived `ScmCredential` values. DTOs and
   `project_repo` store only credential-free metadata and an HTTPS clone URL with no userinfo,
   query, or fragment.

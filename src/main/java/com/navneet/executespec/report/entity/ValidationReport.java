@@ -194,8 +194,28 @@ public class ValidationReport {
   @Column(name = "preview_url", length = 512)
   private String previewUrl;
 
+  /**
+   * Rolling-schema compatibility only. V294 hashes historical values and clears this column; new
+   * application code must never populate or expose it.
+   */
   @Column(name = "share_token", length = 64, unique = true)
-  private String shareToken;
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  @lombok.ToString.Exclude
+  private String legacyShareToken;
+
+  @Column(name = "share_token_hash", length = 64, unique = true)
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  @lombok.ToString.Exclude
+  private String shareTokenHash;
+
+  @Column(name = "share_token_prefix", length = 12)
+  private String shareTokenPrefix;
+
+  @Column(name = "share_expires_at")
+  private Instant shareExpiresAt;
+
+  @Column(name = "share_revoked_at")
+  private Instant shareRevokedAt;
 
   @Column(name = "shared_at")
   private Instant sharedAt;

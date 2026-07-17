@@ -19,7 +19,7 @@
 - `entity/ProjectShareLinkAudit.java` — V287 append-only CREATE / ACCESS / DENIED / REVOKE fact with keyed hashes of IP/user-agent, never raw request identifiers.
 - `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`, `ProjectShareLinkAuditRepository.java`.
 - `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite). **RL-2026-05-066:** `createInvite` ALSO writes an in-app `Notification` (`InAppNotificationService.create`, type `PROJECT_INVITE`, link `/invites/accept?token=…`) when the invitee already has an account — best-effort, never fails the invite. The email link is `{appBaseUrl}/invites/accept?token=…`; the matching SPA route was missing (only `/accept-invite`, the org-invite path, existed) so the magic link dead-ended and the invitee never became a `ProjectMember` — fixed by adding the `/invites/accept` route in `frontend/src/App.tsx` (`AcceptInvitePage` now takes a `kind: 'org' | 'project'` prop so the two flows call their own accept endpoint: org → `/api/org/accept-invite`, project → `/api/invites/accept`).
-- `service/ProjectShareLinkService.java` — link lifecycle (create / digest lookup / revoke / atomic view-counter / audit). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited). New expiry defaults to 7 days and is bounded to 1..90 days.
+- `service/ProjectShareLinkService.java` — link lifecycle (create / digest lookup / revoke / atomic view-counter / audit). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited). New expiry defaults to 7 days and is bounded to 1..90 days. Finite-cap admission takes the existing project-row pessimistic lock before count + insert, so concurrent nodes cannot each observe `cap-1` and over-allocate links.
 - `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api/projects.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected management endpoints (create/list/revoke/latest-100 audit). List responses expose only the token prefix; the full bearer appears in the create response once.
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
@@ -46,7 +46,9 @@
 Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token is the bearer. The
 token is shape-checked then SHA-256 hashed for lookup; expiry/revocation and surface mismatch deny
 before content. The global Redis/IP API rate limiter applies to `/api/shared/**`; successful and
-known-link denied reads are additionally appended to the link audit ledger.
+known-link denied reads are additionally appended to the link audit ledger. Rate-limit and audit
+identity use `request.remoteAddr` only; deployed profiles let Spring resolve forwarded headers once.
+The load balancer must strip/replace inbound forwarding headers and prevent direct backend access.
 
 ## Endpoints
 

@@ -3,13 +3,12 @@ package com.navneet.executespec.execution.controller;
 import java.time.Instant;
 import java.util.Map;
 
+import com.navneet.executespec.api.PageBounds;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.OrgRepository;
-import com.navneet.executespec.auth.repository.ProjectMemberRepository;
-import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
@@ -27,10 +26,11 @@ import com.navneet.executespec.execution.repository.ExecutionSolutionRunReposito
 import com.navneet.executespec.execution.service.ExecutionOrchestrator;
 import com.navneet.executespec.execution.service.ExecutionPlannerService;
 import com.navneet.executespec.execution.service.SolutionExecutionService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -65,8 +65,8 @@ public class ExecutionController {
   private final ExecutionRunRepository execRunRepo;
   private final ExecutionSolutionRepository solutionRepo;
   private final ExecutionSolutionRunRepository solutionRunRepo;
-  private final ProjectRepository projectRepo;
-  private final ProjectMemberRepository projectMemberRepo;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final ProjectRepoService projectRepoService;
   private final OrgRepository orgRepo;
   private final TierConfigRepository tierConfigRepo;
   private final ExecutionOrchestrator orchestrator;
@@ -85,7 +85,7 @@ public class ExecutionController {
       @RequestBody CreateExecutionRequest req,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    Project project = requireProjectAccess(projectId, user);
+    Project project = projectAccessGuard.assertCanWrite(projectId, principal);
     var activeRuns = execRunRepo.findActiveByProjectId(projectId);
     if (!activeRuns.isEmpty()) {
       ExecutionRun active = activeRuns.get(0);
@@ -127,7 +127,7 @@ public class ExecutionController {
   public ResponseEntity<ExecutionRunDto> getExecution(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunAccess(id, principal);
     var solutions = solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(id);
     // Force-init the lazy dependencies collection before the session closes
     // so SolutionDto.from can walk it without a LazyInitializationException.
@@ -145,10 +145,10 @@ public class ExecutionController {
       @RequestParam(defaultValue = "20") int size,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireProjectAccess(projectId, user);
+    projectAccessGuard.assertCanRead(projectId, principal);
     Page<ExecutionRun> runs =
         execRunRepo.findByProjectIdAndDeletedAtIsNullOrderByCreatedAtDesc(
-            projectId, PageRequest.of(page, size));
+            projectId, PageBounds.request(page, size, 100));
     return ResponseEntity.ok(runs.map(r -> ExecutionRunDto.from(r, null)));
   }
 
@@ -156,7 +156,7 @@ public class ExecutionController {
   public ResponseEntity<Void> triggerAnalysis(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireRunAccess(id, user);
+    requireRunWriteAccess(id, principal);
     orchestrator.triggerAnalysis(id);
     return ResponseEntity.accepted().build();
   }
@@ -167,7 +167,7 @@ public class ExecutionController {
       @RequestBody ExecutionArchApprovalRequest req,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunWriteAccess(id, principal);
     orchestrator.approveArchDoc(run, req.approved(), req.annotations());
     return ResponseEntity.ok().build();
   }
@@ -176,7 +176,7 @@ public class ExecutionController {
   public ResponseEntity<Void> generatePlan(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireRunAccess(id, user);
+    requireRunWriteAccess(id, principal);
     // V188 (2026-05-13) — route through ExecutionOrchestrator.kickoffPlanning so the unified
     // V2-dispatch path can pre-empt the legacy LLM-split planner when the
     // execution.unified-dispatch.enabled flag is on (the default after V188). The orchestrator
@@ -190,7 +190,7 @@ public class ExecutionController {
   public ResponseEntity<Void> approvePlan(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunWriteAccess(id, principal);
     // v2.5.12 — reject plan-approve before the plan is generated. Observed
     // live on 2026-04-17: first approve 20 s after /plan returned 202 but
     // did NOT set planApprovedAt (concurrent planner save clobbered it).
@@ -215,7 +215,7 @@ public class ExecutionController {
       @RequestBody DecisionRequest req,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunWriteAccess(id, principal);
     ExecutionSolution sol =
         solutionRepo
             .findById(solutionId)
@@ -233,8 +233,10 @@ public class ExecutionController {
       @PathVariable String solutionId,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireRunAccess(id, user);
-    solutionExecService.signalManualFixDone(solutionId);
+    requireRunWriteAccess(id, principal);
+    if (!solutionExecService.signalManualFixDone(id, solutionId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "solution");
+    }
     return ResponseEntity.accepted().build();
   }
 
@@ -247,7 +249,7 @@ public class ExecutionController {
   public ResponseEntity<Void> resume(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunWriteAccess(id, principal);
     orchestrator.executeApprovedPlan(run.getId());
     return ResponseEntity.ok().build();
   }
@@ -256,7 +258,7 @@ public class ExecutionController {
   public ResponseEntity<Void> abort(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunWriteAccess(id, principal);
     orchestrator.abortExecution(run);
     return ResponseEntity.ok().build();
   }
@@ -267,7 +269,7 @@ public class ExecutionController {
       @PathVariable String solutionId,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunAccess(id, principal);
     ExecutionSolution sol =
         solutionRepo
             .findById(solutionId)
@@ -282,7 +284,7 @@ public class ExecutionController {
   public ResponseEntity<Map<String, Object>> getReport(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    ExecutionRun run = requireRunAccess(id, user);
+    ExecutionRun run = requireRunAccess(id, principal);
     return ResponseEntity.ok(orchestrator.buildReport(run));
   }
 
@@ -290,12 +292,15 @@ public class ExecutionController {
   public ResponseEntity<Map<String, String>> prReviewComments(
       @PathVariable String projectId,
       @PathVariable int prNumber,
+      @RequestParam java.util.UUID repoId,
       @RequestParam String repo,
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireProjectAccess(projectId, user);
+    projectAccessGuard.assertCanRead(projectId, principal);
+    var linkedRepo = projectRepoService.resolveGitHubReviewRepoStrict(projectId, repoId, repo);
     String pat = appUserRepo.findById(user.getId()).map(u -> u.getGithubPat()).orElse(null);
-    String comments = gitHubRepoService.fetchPrReviewComments(repo, prNumber, pat);
+    String comments =
+        gitHubRepoService.fetchPrReviewComments(linkedRepo.getGithubRepoFullName(), prNumber, pat);
     return ResponseEntity.ok(Map.of("comments", comments));
   }
 
@@ -303,7 +308,7 @@ public class ExecutionController {
   public ResponseEntity<Map<String, String>> sseToken(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
-    requireRunAccess(id, user);
+    requireRunAccess(id, principal);
     String token = jwtUtil.generateSseToken(user.getId(), SSE_RESOURCE_PREFIX + id);
     return ResponseEntity.ok(Map.of("token", token));
   }
@@ -322,7 +327,7 @@ public class ExecutionController {
     if (principal == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Valid SSE token or JWT required");
     }
-    requireRunAccess(id, principal.getUser());
+    requireRunAccess(id, principal);
     return broadcaster.subscribe(channel, lastEventId);
   }
 
@@ -347,23 +352,16 @@ public class ExecutionController {
     return user;
   }
 
-  private Project requireProjectAccess(String projectId, AppUser user) {
-    Project p =
-        projectRepo
-            .findById(projectId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
-    // RL-2026-05-056 — honour V175 cross-org ProjectMember access (consistent with
-    // ProjectAccessGuard.assertCanRead). An accepted cross-org invitee reaches the project via a
-    // ProjectMember row, not org match; the old org-only check 403'd them on the Execution View.
-    boolean orgMatch = java.util.Objects.equals(p.getOrgId(), user.getOrgId());
-    boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, user.getId());
-    if (!orgMatch && !isMember) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
-    }
-    return p;
+  private ExecutionRun requireRunAccess(String runId, AppUserDetails principal) {
+    return requireRunAccess(runId, principal, false);
   }
 
-  private ExecutionRun requireRunAccess(String runId, AppUser user) {
+  private ExecutionRun requireRunWriteAccess(String runId, AppUserDetails principal) {
+    return requireRunAccess(runId, principal, true);
+  }
+
+  private ExecutionRun requireRunAccess(
+      String runId, AppUserDetails principal, boolean writeRequired) {
     ExecutionRun run =
         execRunRepo
             .findById(runId)
@@ -371,9 +369,8 @@ public class ExecutionController {
     if (run.getDeletedAt() != null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "execution run");
     }
-    if (!java.util.Objects.equals(run.getOrgId(), user.getOrgId())) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "not in caller org");
-    }
+    if (writeRequired) projectAccessGuard.assertCanWrite(run.getProjectId(), principal);
+    else projectAccessGuard.assertCanRead(run.getProjectId(), principal);
     if (run.getUpdatedAt() == null) run.setUpdatedAt(Instant.now());
     return run;
   }

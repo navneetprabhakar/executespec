@@ -41,7 +41,6 @@ import com.navneet.executespec.state.repository.RunRecoveryRepository;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -301,8 +300,7 @@ public class RunController {
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
     guard.requireAuthenticated(userDetails);
-    page = Math.max(0, page);
-    size = Math.max(1, Math.min(100, size));
+    var requestedPage = com.navneet.executespec.api.PageBounds.request(page, size, 100);
     var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
     boolean realProjectFilter =
         projectId != null && !projectId.isBlank() && !"__none__".equals(projectId);
@@ -325,7 +323,7 @@ public class RunController {
     }
 
     Page<PipelineRun> runs =
-        stateStore.listRuns(status, projectId, archived, PageRequest.of(page, size), visSpec);
+        stateStore.listRuns(status, projectId, archived, requestedPage, visSpec);
     // RL-2026-06-019 — batch variant hydrates each row's verifiedScore (one query per page) so
     // the runs list can lead with the score instead of provider internals.
     List<RunSummary> content = mapper.toSummaries(runs.getContent());

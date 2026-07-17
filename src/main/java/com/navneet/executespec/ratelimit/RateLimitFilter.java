@@ -244,24 +244,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
   }
 
-  /** Extract client IP from X-Forwarded-For using the configured trusted proxy depth. */
+  /**
+   * Use the container's effective remote address. Deployed profiles enable Spring's forwarded
+   * header strategy, so the framework wrapper resolves the edge-supplied client address once. The
+   * application must not parse caller-controlled forwarding headers a second time.
+   */
   private String getClientIp(HttpServletRequest request) {
-    return extractClientIp(
-        request.getHeader("X-Forwarded-For"),
-        request.getRemoteAddr(),
-        properties.getTrustedProxyCount());
+    return request.getRemoteAddr();
   }
 
+  /** Backward-compatible test seam; forwarding headers are deliberately ignored. */
   static String extractClientIp(String xff, String remoteAddr, int trustedProxyCount) {
-    if (xff != null && !xff.isBlank()) {
-      String[] parts = xff.split(",");
-      int trustedHops = Math.max(1, trustedProxyCount);
-      int clientIndex = Math.max(0, parts.length - trustedHops - 1);
-      String candidate = parts[clientIndex].trim();
-      if (!candidate.isBlank()) {
-        return candidate;
-      }
-    }
     return remoteAddr;
   }
 

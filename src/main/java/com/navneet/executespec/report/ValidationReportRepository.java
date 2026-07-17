@@ -17,7 +17,7 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
 
   Optional<ValidationReport> findByRunId(String runId);
 
-  Optional<ValidationReport> findByShareToken(String shareToken);
+  Optional<ValidationReport> findByShareTokenHash(String shareTokenHash);
 
   /**
    * RL-2026-06-019 — batch (run_id, verified_score) pairs for the run-list endpoint so RunSummary

@@ -109,10 +109,12 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/sync")
   public ResponseEntity<ProjectRepoDto> syncRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
-    // GA-readiness P4.1-followup — visible repo-access check at the call site. The
-    // service-side `loadRepoForRead` runs again as defense in depth.
-    service.loadRepoForRead(
-        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
+    // Sync changes shared source metadata, so org-scoped repos require ORG_ADMIN authority.
+    service.loadRepoForWrite(
+        repoId,
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        isOrgAdmin(userDetails));
     return ResponseEntity.ok(
         service.syncRepo(
             repoId,
@@ -129,11 +131,16 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/webhook")
   public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
-    // GA-readiness P4.1-followup — explicit access check before the GitHub-side mutation.
-    service.loadRepoForRead(
-        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
+    // Installing a webhook mutates both GitHub and shared source state.
+    service.loadRepoForWrite(
+        repoId,
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        isOrgAdmin(userDetails));
     var u = userDetails.getUser();
-    boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
+    boolean ok =
+        service.installWebhook(
+            repoId, u.getGithubPat(), u.getId(), u.getOrgId(), isOrgAdmin(userDetails));
     if (ok) {
       return ResponseEntity.ok(java.util.Map.of("installed", true));
     }

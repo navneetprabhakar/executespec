@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
@@ -49,6 +50,7 @@ public class ProjectShareLinkService {
 
   private final ProjectShareLinkRepository linkRepo;
   private final TierConfigRepository tierConfigRepo;
+  private final ProjectRepository projectRepo;
   private final PipelineRunRepository runRepo;
   private final CodeReviewScanRepository scanRepo;
   private final PrReviewRepository prReviewRepo;
@@ -96,6 +98,11 @@ public class ProjectShareLinkService {
     Instant now = Instant.now();
     validateExpiry(expiresAt, now);
     String normalizedLabel = normalizeLabel(label);
+    // Serialize count-and-create admission on the project row. Without this lock, concurrent
+    // nodes can all observe cap-1 and each create a link, exceeding the tier's active-link cap.
+    projectRepo
+        .findByIdForQuotaUpdate(projectId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
     assertCanCreate(creator, projectId);
     // IDOR defense (create side): the scope entity referenced by scopeId MUST belong to the same
     // project the caller is authorized to write. Without this a project admin could mint a public,

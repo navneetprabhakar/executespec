@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -29,6 +30,7 @@ import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -335,7 +337,8 @@ class ValidationReportServiceVerificationLedgerTest {
         ValidationReport.builder()
             .id("vr-share")
             .runId("run-share")
-            .shareToken("share-token")
+            .shareTokenHash(DigestUtils.sha256Hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+            .shareExpiresAt(Instant.now().plusSeconds(3600))
             .filesGenerated(2)
             .pipelineResult(PipelineResult.PASSED)
             .issuesJson("[]")
@@ -349,11 +352,13 @@ class ValidationReportServiceVerificationLedgerTest {
             .bootHealthy(true)
             .bootReason("boots; /health responded 200")
             .build();
-    when(repository.findByShareToken("share-token")).thenReturn(Optional.of(report));
+    when(repository.findByShareTokenHash(report.getShareTokenHash()))
+        .thenReturn(Optional.of(report));
     ValidationReportService service =
         new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
 
-    var shared = service.getByShareToken("share-token").orElseThrow();
+    var shared =
+        service.getByShareToken("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").orElseThrow();
 
     assertEquals(100, shared.verifiedScore());
     assertEquals(100, shared.rubricScore());
@@ -362,6 +367,26 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals(2, shared.testsTotal());
     assertEquals("CLEAN", shared.reviewerVerdict());
     assertEntry(shared.verificationLedger(), "boot-verification", "PASS", "DETERMINISTIC", "HIGH");
+  }
+
+  @Test
+  void legacySharedReportRejectsExpiredAndMalformedBearers() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    String token = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    ValidationReport expired =
+        ValidationReport.builder()
+            .id("vr-expired")
+            .runId("run-expired")
+            .shareTokenHash(DigestUtils.sha256Hex(token))
+            .shareExpiresAt(Instant.now().minusSeconds(1))
+            .build();
+    when(repository.findByShareTokenHash(expired.getShareTokenHash()))
+        .thenReturn(Optional.of(expired));
+    ValidationReportService service =
+        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+
+    assertTrue(service.getByShareToken(token).isEmpty());
+    assertTrue(service.getByShareToken("short").isEmpty());
   }
 
   private static void assertEntry(

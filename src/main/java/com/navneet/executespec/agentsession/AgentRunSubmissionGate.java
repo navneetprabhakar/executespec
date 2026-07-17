@@ -15,9 +15,9 @@ import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
-import com.navneet.executespec.run.RunLocalExecutionFlag;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -51,7 +51,7 @@ public class AgentRunSubmissionGate {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final RunIdempotencyService runIdempotencyService;
   private final StateStore stateStore;
-  private final RunLocalExecutionFlag runLocalExecutionFlag;
+  private final ProjectAccessGuard projectAccessGuard;
 
   public Submission submitConfirmed(
       AgentSession session,
@@ -103,6 +103,7 @@ public class AgentRunSubmissionGate {
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
+    projectAccessGuard.assertCanWrite(projectId, user);
     boolean localExecutionRequested =
         request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
@@ -116,6 +117,13 @@ public class AgentRunSubmissionGate {
           HttpStatus.FORBIDDEN,
           "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
               + " runs execute remotely.");
+    }
+    if (localExecutionRequested) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Agent proposal confirmation cannot bind a local connector and repository selection."
+              + " Submit through the CLI/VS Code local-run command so selectedRepoIds and"
+              + " localInstallationId are verified before any run or provider spend.");
     }
 
     String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
@@ -191,9 +199,6 @@ public class AgentRunSubmissionGate {
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
-    }
-    if (localExecutionRequested) {
-      runLocalExecutionFlag.mark(run.getRunId());
     }
     runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
     return new Submission(run.getRunId(), true, "SUBMITTED");

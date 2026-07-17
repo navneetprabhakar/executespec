@@ -3,6 +3,8 @@ package com.navneet.executespec.project.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -125,5 +127,20 @@ class ProjectRepoServiceSourceReadinessTest {
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
         .hasMessageContaining("LOCAL sources cannot sync");
     org.mockito.Mockito.verifyNoInteractions(stackDetector, gitHub);
+  }
+
+  @Test
+  void organizationMemberCannotSyncSharedRepoWithoutAdminAuthority() {
+    repo.setScope(ProjectRepo.Scope.ORG);
+    repo.setOwnerUserId(null);
+    repo.setOwnerOrgId("org-1");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.syncRepo(repoId, "user-1", "org-1", false, "pat"))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("Only ORG_ADMIN");
+
+    verify(gitHub, never()).getRemoteRepo(any(), any());
+    verify(repoRepo, never()).save(any());
   }
 }

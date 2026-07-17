@@ -244,10 +244,8 @@ public class ProjectSharePublicController {
 
   private static ProjectShareLinkAuditService.AccessContext accessContext(
       HttpServletRequest request) {
-    String clientIp = request.getHeader("CF-Connecting-IP");
-    if (clientIp == null || clientIp.isBlank()) clientIp = request.getRemoteAddr();
     return new ProjectShareLinkAuditService.AccessContext(
-        clientIp, request.getHeader("User-Agent"));
+        request.getRemoteAddr(), request.getHeader("User-Agent"));
   }
 
   /**

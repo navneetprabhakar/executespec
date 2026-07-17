@@ -170,6 +170,14 @@ date range plus an explicit IANA timezone. The same guarded API is available at
 `GET /api/admin/analytics/llm-usage-audit` and `/llm-usage-audit.csv`. Provider invoice comparison
 remains explicitly unavailable until a real upstream invoice/request ingestion contract exists.
 
+### Governed public validation reports
+
+New validation-report shares use the project-share lifecycle: SHA-256 bearer storage, seven-day
+default expiry, revocation, access audit, and project/run scope validation. V294 preserves
+historical `/reports/shared/{token}` URLs for a bounded migration grace period while clearing their
+plaintext bearers. A standalone run must be attached to a project before it can mint a public
+report link.
+
 **Local observability (optional)**
 
 ```bash
