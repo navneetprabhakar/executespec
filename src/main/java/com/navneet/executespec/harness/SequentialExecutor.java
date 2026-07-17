@@ -3511,17 +3511,27 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      // Goal/continuation evidence is another ancillary task write.  Serialize it with recovery
-      // takeover just like terminal status and action history; otherwise a stale executor can
-      // overwrite the resumed worker's latest decision after the generation CAS succeeds.
+      String goalJson = objectMapper.writeValueAsString(goalDecision);
+      String continuationJson = serializeContinuationDecision(continuationDecision);
+      if (taskStatusPersistenceService != null) {
+        // Route through the proxied transactional seam so the pessimistic row lock has an active
+        // transaction. Without this, a fast-fail task (early worker router/provider error) reaches
+        // findByIdForUpdate with no ambient transaction and TransactionRequiredException silently
+        // drops the goal/continuation evidence — the case where an operator most needs it.
+        taskStatusPersistenceService.persistGoalDecisionJson(
+            runId, taskIdShort, goalJson, continuationJson);
+        return;
+      }
+      // Test/bounded-constructor path (no transactional service): mocked repos tolerate the inline
+      // lock; a real DB without a transaction is only reachable through the service branch above.
       var existing = taskRepo.findByIdForUpdate(key);
       if (existing.isEmpty()) {
         log.debug("persistGoalDecision: row not found id={}", key);
         return;
       }
       var task = existing.get();
-      task.setGoalDonenessJson(objectMapper.writeValueAsString(goalDecision));
-      task.setContinuationDecisionJson(serializeContinuationDecision(continuationDecision));
+      task.setGoalDonenessJson(goalJson);
+      task.setContinuationDecisionJson(continuationJson);
       taskRepo.saveAndFlush(task);
     } catch (Exception ex) {
       log.warn("persistGoalDecision: {} failed: {}", key, ex.getMessage(), ex);
