@@ -62,6 +62,30 @@ public class ManagedAiUsageService {
     ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
     String state = routingPolicy.recomputeState(period);
     periodService.syncState(period, state);
+    // Tier model lock (F2, founder decision 2026-07-18): a locked tier (FREE) is routed
+    // exclusively to its locked provider/model (native DeepSeek Flash), overriding whatever
+    // provider/model was requested, so a managed tier cannot spend platform credits on a premium
+    // provider. The managed hard-stop still applies to the locked model.
+    String lockedModel = policy.getLockedModel();
+    if (lockedModel != null && !lockedModel.isBlank()) {
+      String lockedProvider =
+          (policy.getLockedProvider() != null && !policy.getLockedProvider().isBlank())
+              ? policy.getLockedProvider()
+              : provider;
+      String lockedCostClass = modelClassifier.costClass(lockedModel);
+      if (!routingPolicy.isAllowed(state, lockedCostClass, agentRole)) {
+        throw routingPolicy.blocked(state, lockedCostClass);
+      }
+      if (!lockedModel.equals(model) || !lockedProvider.equalsIgnoreCase(provider)) {
+        return new CallAuthorization(
+            lockedProvider,
+            lockedModel,
+            state,
+            true,
+            "Managed AI tier lock: " + user.tier() + " routes to " + lockedModel);
+      }
+      return CallAuthorization.allowed(lockedProvider, lockedModel, state);
+    }
     String costClass = modelClassifier.costClass(model);
     if (routingPolicy.shouldStepUp(state, costClass, agentRole, period)) {
       return modelClassifier
