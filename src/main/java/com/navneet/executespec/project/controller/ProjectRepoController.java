@@ -7,10 +7,15 @@ import jakarta.validation.Valid;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.dto.CreateRepoRequest;
+import com.navneet.executespec.project.dto.LocalProjectSourceDto;
+import com.navneet.executespec.project.dto.LocalSourceHeartbeatRequest;
+import com.navneet.executespec.project.dto.LocalSourceHeartbeatResponse;
 import com.navneet.executespec.project.dto.ProjectRepoDto;
 import com.navneet.executespec.project.dto.ProjectRepoLinkDto;
+import com.navneet.executespec.project.dto.RegisterLocalSourceRequest;
 import com.navneet.executespec.project.dto.UpdateRelationshipsRequest;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.project.service.LocalProjectSourceService;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
@@ -31,6 +36,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectRepoController {
 
   private final ProjectRepoService service;
+  private final LocalProjectSourceService localProjectSourceService;
   private final GitHubRepoService gitHub;
   private final ProjectAccessGuard projectAccessGuard;
 
@@ -135,6 +141,48 @@ public class ProjectRepoController {
   }
 
   /* ── Project linking ── */
+
+  /**
+   * Register (or renew) an opaque local-folder connector and link it to this project. The request
+   * deliberately has no path field; the server stores random client IDs and bounded metadata only.
+   */
+  @PostMapping("/api/projects/{projectId}/sources/local")
+  public ResponseEntity<LocalProjectSourceDto> registerLocalSource(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @Valid @RequestBody RegisterLocalSourceRequest request) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    LocalProjectSourceDto result =
+        localProjectSourceService.register(
+            projectId,
+            request,
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole()));
+    return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
+        .body(result);
+  }
+
+  /**
+   * Renew a registered local source's lease. Path-free like registration; only the connector
+   * installation that registered the folder identity can keep it ONLINE.
+   */
+  @PostMapping("/api/projects/{projectId}/sources/local/{localFolderId}/heartbeat")
+  public ResponseEntity<LocalSourceHeartbeatResponse> heartbeatLocalSource(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID localFolderId,
+      @Valid @RequestBody LocalSourceHeartbeatRequest request) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    return ResponseEntity.ok(
+        localProjectSourceService.heartbeat(
+            projectId,
+            localFolderId,
+            request,
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())));
+  }
 
   @GetMapping("/api/projects/{projectId}/repos")
   public ResponseEntity<List<ProjectRepoLinkDto>> listProjectRepos(

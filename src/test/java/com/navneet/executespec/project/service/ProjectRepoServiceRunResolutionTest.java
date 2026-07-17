@@ -84,4 +84,132 @@ class ProjectRepoServiceRunResolutionTest {
 
     assertEquals(List.of(repo), resolved);
   }
+
+  @Test
+  void localSourceCannotFallThroughToTheCloudClonePipeline() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder().id(repoId).sourceType(ProjectRepo.SourceType.LOCAL.name()).build();
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(List.of(ProjectRepoLink.builder().repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveForRunStrict("project-1", List.of(repoId)));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  /* ── V278 local-run binding contract ── */
+
+  @Test
+  void localRunAdmitsOwnedOnlineLocalSourceForTheHoldingInstallation() {
+    UUID repoId = UUID.randomUUID();
+    UUID installation = UUID.randomUUID();
+    ProjectRepo repo = onlineLocalSource(repoId, installation, "user-1");
+    linkAndResolve(repoId, repo);
+    when(repoRepo.save(repo)).thenReturn(repo);
+
+    var resolved =
+        service.resolveForLocalRunStrict("project-1", List.of(repoId), installation, "user-1");
+
+    assertEquals(List.of(repo), resolved);
+  }
+
+  @Test
+  void localRunWithoutInstallationIdentityIsRejectedWhenLocalSourceSelected() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo = onlineLocalSource(repoId, UUID.randomUUID(), "user-1");
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveForLocalRunStrict("project-1", List.of(repoId), null, "user-1"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void localRunFromDifferentInstallationIsRejected() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo = onlineLocalSource(repoId, UUID.randomUUID(), "user-1");
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.resolveForLocalRunStrict(
+                    "project-1", List.of(repoId), UUID.randomUUID(), "user-1"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void localRunAgainstExpiredLeaseIsRejectedAsOffline() {
+    UUID repoId = UUID.randomUUID();
+    UUID installation = UUID.randomUUID();
+    ProjectRepo repo = onlineLocalSource(repoId, installation, "user-1");
+    repo.setSourceLeaseExpiresAt(java.time.Instant.now().minusSeconds(5));
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.resolveForLocalRunStrict(
+                    "project-1", List.of(repoId), installation, "user-1"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void localRunByNonOwnerIsRejectedEvenWithMatchingInstallation() {
+    UUID repoId = UUID.randomUUID();
+    UUID installation = UUID.randomUUID();
+    ProjectRepo repo = onlineLocalSource(repoId, installation, "owner-1");
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.resolveForLocalRunStrict(
+                    "project-1", List.of(repoId), installation, "intruder-2"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void localRunPassesScmSourcesThroughWithoutInstallationIdentity() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo = ProjectRepo.builder().id(repoId).build();
+    linkAndResolve(repoId, repo);
+
+    var resolved = service.resolveForLocalRunStrict("project-1", List.of(repoId), null, "user-1");
+
+    assertEquals(List.of(repo), resolved);
+  }
+
+  private void linkAndResolve(UUID repoId, ProjectRepo repo) {
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(List.of(ProjectRepoLink.builder().repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+  }
+
+  private static ProjectRepo onlineLocalSource(UUID repoId, UUID installation, String owner) {
+    return ProjectRepo.builder()
+        .id(repoId)
+        .scope(ProjectRepo.Scope.USER)
+        .ownerUserId(owner)
+        .sourceType(ProjectRepo.SourceType.LOCAL.name())
+        .scmProvider(null)
+        .localFolderId(UUID.randomUUID())
+        .localInstallationId(installation)
+        .sourceLeaseExpiresAt(java.time.Instant.now().plusSeconds(60))
+        .build();
+  }
 }

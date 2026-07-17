@@ -317,17 +317,25 @@ class ToolRegistryWorkerBindTest {
   }
 
   @Test
-  void remoteWorkersRetainCompatibilityTools() {
+  void remoteWorkersAdvertiseCanonicalToolsButKeepCompatibilityAliasesDispatchable() {
     var remote =
         org.mockito.Mockito.mock(com.navneet.executespec.tool.remote.RemoteToolDispatcher.class);
     org.mockito.Mockito.when(remote.isRemote("run-1")).thenReturn(true);
+    org.mockito.Mockito.when(remote.toolProfile("run-1"))
+        .thenReturn(
+            com.navneet.executespec.tool.remote.RemoteToolDispatcher.ToolProfile.LOCAL_HANDS);
     ToolRegistry registry =
         new ToolRegistry(
             List.of(
                 fakeTool("readFile"),
+                fakeTool("read_file"),
+                fakeTool("shell"),
+                fakeTool("bash"),
                 fakeTool("ast_search"),
+                fakeTool("astSearch"),
                 fakeTool("lsp"),
-                fakeTool("mcp_client")),
+                fakeTool("mcp_client"),
+                fakeTool("mcpClient")),
             new ObjectMapper(),
             remote,
             null,
@@ -337,7 +345,141 @@ class ToolRegistryWorkerBindTest {
         registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
 
     org.assertj.core.api.Assertions.assertThat(names)
-        .containsExactlyInAnyOrder("readFile", "ast_search", "lsp", "mcp_client");
+        .containsExactlyInAnyOrder("readFile", "shell", "ast_search", "lsp", "mcp_client")
+        .doesNotContain("read_file", "bash", "astSearch", "mcpClient");
+
+    // Backward compatibility lives below schema advertisement: an older in-flight model turn can
+    // still name an alias, WorkerAgent.find(...) resolves it, and remote dispatch sends it to the
+    // released CLI runtime (which accepts both spellings).
+    assertNotNull(registry.find("read_file"));
+    assertNotNull(registry.find("bash"));
+    assertNotNull(registry.find("astSearch"));
+    assertNotNull(registry.find("mcpClient"));
+    org.assertj.core.api.Assertions.assertThat(
+            registry.bind(ctx()).stream().map(t -> t.getToolDefinition().name()).toList())
+        .contains("read_file", "bash", "astSearch", "mcpClient");
+  }
+
+  @Test
+  void liveLocalHandsSurfaceShrinksFrom51SchemasTo25CanonicalCapabilities() {
+    var remote =
+        org.mockito.Mockito.mock(com.navneet.executespec.tool.remote.RemoteToolDispatcher.class);
+    when(remote.isRemote("run-1")).thenReturn(true);
+    when(remote.toolProfile("run-1"))
+        .thenReturn(
+            com.navneet.executespec.tool.remote.RemoteToolDispatcher.ToolProfile.LOCAL_HANDS);
+
+    // Exact live worker inventory with all four flag-gated native tools OFF: 11 native schemas +
+    // 40 CommandToolConfiguration compatibility schemas = 51 before this change.
+    List<String> liveNames =
+        List.of(
+            "readFile",
+            "writeFile",
+            "editFile",
+            "listFiles",
+            "searchFiles",
+            "gitStatus",
+            "gitDiff",
+            "shell",
+            "buildProject",
+            "runTests",
+            "completeTask",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "glob",
+            "grep",
+            "multi_edit",
+            "multiEdit",
+            "apply_patch",
+            "applyPatch",
+            "move",
+            "rename",
+            "delete",
+            "deletePath",
+            "bash",
+            "background_process",
+            "backgroundProcess",
+            "web_fetch",
+            "webFetch",
+            "web_search",
+            "webSearch",
+            "diagnostics",
+            "ast_search",
+            "astSearch",
+            "lsp",
+            "ast_edit",
+            "astEdit",
+            "mcp_client",
+            "mcpClient",
+            "update_plan",
+            "updatePlan",
+            "todo",
+            "executeCommand",
+            "runCommand",
+            "terminalCommand",
+            "build",
+            "runBuild",
+            "testProject",
+            "installDependencies",
+            "lintProject",
+            "formatProject");
+    assertEquals(51, liveNames.size());
+    ToolRegistry registry =
+        new ToolRegistry(
+            liveNames.stream().map(ToolRegistryWorkerBindTest::fakeTool).toList(),
+            new ObjectMapper(),
+            remote,
+            null,
+            null);
+
+    List<String> advertised =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    assertEquals(25, advertised.size());
+    org.assertj.core.api.Assertions.assertThat(advertised)
+        .containsExactlyInAnyOrderElementsOf(ToolRegistry.REMOTE_LOCAL_HANDS_WORKER_TOOLS)
+        .doesNotContain(
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep",
+            "bash",
+            "build",
+            "testProject",
+            "update_plan",
+            "todo");
+  }
+
+  @Test
+  void terminalBenchAdvertisesOnlyIts11CanonicalImplementedTools() {
+    var remote =
+        org.mockito.Mockito.mock(com.navneet.executespec.tool.remote.RemoteToolDispatcher.class);
+    when(remote.isRemote("run-1")).thenReturn(true);
+    when(remote.toolProfile("run-1"))
+        .thenReturn(
+            com.navneet.executespec.tool.remote.RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+    List<String> candidates =
+        java.util.stream.Stream.concat(
+                ToolRegistry.REMOTE_LOCAL_HANDS_WORKER_TOOLS.stream(),
+                java.util.stream.Stream.of("read_file", "bash", "grep", "astSearch"))
+            .distinct()
+            .toList();
+    ToolRegistry registry =
+        new ToolRegistry(
+            candidates.stream().map(ToolRegistryWorkerBindTest::fakeTool).toList(),
+            new ObjectMapper(),
+            remote,
+            null,
+            null);
+
+    List<String> advertised =
+        registry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    assertEquals(11, advertised.size());
+    org.assertj.core.api.Assertions.assertThat(advertised)
+        .containsExactlyInAnyOrderElementsOf(ToolRegistry.REMOTE_TERMINAL_BENCH_WORKER_TOOLS)
+        .doesNotContain("glob", "move", "web_fetch", "ast_search", "mcp_client", "bash");
   }
 
   // ---- harness-resolution task 10: capability-profile optional tools ----

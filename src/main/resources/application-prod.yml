@@ -188,13 +188,14 @@ auth:
 # ── Crypto ────────────────────────────────────────────────────────────────────
 # Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
 # Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
-# configured in the base profile. Safe fallback: if the key can't be loaded the
-# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
-# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
-# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+# configured in the base profile. 2026-07-17 credential gate: prod FAILS CLOSED —
+# if the key can't be loaded the app refuses to boot instead of silently storing
+# plaintext, and encountering an enc: envelope without a usable key throws instead
+# of returning ciphertext. Rotation via executespec.crypto.key-version + previous-keys.
 executespec:
   crypto:
     enabled: true
+    require-encryption: true
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 # 2026-04-21 — US-first launch. Stripe is the prod default gateway for USD traffic.

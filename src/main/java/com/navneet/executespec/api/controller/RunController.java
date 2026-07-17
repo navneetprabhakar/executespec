@@ -151,10 +151,20 @@ public class RunController {
     }
 
     // Brownfield admission happens before quota accounting and before the asynchronous pipeline.
-    // A project with linked repositories must submit an exact, fully-linked code boundary.
-    if (!localExecutionRequested && req.projectId() != null && !req.projectId().isBlank()) {
+    // A project with linked repositories must submit an exact, fully-linked code boundary. Local
+    // runs go through the same write guard plus the V278 LOCAL-source binding contract: a LOCAL
+    // source is admitted only for the connector installation that holds an ONLINE lease.
+    if (req.projectId() != null && !req.projectId().isBlank()) {
       projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
-      projectRepoService.resolveForRunStrict(req.projectId(), req.selectedRepoIds());
+      if (localExecutionRequested) {
+        projectRepoService.resolveForLocalRunStrict(
+            req.projectId(),
+            req.selectedRepoIds(),
+            req.localInstallationId(),
+            userDetails.getUser().getId());
+      } else {
+        projectRepoService.resolveForRunStrict(req.projectId(), req.selectedRepoIds());
+      }
     }
 
     // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same

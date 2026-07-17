@@ -34,7 +34,9 @@ The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) + visib
 
 ## The keystone mechanism (and the fix that made it work)
 
-`register(runId)` before the worker runs flips `RemoteToolDispatcher.isRemote(runId)` true. The V2
+`register(runId, ToolProfile.TERMINAL_BENCH)` before the worker runs flips
+`RemoteToolDispatcher.isRemote(runId)` true and selects the Harbor adapter's 11-tool canonical
+schema (rather than the 51-name CLI compatibility catalogue). The V2
 worker dispatches tools **manually** (`tool.execute()` at `WorkerAgent.dispatchOne`), NOT through
 Spring AI's `ContextBoundToolCallback` — so the remote branch had to be added at the manual-dispatch
 site, not only in `ToolRegistry.ContextBoundToolCallback.call` (which only covers Spring-AI internal
@@ -48,6 +50,9 @@ execution). The fix (RL-2026-06):
   `tool.execute()`. Compaction is skipped in remote mode (compactor flag is OFF by default).
 - `RemoteToolDispatcher.TOOL_TIMEOUT_MS` → constructor-injected `@Value(executespec.remote-tool.timeout-ms)`,
   default raised 120s → **600s** (long TB build/test commands run in the client's container).
+- `RemoteToolDispatcher.ToolProfile` + `ToolRegistry.REMOTE_*_WORKER_TOOLS` separate local-hands
+  capabilities from Terminal-Bench adapter capabilities. Both advertise one canonical name per
+  capability; aliases remain executable for replay compatibility but are not model-visible.
 
 ## The client (Harbor adapter)
 

@@ -1,6 +1,8 @@
 package com.navneet.executespec.project.entity;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import jakarta.persistence.*;
@@ -41,6 +43,12 @@ public class ProjectRepo {
     BLOCKED
   }
 
+  /** Additive source discriminator. Existing rows are SCM; local folders use LOCAL. */
+  public enum SourceType {
+    SCM,
+    LOCAL
+  }
+
   @Id @Builder.Default private UUID id = UUID.randomUUID();
 
   @Enumerated(EnumType.STRING)
@@ -53,11 +61,60 @@ public class ProjectRepo {
   @Column(name = "owner_user_id")
   private String ownerUserId;
 
-  @Column(name = "github_repo_full_name", nullable = false)
+  @Column(name = "github_repo_full_name")
   private String githubRepoFullName;
 
-  @Column(name = "github_owner", nullable = false)
+  @Column(name = "github_owner")
   private String githubOwner;
+
+  /**
+   * V278 — neutral source identity. String persistence is intentional so a newer node can add an
+   * SCM provider without making an older node fail during entity hydration.
+   */
+  @Column(name = "source_type", nullable = false, length = 16)
+  @Builder.Default
+  private String sourceType = SourceType.SCM.name();
+
+  /** SCM transport for sourceType=SCM (GITHUB for all rows predating V278). */
+  @Column(name = "scm_provider", length = 24)
+  @Builder.Default
+  private String scmProvider = "GITHUB";
+
+  /** Provider-neutral stable key: SCM full name or the opaque localFolderId. Never a local path. */
+  @Column(name = "source_key", length = 512)
+  private String sourceKey;
+
+  /** Human label only. It is never interpreted as or used to reconstruct a filesystem path. */
+  @Column(name = "source_display_name", length = 160)
+  private String sourceDisplayName;
+
+  /** Opaque random v4 identifier minted by the local client; not derived from a folder path. */
+  @Column(name = "local_folder_id")
+  private UUID localFolderId;
+
+  /** Opaque random v4 identifier for the local client installation currently holding the lease. */
+  @Column(name = "local_installation_id")
+  private UUID localInstallationId;
+
+  /** Bounded content/fingerprint revision supplied by the local client. */
+  @Column(name = "source_revision", length = 128)
+  private String sourceRevision;
+
+  /** Declared connector capabilities; claims are not treated as source-readiness proof. */
+  @Column(name = "source_capabilities", columnDefinition = "jsonb")
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private List<String> sourceCapabilities;
+
+  /** Small, path-free display metadata. Absolute paths are rejected before persistence. */
+  @Column(name = "source_metadata", columnDefinition = "jsonb")
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private Map<String, String> sourceMetadata;
+
+  @Column(name = "source_last_seen_at")
+  private Instant sourceLastSeenAt;
+
+  @Column(name = "source_lease_expires_at")
+  private Instant sourceLeaseExpiresAt;
 
   @Column(name = "default_branch")
   @Builder.Default
@@ -236,5 +293,12 @@ public class ProjectRepo {
   public enum PrMode {
     PR,
     DIRECT_PUSH
+  }
+
+  /** LOCAL connector availability is lease-derived and therefore cannot remain falsely ONLINE. */
+  public String localConnectionStatus(Instant now) {
+    if (!SourceType.LOCAL.name().equals(sourceType)) return null;
+    if (sourceLeaseExpiresAt == null || !sourceLeaseExpiresAt.isAfter(now)) return "OFFLINE";
+    return "ONLINE";
   }
 }

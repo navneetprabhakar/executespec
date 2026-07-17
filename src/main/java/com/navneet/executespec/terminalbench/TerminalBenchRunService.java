@@ -260,7 +260,7 @@ iterating needlessly.
     // 2) Bind the run to remote tool execution BEFORE the worker runs → isRemote(runId)=true, so
     //    every worker tool call dispatches to the connected client over SSE (ToolRegistry:149)
     //    instead of executing on the server. No worker change required.
-    remoteToolDispatcher.register(runId);
+    remoteToolDispatcher.register(runId, RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
     log.info("[TB] started remote worker run={} provider={} model={}", runId, provider, model);
 

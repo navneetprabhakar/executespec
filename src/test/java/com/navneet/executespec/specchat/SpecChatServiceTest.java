@@ -345,6 +345,39 @@ class SpecChatServiceTest {
   }
 
   @Test
+  void exhaustedToolBudget_forcesAToolFreeFinalSynthesis() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any()))
+        .thenReturn(
+            toolResponse(toolCall("list_recent_runs", "{\"limit\":5}")),
+            textResponse("The evidence shows the scheduler is the highest-risk seam."));
+    SpecChatService svc =
+        newService(router, List.of(fakeTool("list_recent_runs", "{\"ok\":true}")));
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurnBounded(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-synthesis",
+        null,
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "identify the highest-risk seam")),
+        "anthropic",
+        Set.of("list_recent_runs"),
+        1,
+        () -> {});
+
+    ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router, org.mockito.Mockito.times(2)).call(requests.capture());
+    assertThat(requests.getAllValues().get(1).toolsOverride()).isEmpty();
+    assertThat(sink.tokens)
+        .contains("The evidence shows the scheduler is the highest-risk seam.")
+        .noneMatch(token -> token.contains("ask me to continue"));
+    assertThat(sink.doneTurnCount).isEqualTo(2);
+  }
+
+  @Test
   void systemPromptTreatsCliLocalContextAsApprovedEvidence() {
     LlmRouter router = mock(LlmRouter.class);
     when(router.call(any())).thenReturn(textResponse("This folder is a TypeScript CLI."));

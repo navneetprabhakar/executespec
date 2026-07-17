@@ -85,9 +85,16 @@ class PromptConformanceTest {
   void reviewerGeneralTreatsMissingChangedCodeTestsAsInScope() throws IOException {
     String reviewer = prompt("prompts/reviewer-general.md");
 
-    assertThat(reviewer).contains("Missing required tests or verification evidence");
-    assertThat(reviewer).contains("Missing tests for changed production code are in scope");
+    assertThat(reviewer).contains("Missing or invalid tests for changed production code");
+    assertThat(reviewer)
+        .contains(
+            "Missing, tautological, or requirement-bypassing tests for changed production code are"
+                + " in scope");
     assertThat(reviewer).doesNotContain("Missing tests (unless a spec explicitly asked for them)");
+    assertThat(reviewer)
+        .contains("test reimplements the target logic")
+        .contains("fixture disables the security/validation/middleware boundary")
+        .contains("Remove such bypasses and fix production");
   }
 
   @Test

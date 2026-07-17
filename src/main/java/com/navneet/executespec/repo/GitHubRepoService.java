@@ -619,11 +619,16 @@ public class GitHubRepoService {
       return;
     }
 
-    String authUrl = repoUrl.replace("https://", "https://oauth2:" + effectivePat + "@");
-    ProcessBuilder pb = new ProcessBuilder("git", "clone", authUrl, workspacePath);
-    pb.inheritIO();
-    int exit = pb.start().waitFor();
-    if (exit != 0) throw new RuntimeException("git clone failed with exit code " + exit);
+    // Credential-gate 2026-07-17: PAT rides the child env (GitProcessAuth), not argv/remote —
+    // and inheritIO is gone so child git output can't stream tokens into the parent's stdout.
+    ProcessBuilder pb =
+        GitProcessAuth.git(effectivePat, java.util.List.of("clone", repoUrl, workspacePath));
+    pb.redirectErrorStream(true);
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    int exit = p.waitFor();
+    if (exit != 0)
+      throw new RuntimeException("git clone failed with exit code " + exit + ": " + out);
   }
 
   /** Generates a random memorable repo name (e.g. "swift-spark", "bold-nexus"). */
@@ -1150,35 +1155,28 @@ public class GitHubRepoService {
    * Parses the Git Trees API response to extract file paths. Expected format: {"tree": [{"path":
    * "src/main.java", "type": "blob"}, ...]}
    */
-  private List<String> parseTreePaths(String json) {
+  static List<String> parseTreePaths(String json) {
     List<String> paths = new ArrayList<>();
-    // Simple JSON parsing — find each "path":"..." where preceding "type":"blob"
-    int idx = 0;
-    while (idx < json.length()) {
-      int typeIdx = json.indexOf("\"type\":", idx);
-      if (typeIdx < 0) break;
-
-      int pathIdx = json.indexOf("\"path\":", typeIdx);
-      if (pathIdx < 0) break;
-
-      // Check if type is "blob"
-      int typeValStart = json.indexOf("\"", typeIdx + 7) + 1;
-      int typeValEnd = json.indexOf("\"", typeValStart);
-      String typeVal = json.substring(typeValStart, typeValEnd);
-
-      // Extract path value
-      int pathValStart = json.indexOf("\"", pathIdx + 7) + 1;
-      int pathValEnd = json.indexOf("\"", pathValStart);
-      String pathVal = json.substring(pathValStart, pathValEnd);
-
-      if ("blob".equals(typeVal) && !pathVal.startsWith(".git")) {
-        paths.add(pathVal);
+    try {
+      JsonNode tree = new ObjectMapper().readTree(json).path("tree");
+      if (!tree.isArray()) return List.of();
+      for (JsonNode entry : tree) {
+        String type = entry.path("type").asText("");
+        String path = entry.path("path").asText("");
+        if ("blob".equals(type) && !path.isBlank() && !isGitMetadataPath(path)) {
+          paths.add(path);
+        }
       }
-
-      idx = pathValEnd + 1;
+    } catch (Exception e) {
+      log.warn("[GitHubRepoService] Failed to parse Git Trees response: {}", e.getMessage());
+      return List.of();
     }
     paths.sort(String::compareTo);
     return paths;
+  }
+
+  private static boolean isGitMetadataPath(String path) {
+    return ".git".equals(path) || path.startsWith(".git/");
   }
 
   /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */

@@ -50,15 +50,17 @@ public class BitbucketRepoService {
     }
 
     try {
-      // Embed credentials: https://username:appPassword@bitbucket.org/workspace/repo.git
-      String authUrl =
-          cloneUrl.replace("https://", "https://" + username + ":" + appPassword + "@");
-
-      ProcessBuilder pb = new ProcessBuilder("git", "clone", authUrl, workspacePath);
-      pb.inheritIO();
-      int exit = pb.start().waitFor();
+      // Credential-gate 2026-07-17: app password rides the child env (GitProcessAuth), never
+      // argv or the persisted remote URL; inheritIO removed so git output stays captured.
+      ProcessBuilder pb =
+          GitProcessAuth.git(
+              appPassword, username, java.util.List.of("clone", cloneUrl, workspacePath));
+      pb.redirectErrorStream(true);
+      Process p = pb.start();
+      String out = new String(p.getInputStream().readAllBytes());
+      int exit = p.waitFor();
       if (exit != 0) {
-        log.error("[BitbucketRepoService] git clone failed with exit code {}", exit);
+        log.error("[BitbucketRepoService] git clone failed with exit code {}: {}", exit, out);
         return;
       }
       log.info("[BitbucketRepoService] Cloned repo to {}", workspacePath);

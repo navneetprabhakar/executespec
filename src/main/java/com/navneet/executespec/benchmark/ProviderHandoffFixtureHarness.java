@@ -32,6 +32,15 @@ public final class ProviderHandoffFixtureHarness {
   public static final int MAX_ITERATIONS = 60;
   public static final int MAX_TOKENS_PER_CALL = 4_096;
 
+  /**
+   * Providers admissible for quality-evidence comparison. Gemini is excluded from the comparator
+   * scope by explicit direction, and retired providers are gone from production entirely; neither
+   * may enter this harness even by operator request. OpenRouter/Fireworks stay admissible as
+   * separate capability probes, never as native-provider quality evidence.
+   */
+  public static final Set<String> APPROVED_QUALITY_EVIDENCE_PROVIDERS =
+      Set.of("anthropic", "openai", "deepseek", "openrouter", "fireworks");
+
   private static final Map<String, Fixture> FIXTURES = fixtures();
 
   private ProviderHandoffFixtureHarness() {}
@@ -224,6 +233,16 @@ public final class ProviderHandoffFixtureHarness {
   private static void validateRoute(Request request) {
     if (request.primaryProvider().equals(request.fallbackProvider())) {
       throw new IllegalArgumentException("primaryProvider and fallbackProvider must differ");
+    }
+    for (String provider : List.of(request.primaryProvider(), request.fallbackProvider())) {
+      if (!APPROVED_QUALITY_EVIDENCE_PROVIDERS.contains(provider)) {
+        throw new IllegalArgumentException(
+            "provider "
+                + provider
+                + " is not admissible for quality-evidence comparison (approved: "
+                + APPROVED_QUALITY_EVIDENCE_PROVIDERS.stream().sorted().toList()
+                + ")");
+      }
     }
     Set<String> allowed =
         request.allowedProviders().stream()

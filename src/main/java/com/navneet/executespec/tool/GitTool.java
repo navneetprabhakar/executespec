@@ -586,10 +586,10 @@ public class GitTool {
    */
   public GitToolResult pushToRemote(String runId, String repoUrl, String pat) {
     try {
-      String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
       ProcessBuilder pb =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, "main", "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", wsPath, "push", repoUrl, "main", "--force"));
       pb.redirectErrorStream(true);
       Process p = pb.start();
       String output = new String(p.getInputStream().readAllBytes());
@@ -619,7 +619,6 @@ public class GitTool {
    */
   public GitToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
     try {
-      String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
       // Create the branch from current HEAD (main)
@@ -636,7 +635,8 @@ public class GitTool {
 
       // Push the branch to remote
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", wsPath, "push", repoUrl, branchName, "--force"));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());
@@ -699,9 +699,9 @@ public class GitTool {
       if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
-      String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", repoDir, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", repoDir, "push", remoteUrl, branchName, "--force"));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
@@ -753,8 +753,9 @@ public class GitTool {
       if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       // Push WITHOUT --force (fast-forward only → safe for existing PR branches)
-      String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
-      ProcessBuilder push = new ProcessBuilder("git", "-C", repoDir, "push", authUrl, branchName);
+      ProcessBuilder push =
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", repoDir, "push", remoteUrl, branchName));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
@@ -789,8 +790,6 @@ public class GitTool {
   public GitToolResult pushToBranchBitbucket(
       String runId, String cloneUrl, String username, String appPassword, String branchName) {
     try {
-      String authUrl =
-          cloneUrl.replace("https://", "https://" + username + ":" + appPassword + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
       // Create the branch from current HEAD (main)
@@ -807,7 +806,10 @@ public class GitTool {
 
       // Push the branch to remote
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              appPassword,
+              username,
+              java.util.List.of("-C", wsPath, "push", cloneUrl, branchName, "--force"));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());

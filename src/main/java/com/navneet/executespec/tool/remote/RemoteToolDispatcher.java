@@ -40,6 +40,16 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RemoteToolDispatcher {
 
+  /**
+   * Model-visible tool profile for a remote execution session. LOCAL_HANDS is backed by the
+   * released CLI runtime; TERMINAL_BENCH is deliberately limited to the Harbor adapter's smaller
+   * canonical contract. The profile affects schema advertisement only, never result transport.
+   */
+  public enum ToolProfile {
+    LOCAL_HANDS,
+    TERMINAL_BENCH
+  }
+
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
   private final LocalHandsStateService stateService;
@@ -84,17 +94,24 @@ public class RemoteToolDispatcher {
   private static final class Session {
     final Map<String, PendingRemoteCall> pending = new ConcurrentHashMap<>();
 
+    final ToolProfile toolProfile;
+
     /** True once this process has an in-memory worker wait that a result can unblock. */
     volatile boolean workerWaitRebound;
 
     volatile boolean connected = true;
 
     Session() {
-      this(true);
+      this(true, ToolProfile.LOCAL_HANDS);
     }
 
     Session(boolean workerWaitRebound) {
+      this(workerWaitRebound, ToolProfile.LOCAL_HANDS);
+    }
+
+    Session(boolean workerWaitRebound, ToolProfile toolProfile) {
       this.workerWaitRebound = workerWaitRebound;
+      this.toolProfile = toolProfile;
     }
   }
 
@@ -113,12 +130,36 @@ public class RemoteToolDispatcher {
    * Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client.
    */
   public void register(String runId) {
-    Session existing = sessions.putIfAbsent(runId, new Session());
+    register(runId, ToolProfile.LOCAL_HANDS);
+  }
+
+  /** Bind a run with an explicit model-visible remote tool profile. */
+  public void register(String runId, ToolProfile toolProfile) {
+    ToolProfile resolved = toolProfile == null ? ToolProfile.LOCAL_HANDS : toolProfile;
+    Session existing = sessions.putIfAbsent(runId, new Session(true, resolved));
     if (existing == null) {
-      log.info("[RemoteTool] registered local-execution session for run {}", runId);
+      log.info(
+          "[RemoteTool] registered local-execution session for run {} with profile {}",
+          runId,
+          resolved);
       return;
     }
+    if (existing.toolProfile != resolved) {
+      log.warn(
+          "[RemoteTool] run {} already uses profile {}; ignoring conflicting registration {}",
+          runId,
+          existing.toolProfile,
+          resolved);
+    }
     reconnect(runId);
+  }
+
+  /**
+   * Profile used to advertise tools for this remote session, or null when the run is not remote.
+   */
+  public ToolProfile toolProfile(String runId) {
+    Session session = sessions.get(runId);
+    return session == null ? null : session.toolProfile;
   }
 
   /** Bind a run after JVM crash recovery and close stale calls from the old worker future. */

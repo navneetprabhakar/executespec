@@ -49,6 +49,21 @@ export interface ProjectRepo {
   /** R-325 — TRUE when the attach bypassed the size-gate via the
    *  "Attach anyway" opt-in. Drives a per-run credit surcharge. */
   attachedAnyway: boolean;
+  /** V278 — neutral source identity. Legacy GitHub fields above stay populated for SCM rows;
+   *  LOCAL rows carry opaque client-minted identities and a lease-derived connection status. */
+  sourceType?: 'SCM' | 'LOCAL' | null;
+  scmProvider?: string | null;
+  sourceKey?: string | null;
+  sourceDisplayName?: string | null;
+  localFolderId?: string | null;
+  localInstallationId?: string | null;
+  sourceRevision?: string | null;
+  sourceCapabilities?: string[] | null;
+  sourceMetadata?: Record<string, string> | null;
+  sourceLastSeenAt?: string | null;
+  sourceLeaseExpiresAt?: string | null;
+  /** ONLINE while the connector lease is unexpired; OFFLINE otherwise. Null for SCM rows. */
+  localConnectionStatus?: 'ONLINE' | 'OFFLINE' | null;
   createdAt: string;
   updatedAt: string;
 }

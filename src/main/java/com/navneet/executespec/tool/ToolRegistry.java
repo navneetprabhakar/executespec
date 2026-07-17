@@ -101,8 +101,8 @@ public class ToolRegistry {
    * stall class), splits model behavior across aliases with DIFFERENT error semantics ({@code bash}
    * errs on non-zero exit, {@code shell} returns ok+exit=N), and teaches models the tool surface is
    * unreliable when they hit a stub. When the flag is ON, server-side (non-remote) workers bind
-   * ONLY this set; remote/local-hands runs keep the full parity set — the aliases exist for those
-   * clients.
+   * ONLY this set. Remote workers always use one canonical schema per capability; compatibility
+   * aliases remain registered for replay/backward-compatible dispatch but are not advertised.
    *
    * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
    * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
@@ -133,6 +133,56 @@ public class ToolRegistry {
           "readCodeOutline",
           "runWorkspaceTests",
           "verifyBoot");
+
+  /**
+   * Canonical schemas supported by the released CLI local-hands runtime. This retains genuinely
+   * additive client capabilities (structural search/edit, LSP, MCP, web, background jobs, and
+   * focused project commands) while removing alternate spellings and compatibility stubs. Legacy
+   * aliases remain in {@link #allTools}, so an in-flight/replayed older turn can still dispatch
+   * them through {@link #find(String)}.
+   */
+  public static final Set<String> REMOTE_LOCAL_HANDS_WORKER_TOOLS =
+      Set.of(
+          "readFile",
+          "writeFile",
+          "editFile",
+          "listFiles",
+          "searchFiles",
+          "glob",
+          "move",
+          "delete",
+          "gitStatus",
+          "gitDiff",
+          "shell",
+          "background_process",
+          "web_fetch",
+          "web_search",
+          "diagnostics",
+          "ast_search",
+          "ast_edit",
+          "lsp",
+          "mcp_client",
+          "buildProject",
+          "runTests",
+          "installDependencies",
+          "lintProject",
+          "formatProject",
+          "completeTask");
+
+  /** Canonical schemas implemented by the Terminal-Bench Harbor adapter. */
+  public static final Set<String> REMOTE_TERMINAL_BENCH_WORKER_TOOLS =
+      Set.of(
+          "readFile",
+          "writeFile",
+          "editFile",
+          "listFiles",
+          "searchFiles",
+          "gitStatus",
+          "gitDiff",
+          "shell",
+          "buildProject",
+          "runTests",
+          "completeTask");
 
   /** Names of all registered tools. */
   public List<String> toolNames() {
@@ -217,12 +267,15 @@ public class ToolRegistry {
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
     final boolean remote = isRemoteRun(ctx);
-    // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
-    // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
+    // T1 lean toolset: server-side workers get the canonical set only when enabled. Remote workers
+    // are always canonical because transmitting duplicate aliases on every LLM turn is pure schema
+    // cost and increases tool-selection ambiguity; alias dispatch compatibility remains below the
+    // binding layer.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
             && !remote;
+    final Set<String> remoteTools = remote ? remoteWorkerTools(ctx) : Set.of();
     final java.util.Set<String> profileTools = profileOptionalTools(provider, model);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
@@ -231,12 +284,22 @@ public class ToolRegistry {
         // OFF. This keeps old persisted flag state from reintroducing misleading schemas.
         .filter(t -> remote || !SERVER_WORKER_EXCLUDED_TOOLS.contains(t.name()))
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
+        .filter(t -> !remote || remoteTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)
                     new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
+  }
+
+  private Set<String> remoteWorkerTools(ExecutionContext ctx) {
+    if (remoteToolDispatcher != null
+        && remoteToolDispatcher.toolProfile(ctx.runId())
+            == RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH) {
+      return REMOTE_TERMINAL_BENCH_WORKER_TOOLS;
+    }
+    return REMOTE_LOCAL_HANDS_WORKER_TOOLS;
   }
 
   private java.util.Set<String> profileOptionalTools(String provider) {

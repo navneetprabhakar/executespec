@@ -63,10 +63,27 @@ class RemoteToolDispatcherTest {
   @Test
   void isRemote_togglesWithRegistration() {
     assertThat(dispatcher.isRemote("r1")).isFalse();
+    assertThat(dispatcher.toolProfile("r1")).isNull();
     dispatcher.register("r1");
     assertThat(dispatcher.isRemote("r1")).isTrue();
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.LOCAL_HANDS);
     dispatcher.unregister("r1");
     assertThat(dispatcher.isRemote("r1")).isFalse();
+    assertThat(dispatcher.toolProfile("r1")).isNull();
+  }
+
+  @Test
+  void explicitTerminalBenchProfileSurvivesReconnect() {
+    dispatcher.register("r1", RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+
+    dispatcher.disconnect("r1");
+    dispatcher.reconnect("r1");
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
   }
 
   @Test
