@@ -523,7 +523,7 @@ export function IdeCompose() {
     }
     const t = setTimeout(() => {
       api
-        .estimateRun(projectId, spec.trim())
+        .estimateRun(projectId, spec.trim(), provider, modelName || undefined)
         .then((e) => {
           setEstimate(e);
           setEstimateAt(Date.now());
@@ -534,7 +534,7 @@ export function IdeCompose() {
         });
     }, 600);
     return () => clearTimeout(t);
-  }, [projectId, spec]);
+  }, [projectId, spec, provider, modelName]);
 
   // RUN-7 — flip the estimate card's freshness line to a refresh affordance
   // 60s after the last fetch.

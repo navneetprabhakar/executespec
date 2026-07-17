@@ -234,10 +234,17 @@ export const syncRun = (runId: string, branch?: string) =>
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     {method: 'POST'},
   );
-export const estimateRun = (projectId: string, requirement: string) =>
-  req<LaunchEstimate>(
-    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`,
-  );
+export const estimateRun = (
+  projectId: string,
+  requirement: string,
+  provider?: string,
+  model?: string,
+) => {
+  const params = new URLSearchParams({requirement});
+  if (provider) params.set('provider', provider);
+  if (model) params.set('model', model);
+  return req<LaunchEstimate>(`/projects/${projectId}/estimate?${params.toString()}`);
+};
 
 // v2.5.2 — reset workspace to the exact commit SHAs captured at run start.
 // Returns { reposSynced: 0, details: ["no snapshot — run predates v2.5.2"] }

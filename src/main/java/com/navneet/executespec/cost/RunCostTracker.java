@@ -686,6 +686,39 @@ public class RunCostTracker {
   }
 
   /**
+   * Price a token volume against a specific (provider, model) for the pre-submit Launch estimate.
+   * When {@code model} is blank or unpriced, falls back to the provider's WORKHORSE-tier default
+   * model rate rather than the silent {@code {0,0}} that {@link #rates} returns — so a selected
+   * model that isn't in the pricing matrix still produces a non-zero, provider-appropriate figure.
+   * Returns 0 only when the provider itself cannot be resolved to any rate.
+   */
+  public double estimateTokenCostUsd(
+      String provider, String model, long inputTokens, long outputTokens) {
+    double[] r = ratesForModelOrProviderDefault(provider, model);
+    return (inputTokens / 1_000_000.0) * r[0] + (outputTokens / 1_000_000.0) * r[1];
+  }
+
+  /**
+   * Resolve per-1M input/output rates for the selected model, falling back to the provider's
+   * WORKHORSE-tier default when the model is blank/unpriced. Exposed for the Launch estimate so it
+   * can price historical token volume against whichever model the user is about to select.
+   */
+  public double[] ratesForModelOrProviderDefault(String provider, String model) {
+    if (provider == null || provider.isBlank()) return new double[] {0.0, 0.0};
+    String providerLower = provider.toLowerCase();
+    if (model != null && !model.isBlank()) {
+      double[] r = rates(providerLower, model.trim());
+      if (r[0] > 0.0 || r[1] > 0.0) return r;
+    }
+    try {
+      LlmProvider p = LlmProvider.valueOf(provider.toUpperCase());
+      return ratesForTier(p, AgentTier.WORKHORSE);
+    } catch (Exception e) {
+      return new double[] {0.0, 0.0};
+    }
+  }
+
+  /**
    * Provider-aware pricing. The "normal input" calculation differs by provider because each API
    * reports {@code input_tokens} / {@code prompt_tokens} differently relative to the cache fields:
    *

@@ -1,5 +1,6 @@
 package com.navneet.executespec.benchmark;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -343,17 +344,33 @@ public final class ProviderHandoffFixtureHarness {
   }
 
   private static String fingerprintWorkspace(Path root) throws IOException {
-    StringBuilder content = new StringBuilder();
+    // Hash RAW BYTES, not a UTF-8-decoded String: a worker that runs tests/builds leaves binary
+    // artifacts (e.g. Python `.pyc`, compiled classes) in the workspace, and Files.readString would
+    // throw MalformedInputException (an IOException) on the first non-UTF-8 file, turning a
+    // legitimate
+    // no-deliverable stagnation into a 500 instead of scoreable evidence. `.git` internals are
+    // excluded because their object/timestamp churn is non-deterministic noise, not deliverable
+    // code.
+    MessageDigest digest;
+    try {
+      digest = MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 unavailable", error);
+    }
     try (var walk = Files.walk(root)) {
-      for (Path path : walk.filter(Files::isRegularFile).sorted().toList()) {
-        content
-            .append(root.relativize(path))
-            .append('\n')
-            .append(Files.readString(path))
-            .append('\n');
+      for (Path path :
+          walk.filter(Files::isRegularFile)
+              .filter(p -> !root.relativize(p).toString().startsWith(".git" + File.separator))
+              .filter(p -> !root.relativize(p).toString().equals(".git"))
+              .sorted()
+              .toList()) {
+        digest.update(root.relativize(path).toString().getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) '\n');
+        digest.update(Files.readAllBytes(path));
+        digest.update((byte) '\n');
       }
     }
-    return sha256(content.toString());
+    return HexFormat.of().formatHex(digest.digest());
   }
 
   private static String require(String value, String name) {
