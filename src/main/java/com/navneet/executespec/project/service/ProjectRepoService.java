@@ -237,7 +237,7 @@ public class ProjectRepoService {
       String callerOrgId,
       boolean isOrgAdmin,
       String overridePat) {
-    ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+    ProjectRepo repo = loadRepoForWrite(repoId, callerUserId, callerOrgId, isOrgAdmin);
     requireScmSource(repo, "sync");
     ScmProvider provider = ScmProvider.require(repo.getScmProvider());
     ScmRepositoryClient client = scmClients.require(provider);
@@ -723,8 +723,9 @@ public class ProjectRepoService {
    * "already exists" path is treated as success.
    */
   @Transactional
-  public boolean installWebhook(UUID repoId, String pat, String callerUserId, String callerOrgId) {
-    ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+  public boolean installWebhook(
+      UUID repoId, String pat, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
+    ProjectRepo repo = loadRepoForWrite(repoId, callerUserId, callerOrgId, isOrgAdmin);
     requireScmSource(repo, "install a webhook");
     requireCapability(repo, ScmCapability.WEBHOOK, "install webhooks");
     boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
@@ -841,7 +842,7 @@ public class ProjectRepoService {
     return repo;
   }
 
-  private ProjectRepo loadRepoForWrite(
+  public ProjectRepo loadRepoForWrite(
       UUID repoId, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
     if (repo.getScope() == ProjectRepo.Scope.ORG && !isOrgAdmin) {

@@ -210,6 +210,7 @@ class CommandToolsTest {
             new WriteFileTool(
                 new FileSandboxPolicy(),
                 new com.navneet.executespec.security.CodeAbuseScanner(),
+                new com.navneet.executespec.security.GeneratedSecretScanner(),
                 mock(com.navneet.executespec.sse.SseBroadcaster.class),
                 new ReadFileStateStore(),
                 null));
@@ -399,6 +400,7 @@ class CommandToolsTest {
     return new EditFileTool(
         new FileSandboxPolicy(),
         new com.navneet.executespec.security.CodeAbuseScanner(),
+        new com.navneet.executespec.security.GeneratedSecretScanner(),
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         readState,
         null);

@@ -33,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 class AgentSessionReadService {
 
   private static final int LEGACY_SNAPSHOT_PAGE_SIZE = 500;
+  private static final int CURSOR_REPLAY_PAGE_SIZE = 500;
 
   private final AgentSessionRepository sessionRepo;
   private final AgentTurnRepository turnRepo;
@@ -68,12 +69,24 @@ class AgentSessionReadService {
 
   AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    List<AgentActionEvent> events =
-        after == null || after < 0
-            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(
-                sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE))
-            : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
-                sessionId, after);
+    boolean snapshot = after == null || after < 0;
+    List<AgentActionEvent> events;
+    boolean deltaTruncated = false;
+    if (snapshot) {
+      events =
+          eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+              sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE));
+    } else {
+      // Fetch one sentinel row beyond the response ceiling so a stale reconnect cursor cannot
+      // materialise an unbounded long-lived session and the client still gets an exact next cursor.
+      events =
+          eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+              sessionId, after, PageRequest.of(0, CURSOR_REPLAY_PAGE_SIZE + 1));
+      deltaTruncated = events.size() > CURSOR_REPLAY_PAGE_SIZE;
+      if (deltaTruncated) {
+        events = List.copyOf(events.subList(0, CURSOR_REPLAY_PAGE_SIZE));
+      }
+    }
     long last = after == null || after < 0 ? 0 : after;
     if (after != null && after >= 0) {
       // Keep the cursor contract defensive even if a replica/query implementation returns a stale
@@ -96,11 +109,10 @@ class AgentSessionReadService {
         last = Math.max(last, event.getStreamSequence());
       }
     }
-    boolean snapshot = after == null || after < 0;
     boolean legacyEventsOmitted =
         !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
-    boolean truncated = false;
-    boolean hasMore = false;
+    boolean truncated = deltaTruncated;
+    boolean hasMore = deltaTruncated;
     if (snapshot) {
       truncated = eventRepo.countBySessionId(sessionId) > LEGACY_SNAPSHOT_PAGE_SIZE;
       hasMore = truncated;

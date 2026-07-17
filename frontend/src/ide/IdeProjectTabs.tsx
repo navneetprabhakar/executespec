@@ -726,7 +726,11 @@ export function IdeProjectRuns() {
   const [linkedRepos, setLinkedRepos] = useState<ProjectRepoLink[]>([]);
   const [prBusy, setPrBusy] = useState<string | null>(null);
   // C8 — credit-spending dispatch awaiting confirmation (PR-card "Autofix review").
-  const [autofixFor, setAutofixFor] = useState<{prNumber: number; repo: string} | null>(null);
+  const [autofixFor, setAutofixFor] = useState<{
+    prNumber: number;
+    repo: string;
+    repoId: string;
+  } | null>(null);
   const [reviewOpen, setReviewOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -826,15 +830,15 @@ export function IdeProjectRuns() {
     }
   }
 
-  async function autofix(prNumber: number, repoFullName: string) {
-    if (!projectId || !repoFullName) return;
+  async function autofix(prNumber: number, repoFullName: string, repoId: string) {
+    if (!projectId || !repoFullName || !repoId) return;
     const key = `${repoFullName}#${prNumber}`;
     setPrBusy(key);
     setErr('');
     setMsg('');
     try {
       // Pull PR review comments; the response is { comments: string }.
-      const res = await api.fetchPrReviewComments(projectId, prNumber, repoFullName);
+      const res = await api.fetchPrReviewComments(projectId, prNumber, repoId, repoFullName);
       const text = (res?.comments || '').trim();
       setMsg(
         text
@@ -1147,9 +1151,9 @@ export function IdeProjectRuns() {
                       <button
                         className='ide-btn ghost'
                         style={{padding: '4px 10px'}}
-                        disabled={prBusy === key}
+                        disabled={prBusy === key || !linkedRepoId}
                         // C8 — credit-spending dispatch goes through a confirm modal.
-                        onClick={() => setAutofixFor({prNumber: num, repo})}
+                        onClick={() => setAutofixFor({prNumber: num, repo, repoId: linkedRepoId})}
                       >
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </button>
@@ -1181,7 +1185,7 @@ export function IdeProjectRuns() {
         busy={!!autofixFor && prBusy === `${autofixFor.repo}#${autofixFor.prNumber}`}
         onConfirm={async () => {
           const a = autofixFor;
-          if (a) await autofix(a.prNumber, a.repo);
+          if (a) await autofix(a.prNumber, a.repo, a.repoId);
         }}
         onClose={() => setAutofixFor(null)}
       />

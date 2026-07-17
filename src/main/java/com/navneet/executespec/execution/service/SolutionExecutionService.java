@@ -511,9 +511,10 @@ public class SolutionExecutionService {
     }
   }
 
-  public void signalManualFixDone(String solutionId) {
-    ExecutionSolution s = solutionRepo.findById(solutionId).orElse(null);
-    if (s == null) return;
+  public boolean signalManualFixDone(String executionRunId, String solutionId) {
+    ExecutionSolution s =
+        solutionRepo.findByIdAndExecutionRun_Id(solutionId, executionRunId).orElse(null);
+    if (s == null) return false;
     s.setStatus("DONE");
     s.setCompletedAt(Instant.now());
     solutionRepo.save(s);
@@ -523,6 +524,7 @@ public class SolutionExecutionService {
       emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_DONE, s.getId());
       resume(run);
     }
+    return true;
   }
 
   private void resume(ExecutionRun run) {

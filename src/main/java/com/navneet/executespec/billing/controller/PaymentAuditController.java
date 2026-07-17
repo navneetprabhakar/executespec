@@ -1,5 +1,6 @@
 package com.navneet.executespec.billing.controller;
 
+import com.navneet.executespec.api.PageBounds;
 import com.navneet.executespec.auth.entity.PaymentAudit;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.PaymentAuditService;
@@ -35,7 +36,7 @@ public class PaymentAuditController {
       @RequestParam(defaultValue = "50") int size,
       @RequestParam(required = false) String orgId,
       @RequestParam(required = false) String userId) {
-    PageRequest pr = PageRequest.of(page, Math.min(size, 200));
+    PageRequest pr = PageBounds.request(page, size, 200);
     Page<PaymentAudit> result;
     if (orgId != null) {
       result = auditService.findByOrg(orgId, pr);
@@ -66,7 +67,7 @@ public class PaymentAuditController {
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int size,
       @RequestParam(required = false) String gateway) {
-    PageRequest pr = PageRequest.of(page, Math.min(size, 200));
+    PageRequest pr = PageBounds.request(page, size, 200);
     Page<WebhookEventLog> result;
     if (gateway != null) {
       result = webhookRepo.findByGatewayOrderByCreatedAtDesc(gateway, pr);
@@ -85,7 +86,7 @@ public class PaymentAuditController {
       @RequestParam(defaultValue = "50") int size,
       @AuthenticationPrincipal AppUserDetails principal) {
     assertCanReadOrgHistory(principal, orgId);
-    PageRequest pr = PageRequest.of(page, Math.min(size, 200));
+    PageRequest pr = PageBounds.request(page, size, 200);
     return ResponseEntity.ok(auditService.findByOrg(orgId, pr));
   }
 

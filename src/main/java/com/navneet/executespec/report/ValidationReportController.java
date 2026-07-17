@@ -1,11 +1,15 @@
 package com.navneet.executespec.report;
 
+import java.time.Instant;
 import java.util.Map;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.report.model.ValidationReportShareDTO;
+import com.navneet.executespec.sharing.entity.ProjectShareLink;
+import com.navneet.executespec.sharing.service.ProjectShareLinkService;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -25,6 +29,8 @@ public class ValidationReportController {
   private final ValidationReportService reportService;
   private final ValidationReportPdfService pdfService;
   private final RunAccessGuard runAccessGuard;
+  private final PipelineRunRepository runRepository;
+  private final ProjectShareLinkService shareLinkService;
 
   @GetMapping("/runs/{runId}/report")
   public ResponseEntity<ValidationReportDTO> getReport(
@@ -44,15 +50,32 @@ public class ValidationReportController {
 
     runAccessGuard.requireRunWriteAccess(runId, userDetails);
 
-    var report =
-        reportService
-            .getByRunId(runId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No report for this run"));
+    reportService
+        .findEntityByRunId(runId)
+        .orElseThrow(
+            () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No report for this run"));
 
-    String token = reportService.share(runId);
+    var run =
+        runRepository
+            .findById(runId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+    if (run.getProjectId() == null || run.getProjectId().isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Public report links require a project so expiry, revocation, and audit can be enforced");
+    }
 
-    return ResponseEntity.ok(Map.of("shareToken", token, "shareUrl", "/reports/shared/" + token));
+    ProjectShareLink link =
+        shareLinkService.createLink(
+            run.getProjectId(),
+            ProjectShareLink.Surface.VALIDATION_REPORT,
+            runId,
+            "Validation report",
+            Instant.now().plusSeconds(ProjectShareLinkService.DEFAULT_EXPIRY_DAYS * 24L * 3600L),
+            userDetails.getUser());
+    String token = link.getToken();
+
+    return ResponseEntity.ok(Map.of("shareToken", token, "shareUrl", "/shared/" + token));
   }
 
   @GetMapping("/runs/{runId}/report/pdf")

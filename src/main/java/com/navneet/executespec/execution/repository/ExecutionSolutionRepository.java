@@ -1,6 +1,7 @@
 package com.navneet.executespec.execution.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.navneet.executespec.execution.entity.ExecutionSolution;
 
@@ -8,6 +9,9 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ExecutionSolutionRepository extends JpaRepository<ExecutionSolution, String> {
+
+  /** Security boundary for lifecycle mutations: a solution id is never sufficient on its own. */
+  Optional<ExecutionSolution> findByIdAndExecutionRun_Id(String id, String executionRunId);
 
   /**
    * Default order-by lookup. Lazy collections (dependencies, repos) are NOT fetched — callers that

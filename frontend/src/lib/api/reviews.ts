@@ -43,9 +43,14 @@ export const execPreviewCommand = (runId: string, cmd: string, args: string[] = 
   });
 
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
-export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
+export const fetchPrReviewComments = (
+  projectId: string,
+  prNumber: number,
+  repoId: string,
+  repoFullName: string,
+) =>
   req<{comments: string}>(
-    `/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`,
+    `/projects/${projectId}/prs/${prNumber}/reviews?repoId=${encodeURIComponent(repoId)}&repo=${encodeURIComponent(repoFullName)}`,
   );
 
 export const submitPrReview = (body: {

@@ -6,6 +6,7 @@ import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.security.CodeAbuseScanner;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -30,6 +31,7 @@ public class WriteFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
   private final CodeAbuseScanner codeAbuseScanner;
+  private final GeneratedSecretScanner generatedSecretScanner;
 
   /**
    * PR-C (2026-05-13) — used to push {@code FILE_WRITTEN} SSE events to subscribed RunDetail
@@ -147,6 +149,17 @@ public class WriteFileTool implements Tool {
                   + " changed on disk since you last read it — readFile it again, then re-issue"
                   + " the overwrite.");
         }
+      }
+      var secretFinding = generatedSecretScanner.scan(content);
+      if (secretFinding.isPresent()) {
+        log.warn(
+            "writeFile blocked generated credential path={} category={}",
+            path,
+            secretFinding.get().category());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "generated content contains a high-confidence credential pattern and cannot be"
+                + " written");
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, content);
       if (scanResult.flagged()) {

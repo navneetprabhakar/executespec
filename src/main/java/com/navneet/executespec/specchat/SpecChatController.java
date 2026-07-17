@@ -78,7 +78,7 @@ public class SpecChatController {
   public SseEmitter chat(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestBody SpecChatRequest request,
-      @RequestHeader(value = "X-Forwarded-For", required = false) String forwardedFor,
+      @RequestHeader(value = "X-Forwarded-For", required = false) String ignoredForwardedFor,
       HttpServletRequest http) {
 
     if (userDetails == null) {
@@ -133,7 +133,7 @@ public class SpecChatController {
         throw denied;
       }
     }
-    String ip = clientIp(forwardedFor, http);
+    String ip = clientIp(http);
     String ipHash = sha256(ip);
 
     String effectiveProvider =
@@ -449,10 +449,7 @@ public class SpecChatController {
     }
   }
 
-  private static String clientIp(String forwardedFor, HttpServletRequest http) {
-    if (forwardedFor != null && !forwardedFor.isBlank()) {
-      return forwardedFor.split(",")[0].trim();
-    }
+  private static String clientIp(HttpServletRequest http) {
     return http.getRemoteAddr();
   }
 

@@ -29,6 +29,10 @@ invalid reports are excluded and counted separately.
   `INTERNAL_FORMULA`). A score is a summary, not independent proof.
 - Public/shared report DTOs expose score metadata and the same sanitized ledger, but not run-goal
   persistence or credentials.
+- New report shares are `ProjectShareLink.Surface.VALIDATION_REPORT` links with digest-only storage,
+  bounded expiry, revocation and access audit. V294 preserves historical `/reports/shared/{token}`
+  URLs through a digest-only compatibility lookup with a maximum 30-day migration grace period;
+  standalone runs may not mint an ungoverned public report bearer.
 - Missing endpoint coverage is explicitly `UNKNOWN` in the ledger and receives neutral midpoint
   rubric credit (8/15), never full endpoint points. This prevents a public/shared score from being
   inflated by absent evidence while preserving partial credit for non-HTTP or unmeasurable work.
@@ -49,3 +53,6 @@ invalid reports are excluded and counted separately.
 - `V273__persist_executable_verification_evidence.sql` adds nullable executable-verification columns.
   The migration is immutable; Java persistence and ledger reconstruction are owned by
   `ValidationReportService`, `ValidationReport`, and `ValidationVerificationLedgerBuilder`.
+- `V294__retire_legacy_validation_report_bearers.sql` hashes and clears historical plaintext
+  bearers, bounds their compatibility lifetime, and installs a rolling-deploy trigger that
+  normalizes any write from an older application node before commit.

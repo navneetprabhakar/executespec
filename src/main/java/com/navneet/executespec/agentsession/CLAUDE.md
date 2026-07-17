@@ -159,7 +159,7 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. Confirmed submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override.                              |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It requires canonical project write authority. Local execution fails closed here because the confirmation DTO cannot bind `selectedRepoIds` + `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
@@ -219,7 +219,9 @@ turns separately from runs.
   action lifecycle correlation across permission prompts, local tool events, and action results.
 - `V262__agent_event_replay_cursor.sql` adds a durable database-assigned `stream_sequence` cursor
   and replay index. `/events` remains the compatibility list; `/events/replay?after=` returns a
-  cursor envelope for stream interruption and visibility-resume backfill.
+  cursor envelope for stream interruption and visibility-resume backfill. Both the initial snapshot
+  and cursor delta are bounded to 500 response events; delta queries fetch one sentinel row and set
+  `hasMore`/`nextSequence` instead of materialising the rest of a long-lived session.
 - `V265__dedupe_local_hands_restart_events.sql` deduplicates historical
   `LOCAL_HANDS_WORKER_RESTARTED` transitions and adds a partial first-writer-wins index, so two
   JVMs observing the same stale worker cannot publish competing restart handoff records.
@@ -250,7 +252,8 @@ turns separately from runs.
   require imperative command wording plus run ids and confirmation actions, list-runs/list-gates
   stays read-only, and approval-boundary wording inside code-run requests (for example "do not
   code until I approve") is not claimed by lifecycle routing.
-- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency and propagation of
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency, canonical project
+  write denial, fail-closed local confirmation without connector/repo binding, and propagation of
   `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and

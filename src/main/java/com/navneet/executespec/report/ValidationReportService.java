@@ -1,6 +1,5 @@
 package com.navneet.executespec.report;
 
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -589,28 +588,19 @@ public class ValidationReportService {
       String evidenceJson) {}
 
   public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
-    return repository.findByShareToken(shareToken).map(this::toShareDTO);
-  }
-
-  public String share(String runId) {
-    var report =
-        repository
-            .findByRunId(runId)
-            .orElseThrow(() -> new IllegalArgumentException("Report not found for run " + runId));
-
-    if (report.getShareToken() != null) {
-      return report.getShareToken();
+    if (shareToken == null || !shareToken.matches("^[A-Za-z0-9_-]{40,64}$")) {
+      return Optional.empty();
     }
-
-    String token = generateShareToken();
-    report.setShareToken(token);
-    report.setSharedAt(Instant.now());
-    repository.save(report);
-
-    log.info("Validation report shared: run={} token={}", runId, token);
-    meterRegistry.counter("executespec.report.shared").increment();
-
-    return token;
+    String digest = org.apache.commons.codec.digest.DigestUtils.sha256Hex(shareToken);
+    Instant now = Instant.now();
+    return repository
+        .findByShareTokenHash(digest)
+        .filter(
+            report ->
+                report.getShareRevokedAt() == null
+                    && report.getShareExpiresAt() != null
+                    && now.isBefore(report.getShareExpiresAt()))
+        .map(this::toShareDTO);
   }
 
   private List<ReportIssueDTO> extractIssues(ReportInput input) {
@@ -970,8 +960,8 @@ public class ValidationReportService {
         countBySeverity(issues, "WOULD_FAIL_REVIEW"),
         countBySeverity(issues, "WOULD_CAUSE_BUG"),
         countBySeverity(issues, "WOULD_FAIL_LINT"),
-        entity.getShareToken() != null,
-        entity.getShareToken() != null ? "/reports/shared/" + entity.getShareToken() : null,
+        legacyShareActive(entity),
+        null,
         entity.isGeneratedAfterImprovements(),
         entity.getAccuracyScore(),
         entity.getAccuracyGrade(),
@@ -1093,10 +1083,11 @@ public class ValidationReportService {
     return (int) issues.stream().filter(i -> severity.equals(i.severity())).count();
   }
 
-  private String generateShareToken() {
-    byte[] bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  private boolean legacyShareActive(ValidationReport report) {
+    return report.getShareTokenHash() != null
+        && report.getShareRevokedAt() == null
+        && report.getShareExpiresAt() != null
+        && Instant.now().isBefore(report.getShareExpiresAt());
   }
 
   private String detectLanguage(String filePath) {
