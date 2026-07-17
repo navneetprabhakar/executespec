@@ -188,7 +188,10 @@ public class ChatService {
     // actual generated code to ground a suggestion. ExecutionContext is run-scoped so
     // LlmRouter attributes token cost to this run.
     var executionReference =
-        executionPolicyFactory == null ? null : executionPolicyFactory.forRun(runId);
+        executionPolicyFactory == null
+            ? null
+            : executionPolicyFactory.forRunChatTurn(
+                runId, "turn-" + history.size() + "-" + java.util.UUID.randomUUID());
     ExecutionContext ctx = new ExecutionContext(runId, "chat", workspace, executionReference);
     List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId, ctx));
 
