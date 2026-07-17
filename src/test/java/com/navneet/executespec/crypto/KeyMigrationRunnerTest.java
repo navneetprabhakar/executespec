@@ -66,8 +66,8 @@ class KeyMigrationRunnerTest {
 
     String legacy = service.encrypt("legacy-secret").substring("enc:v1:1:".length());
     String alreadyEnveloped = service.encrypt("done-already");
-    when(jdbc.queryForList(anyString(), eq(Map.class))).thenReturn(List.of());
-    when(jdbc.queryForList(contains("org_slack_integration"), eq(Map.class)))
+    when(jdbc.queryForList(anyString())).thenReturn(List.of());
+    when(jdbc.queryForList(contains("org_slack_integration")))
         .thenReturn(
             List.of(
                 Map.of("id", 1L, "bot_token", "xoxb-plaintext-slack-token"),
@@ -99,6 +99,6 @@ class KeyMigrationRunnerTest {
 
     new KeyMigrationRunner(disabled, jdbc).migrateExistingKeys();
 
-    verify(jdbc, never()).queryForList(anyString(), eq(Map.class));
+    verify(jdbc, never()).queryForList(anyString());
   }
 }

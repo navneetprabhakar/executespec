@@ -1,5 +1,7 @@
 package com.navneet.executespec.crypto;
 
+import java.util.List;
+
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -90,7 +92,10 @@ public class KeyMigrationRunner {
    */
   private int migrateTable(String table, String column) {
     try {
-      var rows =
+      // NOTE: use the no-element-type overload — queryForList(sql, Map.class) maps each row to a
+      // SINGLE column and throws "Incorrect column count: expected 1, actual 2" for our two-column
+      // (id, <column>) select. queryForList(sql) returns List<Map<String,Object>> as intended.
+      List<java.util.Map<String, Object>> rows =
           jdbcTemplate.queryForList(
               "SELECT id, "
                   + column
@@ -100,8 +105,7 @@ public class KeyMigrationRunner {
                   + column
                   + " IS NOT NULL AND "
                   + column
-                  + " != ''",
-              java.util.Map.class);
+                  + " != ''");
 
       int count = 0;
       for (var row : rows) {
