@@ -2,7 +2,11 @@ package com.navneet.executespec.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +16,9 @@ import java.util.Optional;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
@@ -63,5 +70,58 @@ class ChatServiceRouteTest {
     verify(router).call(dispatched.capture());
     assertThat(dispatched.getValue().provider()).isEqualTo("openai");
     assertThat(dispatched.getValue().model()).isEqualTo("gpt-fallback");
+  }
+
+  /**
+   * Phase-6 F1 regression: each chat turn must build a fresh per-turn execution context via {@code
+   * forRunChatTurn} (unique turn id), never {@code forRun(runId)} — which reused the run's own
+   * terminal pipeline context and threw an idempotency-collision 500 on every turn.
+   */
+  @Test
+  void runChatUsesUniquePerTurnContextNotThePipelineContext() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    LlmRouter router = mock(LlmRouter.class);
+    ModelResolver resolver = mock(ModelResolver.class);
+    AgentProperties props = new AgentProperties();
+    props.setWorkspace(System.getProperty("java.io.tmpdir"));
+    ValidationReportRepository reports = mock(ValidationReportRepository.class);
+    RunChatTools tools = mock(RunChatTools.class);
+    LlmExecutionPolicyFactory factory = mock(LlmExecutionPolicyFactory.class);
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-1")
+            .status("COMPLETE")
+            .aiProvider("ANTHROPIC")
+            .createdByUserId("user-1")
+            .orgId("org-1")
+            .build();
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(reports.findByRunId("run-1")).thenReturn(Optional.empty());
+    when(tools.bind(any())).thenReturn(List.of());
+    when(resolver.resolve("ChatService", LlmProvider.ANTHROPIC, AgentTier.LIGHTWEIGHT))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.ANTHROPIC)
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-haiku")
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .fallback(false)
+                .build());
+    when(factory.forRunChatTurn(eq("run-1"), anyString()))
+        .thenReturn(new LlmExecutionReference("ctx", LlmExecutionScope.customer("org-1")));
+    when(router.call(any()))
+        .thenReturn(
+            ChatResponse.builder()
+                .generations(List.of(new Generation(new AssistantMessage("answer"))))
+                .build());
+
+    ChatService svc = new ChatService(runs, router, resolver, props, reports, tools, factory);
+    svc.send("run-1", "first question");
+    svc.send("run-1", "second question");
+
+    ArgumentCaptor<String> turnIds = ArgumentCaptor.forClass(String.class);
+    verify(factory, times(2)).forRunChatTurn(eq("run-1"), turnIds.capture());
+    assertThat(turnIds.getAllValues()).doesNotHaveDuplicates();
+    verify(factory, never()).forRun(any());
   }
 }

@@ -101,6 +101,42 @@ public class LlmExecutionPolicyFactory {
     return java.util.Optional.of(forRun(runId));
   }
 
+  /**
+   * Dedicated per-turn context for the post-run chat copilot. Mirrors {@link #forRun}'s exact
+   * run-owner/org/project/provider/model/pin policy, so BYOK isolation and route policy are
+   * identical to the run itself, but carries a unique per-turn source id so it never collides with
+   * the run's own (already-terminal) pipeline-run context. Fixes the run-chat idempotency-collision
+   * 500 where {@code forRun(runId)} re-created the pipeline tuple every chat turn (Phase-6 F1).
+   */
+  public LlmExecutionReference forRunChatTurn(String runId, String turnId) {
+    var run =
+        runRepository
+            .findById(require(runId, "runId"))
+            .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
+    String userId = require(run.getCreatedByUserId(), "run owner");
+    String orgId = require(run.getOrgId(), "run org");
+    String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
+    boolean pinned = run.isRoutePinned();
+    String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
+    String source = "run-chat:" + runId + ":" + require(turnId, "turnId");
+    return createCustomer(
+        LlmExecutionContext.ContextType.AGENT_TURN,
+        "run-chat",
+        "RUN_CHAT",
+        source,
+        source,
+        userId,
+        userId,
+        orgId,
+        run.getProjectId(),
+        requestedProvider,
+        requestedModel,
+        pinned,
+        LlmExecutionBudget.UNBOUNDED,
+        "run-chat-v1",
+        null);
+  }
+
   public LlmExecutionReference forAgentSession(String sessionId, String turnId) {
     var session =
         agentSessionRepository

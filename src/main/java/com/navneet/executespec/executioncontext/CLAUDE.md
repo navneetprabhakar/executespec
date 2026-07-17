@@ -48,8 +48,12 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 ## Adopted customer surfaces
 
 - Pipeline planning, worker, reviewer and child compaction calls inherit one run context.
-- Run report, test generation, prompt optimisation, code-map/assessment, run ledger and run chat
-  text calls recover the same context from the persisted run primary key.
+- Run report, test generation, prompt optimisation, code-map/assessment and run ledger text calls
+  recover the same context from the persisted run primary key. The post-run chat copilot instead
+  mints a dedicated per-turn context via `forRunChatTurn(runId, turnId)` — identical
+  run-owner/org/project/provider/model/pin policy, but a unique per-turn source id so it never
+  collides with the run's own (already-terminal) pipeline context. Reusing `forRun(runId)` here
+  threw an idempotency-collision 500 on every chat turn (Phase-6 F1, fixed 2026-07-18).
 - Agent intent, Spec Chat and agent-session streams carry an agent-turn context.
 - Project chat/compaction/compiler, architecture, generated docs, project brief/memory, PR Review
   and Code Review create explicit project contexts and resolve the project provider without a
