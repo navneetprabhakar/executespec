@@ -159,6 +159,11 @@ mvn -Pintegration verify        # opt-in integration tests (e2e, integration, ch
 
 `mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
 
+Validation evidence is fail-closed: code-changing tasks require an admitted baseline-to-final product
+diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
+`BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
+the headline score is a summary and must not be treated as independent proof.
+
 **Frontend**
 
 ```bash

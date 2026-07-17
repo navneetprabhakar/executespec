@@ -269,9 +269,15 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "boot-verification", "PASS", "DETERMINISTIC", "HIGH");
+    assertEntry(
+        event.verificationLedger(), "executable-verification", "WARN", "DETERMINISTIC", "HIGH");
     assertEquals(Verdict.HEALTHY.name(), saved.get().getBootVerdict());
     assertTrue(saved.get().getBootHealthy());
     assertEquals("boots; /health responded 200", saved.get().getBootReason());
+    assertFalse(saved.get().getExecutableTestsRun());
+    assertEquals("BUILD_ONLY", saved.get().getExecutableVerificationStatus());
+    assertEquals(null, saved.get().getExecutionFailureStage());
+    assertTrue(saved.get().getExecutableEvidenceJson().contains("\"buildPassed\":true"));
     assertNotNull(run.getRunGoalDonenessJson());
     assertTrue(run.getRunGoalDonenessJson().contains("\"state\":\"UNCERTAIN\""));
     assertTrue(

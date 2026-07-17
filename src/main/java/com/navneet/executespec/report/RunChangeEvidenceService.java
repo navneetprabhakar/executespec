@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.AgentProperties;
@@ -37,6 +39,11 @@ import lombok.extern.slf4j.Slf4j;
 public class RunChangeEvidenceService {
 
   private static final Duration GIT_TIMEOUT = Duration.ofSeconds(60);
+  private static final Pattern TOOL_PATH_PATTERN =
+      Pattern.compile("\\\"(?:path|file)\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+  private static final Pattern PATCH_PATH_PATTERN =
+      Pattern.compile("\\*\\*\\*\\s+(?:Add|Update) File:\\s*([^\\r\\n*]+)");
+  private static final Pattern TARGET_PATH_PATTERN = Pattern.compile("\\[target=([^\\]\\r\\n]+)]");
   private static final Set<String> SYSTEM_PATHS =
       Set.of(
           ".gitignore",
@@ -93,6 +100,60 @@ public class RunChangeEvidenceService {
   public int meaningfulProductDiffCount(String runId) {
     ChangeEvidence evidence = inspect(runId, List.of());
     return evidence.valid() ? evidence.productFiles().size() : 0;
+  }
+
+  /**
+   * Returns actual product files in the admitted Git diff that were claimed by this worker's
+   * successful mutating tool calls. This is intentionally narrower than {@link
+   * #meaningfulProductDiffCount(String)}: a later task cannot satisfy its goal by inheriting a file
+   * changed by an earlier task, and a README/ExecuteSpec metadata write cannot masquerade as
+   * product output.
+   */
+  public int meaningfulProductDiffCountForToolLog(String runId, List<String> toolLog) {
+    Set<String> claimedPaths = claimedPaths(toolLog);
+    if (claimedPaths.isEmpty()) return 0;
+    ChangeEvidence evidence = inspect(runId, List.of());
+    if (!evidence.valid()) return 0;
+    return (int)
+        evidence.productFiles().stream()
+            .map(ChangedFile::path)
+            .map(RunChangeEvidenceService::normalize)
+            .filter(path -> claimedPaths.stream().anyMatch(claim -> pathMatches(path, claim)))
+            .count();
+  }
+
+  private static Set<String> claimedPaths(List<String> toolLog) {
+    Set<String> paths = new HashSet<>();
+    if (toolLog == null) return paths;
+    for (String entry : toolLog) {
+      if (entry == null || !isSuccessfulMutation(entry)) continue;
+      Matcher toolPath = TOOL_PATH_PATTERN.matcher(entry);
+      while (toolPath.find()) paths.add(normalize(toolPath.group(1)));
+      Matcher patchPath = PATCH_PATH_PATTERN.matcher(entry);
+      while (patchPath.find()) paths.add(normalize(patchPath.group(1).trim()));
+      Matcher targetPath = TARGET_PATH_PATTERN.matcher(entry);
+      while (targetPath.find()) paths.add(normalize(targetPath.group(1).trim()));
+    }
+    paths.removeIf(String::isBlank);
+    return paths;
+  }
+
+  private static boolean isSuccessfulMutation(String entry) {
+    String lower = entry.toLowerCase(Locale.ROOT);
+    boolean mutating =
+        lower.startsWith("writefile(")
+            || lower.startsWith("write_file(")
+            || lower.startsWith("editfile(")
+            || lower.startsWith("edit_file(")
+            || lower.startsWith("multiedit(")
+            || lower.startsWith("multi_edit(")
+            || lower.startsWith("applypatch(")
+            || lower.startsWith("apply_patch(");
+    return mutating && lower.endsWith("-> ok");
+  }
+
+  private static boolean pathMatches(String productPath, String claimedPath) {
+    return productPath.equals(claimedPath) || productPath.endsWith("/" + claimedPath);
   }
 
   private void collectDiff(

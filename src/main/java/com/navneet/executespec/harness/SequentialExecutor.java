@@ -33,6 +33,7 @@ import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.report.RunChangeEvidenceService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.InitialRoutingDecision;
 import com.navneet.executespec.router.InitialRoutingService;
@@ -365,6 +366,11 @@ to boot — skip it for those.""";
   /** Optional only for source-compatible unit construction; Spring always supplies it. */
   private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
 
+  /**
+   * Canonical admitted-baseline product-diff evidence; optional only in legacy unit constructors.
+   */
+  private RunChangeEvidenceService runChangeEvidenceService;
+
   public SequentialExecutor(
       WorkerAgent worker,
       BuildProjectTool buildProjectTool,
@@ -425,7 +431,8 @@ to boot — skip it for those.""";
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
       InitialRoutingService initialRoutingService,
-      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService) {
+      com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService,
+      RunChangeEvidenceService runChangeEvidenceService) {
     this(
         worker,
         buildProjectTool,
@@ -446,6 +453,7 @@ to boot — skip it for those.""";
         repoOrientationService,
         taskOutcomeMetricService);
     this.initialRoutingService = initialRoutingService;
+    this.runChangeEvidenceService = runChangeEvidenceService;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -3557,6 +3565,7 @@ to boot — skip it for those.""";
       Boolean smokePassed,
       String failureReason) {
     int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
     RunCostTracker.Snapshot cost = costSnapshot(runId);
     int totalTokens = totalTrackedTokens(cost);
     long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
@@ -3570,7 +3579,7 @@ to boot — skip it for those.""";
     String category = taskCategory(task);
     boolean meaningfulDiffRequired = requiresMeaningfulDiff(category);
     boolean requiredOutputsPresent =
-        validationPassed && statusClean && (!meaningfulDiffRequired || fileWrites > 0);
+        validationPassed && statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
     List<String> completed = new ArrayList<>();
     if (completeTaskClaimed) {
       completed.add("worker called completeTask");
@@ -3589,7 +3598,7 @@ to boot — skip it for those.""";
     if (validationAttempted && !validationPassed) {
       incomplete.add("smoke validation failed");
     }
-    if (meaningfulDiffRequired && fileWrites == 0) {
+    if (meaningfulDiffRequired && meaningfulProductDiffs == 0) {
       incomplete.add("code-changing task produced no meaningful product diff");
     }
     if (failureReason != null && !failureReason.isBlank()) {
@@ -3614,6 +3623,7 @@ to boot — skip it for those.""";
     evidence.add("costUsd=" + String.format(Locale.ROOT, "%.6f", cost.costUsd()));
     evidence.add("taskCategory=" + category);
     evidence.add("meaningfulDiffRequired=" + meaningfulDiffRequired);
+    evidence.add("meaningfulProductDiffs=" + meaningfulProductDiffs);
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
     }
@@ -3655,7 +3665,7 @@ to boot — skip it for those.""";
         .validationPassed(smokePassed)
         .requiredOutputsPresent(requiredOutputsPresent)
         .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
-        .meaningfulDiffCount(fileWrites)
+        .meaningfulDiffCount(meaningfulProductDiffs)
         .noProgressIterations(noProgressIterations)
         .maxNoProgressIterations(maxNoProgressIterations())
         .falseDoneClaims(falseDoneClaims)
@@ -3690,6 +3700,23 @@ to boot — skip it for those.""";
   static boolean requiresMeaningfulDiff(String category) {
     if (category == null) return true;
     return !"READ_ONLY_HELP".equals(category);
+  }
+
+  private int meaningfulProductDiffCount(
+      String runId, WorkerResult workerResult, int legacyFileWrites) {
+    if (runChangeEvidenceService == null) {
+      // Compatibility for narrow unit tests that construct the executor manually. The Spring
+      // runtime always supplies canonical Git evidence through the autowired constructor.
+      return legacyFileWrites;
+    }
+    if (workerResult == null) return 0;
+    try {
+      return runChangeEvidenceService.meaningfulProductDiffCountForToolLog(
+          runId, workerResult.toolCallLog());
+    } catch (RuntimeException ex) {
+      log.warn("goalEvidence: product diff failed closed for run={}: {}", runId, ex.getMessage());
+      return 0;
+    }
   }
 
   private static int repeatedFailureCount(
