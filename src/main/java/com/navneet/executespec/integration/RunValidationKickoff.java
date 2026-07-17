@@ -1,7 +1,6 @@
 package com.navneet.executespec.integration;
 
 import static com.navneet.executespec.integration.RunPipelineSupport.describeReviewerFixes;
-import static com.navneet.executespec.integration.RunPipelineSupport.listWorkspaceFiles;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStatusToV1;
 import static com.navneet.executespec.integration.RunPipelineSupport.providerForAccuracy;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
@@ -14,6 +13,7 @@ import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
+import com.navneet.executespec.report.RunChangeEvidenceService;
 import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.CompileResult;
@@ -55,6 +55,7 @@ class RunValidationKickoff {
   private final ModelResolver modelResolver;
   private final AccuracyAssessmentService accuracyAssessmentService;
   private final ValidationReportService validationReportService;
+  private final RunChangeEvidenceService runChangeEvidenceService;
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
   private final com.navneet.executespec.deployment.preview.verify.PreviewVerifier previewVerifier;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
@@ -80,10 +81,22 @@ class RunValidationKickoff {
       if (run == null) return java.util.Optional.empty();
       var tasks = taskRepo.findByRunId(runId);
 
-      // Enumerate files actually produced by the run so `filesGenerated` /
-      // `languages` on the final report reflect reality instead of 0/empty.
+      // Resolve the baseline-to-final Git change set. The previous implementation walked the
+      // final workspace and treated every pre-existing brownfield file as generated code.
       Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
-      List<String> allFiles = listWorkspaceFiles(workspace);
+      List<WorkerReport> provenanceClaims = workerProvenanceClaims(execResult);
+      RunChangeEvidenceService.ChangeEvidence changeEvidence =
+          runChangeEvidenceService.inspect(runId, provenanceClaims);
+      List<String> createdProductFiles =
+          changeEvidence.productFiles().stream()
+              .filter(f -> f.status().startsWith("A"))
+              .map(RunChangeEvidenceService.ChangedFile::path)
+              .toList();
+      List<String> modifiedProductFiles =
+          changeEvidence.productFiles().stream()
+              .filter(f -> !f.status().startsWith("A"))
+              .map(RunChangeEvidenceService.ChangedFile::path)
+              .toList();
 
       List<WorkerReport> workerReports = new java.util.ArrayList<>();
       boolean firstReport = true;
@@ -93,10 +106,10 @@ class RunValidationKickoff {
           wr.setTaskId(o.taskId());
           wr.setStatus(mapTaskStatusToV1(o.status()));
           wr.setSummary(o.taskTitle());
-          // Attribute all workspace files to the first task so `countFilesGenerated`
-          // + `extractLanguages` have real data (V2 doesn't track per-task authorship).
-          wr.setFilesCreated(firstReport ? allFiles : List.of());
-          wr.setFilesModified(List.of());
+          // The report DTO predates phase provenance. Keep its count/list compatibility on the
+          // first task, but source the lists only from authoritative product diff evidence.
+          wr.setFilesCreated(firstReport ? createdProductFiles : List.of());
+          wr.setFilesModified(firstReport ? modifiedProductFiles : List.of());
           wr.setFilesRead(List.of());
           workerReports.add(wr);
           firstReport = false;
@@ -110,12 +123,23 @@ class RunValidationKickoff {
           wr.setTaskId(t.getTaskId());
           wr.setStatus(t.getStatus() == null ? "COMPLETE" : t.getStatus());
           wr.setSummary(t.getTitle());
-          wr.setFilesCreated(firstReport ? allFiles : List.of());
-          wr.setFilesModified(List.of());
+          wr.setFilesCreated(firstReport ? createdProductFiles : List.of());
+          wr.setFilesModified(firstReport ? modifiedProductFiles : List.of());
           wr.setFilesRead(List.of());
           workerReports.add(wr);
           firstReport = false;
         }
+      }
+      if (workerReports.isEmpty()
+          && (!createdProductFiles.isEmpty() || !modifiedProductFiles.isEmpty())) {
+        WorkerReport evidenceOnly = new WorkerReport();
+        evidenceOnly.setTaskId("RUN_CHANGE_EVIDENCE");
+        evidenceOnly.setStatus("COMPLETE");
+        evidenceOnly.setSummary("Authoritative baseline-to-final product diff");
+        evidenceOnly.setFilesCreated(createdProductFiles);
+        evidenceOnly.setFilesModified(modifiedProductFiles);
+        evidenceOnly.setFilesRead(List.of());
+        workerReports.add(evidenceOnly);
       }
 
       ReviewReport review = new ReviewReport();
@@ -251,6 +275,36 @@ class RunValidationKickoff {
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);
       return java.util.Optional.empty();
     }
+  }
+
+  private static List<WorkerReport> workerProvenanceClaims(ExecutionResult result) {
+    if (result == null || result.perTask() == null) return List.of();
+    java.util.regex.Pattern pathPattern =
+        java.util.regex.Pattern.compile("\\\"path\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+    List<WorkerReport> claims = new java.util.ArrayList<>();
+    for (TaskOutcome outcome : result.perTask()) {
+      List<String> paths = new java.util.ArrayList<>();
+      for (var worker :
+          new com.navneet.executespec.engine.WorkerResult[] {
+            outcome.workerOutcome(), outcome.retryWorkerOutcome()
+          }) {
+        if (worker == null || worker.toolCallLog() == null) continue;
+        worker.toolCallLog().stream()
+            .filter(line -> line != null && line.endsWith("-> OK"))
+            .filter(line -> line.startsWith("writeFile(") || line.startsWith("editFile("))
+            .forEach(
+                line -> {
+                  java.util.regex.Matcher matcher = pathPattern.matcher(line);
+                  if (matcher.find()) paths.add(matcher.group(1));
+                });
+      }
+      WorkerReport claim = new WorkerReport();
+      claim.setTaskId(outcome.taskId());
+      claim.setFilesCreated(paths);
+      claim.setFilesModified(paths);
+      claims.add(claim);
+    }
+    return claims;
   }
 
   /**

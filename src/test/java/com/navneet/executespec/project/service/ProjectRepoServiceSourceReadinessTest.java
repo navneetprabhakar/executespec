@@ -1,0 +1,107 @@
+package com.navneet.executespec.project.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
+import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.auth.service.TierEnforcementService;
+import com.navneet.executespec.governance.GovernanceGuard;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
+import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.repo.GitHubRepoService;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+
+class ProjectRepoServiceSourceReadinessTest {
+
+  private final ProjectRepoRepository repoRepo = mock(ProjectRepoRepository.class);
+  private final StackDetector stackDetector = mock(StackDetector.class);
+  private final GitHubRepoService gitHub = mock(GitHubRepoService.class);
+  private final ProjectRepoService service =
+      new ProjectRepoService(
+          repoRepo,
+          mock(ProjectRepoLinkRepository.class),
+          mock(ProjectRepository.class),
+          mock(ProjectMemberRepository.class),
+          stackDetector,
+          gitHub,
+          mock(AppUserRepository.class),
+          mock(TierEnforcementService.class),
+          mock(GovernanceGuard.class),
+          mock(ObjectProvider.class));
+
+  private final UUID repoId = UUID.randomUUID();
+  private ProjectRepo repo;
+
+  @BeforeEach
+  void setUp() {
+    repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .scope(ProjectRepo.Scope.USER)
+            .ownerUserId("user-1")
+            .githubRepoFullName("acme/api")
+            .githubOwner("acme")
+            .defaultBranch("main")
+            .build();
+    when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(repoRepo.save(any(ProjectRepo.class))).thenAnswer(invocation -> invocation.getArgument(0));
+  }
+
+  @Test
+  void syncMarksSourceReadyOnlyAfterBranchAndInventoryAreProven() {
+    when(gitHub.getBranchHeadSha("https://github.com/acme/api", "main", "pat"))
+        .thenReturn("0123456789012345678901234567890123456789");
+    when(gitHub.listRepoFilesResult("https://github.com/acme/api", "main", "pat"))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("src/App.java", "src/AppTest.java")));
+
+    var result = service.syncRepo(repoId, "user-1", null, false, "pat");
+
+    assertThat(result.sourceReadinessStatus()).isEqualTo("READY");
+    assertThat(result.sourceReadinessReason()).isEqualTo("SOURCE_INVENTORY_CONFIRMED");
+    assertThat(result.sourceFileCount()).isEqualTo(2);
+    assertThat(result.sourceReadinessCheckedAt()).isNotNull();
+  }
+
+  @Test
+  void syncPreservesUpstreamFailureAsBlockedInsteadOfEmptyReadyRepo() {
+    when(gitHub.getBranchHeadSha("https://github.com/acme/api", "main", "pat")).thenReturn(null);
+    when(gitHub.listRepoFilesResult("https://github.com/acme/api", "main", "pat"))
+        .thenReturn(GitHubRepoService.RepoFileListResult.failed("GITHUB_TREE_HTTP_ERROR", 403));
+
+    var result = service.syncRepo(repoId, "user-1", null, false, "pat");
+
+    assertThat(result.sourceReadinessStatus()).isEqualTo("BLOCKED");
+    assertThat(result.sourceReadinessReason()).isEqualTo("GITHUB_TREE_HTTP_ERROR");
+    assertThat(result.sourceFileCount()).isNull();
+  }
+
+  @Test
+  void syncDoesNotClaimFullReadinessForATruncatedLargeRepositoryTree() {
+    when(gitHub.getBranchHeadSha("https://github.com/acme/api", "main", "pat"))
+        .thenReturn("0123456789012345678901234567890123456789");
+    when(gitHub.listRepoFilesResult("https://github.com/acme/api", "main", "pat"))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("src/App.java", "src/AppTest.java"), true));
+
+    var result = service.syncRepo(repoId, "user-1", null, false, "pat");
+
+    assertThat(result.sourceReadinessStatus()).isEqualTo("INVENTORIED");
+    assertThat(result.sourceReadinessReason()).isEqualTo("SOURCE_INVENTORY_TRUNCATED");
+    assertThat(result.sourceFileCount()).isEqualTo(2);
+  }
+}

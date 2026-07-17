@@ -33,8 +33,11 @@ import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -126,6 +129,8 @@ public class RunLifecycleService {
         modelResolver,
         validationReportRepository,
         null,
+        null,
+        null,
         null);
   }
 
@@ -166,6 +171,8 @@ public class RunLifecycleService {
   private final ValidationReportRepository validationReportRepository;
   private final FeatureFlagService featureFlagService;
   private final RemoteToolDispatcher remoteToolDispatcher;
+  private final OrgModelOverrideService orgModelOverrideService;
+  private final ModelRegistry modelRegistry;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -799,6 +806,7 @@ public class RunLifecycleService {
         log.warn("resume run={} row vanished mid-resume", runId);
         return;
       }
+      bindRunModelOverrides(row);
       // Local-hands intent is durable; never fall back to server-side tools after a JVM restart.
       // A missing client therefore remains a bounded remote-tool wait/error, not an unsafe shell
       // execution. The feature flag is still an operator kill switch.
@@ -815,7 +823,7 @@ public class RunLifecycleService {
         log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
-      String model = row.getWorkerModel();
+      String model = row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
       String upperProvider = provider.toUpperCase();
       String projectId = row.getProjectId();
       List<UUID> selectedRepoIds = deserializeRepoIds(row.getSelectedRepoIds());
@@ -835,6 +843,7 @@ public class RunLifecycleService {
                       .maxIterationsPerTask(null)
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
+                      .routePinned(row.isRoutePinned())
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
                       .workspaceSummary(
@@ -870,16 +879,26 @@ public class RunLifecycleService {
 
       contextComposer.ensureReadme(
           runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
-      validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
+      var validationReport =
+          validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
 
       String userRequest = row.getUserRequest();
       String prReviewComments = null; // not threaded for resumed runs
       finalizeRunAfterResume(
-          runId, plan, execResult, reviewResult, startedAt, upperProvider, model);
+          runId,
+          plan,
+          execResult,
+          reviewResult,
+          validationReport.orElse(null),
+          startedAt,
+          upperProvider,
+          model);
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
     } finally {
+      RunModelOverrides.clear();
+      keyContextStore.evict(runId);
       if (localRun) {
         try {
           remoteToolDispatcher.unregister(runId);
@@ -899,6 +918,7 @@ public class RunLifecycleService {
       com.navneet.executespec.agent.Plan plan,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
+      com.navneet.executespec.report.entity.ValidationReport validationReport,
       Instant startedAt,
       String upperProvider,
       String model) {
@@ -914,6 +934,9 @@ public class RunLifecycleService {
                 .build()
             : execResult;
     var terminal = RunOrchestrator.resolveTerminalStatus(effectiveExec, reviewResult);
+    if (RunOrchestrator.validationReportProvenanceFailed(validationReport)) {
+      terminal = new RunOrchestrator.StatusAndReason("FAILED", "VALIDATION_EVIDENCE_FAILED");
+    }
     controlPort.terminate(
         runId,
         terminal.status(),
@@ -1017,10 +1040,21 @@ public class RunLifecycleService {
                 PipelineRun row = runRepo.findById(runId).orElse(null);
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
-                String model = row == null ? null : row.getWorkerModel();
+                String model =
+                    row == null
+                        ? null
+                        : row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
                 if (override != null) {
+                  if (row != null && row.isRoutePinned()) {
+                    throw new IllegalStateException(
+                        "An exact-route run cannot approve a different continuation route.");
+                  }
                   provider = override.provider();
                   model = override.model();
+                }
+                bindRunModelOverrides(row);
+                if (row != null && row.getCreatedByUserId() != null) {
+                  keyContextStore.resolveAndPut(runId, row.getCreatedByUserId());
                 }
                 ContinuationUsage approvedUsage = continuationUsageFor(row, override);
 
@@ -1039,6 +1073,7 @@ public class RunLifecycleService {
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
                             .enableSmokeTests(true)
+                            .routePinned(row != null && row.isRoutePinned())
                             .userConfirmedExpensiveContinuation(override != null)
                             .userConfirmedContinuationAction(
                                 override == null ? null : override.proposedAction())
@@ -1100,6 +1135,8 @@ public class RunLifecycleService {
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
                 controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, null);
               } finally {
+                RunModelOverrides.clear();
+                keyContextStore.evict(runId);
                 controlPort.removeActiveRun(runId);
               }
             });
@@ -1146,6 +1183,42 @@ public class RunLifecycleService {
       persistenceWriter.persistReviewFailure(runId, e);
       return RunOrchestrator.reviewerFailedResult(e);
     }
+  }
+
+  private void bindRunModelOverrides(PipelineRun run) {
+    if (run == null) {
+      RunModelOverrides.clear();
+      return;
+    }
+    java.util.Map<String, String> orgOverrides =
+        orgModelOverrideService == null
+            ? java.util.Map.of()
+            : orgModelOverrideService.overridesForRun(run.getOrgId());
+    LlmProvider pinProvider = null;
+    String pinnedModel = null;
+    if (run.isRoutePinned()) {
+      if (run.getRequestedProvider() == null
+          || run.getRequestedModel() == null
+          || run.getRequestedModel().isBlank()) {
+        throw new IllegalStateException(
+            "Persisted exact route is incomplete for run " + run.getRunId());
+      }
+      pinProvider = LlmProvider.valueOf(run.getRequestedProvider().toUpperCase());
+      pinnedModel =
+          modelRegistry == null
+              ? run.getRequestedModel()
+              : modelRegistry.canonicalize(run.getRequestedModel());
+      if (modelRegistry != null) {
+        String owner = modelRegistry.providerFor(pinnedModel);
+        if (owner == null
+            || !com.navneet.executespec.router.ModelAccessService.canRouteModel(
+                pinProvider, pinnedModel, owner)) {
+          throw new IllegalStateException(
+              "Persisted exact route is not dispatchable: " + pinProvider + "/" + pinnedModel);
+        }
+      }
+    }
+    RunModelOverrides.bind(RunModelOverrides.withRunPin(orgOverrides, pinProvider, pinnedModel));
   }
 
   private com.navneet.executespec.state.entity.AgentTask findTask(String runId, String taskId) {

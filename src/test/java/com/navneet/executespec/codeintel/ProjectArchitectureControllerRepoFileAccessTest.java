@@ -83,17 +83,48 @@ class ProjectArchitectureControllerRepoFileAccessTest {
         .thenReturn(Optional.of(link));
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(userRepo.findById("host-user")).thenReturn(Optional.of(host));
-    when(github.listRepoFiles("https://github.com/acme/private-api", "main", "host-pat"))
-        .thenReturn(List.of("README.md", "src/App.tsx"));
+    when(github.listRepoFilesResult("https://github.com/acme/private-api", "main", "host-pat"))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(List.of("README.md", "src/App.tsx")));
 
     var response = controller.listRepoFiles(projectId, repoId, invited);
 
     assertThat(response.getBody()).isNotNull();
     assertThat(response.getBody().files()).containsExactly("README.md", "src/App.tsx");
     verify(projectAccessGuard).assertCanRead(projectId, invited);
-    verify(github).listRepoFiles("https://github.com/acme/private-api", "main", "host-pat");
+    verify(github).listRepoFilesResult("https://github.com/acme/private-api", "main", "host-pat");
     verify(github, never())
-        .listRepoFiles("https://github.com/acme/private-api", "main", "invitee-pat");
+        .listRepoFilesResult("https://github.com/acme/private-api", "main", "invitee-pat");
+  }
+
+  @Test
+  void listRepoFiles_doesNotConvertUpstreamFailureIntoAnEmptyRepository() {
+    UUID repoId = UUID.randomUUID();
+    String projectId = "project-1";
+    var link =
+        ProjectRepoLink.builder().projectId(projectId).repoId(repoId).linkedBy("host-user").build();
+    var repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/private-api")
+            .defaultBranch("main")
+            .build();
+    var host = AppUser.builder().id("host-user").githubPat("host-pat").build();
+    var caller =
+        new AppUserDetails(
+            AppUser.builder().id("invitee").email("invitee@example.com").status("ACTIVE").build(),
+            null);
+    when(projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, repoId))
+        .thenReturn(Optional.of(link));
+    when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(userRepo.findById("host-user")).thenReturn(Optional.of(host));
+    when(github.listRepoFilesResult("https://github.com/acme/private-api", "main", "host-pat"))
+        .thenReturn(GitHubRepoService.RepoFileListResult.failed("GITHUB_TREE_HTTP_ERROR", 403));
+
+    assertThatThrownBy(() -> controller.listRepoFiles(projectId, repoId, caller))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("502 BAD_GATEWAY")
+        .hasMessageContaining("GITHUB_TREE_HTTP_ERROR");
   }
 
   @Test

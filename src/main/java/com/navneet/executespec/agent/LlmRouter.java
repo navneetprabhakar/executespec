@@ -102,6 +102,7 @@ public class LlmRouter {
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final ManagedAiUsageService managedAiUsageService;
+  private final com.navneet.executespec.router.RunRoutePolicyService runRoutePolicyService;
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
@@ -342,6 +343,8 @@ public class LlmRouter {
       ProviderTestBudgetGuard.authorize(
           liveLlmReservationId, request.provider(), request.model(), request.context().runId());
     }
+    var routePolicy = runRoutePolicyService.forRun(request.context().runId());
+    request = enforceDurableRoutePolicy(request, routePolicy);
     // If the caller supplied an explicit tool list (e.g. the planner restricting
     // to just submitPlan), honor it; otherwise bind every registered V2 tool.
     List<ToolCallback> tools =
@@ -371,6 +374,10 @@ public class LlmRouter {
             keys,
             source);
     if (authorization.modelChanged()) {
+      if (routePolicy.exactLock()) {
+        throw new IllegalStateException(
+            "Exact run route cannot be changed by managed-AI policy: " + authorization.reason());
+      }
       request =
           request.toBuilder()
               .provider(authorization.provider())
@@ -399,6 +406,33 @@ public class LlmRouter {
       if (failed != null) return failed;
       throw primaryError;
     }
+  }
+
+  LlmRequest enforceDurableRoutePolicy(
+      LlmRequest request, com.navneet.executespec.router.RunRoutePolicyService.RoutePolicy policy) {
+    if (policy == null || !policy.exactLock()) return request;
+    String expectedProvider = normalizeProvider(policy.requestedProvider());
+    String actualProvider = normalizeProvider(request.provider());
+    String expectedModel = modelRegistry.canonicalize(policy.requestedModel());
+    String actualModel = modelRegistry.canonicalize(request.model());
+    if (!expectedProvider.equals(actualProvider) || !expectedModel.equals(actualModel)) {
+      throw new IllegalStateException(
+          "Exact run route violation: requested "
+              + expectedProvider
+              + "/"
+              + expectedModel
+              + " but dispatch attempted "
+              + actualProvider
+              + "/"
+              + actualModel);
+    }
+    return request.strictProvider() ? request : request.toBuilder().strictProvider(true).build();
+  }
+
+  private static String normalizeProvider(String provider) {
+    if (provider == null) return "";
+    String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    return "google".equals(normalized) ? "gemini" : normalized;
   }
 
   /**

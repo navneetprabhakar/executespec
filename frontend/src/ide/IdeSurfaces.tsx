@@ -13,6 +13,12 @@ import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
 import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
+import {
   formatManagedAiPlanMessage,
   hasUnlimitedAiCredits,
   managedAiStatusLabel,
@@ -335,6 +341,7 @@ export function IdeCompose() {
   const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
   const user = useAuthStore((s) => s.user);
+  const providerReadiness = useProviderReadiness();
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
@@ -452,12 +459,16 @@ export function IdeCompose() {
 
   useEffect(() => {
     if (user?.preferredAiProvider) {
+      setModelName('');
       setProvider(user.preferredAiProvider.toUpperCase());
     }
   }, [user?.preferredAiProvider]);
 
   function chooseProvider(next: string) {
     const normalized = next.toUpperCase();
+    // Clear synchronously with the provider selection. Waiting for the effect leaves a render in
+    // which a fast submit can pair the new provider with the previous provider's exact model.
+    setModelName('');
     setProvider(normalized);
     if (user?.preferredAiProvider?.toUpperCase() !== normalized) {
       useAuthStore.setState({user: user ? {...user, preferredAiProvider: normalized} : user});
@@ -473,7 +484,7 @@ export function IdeCompose() {
     try {
       const picked = await api.pickOnboardingSample(sample.id);
       setSpec(picked.spec || sample.title);
-      if (picked.preferredProvider) setProvider(picked.preferredProvider.toUpperCase());
+      if (picked.preferredProvider) chooseProvider(picked.preferredProvider);
     } catch {
       // Backend tracking is best-effort; still let the user start from the title.
       setSpec(sample.title);
@@ -577,6 +588,8 @@ export function IdeCompose() {
       .filter((p) => tier === 'ENTERPRISE' || !ENTERPRISE_PROVIDER_IDS.has(p.id.toUpperCase()))
       .map((p) => ({...p, id: p.id.toUpperCase()}));
   }, [providerOptions, tier]);
+  const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
+  const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
 
   const modelLabelById = useMemo(() => {
     const labels: Record<string, string> = {...modelLabels};
@@ -635,6 +648,16 @@ export function IdeCompose() {
   async function submit() {
     if (!spec.trim()) {
       setErr('Describe what to build first.');
+      return;
+    }
+    if (providerReadiness.loading || providerReadiness.error || !selectedProviderReady) {
+      setErr(
+        providerReadiness.error
+          ? 'Provider readiness could not be verified. Retry after the service is available.'
+          : providerReadiness.loading
+            ? 'Provider readiness is still being checked.'
+            : providerReadinessLabel(selectedProviderReadiness),
+      );
       return;
     }
     setBusy(true);
@@ -905,12 +928,29 @@ export function IdeCompose() {
                     onChange={(e) => chooseProvider(e.target.value)}
                   >
                     {selectableProviders.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label || providerLabel(p.id)}
+                      <option
+                        key={p.id}
+                        value={p.id}
+                        disabled={!providerIsDispatchable(providerReadiness.byProvider.get(p.id))}
+                      >
+                        {providerOptionLabel(
+                          p.label || providerLabel(p.id),
+                          providerReadiness.byProvider.get(p.id),
+                        )}
                         {p.tag ? ` · ${p.tag}` : ''}
                       </option>
                     ))}
                   </select>
+                  <div
+                    role={selectedProviderReady ? 'status' : 'alert'}
+                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                  >
+                    {providerReadiness.error
+                      ? 'Provider readiness unavailable; starting work is disabled.'
+                      : providerReadiness.loading
+                        ? 'Checking provider readiness…'
+                        : providerReadinessLabel(selectedProviderReadiness)}
+                  </div>
                 </div>
                 {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
                   default matrix for this run only. '' = Default → no modelName sent. */}
@@ -1212,7 +1252,13 @@ export function IdeCompose() {
             Next
           </button>
         ) : (
-          <button className='ide-btn' onClick={submit} disabled={busy}>
+          <button
+            className='ide-btn'
+            onClick={submit}
+            disabled={
+              busy || providerReadiness.loading || providerReadiness.error || !selectedProviderReady
+            }
+          >
             {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}
@@ -1274,6 +1320,7 @@ export function IdeLive() {
   useSse(runId || null);
   const sseEntries = useSseStore((s) => s.entries);
   const sseStatus = useSseStore((s) => s.status);
+  const replayWarning = useSseStore((s) => s.replayNotice);
   const fileTick = useSseStore((s) => s.fileWrittenTickAt);
   const logBottomRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1517,6 +1564,14 @@ export function IdeLive() {
             <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '0 0 6px'}}>
               ▶ {completed}/{tasks.length} steps
               {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+            </div>
+          )}
+          {replayWarning && (
+            <div
+              role='status'
+              style={{fontSize: 12, color: 'var(--ide-yellow)', margin: '0 0 8px'}}
+            >
+              {replayWarning}
             </div>
           )}
           {logList.length === 0 ? (

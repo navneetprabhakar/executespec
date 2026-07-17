@@ -169,6 +169,18 @@ public class RunDetail {
   /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
   String aiProvider;
 
+  /** Caller-selected provider preserved independently from the effective dispatch route. */
+  String requestedProvider;
+
+  /** Caller-selected exact model, or null when provider-tier routing was requested. */
+  String requestedModel;
+
+  /** AUTO, PROVIDER_PREFERRED, or EXACT_LOCK. */
+  String routingMode;
+
+  /** True when every run-scoped LLM dispatch must use requestedProvider/requestedModel. */
+  Boolean routePinned;
+
   /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
   String harnessVersion;
 

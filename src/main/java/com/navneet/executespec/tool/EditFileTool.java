@@ -131,6 +131,10 @@ public class EditFileTool implements Tool {
     }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+      String reviewerPolicyError = ReviewerMutationScope.validateEditFile(path);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       // Guardrail-level file-sandbox gate — no-op at LOW.
       FileSandboxPolicy.Decision sandbox =
           fileSandboxPolicy.validateWrite(ctx.workspaceRoot(), resolved);

@@ -124,17 +124,34 @@ public class ChatService {
       provider = LlmProvider.ANTHROPIC;
     }
     ResolvedModel model;
-    try {
-      model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
-    } catch (Exception e) {
-      log.warn(
-          "ChatService model resolve failed for provider={}: {} — falling back to ANTHROPIC",
-          provider,
-          e.getMessage());
-      provider = LlmProvider.ANTHROPIC;
-      model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
+    if (run.isRoutePinned()) {
+      if (run.getRequestedProvider() == null
+          || run.getRequestedModel() == null
+          || run.getRequestedModel().isBlank()) {
+        throw new IllegalStateException("Run has an incomplete exact route policy");
+      }
+      provider = LlmProvider.valueOf(run.getRequestedProvider().toUpperCase());
+      model =
+          ResolvedModel.builder()
+              .requestedProvider(provider)
+              .actualProvider(provider)
+              .model(run.getRequestedModel())
+              .agentTier(AgentTier.LIGHTWEIGHT)
+              .fallback(false)
+              .build();
+    } else {
+      try {
+        model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
+      } catch (Exception e) {
+        log.warn(
+            "ChatService model resolve failed for provider={}: {} — falling back to ANTHROPIC",
+            provider,
+            e.getMessage());
+        provider = LlmProvider.ANTHROPIC;
+        model = modelResolver.resolve("ChatService", provider, AgentTier.LIGHTWEIGHT);
+      }
     }
-    String providerName = provider.name().toLowerCase();
+    String providerName = model.getActualProvider().name().toLowerCase();
 
     Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
     String systemPrompt = buildSystemPrompt(run, workspace);

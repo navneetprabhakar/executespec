@@ -8,6 +8,7 @@ import com.navneet.executespec.codeintel.StalenessService;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportValidityService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -33,6 +34,7 @@ public class ProjectDashboardController {
 
   private final PipelineRunRepository runRepo;
   private final ValidationReportRepository reportRepo;
+  private final ValidationReportValidityService reportValidityService;
   private final PullRequestRecordRepository prRepo;
   private final ProjectArchitectureService archService;
   private final StalenessService stalenessService;
@@ -121,6 +123,7 @@ public class ProjectDashboardController {
       int completedRuns,
       int failedRuns,
       double avgScore,
+      int excludedScoreReports,
       long totalTokens,
       double totalCostUsd,
       CostBreakdown costBreakdown,
@@ -184,13 +187,11 @@ public class ProjectDashboardController {
     // v2.5.10+: aggregate only verifiedScore (objective build+tests+verdict signal).
     // Legacy accuracyScore is an LLM self-assessment and must never be promoted into
     // a dashboard aggregate when deterministic evidence is absent.
-    double avgScore =
-        reports.stream()
-            .map(ProjectDashboardController::preferredScore)
-            .filter(s -> s != null)
-            .mapToInt(Integer::intValue)
-            .average()
-            .orElse(0.0);
+    ValidationReportValidityService.Aggregate scoreAggregate =
+        reportValidityService.aggregate(reports);
+    List<ValidationReport> canonicalReports = scoreAggregate.canonicalReports();
+    int excludedScoreReports = scoreAggregate.excludedCount();
+    double avgScore = scoreAggregate.averageScore();
 
     List<TaskSummary> recentTasks =
         recentRuns.stream()
@@ -201,7 +202,7 @@ public class ProjectDashboardController {
                         r.getRunId(),
                         r.getRunTitle() != null ? r.getRunTitle() : r.getUserRequest(),
                         r.getStatus(),
-                        latestScoreForRun(reports, r.getRunId()),
+                        latestScoreForRun(canonicalReports, r.getRunId()),
                         r.getStartedAt() != null ? r.getStartedAt().toString() : null))
             .toList();
 
@@ -232,6 +233,7 @@ public class ProjectDashboardController {
             (int) completed,
             (int) failed,
             avgScore,
+            excludedScoreReports,
             totalTokens,
             totalCost,
             costBreakdown,

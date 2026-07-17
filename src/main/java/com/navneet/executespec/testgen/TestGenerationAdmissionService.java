@@ -1,0 +1,144 @@
+package com.navneet.executespec.testgen;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import com.navneet.executespec.report.RunChangeEvidenceService;
+import com.navneet.executespec.testgen.model.TestTask;
+
+import org.springframework.stereotype.Component;
+
+import lombok.RequiredArgsConstructor;
+
+/** Fail-closed source admission for generated integration tests. */
+@Component
+@RequiredArgsConstructor
+public class TestGenerationAdmissionService {
+
+  private static final Set<String> SOURCE_EXTENSIONS =
+      Set.of(".java", ".kt", ".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs", ".html");
+
+  private final RunChangeEvidenceService changeEvidenceService;
+  private final ApiSurfaceExtractor apiSurfaceExtractor;
+  private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
+
+  public Admission assess(String runId, boolean isCli, boolean isStaticHtml) {
+    Path workspace = workspaceInitService.runWorkspacePath(runId);
+    if (!Files.isDirectory(workspace)) return Admission.blocked("workspace is unavailable");
+    RunChangeEvidenceService.ChangeEvidence changes =
+        changeEvidenceService.inspect(runId, List.of());
+    if (!changes.valid()) return Admission.blocked(changes.invalidReason());
+    boolean relevantDiff =
+        changes.productFiles().stream()
+            .map(f -> f.path().toLowerCase(Locale.ROOT))
+            .anyMatch(TestGenerationAdmissionService::isRelevantProductSource);
+    if (!relevantDiff) return Admission.blocked("no relevant product source diff");
+    if (!containsSource(workspace))
+      return Admission.blocked("workspace contains no runtime source");
+    List<String> paths = apiSurfaceExtractor.extractPaths(workspace);
+    if (!isCli && !isStaticHtml && paths.isEmpty()) {
+      return Admission.blocked("HTTP runtime has no extracted endpoint surface");
+    }
+    String workspaceFingerprint = workspaceFingerprint(workspace, changes);
+    if (changes.baselineFingerprint() == null || workspaceFingerprint == null) {
+      return Admission.blocked("source provenance fingerprint is unavailable");
+    }
+    return new Admission(
+        true, null, workspace, paths, changes.baselineFingerprint(), workspaceFingerprint);
+  }
+
+  public boolean targetExists(Admission admission, TestTask task) {
+    if (admission == null || !admission.admitted() || task == null) return false;
+    String target = task.getTargetEntity();
+    if (target == null || target.isBlank()) return false;
+    List<String> tokens =
+        Stream.of(target.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))
+            .filter(t -> t.length() >= 3)
+            .filter(t -> !Set.of("api", "test", "tests", "service", "endpoint").contains(t))
+            .toList();
+    if (tokens.isEmpty()) return false;
+    if (admission.runtimePaths().stream()
+        .map(p -> p.toLowerCase(Locale.ROOT))
+        .anyMatch(path -> tokens.stream().anyMatch(path::contains))) return true;
+    try (Stream<Path> walk = Files.walk(admission.workspace(), 8)) {
+      return walk.filter(Files::isRegularFile)
+          .filter(p -> isSource(p.getFileName().toString().toLowerCase(Locale.ROOT)))
+          .limit(2_000)
+          .anyMatch(
+              p -> {
+                String file = p.getFileName().toString().toLowerCase(Locale.ROOT);
+                if (tokens.stream().anyMatch(file::contains)) return true;
+                try {
+                  String content = Files.readString(p).toLowerCase(Locale.ROOT);
+                  return tokens.stream().anyMatch(content::contains);
+                } catch (IOException ignored) {
+                  return false;
+                }
+              });
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private static boolean containsSource(Path workspace) {
+    try (Stream<Path> walk = Files.walk(workspace, 8)) {
+      return walk.filter(Files::isRegularFile)
+          .map(p -> p.getFileName().toString().toLowerCase(Locale.ROOT))
+          .anyMatch(TestGenerationAdmissionService::isSource);
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  private static boolean isSource(String name) {
+    return SOURCE_EXTENSIONS.stream().anyMatch(name::endsWith);
+  }
+
+  private static boolean isRelevantProductSource(String path) {
+    String normalized = path.replace('\\', '/');
+    if (!isSource(normalized)) return false;
+    return !normalized.contains("/src/test/")
+        && !normalized.startsWith("tests/")
+        && !normalized.contains("/tests/")
+        && !normalized.contains("/__tests__/")
+        && !normalized.matches(".*(?:test|spec)\\.[a-z0-9]+$");
+  }
+
+  private static String workspaceFingerprint(
+      Path workspace, RunChangeEvidenceService.ChangeEvidence changes) {
+    try {
+      java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+      for (RunChangeEvidenceService.ChangedFile file :
+          changes.productFiles().stream()
+              .sorted(java.util.Comparator.comparing(RunChangeEvidenceService.ChangedFile::path))
+              .toList()) {
+        digest.update(file.path().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        digest.update(file.status().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Path changed = workspace.resolve(file.path()).normalize();
+        if (changed.startsWith(workspace) && Files.isRegularFile(changed)) {
+          digest.update(Files.readAllBytes(changed));
+        }
+      }
+      return java.util.HexFormat.of().formatHex(digest.digest());
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  public record Admission(
+      boolean admitted,
+      String reason,
+      Path workspace,
+      List<String> runtimePaths,
+      String sourceFingerprint,
+      String workspaceFingerprint) {
+    static Admission blocked(String reason) {
+      return new Admission(false, reason, null, List.of(), null, null);
+    }
+  }
+}

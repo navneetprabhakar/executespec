@@ -46,11 +46,13 @@ public class TestCoverageRescorer {
 
     ValidationReport report = rescored.get();
     log.info(
-        "TestCoverageRescorer: run {} rescored verifiedScore={} rubricScore={} (total={}"
-            + " passed={})",
+        "TestCoverageRescorer: run {} reconciled verifiedScore={} rubricScore={} (report total={}"
+            + " passed={}, event total={} passed={})",
         event.runId(),
         report.getVerifiedScore(),
         report.getRubricScore(),
+        report.getTestsTotal(),
+        report.getTestsPassed(),
         s.getTotalTests(),
         s.getPassed());
   }

@@ -4350,6 +4350,20 @@ components:
           nullable: true
         aiProvider:
           type: string
+        requestedProvider:
+          type: string
+          nullable: true
+          description: Caller-selected provider, preserved independently from effective dispatch evidence.
+        requestedModel:
+          type: string
+          nullable: true
+          description: Caller-selected exact model; null for provider-tier routing.
+        routingMode:
+          type: string
+          enum: [AUTO, PROVIDER_PREFERRED, EXACT_LOCK]
+        routePinned:
+          type: boolean
+          description: Whether every run-scoped LLM dispatch is locked to the requested provider and model.
         executionMode:
           type: string
         approvedExecutionMode:

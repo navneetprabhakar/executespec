@@ -71,8 +71,8 @@ public class AccuracyAssessmentService {
   private static final String SYSTEM_PROMPT =
       """
 You are a specification adherence auditor. Your ONLY job is to compare the ORIGINAL USER SPECIFICATION
-against the FILE TREE, KEY SOURCE FILES, and REVIEW ISSUES to determine how accurately the generated
-code implements what was asked for.
+against the FILE TREE, KEY SOURCE FILES, TEST FILES, and REVIEW ISSUES to determine how accurately the
+generated code implements what was asked for.
 
 You are NOT re-reviewing the code quality — that was done already. You are measuring COMPLETENESS
 and ACCURACY of the implementation relative to the specification.
@@ -176,7 +176,8 @@ SCORE COMPUTATION GUIDANCE:
       the suite delivers it.
   When the spec only implies tests loosely ("include a unit test"), one meaningful test = GOOD.
   Reserve PARTIAL for real gaps (a required endpoint/module with zero test), not for "could be
-  more thorough."
+  more thorough." Inspect the TEST FILES section for this judgment; the KEY SOURCE FILES section
+  intentionally excludes tests so implementation and test evidence have independent budgets.
 - Return valid JSON. Do not wrap in markdown fences.
 """;
 
@@ -202,9 +203,11 @@ SCORE COMPUTATION GUIDANCE:
     try {
       String fileTree = getFileTree(runId);
       String keyFileSnippets = buildKeyFileSnippets(runId, fileTree);
+      String testFileSnippets = buildTestFileSnippets(runId, fileTree);
       String issuesSummary = buildIssuesSummary(issues);
       String userMessage =
-          buildAssessmentPrompt(originalGoal, fileTree, keyFileSnippets, issuesSummary);
+          buildAssessmentPrompt(
+              originalGoal, fileTree, keyFileSnippets, testFileSnippets, issuesSummary);
 
       List<Message> messages = new ArrayList<>();
       messages.add(new SystemMessage(SYSTEM_PROMPT));
@@ -626,11 +629,17 @@ SCORE COMPUTATION GUIDANCE:
   // Prompt builder
 
   private String buildAssessmentPrompt(
-      String originalGoal, String fileTree, String keyFileSnippets, String issuesSummary) {
+      String originalGoal,
+      String fileTree,
+      String keyFileSnippets,
+      String testFileSnippets,
+      String issuesSummary) {
     String filesSection =
         keyFileSnippets.isBlank()
             ? "(no key source files available — rely on file tree)"
             : keyFileSnippets;
+    String testsSection =
+        testFileSnippets.isBlank() ? "(no readable test files available)" : testFileSnippets;
     return String.format(
         """
 === ORIGINAL SPECIFICATION (this is what the user asked for) ===
@@ -640,6 +649,9 @@ SCORE COMPUTATION GUIDANCE:
 %s
 
 === KEY SOURCE FILES (actual code — use this to verify endpoint/feature existence) ===
+%s
+
+=== TEST FILES (actual test code — use this to grade testCoverageLevel) ===
 %s
 
 === REVIEW ISSUES FOUND (critical and minor issues identified in code review) ===
@@ -657,7 +669,7 @@ Based on the specification, file tree, source files, and review issues above:
 
 Return your assessment as a JSON object. No markdown fences. No explanation outside the JSON.
 """,
-        originalGoal, fileTree, filesSection, issuesSummary);
+        originalGoal, fileTree, filesSection, testsSection, issuesSummary);
   }
 
   private String buildIssuesSummary(List<ReviewIssue> issues) {
@@ -770,6 +782,39 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     return sb.toString();
   }
 
+  /**
+   * Reads a bounded, independent sample of generated test files for the coverage judgment.
+   * Production-file inference intentionally excludes tests so they cannot consume the scarce
+   * implementation-evidence budget. Before this separate lane existed, the assessor was still asked
+   * to grade test coverage and therefore reported NONE even for concrete passing suites.
+   */
+  private String buildTestFileSnippets(String runId, String fileTree) {
+    List<String> candidates = inferTestFilePaths(fileTree);
+    if (candidates.isEmpty()) return "";
+
+    StringBuilder sb = new StringBuilder();
+    int totalChars = 0;
+    for (String path : candidates) {
+      if (totalChars >= TEST_SNIPPETS_CHAR_CAP) break;
+      try {
+        String content = fileSystemTool.readFile(runId, path);
+        if (content == null || content.isBlank() || isReadErrorMessage(content)) continue;
+        String snip = truncateForSnippet(content);
+        int remaining = TEST_SNIPPETS_CHAR_CAP - totalChars;
+        if (snip.length() > remaining) snip = snip.substring(0, remaining);
+        sb.append("### ").append(path).append("\n```\n").append(snip).append("\n```\n\n");
+        totalChars += snip.length();
+      } catch (Exception e) {
+        log.debug(
+            "[AccuracyAssessment] Could not read test file {} for run {}: {}",
+            path,
+            runId,
+            e.getMessage());
+      }
+    }
+    return sb.toString();
+  }
+
   /** Per-file content cap. Was 2,500; bumped 2026-05-06 to give multi-endpoint routers headroom. */
   static final int PER_FILE_CHAR_CAP = 10_000;
 
@@ -790,6 +835,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * cuts off the tail rather than crashing.
    */
   static final int TOTAL_SNIPPETS_CHAR_CAP = 100_000;
+
+  /** Independent cap for test evidence so it cannot crowd implementation evidence from context. */
+  static final int TEST_SNIPPETS_CHAR_CAP = 30_000;
+
+  /** Maximum test files included in one assessment. */
+  static final int TEST_FILE_CAP = 6;
 
   /**
    * Truncate a file's content for snippet inclusion. Files ≤ {@link #PER_FILE_CHAR_CAP} are
@@ -917,6 +968,35 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
       picked.addAll(repoPicks);
     }
     return java.util.List.copyOf(picked);
+  }
+
+  /** Selects common test-file conventions while excluding build, cache, and vendored trees. */
+  private List<String> inferTestFilePaths(String fileTree) {
+    if (fileTree == null || fileTree.isBlank()) return List.of();
+    java.util.regex.Pattern sourceExtension =
+        java.util.regex.Pattern.compile(
+            "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh)$");
+    java.util.regex.Pattern excludedTree =
+        java.util.regex.Pattern.compile(
+            "(?i).*(?:^|/)(?:__pycache__|venv|\\.venv|node_modules|target|build|dist|"
+                + "\\.next|\\.gradle|coverage|bower_components|vendor|\\.idea|\\.vscode|"
+                + "\\.pytest_cache|\\.mypy_cache|\\.tox|\\.nyc_output)(?:/|$).*");
+    java.util.regex.Pattern testConvention =
+        java.util.regex.Pattern.compile(
+            "(?i)(?:^|/)(?:tests?|__tests__)(?:/|$)|"
+                + "(?:^|/)(?:test_[^/]+|[^/]+_test|[^/]+\\.test|[^/]+\\.spec|[^/]*Test)\\.[^/]+$");
+
+    return fileTree
+        .lines()
+        .map(String::trim)
+        .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+        .filter(l -> !l.isBlank())
+        .filter(l -> sourceExtension.matcher(l).matches())
+        .filter(l -> !excludedTree.matcher(l).matches())
+        .filter(l -> testConvention.matcher(l).find())
+        .sorted(java.util.Comparator.comparingInt(String::length).thenComparing(s -> s))
+        .limit(TEST_FILE_CAP)
+        .toList();
   }
 
   /**

@@ -78,15 +78,31 @@ class SseBroadcasterReplayContractTest {
                 mapper.writeValueAsString(Map.of("seq", 42, "payload", typed)),
                 mapper.writeValueAsString(RunEvent.log("run-1", "task-1", "legacy"))));
 
-    List<Map<String, Object>> replay = broadcaster().getReplayLog("run-1");
+    SseBroadcaster.ReplayLog replay = broadcaster().getReplayLog("run-1");
 
-    assertThat(replay).hasSize(2);
-    assertThat(replay.get(0))
+    assertThat(replay.events()).hasSize(2);
+    assertThat(replay.available()).isTrue();
+    assertThat(replay.lastEventId()).isEqualTo("42");
+    assertThat(replay.events().get(0))
         .containsEntry("type", "GOAL_DECISION")
+        .containsEntry("_eventId", "42")
         .containsEntry("schemaVersion", 1);
-    assertThat(replay.get(0)).containsEntry("payload", "done");
-    assertThat(replay.get(0)).containsEntry("data", Map.of("state", "DONE"));
-    assertThat(replay.get(1)).containsEntry("type", "LOG").containsEntry("payload", "legacy");
+    assertThat(replay.events().get(0)).containsEntry("payload", "done");
+    assertThat(replay.events().get(0)).containsEntry("data", Map.of("state", "DONE"));
+    assertThat(replay.events().get(1))
+        .containsEntry("type", "LOG")
+        .containsEntry("payload", "legacy");
+  }
+
+  @Test
+  void emptyReplayIsExplicitlyUnavailableInsteadOfLookingLikeAValidEmptyHistory() {
+    when(replayOps.range("sse:replay:run-1", 0, -1)).thenReturn(List.of());
+
+    SseBroadcaster.ReplayLog replay = broadcaster().getReplayLog("run-1");
+
+    assertThat(replay.available()).isFalse();
+    assertThat(replay.reason()).isEqualTo("EXPIRED_OR_EMPTY");
+    assertThat(replay.events()).isEmpty();
   }
 
   @Test

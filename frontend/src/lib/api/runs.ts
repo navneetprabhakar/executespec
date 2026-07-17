@@ -6,7 +6,8 @@ import {
   PagedResponse,
   RunChatMessage,
   RunDetail,
-  RunLogEvent,
+  RunCostEvidence,
+  RunReplayLog,
   RunSummary,
   TaskGraphNode,
   TestPlanData,
@@ -146,11 +147,9 @@ export const resumeRun = (runId: string) => req<void>(`/runs/${runId}/resume`, {
 export const getUserRunsSummary = (days = 30) =>
   req<UserRunsSummaryData>(`/user-runs-summary?days=${days}`);
 
-export const getLiveCost = (runId: string) =>
-  req<{runId: string; costUsd: number; inputTokens?: number; outputTokens?: number}>(
-    `/runs/${runId}/cost`,
-  );
-export const getRunEventLog = (runId: string) => req<RunLogEvent[]>(`/runs/${runId}/event-log`);
+export const getLiveCost = (runId: string) => req<RunCostEvidence>(`/runs/${runId}/cost`);
+export const getRunEventLog = (runId: string) =>
+  req<RunReplayLog>(`/runs/${runId}/event-log/replay`);
 
 export const submitContactForm = (subject: string, body: string) =>
   req<{message: string}>('/contact', {

@@ -44,6 +44,7 @@ public class TestGenOrchestrator {
   private final ApiProber apiProber;
   private final ApiSurfaceExtractor apiSurfaceExtractor;
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
+  private final TestGenerationAdmissionService admissionService;
 
   /**
    * Provider avoids the circular dependency: PreviewService → TestPreviewCoordinator →
@@ -64,6 +65,19 @@ public class TestGenOrchestrator {
       boolean isCli = projectConfig.isCli;
       boolean isStaticHtml = projectConfig.isStaticHtml;
 
+      // RCA-15 — prove a source/runtime surface and a relevant product diff before scaffolding,
+      // persisting a plan, or spending the first planner token. An empty brownfield checkout used
+      // to produce plausible-looking, entirely hallucinated Calculator test tasks.
+      TestGenerationAdmissionService.Admission admission =
+          admissionService.assess(runId, isCli, isStaticHtml);
+      if (!admission.admitted()) {
+        log.warn("[TestGen] Run {} not applicable: {}", runId, admission.reason());
+        emitTestEvent(runId, "TEST_GEN_NOT_APPLICABLE", admission.reason());
+        eventPublisher.publishEvent(
+            new TestExecutionCompletedEvent(runId, 0L, TestExecutionSummary.empty()));
+        return;
+      }
+
       // 2. Scaffold test project (Playwright POM for static HTML, RestAssured for REST APIs)
       testProjectScaffold.scaffold(runId, isStaticHtml);
 
@@ -78,7 +92,33 @@ public class TestGenOrchestrator {
           "Planning integration tests (CLI: " + isCli + ", staticHtml: " + isStaticHtml + ")");
       TestPlan testPlan =
           testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli, isStaticHtml);
-      List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlan.getId());
+      testPlan.setSourceFingerprint(admission.sourceFingerprint());
+      testPlan.setWorkspaceFingerprint(admission.workspaceFingerprint());
+      testPlan.setPromptVersion("test-planner-v1");
+      testPlan = testPlanRepository.save(testPlan);
+      List<TestTask> plannedTasks = testTaskRepository.findByTestPlanId(testPlan.getId());
+      List<TestTask> invalidTargets =
+          plannedTasks.stream()
+              .filter(task -> !admissionService.targetExists(admission, task))
+              .toList();
+      if (!invalidTargets.isEmpty()) {
+        log.warn(
+            "[TestGen] Rejecting {} source-unmatched test target(s) for run {}",
+            invalidTargets.size(),
+            runId);
+        testTaskRepository.deleteAll(invalidTargets);
+      }
+      List<TestTask> tasks =
+          plannedTasks.stream().filter(task -> !invalidTargets.contains(task)).toList();
+      if (tasks.isEmpty()) {
+        testPlan.setStatus(TestPlanStatus.FAILED);
+        testPlanRepository.save(testPlan);
+        emitTestEvent(
+            runId, "TEST_GEN_NOT_APPLICABLE", "No planned test target exists in admitted source");
+        eventPublisher.publishEvent(
+            new TestExecutionCompletedEvent(runId, testPlan.getId(), TestExecutionSummary.empty()));
+        return;
+      }
       emitTestEvent(
           runId,
           "TEST_PLANNING_COMPLETED",

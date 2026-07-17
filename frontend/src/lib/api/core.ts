@@ -287,6 +287,11 @@ export interface AgentTokenEntry {
 }
 
 export interface RunDetail extends RunSummary {
+  /** Durable caller-selected route contract; effective per-call evidence lives in /cost. */
+  requestedProvider?: string | null;
+  requestedModel?: string | null;
+  routingMode?: 'AUTO' | 'PROVIDER_PREFERRED' | 'EXACT_LOCK' | null;
+  routePinned?: boolean | null;
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
@@ -461,6 +466,51 @@ export interface RunLogEvent {
   type: string;
   timestamp?: number;
   [k: string]: unknown;
+}
+
+export interface RunReplayLog {
+  events: RunLogEvent[];
+  available: boolean;
+  reason: 'AVAILABLE' | 'EXPIRED_OR_EMPTY' | 'STORE_UNAVAILABLE';
+  retainedUntil: string | null;
+  lastEventId: string | null;
+  truncated: boolean;
+}
+
+export interface RunStepCostCall {
+  id: string;
+  taskId: string | null;
+  agentRole: string | null;
+  stepId: string | null;
+  retryOf: string | null;
+  provider: string | null;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  costUsd: number;
+  callIndex: number;
+  createdAt: string;
+}
+
+export interface RunCostEvidence {
+  runId: string;
+  schemaVersion: number;
+  source: 'stored_total' | 'live_tracker' | 'legacy_estimator';
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  calls: number | null;
+  phases: {classifier: number; outline: number; expansion: number; coherence: number};
+  stepCalls: RunStepCostCall[];
+  attributedCostUsd: number;
+  unattributedCostUsd: number;
+  reconciled: boolean;
 }
 
 /**
@@ -1222,6 +1272,7 @@ export interface RepoHealth {
   lastCodeMapSha: string | null;
   currentOriginSha: string | null;
   isStale: boolean;
+  syncStatus: 'IN_SYNC' | 'DRIFTED' | 'UNKNOWN';
   webhookInstalled: boolean;
   openPrCount: number;
   lastAnalysedAt: string | null;

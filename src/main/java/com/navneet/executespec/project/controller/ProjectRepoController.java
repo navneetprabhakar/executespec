@@ -44,8 +44,10 @@ public class ProjectRepoController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(value = "owner", required = false) String owner) {
     var u = userDetails.getUser();
-    String effectiveOwner = (owner != null && !owner.isBlank()) ? owner : u.getGithubOwner();
-    return ResponseEntity.ok(gitHub.listOwnerRepos(effectiveOwner, u.getGithubPat()));
+    // No owner query means the complete PAT-visible catalogue (owner + collaborator + org), not
+    // merely the user's personal namespace. An explicit owner remains a server-side filter.
+    String ownerFilter = (owner != null && !owner.isBlank()) ? owner : null;
+    return ResponseEntity.ok(gitHub.listOwnerRepos(ownerFilter, u.getGithubPat()));
   }
 
   /* ── Lifecycle ── */

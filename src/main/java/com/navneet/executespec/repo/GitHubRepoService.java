@@ -456,16 +456,27 @@ public class GitHubRepoService {
    * @return sorted list of relative file paths, or empty list on failure
    */
   public List<String> listRepoFiles(String repoUrl, String overridePat) {
-    return listRepoFiles(repoUrl, null, overridePat);
+    return listRepoFilesResult(repoUrl, null, overridePat).files();
   }
 
   /** Variant that respects a non-default branch (avoids the hardcoded {@code main}). */
   public List<String> listRepoFiles(String repoUrl, String branch, String overridePat) {
+    return listRepoFilesResult(repoUrl, branch, overridePat).files();
+  }
+
+  /**
+   * Typed GitHub tree result. An empty successful tree is materially different from a missing PAT,
+   * upstream rejection, or transport failure; callers that make readiness/scoring decisions must
+   * use this method instead of inferring success from an empty list.
+   */
+  public RepoFileListResult listRepoFilesResult(String repoUrl, String branch, String overridePat) {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return List.of();
+    if (effectivePat == null || effectivePat.isBlank()) {
+      return RepoFileListResult.failed("MISSING_GITHUB_PAT", null);
+    }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
-    if (ownerRepo == null) return List.of();
+    if (ownerRepo == null) return RepoFileListResult.failed("INVALID_REPOSITORY_URL", null);
 
     String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
     try {
@@ -492,14 +503,41 @@ public class GitHubRepoService {
             "[GitHubRepoService] Failed to list repo files for {}: {}",
             repoUrl,
             response.statusCode());
-        return List.of();
+        return RepoFileListResult.failed("GITHUB_TREE_HTTP_ERROR", response.statusCode());
       }
 
-      // Parse the "tree" array: extract "path" where "type" is "blob"
-      return parseTreePaths(response.body());
+      // Parse the "tree" array: extract "path" where "type" is "blob". GitHub marks recursive
+      // trees as truncated for very large repositories; preserve that fact instead of presenting
+      // a partial inventory as complete.
+      boolean truncated =
+          new ObjectMapper().readTree(response.body()).path("truncated").asBoolean(false);
+      return RepoFileListResult.success(parseTreePaths(response.body()), truncated);
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error listing repo files: {}", e.getMessage());
-      return List.of();
+      return RepoFileListResult.failed("GITHUB_TREE_REQUEST_FAILED", null);
+    }
+  }
+
+  public record RepoFileListResult(
+      List<String> files,
+      boolean successful,
+      boolean truncated,
+      String errorCode,
+      Integer upstreamStatus) {
+    public RepoFileListResult {
+      files = files == null ? List.of() : List.copyOf(files);
+    }
+
+    public static RepoFileListResult success(List<String> files) {
+      return success(files, false);
+    }
+
+    public static RepoFileListResult success(List<String> files, boolean truncated) {
+      return new RepoFileListResult(files, true, truncated, null, 200);
+    }
+
+    public static RepoFileListResult failed(String errorCode, Integer upstreamStatus) {
+      return new RepoFileListResult(List.of(), false, false, errorCode, upstreamStatus);
     }
   }
 

@@ -2627,13 +2627,10 @@ public class WorkerAgent {
    * command exits successfully. Legacy envelopes without the marker remain accepted.
    */
   static boolean isSuccessfulBuildEnvelope(String envelope) {
-    if (envelope == null
-        || !envelope.startsWith("{\"ok\":true")
-        || !envelope.contains("\\nexit=0\\n")) {
+    if (envelope == null || !envelope.startsWith("{\"ok\":true")) {
       return false;
     }
-    return !envelope.contains("\\nsmokeSignal=UNAVAILABLE\\n")
-        && !envelope.contains("\\nnoOp=true\\n");
+    return com.navneet.executespec.smoketest.BuildVerificationResult.parse(envelope).passed();
   }
 
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =

@@ -27,6 +27,7 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.RunRoutePolicyService;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -55,6 +56,7 @@ class LlmRouterTest {
   private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
   private ManagedAiUsageService managedAiUsageService;
+  private RunRoutePolicyService routePolicyService;
   private ObjectProvider<AnthropicChatModel> anthropicModelProvider;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
@@ -79,6 +81,10 @@ class LlmRouterTest {
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
     managedAiUsageService = mock(ManagedAiUsageService.class);
+    routePolicyService = mock(RunRoutePolicyService.class);
+    lenient()
+        .when(routePolicyService.forRun(anyString()))
+        .thenReturn(new RunRoutePolicyService.RoutePolicy(null, null, "PROVIDER_PREFERRED", false));
     anthropicModelProvider = mock(ObjectProvider.class);
     lenient().when(anthropicModelProvider.getIfAvailable()).thenReturn(null);
     lenient()
@@ -103,6 +109,7 @@ class LlmRouterTest {
             registry,
             flags,
             managedAiUsageService,
+            routePolicyService,
             anthropicModelProvider);
     router = spy(real);
     doNothing().when(router).backoffSleep(anyLong()); // keep retry tests fast
@@ -139,6 +146,25 @@ class LlmRouterTest {
         RunKeyContext.Source.USER,
         "u1",
         "o1");
+  }
+
+  @Test
+  void exactRouteForcesStrictProviderAndRejectsAnyPairSubstitution() {
+    LlmRouter subject = build();
+    when(registry.canonicalize(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+    var policy =
+        new RunRoutePolicyService.RoutePolicy(
+            "DEEPSEEK", "deepseek-v4-pro-native", "EXACT_LOCK", true);
+
+    LlmRequest locked =
+        subject.enforceDurableRoutePolicy(req("deepseek", "deepseek-v4-pro-native"), policy);
+    assertThat(locked.strictProvider()).isTrue();
+    assertThatThrownBy(
+            () ->
+                subject.enforceDurableRoutePolicy(
+                    req("openrouter", "deepseek-v4-pro-native"), policy))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Exact run route violation");
   }
 
   @Test

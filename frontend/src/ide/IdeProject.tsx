@@ -5,6 +5,13 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {explicitLinkedRepoSelection} from '@/ide/projectRepoUi';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 
 type Repo = Record<string, unknown>;
 // Relative timestamps everywhere (review/11 #8) — absolute locale strings were
@@ -23,6 +30,7 @@ export default function IdeProject() {
   // pass {compose:true} via Link state) skips the landing→Overview redirect below,
   // so the composer stays reachable on projects with work history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
+  const providerReadiness = useProviderReadiness();
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -39,25 +47,49 @@ export default function IdeProject() {
     if (!projectId) return;
     api
       .getProject(projectId)
-      .then(setProject)
+      .then((loadedProject) => {
+        setProject(loadedProject);
+        if (loadedProject.aiProvider) setProvider(loadedProject.aiProvider.toUpperCase());
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
     api
       .getProjectRepos(projectId)
-      .then((list) => setRepos((list as unknown as Repo[]) ?? []))
+      .then((list) => {
+        const loadedRepos = (list as unknown as Repo[]) ?? [];
+        setRepos(loadedRepos);
+        // Project runs are explicit about their code boundary. The previous UI displayed every
+        // linked repo as selected while leaving this array empty, so the request omitted
+        // selectedRepoIds and the backend created a seed-only workspace.
+        setSelected(explicitLinkedRepoSelection(loadedRepos));
+      })
       .catch(() => setRepos([]));
     api
       .getRuns({projectId, size: 6})
       .then((r) => setRuns(r.content ?? []))
       .catch(() => setRuns([]))
       .finally(() => setRunsLoaded(true));
-    if (project?.aiProvider) setProvider(project.aiProvider.toUpperCase());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   async function submit() {
     if (!spec.trim()) {
       setErr('Describe what to build first.');
+      return;
+    }
+    const readiness = providerReadiness.byProvider.get(provider.toUpperCase());
+    if (
+      providerReadiness.loading ||
+      providerReadiness.error ||
+      !providerIsDispatchable(readiness)
+    ) {
+      setErr(
+        providerReadiness.error
+          ? 'Provider readiness could not be verified. Retry after the service is available.'
+          : providerReadiness.loading
+            ? 'Provider readiness is still being checked.'
+            : providerReadinessLabel(readiness),
+      );
       return;
     }
     setBusy(true);
@@ -69,6 +101,9 @@ export default function IdeProject() {
         executionMode: mode,
         projectId,
       };
+      if (repos.length > 0 && selected.length === 0) {
+        throw new Error('Select at least one linked repository before starting work.');
+      }
       if (selected.length) body.selectedRepoIds = selected;
       const res = await api.createRun(body);
       navigate(`/live/${res.runId}`);
@@ -106,6 +141,12 @@ export default function IdeProject() {
     ].includes((r.status || '').toUpperCase()),
   );
   const lastRun = runs[0];
+  const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
+  const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
+  const projectProviderOptions = ['ANTHROPIC', 'OPENAI', 'DEEPSEEK'].map((id) => ({
+    id,
+    label: id === 'OPENAI' ? 'OpenAI' : id[0] + id.slice(1).toLowerCase(),
+  }));
 
   return (
     <div className='ide-pane'>
@@ -130,7 +171,7 @@ export default function IdeProject() {
           </div>
           <div className='ide-kv' style={{borderBottom: 'none'}}>
             <span>Repos selected</span>
-            <span>{selected.length || repos.length || 0}</span>
+            <span>{selected.length}</span>
           </div>
         </div>
         <div className='ide-card'>
@@ -213,10 +254,26 @@ export default function IdeProject() {
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
           >
-            <option value='ANTHROPIC'>Anthropic</option>
-            <option value='OPENAI'>OpenAI</option>
-            <option value='DEEPSEEK'>DeepSeek</option>
+            {projectProviderOptions.map((option) => (
+              <option
+                key={option.id}
+                value={option.id}
+                disabled={!providerIsDispatchable(providerReadiness.byProvider.get(option.id))}
+              >
+                {providerOptionLabel(option.label, providerReadiness.byProvider.get(option.id))}
+              </option>
+            ))}
           </select>
+          <div
+            role={selectedProviderReady ? 'status' : 'alert'}
+            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+          >
+            {providerReadiness.error
+              ? 'Provider readiness unavailable; starting work is disabled.'
+              : providerReadiness.loading
+                ? 'Checking provider readiness…'
+                : providerReadinessLabel(selectedProviderReadiness)}
+          </div>
         </div>
         <div style={{flex: 1, minWidth: 160}}>
           <div className='ide-h2' style={{marginTop: 0}}>
@@ -234,7 +291,13 @@ export default function IdeProject() {
         </div>
       </div>
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <button className='ide-btn' onClick={submit} disabled={busy}>
+      <button
+        className='ide-btn'
+        onClick={submit}
+        disabled={
+          busy || providerReadiness.loading || providerReadiness.error || !selectedProviderReady
+        }
+      >
         {busy ? 'Submitting…' : 'Start work'}
       </button>
 

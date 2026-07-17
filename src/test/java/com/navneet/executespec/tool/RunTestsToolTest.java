@@ -16,7 +16,7 @@ class RunTestsToolTest {
 
     assertThat(cmd)
         .containsExactly(
-            "python",
+            "python3",
             "-m",
             "pytest",
             "tests/test_widget.py::test_renders",

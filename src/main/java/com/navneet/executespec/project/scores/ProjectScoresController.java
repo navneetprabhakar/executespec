@@ -3,6 +3,7 @@ package com.navneet.executespec.project.scores;
 import java.util.List;
 
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportValidityService;
 import com.navneet.executespec.report.entity.ValidationReport;
 
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectScoresController {
 
   private final ValidationReportRepository reportRepo;
+  private final ValidationReportValidityService reportValidityService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   public record ScoreEntry(
@@ -36,7 +38,7 @@ public class ProjectScoresController {
     static ScoreEntry from(ValidationReport r) {
       return new ScoreEntry(
           r.getRunId(),
-          r.getAccuracyScore(),
+          r.getVerifiedScore(),
           r.getCodeQualityScore(),
           r.getTestCoverageScore(),
           r.getArchitectureScore(),
@@ -54,7 +56,10 @@ public class ProjectScoresController {
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
     List<ScoreEntry> out =
-        reportRepo.findAllByProjectId(projectId).stream().map(ScoreEntry::from).toList();
+        reportRepo.findAllByProjectId(projectId).stream()
+            .filter(reportValidityService::isCanonical)
+            .map(ScoreEntry::from)
+            .toList();
     return ResponseEntity.ok(out);
   }
 }

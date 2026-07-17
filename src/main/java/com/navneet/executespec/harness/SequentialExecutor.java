@@ -3567,6 +3567,10 @@ to boot — skip it for those.""";
     boolean statusClean =
         finalStatus == TaskOutcome.Status.SUCCESS
             || finalStatus == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
+    String category = taskCategory(task);
+    boolean meaningfulDiffRequired = requiresMeaningfulDiff(category);
+    boolean requiredOutputsPresent =
+        validationPassed && statusClean && (!meaningfulDiffRequired || fileWrites > 0);
     List<String> completed = new ArrayList<>();
     if (completeTaskClaimed) {
       completed.add("worker called completeTask");
@@ -3584,6 +3588,9 @@ to boot — skip it for those.""";
     }
     if (validationAttempted && !validationPassed) {
       incomplete.add("smoke validation failed");
+    }
+    if (meaningfulDiffRequired && fileWrites == 0) {
+      incomplete.add("code-changing task produced no meaningful product diff");
     }
     if (failureReason != null && !failureReason.isBlank()) {
       incomplete.add(failureReason);
@@ -3605,6 +3612,8 @@ to boot — skip it for those.""";
     evidence.add("reasoningTokens=" + cost.reasoningTokens());
     evidence.add("totalTrackedTokens=" + totalTokens);
     evidence.add("costUsd=" + String.format(Locale.ROOT, "%.6f", cost.costUsd()));
+    evidence.add("taskCategory=" + category);
+    evidence.add("meaningfulDiffRequired=" + meaningfulDiffRequired);
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
     }
@@ -3641,10 +3650,10 @@ to boot — skip it for those.""";
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
-        .goalCriteriaSatisfied(completeTaskClaimed && validationPassed && statusClean)
+        .goalCriteriaSatisfied(completeTaskClaimed && requiredOutputsPresent)
         .validationAttempted(validationAttempted)
         .validationPassed(smokePassed)
-        .requiredOutputsPresent(validationPassed && statusClean)
+        .requiredOutputsPresent(requiredOutputsPresent)
         .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
         .meaningfulDiffCount(fileWrites)
         .noProgressIterations(noProgressIterations)
@@ -3676,6 +3685,11 @@ to boot — skip it for those.""";
         .evidence(evidence)
         .risks(risksFor(workerResult, failureReason, budgetCeilingReason, completionConfidenceLow))
         .build();
+  }
+
+  static boolean requiresMeaningfulDiff(String category) {
+    if (category == null) return true;
+    return !"READ_ONLY_HELP".equals(category);
   }
 
   private static int repeatedFailureCount(
@@ -4991,8 +5005,17 @@ to boot — skip it for those.""";
     long elapsed = System.currentTimeMillis() - start;
     if (result instanceof ToolResult.Ok ok) {
       String content = ok.content();
-      int exit = extractExitCode(content);
-      boolean passed = exit == 0;
+      com.navneet.executespec.smoketest.BuildVerificationResult verification =
+          com.navneet.executespec.smoketest.BuildVerificationResult.parse(content);
+      int exit = verification.exitCode() == null ? -1 : verification.exitCode();
+      boolean passed = verification.passed();
+      if (verification.status()
+          == com.navneet.executespec.smoketest.BuildVerificationResult.Status.UNAVAILABLE) {
+        content =
+            content
+                + "\nverificationResult=UNAVAILABLE\nverificationReason="
+                + verification.reason();
+      }
       // Transfer #1 / verify-before-done (RL-2026-05-034): after a clean COMPILE, RUN the worker's
       // tests in-loop. BUILD's tests-are-mandatory directive WRITES tests; this verifies they PASS.
       // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle /
@@ -5035,21 +5058,6 @@ to boot — skip it for those.""";
     metrics.recordSmokeTest("fail");
     String msg = result instanceof ToolResult.Err err ? err.message() : "(unknown tool err)";
     return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed);
-  }
-
-  /** Parses "exit=N" out of BuildProjectTool's output envelope. */
-  private static int extractExitCode(String output) {
-    if (output == null) return -1;
-    int i = output.indexOf("exit=");
-    if (i < 0) return -1;
-    int j = i + "exit=".length();
-    int k = j;
-    while (k < output.length() && Character.isDigit(output.charAt(k))) k++;
-    try {
-      return Integer.parseInt(output.substring(j, k));
-    } catch (NumberFormatException nfe) {
-      return -1;
-    }
   }
 
   private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}

@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import type {ProjectRepo} from '@/types/project';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
@@ -9,6 +10,7 @@ import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {normalizeGitHubRepoQuery, sourceReadinessBadge, syncBadge} from '@/ide/projectRepoUi';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -289,6 +291,7 @@ export function IdeProjectPulse() {
   }, [hasLiveRun, refreshRuns]);
 
   const avgScore = dash ? (numOf(dash, 'recencyAvgScore') ?? numOf(dash, 'avgScore')) : undefined;
+  const excludedScoreReports = dash ? (numOf(dash, 'excludedScoreReports') ?? 0) : 0;
   const dur = dash ? numOf(dash, 'avgDurationMs') : undefined;
   const runTime = dur ? `${Math.floor(dur / 60000)}m ${Math.floor((dur % 60000) / 1000)}s` : '—';
   const spent = dash ? (numOf(dash, 'totalSpent30d') ?? numOf(dash, 'totalCostUsd')) : undefined;
@@ -347,6 +350,12 @@ export function IdeProjectPulse() {
             )}
             <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
           </div>
+          {excludedScoreReports > 0 && (
+            <div style={{marginTop: 6, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+              {excludedScoreReports} invalid validation{' '}
+              {excludedScoreReports === 1 ? 'report was' : 'reports were'} excluded from the score.
+            </div>
+          )}
 
           <div className='ide-h2'>Workspace health</div>
           {health.length === 0 ? (
@@ -354,7 +363,7 @@ export function IdeProjectPulse() {
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {health.map((r, i) => {
-                const drift = numOf(r, 'commitsBehind') ?? numOf(r, 'behindBy') ?? 0;
+                const sync = syncBadge(String(r.syncStatus || 'UNKNOWN'));
                 const wh = (r as {webhookInstalled?: boolean}).webhookInstalled;
                 const open = numOf(r, 'openPrCount') ?? numOf(r, 'openPrs') ?? 0;
                 return (
@@ -369,9 +378,7 @@ export function IdeProjectPulse() {
                     }}
                   >
                     <span style={{flex: 1, fontWeight: 500}}>{repoDisplayName(r)}</span>
-                    <IdeBadge kind={drift > 0 ? 'warn' : 'ok'}>
-                      {drift > 0 ? `drift +${drift}` : 'in sync'}
-                    </IdeBadge>
+                    <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
                     <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook' : 'no webhook'}</IdeBadge>
                     <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{open} open PR</span>
                   </div>
@@ -1147,12 +1154,25 @@ export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
   const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
-  const [available, setAvailable] = useState<Array<Record<string, unknown>> | null>(null);
+  const [available, setAvailable] = useState<api.GitHubRemoteRepo[] | null>(null);
+  const [registered, setRegistered] = useState<ProjectRepo[]>([]);
+  const [repoQuery, setRepoQuery] = useState('');
   const [showLink, setShowLink] = useState(false);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [unlinkFor, setUnlinkFor] = useState<{repoId: string; name: string} | null>(null);
+
+  const normalizedQuery = normalizeGitHubRepoQuery(repoQuery);
+  const filteredAvailable =
+    available?.filter((repo) =>
+      repo.fullName.toLowerCase().includes(normalizedQuery.toLowerCase()),
+    ) ?? [];
+  const attachableTypedSlug =
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalizedQuery) &&
+    !available?.some((repo) => repo.fullName.toLowerCase() === normalizedQuery.toLowerCase())
+      ? normalizedQuery
+      : '';
 
   function load() {
     api
@@ -1184,8 +1204,12 @@ export function IdeProjectRepos() {
     setErr('');
     if (!available) {
       try {
-        const r = await api.listRepos('ALL');
-        setAvailable(r as unknown as Array<Record<string, unknown>>);
+        const [remoteRepos, registeredRepos] = await Promise.all([
+          api.listGitHubRepos(),
+          api.listRepos('ALL'),
+        ]);
+        setAvailable(remoteRepos);
+        setRegistered(registeredRepos);
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : 'Failed to load repos.');
       }
@@ -1207,12 +1231,24 @@ export function IdeProjectRepos() {
     }
   }
 
-  async function link(repoId: string) {
-    setBusy(`link${repoId}`);
+  async function link(remote: {fullName: string; defaultBranch?: string}) {
+    const key = remote.fullName;
+    setBusy(`link${key}`);
     setMsg('');
     setErr('');
     try {
-      await api.linkProjectRepo(projectId, repoId);
+      let repo = registered.find((r) => r.githubRepoFullName === remote.fullName);
+      if (!repo) {
+        repo = await api.createRepo({
+          scope: 'USER',
+          githubRepoFullName: remote.fullName,
+          defaultBranch: remote.defaultBranch,
+          attachAnyway: false,
+        });
+        const createdRepo = repo;
+        setRegistered((current) => [...current, createdRepo]);
+      }
+      await api.linkProjectRepo(projectId, repo.id);
       setMsg('Repo linked.');
       setShowLink(false);
       load();
@@ -1248,9 +1284,16 @@ export function IdeProjectRepos() {
           <div className='ide-h2' style={{marginTop: 0}}>
             Available repos
           </div>
+          <input
+            className='ide-input'
+            value={repoQuery}
+            onChange={(event) => setRepoQuery(event.target.value)}
+            placeholder='Search repos or paste https://github.com/owner/repo'
+            style={{marginBottom: 10}}
+          />
           {available === null ? (
             <IdeLoader label='Loading repos…' />
-          ) : available.length === 0 ? (
+          ) : available.length === 0 && !attachableTypedSlug ? (
             <div className='ide-empty'>
               No connected repos yet. Connect GitHub from{' '}
               <Link to='/integrations' style={{color: 'var(--ide-accent)'}}>
@@ -1260,12 +1303,44 @@ export function IdeProjectRepos() {
             </div>
           ) : (
             <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
-              {available.map((r) => {
-                const rId = repoIdFor(r);
-                const linked = (repos || []).some((p) => repoIdFor(p) === rId);
+              {attachableTypedSlug && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 12px',
+                    background: 'var(--ide-bg-sidebar)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                    {attachableTypedSlug}
+                  </span>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '3px 12px'}}
+                    disabled={busy === `link${attachableTypedSlug}`}
+                    onClick={() =>
+                      link({
+                        fullName: attachableTypedSlug,
+                      })
+                    }
+                  >
+                    {busy === `link${attachableTypedSlug}` ? '…' : 'Attach by URL'}
+                  </button>
+                </div>
+              )}
+              {filteredAvailable.map((r) => {
+                const registeredRepo = registered.find(
+                  (candidate) => candidate.githubRepoFullName === r.fullName,
+                );
+                const linked = (repos || []).some(
+                  (p) => repoDisplayName(p) === r.fullName || repoIdFor(p) === registeredRepo?.id,
+                );
                 return (
                   <div
-                    key={rId}
+                    key={r.fullName}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1276,15 +1351,15 @@ export function IdeProjectRepos() {
                     }}
                   >
                     <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
-                      {repoDisplayName(r)}
+                      {r.fullName}
                     </span>
                     <button
                       className='ide-btn ghost'
                       style={{padding: '3px 12px'}}
-                      disabled={linked || busy === `link${rId}`}
-                      onClick={() => link(rId)}
+                      disabled={linked || busy === `link${r.fullName}`}
+                      onClick={() => link(r)}
                     >
-                      {linked ? 'Linked' : busy === `link${rId}` ? '…' : 'Link'}
+                      {linked ? 'Linked' : busy === `link${r.fullName}` ? '…' : 'Link'}
                     </button>
                   </div>
                 );
@@ -1311,22 +1386,31 @@ export function IdeProjectRepos() {
             const id = repoIdFor(r);
             const name = repoDisplayName(r);
             const h = health[id] || health[name] || {};
-            const drift =
-              numOf(h, 'commitsBehind') ?? numOf(h, 'behindBy') ?? numOf(r, 'commitsBehind') ?? 0;
+            const repo =
+              ((r as {repo?: Record<string, unknown>}).repo as
+                | Record<string, unknown>
+                | undefined) || r;
+            const sync = syncBadge(String(h.syncStatus || 'UNKNOWN'));
             const wh = (h as {webhookInstalled?: boolean}).webhookInstalled;
             const open = numOf(h, 'openPrCount') ?? numOf(h, 'openPrs') ?? 0;
-            const language = stackLanguage(r);
-            const sizeKb = numOf(r, 'sizeKb');
-            const fullName = (r as {githubRepoFullName?: string}).githubRepoFullName || name;
+            const language = stackLanguage(repo);
+            const sizeKb = numOf(repo, 'sizeKb');
+            const fullName = (repo as {githubRepoFullName?: string}).githubRepoFullName || name;
             const head =
-              (r as {headSha?: string}).headSha ||
+              (repo as {lastSyncedSha?: string}).lastSyncedSha ||
               (h as {currentOriginSha?: string}).currentOriginSha;
             const branch =
-              (r as {defaultBranch?: string}).defaultBranch ||
+              (repo as {defaultBranch?: string}).defaultBranch ||
               (h as {defaultBranch?: string}).defaultBranch ||
               'main';
+            const source = sourceReadinessBadge(
+              String(repo.sourceReadinessStatus || 'UNKNOWN'),
+              String(repo.sourceReadinessReason || ''),
+              numOf(repo, 'sourceFileCount'),
+            );
+            const folderStatus = String(repo.executespecFolderStatus || 'NOT_BOOTSTRAPPED');
             const archStatus =
-              (r as {architectureStatus?: string}).architectureStatus ||
+              (repo as {architectureStatus?: string}).architectureStatus ||
               (h as {architectureStatus?: string}).architectureStatus ||
               ((h as {isStale?: boolean}).isStale === true ? 'STALE' : undefined);
             return (
@@ -1335,8 +1419,16 @@ export function IdeProjectRepos() {
                   ▤ {name}
                 </div>
                 <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                  <IdeBadge kind={drift > 0 ? 'warn' : 'ok'}>
-                    {drift > 0 ? `drift +${drift}` : 'in sync'}
+                  <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
+                  <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                  <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
+                    {folderStatus === 'BOOTSTRAPPED'
+                      ? '.executespec ready'
+                      : folderStatus === 'BOOTSTRAP_PR_OPEN'
+                        ? 'setup PR open'
+                        : folderStatus === 'BOOTSTRAP_FAILED'
+                          ? 'setup failed'
+                          : 'setup optional'}
                   </IdeBadge>
                   <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook ✓' : 'no webhook'}</IdeBadge>
                   {fullName.includes('/') ? (

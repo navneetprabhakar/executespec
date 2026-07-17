@@ -65,6 +65,7 @@ public class WorkspaceHealthService {
       String lastCodeMapSha,
       String currentOriginSha,
       boolean isStale,
+      String syncStatus,
       boolean webhookInstalled,
       long openPrCount,
       Instant lastAnalysedAt) {}
@@ -96,6 +97,7 @@ public class WorkspaceHealthService {
       String lastSha = cm == null ? null : cm.getGeneratedFromSha();
       String currentSha = resolveOriginSha(repo, pat);
       boolean stale = currentSha != null && (lastSha == null || !lastSha.equals(currentSha));
+      String syncStatus = currentSha == null ? "UNKNOWN" : stale ? "DRIFTED" : "IN_SYNC";
       long openPrs =
           prRepo.countByRepoFullNameAndStatus(
               repo.getGithubRepoFullName(), PullRequestRecord.Status.OPEN);
@@ -107,6 +109,7 @@ public class WorkspaceHealthService {
               lastSha,
               currentSha,
               stale,
+              syncStatus,
               repo.isWebhookInstalled(),
               openPrs,
               cm == null ? null : cm.getGeneratedAt()));

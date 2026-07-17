@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -107,5 +108,42 @@ class ValidationReportServiceConcreteRescoreTest {
 
     assertTrue(
         service.rescoreAfterConcreteTests("missing", TestExecutionSummary.empty()).isEmpty());
+  }
+
+  @Test
+  void emptyDownstreamSummaryCannotEraseConcreteWorkspaceTests() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    var events = mock(org.springframework.context.ApplicationEventPublisher.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-worker-tests")
+            .runId("run-worker-tests")
+            .testsPassed(2)
+            .testsTotal(2)
+            .verifiedScore(94)
+            .rubricScore(100)
+            .build();
+    when(repository.findByRunId("run-worker-tests")).thenReturn(Optional.of(report));
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            null,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            null,
+            flags,
+            events);
+
+    Optional<ValidationReport> result =
+        service.rescoreAfterConcreteTests("run-worker-tests", TestExecutionSummary.empty());
+
+    assertTrue(result.isPresent());
+    assertEquals(2, result.orElseThrow().getTestsTotal());
+    assertEquals(2, result.orElseThrow().getTestsPassed());
+    assertEquals(94, result.orElseThrow().getVerifiedScore());
+    verify(repository, never()).save(any());
+    verify(events, never()).publishEvent(any());
   }
 }
