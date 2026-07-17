@@ -2,6 +2,7 @@ package com.navneet.executespec.tool;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -63,8 +64,12 @@ class SearchFilesToolRipgrepTest {
         .startsWith("1000+ match(es); engine=ripgrep; showing 1–2");
   }
 
-  private static void assumeRipgrep() throws Exception {
-    Process process = new ProcessBuilder("rg", "--version").start();
-    Assumptions.assumeTrue(process.waitFor() == 0, "ripgrep is not installed");
+  private static void assumeRipgrep() throws InterruptedException {
+    try {
+      Process process = new ProcessBuilder("rg", "--version").start();
+      Assumptions.assumeTrue(process.waitFor() == 0, "ripgrep is not installed");
+    } catch (IOException unavailable) {
+      Assumptions.assumeTrue(false, "ripgrep is not installed");
+    }
   }
 }
