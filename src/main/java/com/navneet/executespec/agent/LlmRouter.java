@@ -98,6 +98,7 @@ public class LlmRouter {
   private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
+  private final RunKeySourceModeResolver runKeySourceModeResolver;
   private final AnthropicForcedToolClient anthropicForcedToolClient;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
@@ -390,6 +391,25 @@ public class LlmRouter {
           request.context().runId(),
           RunEvent.log(
               request.context().runId(), request.context().taskId(), authorization.reason()));
+    }
+
+    // BYOK boundary — fail CLOSED (deep-dive §7 #2, 2026-07-17). If this call is about to dispatch
+    // on a PLATFORM key but the run is a pure-BYOK (OWN_KEYS) run, the customer key context was
+    // lost
+    // (cache eviction / Redis outage / cross-JVM resume) or routing moved to a provider the
+    // customer
+    // did not key. Either way, spending on platform credentials would violate the customer's cost +
+    // data boundary. Refuse the dispatch rather than silently fall back. HYBRID/SYSTEM runs keep
+    // their intentional platform fallback. Guarded so a missing/unattributable run stays
+    // permissive.
+    if (source == RunKeyContext.Source.PLATFORM
+        && runKeySourceModeResolver.isOwnKeysRun(request.context().runId())) {
+      throw new ByokContextUnavailableException(
+          "BYOK_CONTEXT_UNAVAILABLE: run "
+              + request.context().runId()
+              + " is OWN_KEYS but no customer key is available for provider "
+              + request.provider()
+              + " at dispatch — refusing to spend on platform credentials.");
     }
 
     log.info(

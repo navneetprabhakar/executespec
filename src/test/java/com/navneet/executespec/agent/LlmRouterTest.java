@@ -51,6 +51,7 @@ class LlmRouterTest {
   private OpenAiNativeToolClient openai;
   private GeminiNativeToolClient gemini;
   private RunKeyContextStore keyStore;
+  private RunKeySourceModeResolver keySourceModeResolver;
   private ModelRegistry registry;
   private FeatureFlagService flags;
   private RunCostTracker costTracker;
@@ -77,6 +78,9 @@ class LlmRouterTest {
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
     lenient().when(keyStore.get(anyString())).thenReturn(null); // platform keys by default
+    keySourceModeResolver = mock(RunKeySourceModeResolver.class);
+    // Default: NOT a pure-BYOK run, so platform fallback is permitted (existing behavior).
+    lenient().when(keySourceModeResolver.isOwnKeysRun(anyString())).thenReturn(false);
     AnthropicForcedToolClient forced = mock(AnthropicForcedToolClient.class);
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
@@ -105,6 +109,7 @@ class LlmRouterTest {
             stepUsageRecorder,
             broadcaster,
             keyStore,
+            keySourceModeResolver,
             forced,
             registry,
             flags,
@@ -204,6 +209,56 @@ class LlmRouterTest {
     build();
     when(openai.call(any())).thenReturn(ok());
     assertThat(router.call(req("openai", "gpt-x"))).isNotNull();
+    verify(openai, times(1)).call(any());
+  }
+
+  @Test
+  void ownKeysRunWithNoCustomerKeyFailsClosedInsteadOfPlatformSpend() {
+    LlmRouter subject = build();
+    // Pure-BYOK run, but the resolved-key context is missing (cache eviction / cross-JVM) → the
+    // router would otherwise dispatch on the platform key. It must refuse.
+    when(keySourceModeResolver.isOwnKeysRun(anyString())).thenReturn(true);
+    when(keyStore.get(anyString())).thenReturn(null);
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(ByokContextUnavailableException.class)
+        .hasMessageContaining("BYOK_CONTEXT_UNAVAILABLE");
+    verify(openai, never()).call(any());
+    verify(gemini, never()).call(any());
+  }
+
+  @Test
+  void ownKeysRunWithACustomerKeyDispatchesNormally() {
+    LlmRouter subject = build();
+    when(keySourceModeResolver.isOwnKeysRun(anyString())).thenReturn(true);
+    // Customer keyed OpenAI (USER source) → source != PLATFORM → the guard does not fire.
+    when(keyStore.get(anyString()))
+        .thenReturn(
+            new RunKeyContext(
+                null,
+                "customer-openai-key",
+                null,
+                null,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.USER,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                "u1",
+                "o1"));
+    when(openai.call(any())).thenReturn(ok());
+
+    assertThat(subject.call(req("openai", "gpt-x"))).isNotNull();
+    verify(openai, times(1)).call(any());
+  }
+
+  @Test
+  void hybridRunWithNoKeyKeepsIntentionalPlatformFallback() {
+    LlmRouter subject = build();
+    // Default resolver stub = not OWN_KEYS (HYBRID/SYSTEM). Platform fallback stays allowed.
+    when(keyStore.get(anyString())).thenReturn(null);
+    when(openai.call(any())).thenReturn(ok());
+
+    assertThat(subject.call(req("openai", "gpt-x"))).isNotNull();
     verify(openai, times(1)).call(any());
   }
 

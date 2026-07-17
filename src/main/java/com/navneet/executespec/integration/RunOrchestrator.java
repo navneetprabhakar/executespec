@@ -1216,9 +1216,38 @@ public class RunOrchestrator implements RunControlPort {
           log.info("V2 run={} keys resolved (source={})", runId, label);
         }
       } catch (Exception keyEx) {
-        // Non-fatal — falls through to platform key dispatch.
+        // BYOK boundary — fail CLOSED for pure-BYOK runs (deep-dive §7 #2, 2026-07-17). For a
+        // HYBRID
+        // run this is genuinely non-fatal (platform fallback is intended), but for an OWN_KEYS run
+        // a
+        // resolution failure must terminate the run before any provider spend rather than silently
+        // billing the platform's credentials.
+        boolean ownKeys = false;
+        try {
+          PipelineRun pre = runRepo.findById(runId).orElse(null);
+          ownKeys = pre != null && apiKeyResolver.isOwnKeysMode(pre.getCreatedByUserId());
+        } catch (Exception ignore) {
+          // If we cannot even determine the mode, stay permissive (HYBRID semantics).
+        }
+        if (ownKeys) {
+          log.error(
+              "V2 run={} OWN_KEYS BYOK resolution failed; failing run closed (no platform"
+                  + " fallback): {}",
+              runId,
+              keyEx.getMessage());
+          terminate(
+              runId,
+              "FAILED",
+              "BYOK_CONTEXT_UNAVAILABLE",
+              "BYOK key resolution failed for an OWN_KEYS run; refused to fall back to platform"
+                  + " keys.",
+              startedAt);
+          return;
+        }
         log.warn(
-            "V2 run={} BYOK resolution failed; using platform keys: {}", runId, keyEx.getMessage());
+            "V2 run={} BYOK resolution failed; using platform keys (HYBRID): {}",
+            runId,
+            keyEx.getMessage());
       }
 
       // F3 — bind this org's per-tier model overrides for the duration of the run so every
