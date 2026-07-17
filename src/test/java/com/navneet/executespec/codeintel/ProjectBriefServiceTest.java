@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +43,7 @@ class ProjectBriefServiceTest {
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any(),
             eq("OPENAI"),
+            org.mockito.ArgumentMatchers.isNull(),
             org.mockito.ArgumentMatchers.isNull()))
         .thenReturn(executionReference);
     when(modelResolver.resolve("ProjectBriefService", LlmProvider.OPENAI))
@@ -89,6 +91,50 @@ class ProjectBriefServiceTest {
 
     assertThat(service.summarise("p1", "# Architecture\nA service.", null))
         .isEqualTo("# Architecture");
+  }
+
+  @Test
+  void confirmedArchitectureSummaryReusesSharedActorBudgetContext() {
+    ProjectWorkspaceService workspace = mock(ProjectWorkspaceService.class);
+    LlmRouter llmRouter = mock(LlmRouter.class);
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    ProjectProviderResolver providerResolver = mock(ProjectProviderResolver.class);
+    LlmExecutionPolicyFactory executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionReference shared =
+        new LlmExecutionReference("ctx-confirmed", LlmExecutionScope.customer("org-1"));
+    when(modelResolver.resolve("ProjectBriefService", LlmProvider.DEEPSEEK))
+        .thenReturn(
+            ResolvedModel.builder()
+                .actualProvider(LlmProvider.DEEPSEEK)
+                .model("deepseek-v4")
+                .build());
+    when(llmRouter.callText(
+            eq("deepseek"),
+            eq("deepseek-v4"),
+            anyList(),
+            eq("project-brief-p1"),
+            eq("ProjectBriefService"),
+            eq("summary"),
+            eq(shared)))
+        .thenReturn(ok("Shared-budget summary."));
+    ProjectBriefService service =
+        new ProjectBriefService(
+            workspace, llmRouter, modelResolver, providerResolver, executionPolicyFactory);
+
+    assertThat(
+            service.summarise(
+                "p1", "# Architecture\nA service.", LlmProvider.DEEPSEEK, "member-1", shared))
+        .isEqualTo("Shared-budget summary.");
+    verify(executionPolicyFactory, never())
+        .forProject(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyString());
   }
 
   private static ChatResponse ok(String text) {

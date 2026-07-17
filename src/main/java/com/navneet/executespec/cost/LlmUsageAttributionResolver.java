@@ -40,6 +40,7 @@ public class LlmUsageAttributionResolver {
             null,
             feature,
             "INVALID_EXECUTION_CONTEXT",
+            request.llmExecutionContextId(),
             request.llmExecutionContextId());
       }
       return new Attribution(
@@ -50,7 +51,8 @@ public class LlmUsageAttributionResolver {
           durable.getRepoId(),
           durable.getFeature(),
           durable.getSourceType(),
-          durable.getSourceId());
+          durable.getSourceId(),
+          durable.getCorrelationId());
     }
 
     // Transitional compatibility is exact-primary-key only. Never infer from V282 source_id or
@@ -66,6 +68,7 @@ public class LlmUsageAttributionResolver {
             null,
             feature,
             "PIPELINE_RUN",
+            runId,
             runId);
       }
       var session = agentSessionRepository.findById(runId).orElse(null);
@@ -78,6 +81,7 @@ public class LlmUsageAttributionResolver {
             null,
             feature,
             "AGENT_SESSION",
+            runId,
             runId);
       }
     }
@@ -98,6 +102,7 @@ public class LlmUsageAttributionResolver {
           null,
           "LLM_CAPABILITY",
           "INVALID_EXECUTION_CONTEXT",
+          reference.contextId(),
           reference.contextId());
     }
     return new Attribution(
@@ -108,7 +113,8 @@ public class LlmUsageAttributionResolver {
         durable.getRepoId(),
         durable.getFeature(),
         durable.getSourceType(),
-        durable.getSourceId());
+        durable.getSourceId(),
+        durable.getCorrelationId());
   }
 
   public record Attribution(
@@ -119,10 +125,11 @@ public class LlmUsageAttributionResolver {
       UUID repoId,
       String feature,
       String sourceType,
-      String sourceId) {
+      String sourceId,
+      String correlationId) {
     static Attribution unattributed(String sourceId) {
       return new Attribution(
-          null, null, null, null, null, "LLM_CALL", "LEGACY_RUN_SCOPE", sourceId);
+          null, null, null, null, null, "LLM_CALL", "LEGACY_RUN_SCOPE", sourceId, sourceId);
     }
   }
 

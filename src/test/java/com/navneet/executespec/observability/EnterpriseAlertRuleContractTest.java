@@ -18,7 +18,9 @@ class EnterpriseAlertRuleContractTest {
     assertThat(prometheus).contains("/etc/prometheus/rules/*.yml");
     assertThat(rules)
         .contains("CanonicalLlmUsagePersistenceFailure")
+        .contains("CanonicalLlmUsageTerminalMissing")
         .contains("executespec_v2_llm_usage_persistence_total{result=\"failed\"}")
+        .contains("executespec_v2_llm_usage_stale_intents > 0")
         .contains("severity: critical")
         .contains("owner: platform")
         .contains("runbook_url:")

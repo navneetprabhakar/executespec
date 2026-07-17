@@ -80,19 +80,31 @@ public class MemoryCompactionService {
    */
   @Transactional
   public int compactNow(String projectId, String orgId) {
+    return compactNow(projectId, orgId, null);
+  }
+
+  @Transactional
+  public int compactNow(String projectId, String orgId, String actorUserId) {
     List<ProjectRunLedger> entries =
         ledgerRepo.findUncompactedBeforeRunNumber(projectId, Integer.MAX_VALUE);
-    return doCompact(projectId, orgId, entries);
+    return doCompact(projectId, orgId, actorUserId, entries);
   }
 
   @Transactional
   public void compactIfNeeded(String projectId, int currentRunNumber, String orgId) {
-    int cutoff = currentRunNumber - 10;
-    List<ProjectRunLedger> entries = ledgerRepo.findUncompactedBeforeRunNumber(projectId, cutoff);
-    doCompact(projectId, orgId, entries);
+    compactIfNeeded(projectId, currentRunNumber, orgId, null);
   }
 
-  private int doCompact(String projectId, String orgId, List<ProjectRunLedger> entries) {
+  @Transactional
+  public void compactIfNeeded(
+      String projectId, int currentRunNumber, String orgId, String actorUserId) {
+    int cutoff = currentRunNumber - 10;
+    List<ProjectRunLedger> entries = ledgerRepo.findUncompactedBeforeRunNumber(projectId, cutoff);
+    doCompact(projectId, orgId, actorUserId, entries);
+  }
+
+  private int doCompact(
+      String projectId, String orgId, String actorUserId, List<ProjectRunLedger> entries) {
     if (entries.isEmpty()) {
       log.debug("MemoryCompactionService: no uncompacted entries for project {}", projectId);
       return 0;
@@ -112,7 +124,7 @@ public class MemoryCompactionService {
               "memory-compaction.txt",
               java.util.Map.of("EXISTING_SNAPSHOT", existingContent, "NEW_ENTRIES", newEntries));
 
-      String compacted = callLightweightLlm(filled, projectId);
+      String compacted = callLightweightLlm(filled, projectId, actorUserId);
       if (compacted == null || compacted.isBlank()) {
         log.warn("MemoryCompactionService: empty LLM response for project {}", projectId);
         return 0;
@@ -165,7 +177,7 @@ public class MemoryCompactionService {
     }
   }
 
-  private String callLightweightLlm(String systemPrompt, String projectId) {
+  private String callLightweightLlm(String systemPrompt, String projectId, String actorUserId) {
     if (projectProviderResolver == null) {
       throw new IllegalStateException("ProjectProviderResolver is required for customer memory");
     }
@@ -182,7 +194,7 @@ public class MemoryCompactionService {
             contextId,
             contextId,
             provider.name(),
-            null);
+            actorUserId);
     ResolvedModel resolved = modelResolver.resolve("RunLedgerAgent", provider);
     ChatResponse response =
         llmRouter.callText(

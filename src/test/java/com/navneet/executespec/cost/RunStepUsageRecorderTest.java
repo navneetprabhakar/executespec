@@ -1,6 +1,7 @@
 package com.navneet.executespec.cost;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,6 +13,7 @@ import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.DisplayName;
@@ -25,9 +27,15 @@ class RunStepUsageRecorderTest {
       org.mockito.Mockito.mock(RunStepUsageRepository.class);
   private final LlmUsageAttributionResolver attributionResolver =
       org.mockito.Mockito.mock(LlmUsageAttributionResolver.class);
+  private final LlmUsageAttemptIntentRepository intentRepository =
+      org.mockito.Mockito.mock(LlmUsageAttemptIntentRepository.class);
   private final Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
+  private final ModelRegistry modelRegistry = org.mockito.Mockito.mock(ModelRegistry.class);
+  private final LlmUsageRecoverySpool recoverySpool =
+      org.mockito.Mockito.mock(LlmUsageRecoverySpool.class);
   private final RunStepUsageRecorder recorder =
-      new RunStepUsageRecorder(repository, attributionResolver, metrics);
+      new RunStepUsageRecorder(
+          repository, intentRepository, attributionResolver, metrics, modelRegistry, recoverySpool);
 
   @Test
   @DisplayName("records role/step/retry attribution with per-call usage")
@@ -85,7 +93,9 @@ class RunStepUsageRecorderTest {
                 null,
                 "WORKER",
                 "PIPELINE_RUN",
-                "run-1"));
+                "run-1",
+                "corr-1"));
+    when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
     when(repository.save(any(RunStepUsage.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -108,6 +118,8 @@ class RunStepUsageRecorderTest {
     assertThat(row.getOrgId()).isEqualTo("org-1");
     assertThat(row.getUserId()).isEqualTo("user-1");
     assertThat(row.getProjectId()).isEqualTo("project-1");
+    assertThat(row.getCorrelationId()).isEqualTo("corr-1");
+    assertThat(row.getModelTier()).isEqualTo("CAPABLE");
     assertThat(row.getKeySource()).isEqualTo("ORG");
     assertThat(row.getRetryOf()).isEqualTo("WorkerAgent:worker.iteration#attempt-1");
     assertThat(row.getErrorCode()).isEqualTo("ILLEGALSTATEEXCEPTION");
@@ -131,6 +143,84 @@ class RunStepUsageRecorderTest {
         request, "openai", "gpt", "PLATFORM", 1, 1, new RuntimeException("timeout"));
 
     verify(metrics).recordLlmUsagePersistence("FAILED", "failed");
+    verify(recoverySpool).enqueue(any(RunStepUsage.class));
+  }
+
+  @Test
+  void prepareAttemptWritesImmutableIntentBeforeTransport() {
+    LlmRequest request = request();
+    when(attributionResolver.resolve(request))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-1",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "WORKER",
+                "PIPELINE_RUN",
+                "run-1",
+                "corr-1"));
+    when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
+
+    RunStepUsageRecorder.AttemptHandle handle =
+        recorder.prepareAttempt(request, "deepseek", "deepseek-v4", "ORG", 1);
+
+    ArgumentCaptor<LlmUsageAttemptIntent> captor =
+        ArgumentCaptor.forClass(LlmUsageAttemptIntent.class);
+    verify(intentRepository).save(captor.capture());
+    LlmUsageAttemptIntent intent = captor.getValue();
+    assertThat(intent.getPhysicalAttemptId()).isEqualTo(handle.physicalAttemptId());
+    assertThat(intent.getLogicalCallId()).isEqualTo(request.usageLogicalCallId());
+    assertThat(intent.getCorrelationId()).isEqualTo("corr-1");
+    assertThat(intent.getOrgId()).isEqualTo("org-1");
+    assertThat(intent.getModelTier()).isEqualTo("CAPABLE");
+    assertThat(intent.getAttemptKind()).isEqualTo("PRIMARY");
+    assertThat(intent.getStartedAt()).isNotNull();
+    verify(metrics).recordLlmUsagePersistence("STARTED", "ok");
+  }
+
+  @Test
+  void nestedProviderAttemptPreservesExplicitKindOrdinalAndParent() {
+    LlmRequest request = request();
+    when(attributionResolver.resolve(request))
+        .thenReturn(LlmUsageAttributionResolver.Attribution.unattributed("run-1"));
+
+    RunStepUsageRecorder.AttemptHandle handle =
+        recorder.prepareAttempt(
+            request,
+            "gemini",
+            "gemini-flash",
+            "ORG",
+            3,
+            "RETRY",
+            request.usageLogicalCallId() + ":gemini:2");
+
+    ArgumentCaptor<LlmUsageAttemptIntent> captor =
+        ArgumentCaptor.forClass(LlmUsageAttemptIntent.class);
+    verify(intentRepository).save(captor.capture());
+    LlmUsageAttemptIntent intent = captor.getValue();
+    assertThat(handle.attemptOrdinal()).isEqualTo(3);
+    assertThat(handle.attemptKind()).isEqualTo("RETRY");
+    assertThat(handle.parentAttemptId()).isEqualTo(request.usageLogicalCallId() + ":gemini:2");
+    assertThat(intent.getAttemptOrdinal()).isEqualTo(3);
+    assertThat(intent.getAttemptKind()).isEqualTo("RETRY");
+    assertThat(intent.getParentAttemptId()).isEqualTo(request.usageLogicalCallId() + ":gemini:2");
+  }
+
+  @Test
+  void prepareAttemptFailureIsFailClosed() {
+    LlmRequest request = request();
+    when(attributionResolver.resolve(request))
+        .thenReturn(LlmUsageAttributionResolver.Attribution.unattributed("run-1"));
+    when(intentRepository.save(any(LlmUsageAttemptIntent.class)))
+        .thenThrow(new IllegalStateException("database unavailable"));
+
+    assertThatThrownBy(() -> recorder.prepareAttempt(request, "deepseek", "deepseek-v4", "ORG", 1))
+        .isInstanceOf(RunStepUsageRecorder.LlmUsagePersistenceException.class)
+        .hasMessageContaining("Provider call blocked");
+    verify(metrics).recordLlmUsagePersistence("STARTED", "failed");
+    verify(repository, never()).save(any());
   }
 
   @Test
@@ -157,7 +247,8 @@ class RunStepUsageRecorderTest {
                 null,
                 "projectdocumentembedding",
                 "PROJECT_DOCUMENT",
-                "doc-1"));
+                "doc-1",
+                "corr-embed"));
     when(repository.save(any(RunStepUsage.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     RunCostTracker.CallUsage call =

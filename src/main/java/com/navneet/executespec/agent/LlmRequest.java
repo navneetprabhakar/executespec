@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import java.util.List;
+import java.util.UUID;
 
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -46,6 +47,8 @@ import lombok.Builder;
  * @param llmExecutionScope tenant scope used to load {@code llmExecutionContextId}. The router and
  *     usage recorder never infer a durable context from run/source/correlation strings.
  * @param strictProvider when true, transient failures are not routed to another provider
+ * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
+ *     generated once when omitted and preserved by {@link #toBuilder()}
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -63,6 +66,7 @@ public record LlmRequest(
     String retryOf,
     String llmExecutionContextId,
     LlmExecutionScope llmExecutionScope,
+    String usageLogicalCallId,
     boolean strictProvider,
     PromptCacheStrategy promptCacheStrategy) {
 
@@ -93,6 +97,9 @@ public record LlmRequest(
     if (llmExecutionContextId == null && context.llmExecutionContextId() != null) {
       llmExecutionContextId = context.llmExecutionContextId();
       llmExecutionScope = context.llmExecutionScope();
+    }
+    if (usageLogicalCallId == null || usageLogicalCallId.isBlank()) {
+      usageLogicalCallId = UUID.randomUUID().toString();
     }
     if (temperature == null) temperature = 0.0;
     if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;

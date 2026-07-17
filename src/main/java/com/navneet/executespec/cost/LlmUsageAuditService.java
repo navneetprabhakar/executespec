@@ -28,7 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
-/** Bounded Enterprise audit/reporting surface over V283 physical provider attempts. */
+/** Bounded Enterprise audit/reporting surface over immutable physical provider attempts. */
 @Service
 @RequiredArgsConstructor
 public class LlmUsageAuditService {
@@ -36,7 +36,49 @@ public class LlmUsageAuditService {
   private static final String RESOLVED_CTE =
       """
 WITH resolved AS (
-  SELECT u.*,
+  SELECT i.physical_attempt_id AS id,
+         COALESCE(u.created_at, i.started_at) AS created_at,
+         i.llm_execution_context_id,
+         i.correlation_id,
+         i.org_id,
+         i.user_id,
+         i.project_id,
+         u.repo_id,
+         i.feature,
+         i.source_type,
+         i.source_id,
+         i.run_id,
+         i.task_id,
+         i.agent_role,
+         i.step_id,
+         u.retry_of,
+         i.provider,
+         i.model,
+         i.model_tier,
+         i.logical_call_id,
+         i.physical_attempt_id,
+         i.parent_attempt_id,
+         i.attempt_kind,
+         i.attempt_ordinal,
+         i.key_source,
+         COALESCE(u.attempt_status, 'MISSING_TERMINAL') AS attempt_status,
+         COALESCE(u.attempt_number, i.attempt_ordinal)::int AS attempt_number,
+         COALESCE(u.latency_ms, 0) AS latency_ms,
+         COALESCE(u.input_tokens, 0) AS input_tokens,
+         COALESCE(u.output_tokens, 0) AS output_tokens,
+         COALESCE(u.cache_read_tokens, 0) AS cache_read_tokens,
+         COALESCE(u.cache_write_tokens, 0) AS cache_write_tokens,
+         COALESCE(u.reasoning_tokens, 0) AS reasoning_tokens,
+         u.cost_usd,
+         u.provider_usage_raw_json,
+         u.error_code,
+         COALESCE(m.ai_credits_charged, 0) AS managed_ai_credits,
+         CASE
+           WHEN m.id IS NOT NULL THEN 'RECORDED'
+           WHEN u.id IS NULL THEN 'PENDING_TERMINAL'
+           WHEN i.key_source IN ('USER', 'ORG') THEN 'NOT_APPLICABLE'
+           ELSE 'UNRECONCILED'
+         END AS managed_ai_projection_status,
          a.email AS user_email,
          p.name AS project_name,
          COALESCE(run_direct.run_id, run_source.run_id, turn_run.run_id,
@@ -44,7 +86,7 @@ WITH resolved AS (
          COALESCE(turn_row.session_id, session_direct.id, session_source.id)
            AS resolved_session_id,
          CASE
-           WHEN u.attempt_status <> 'FAILED' AND u.cost_usd >= 0 THEN u.cost_usd::numeric
+           WHEN u.attempt_status = 'SUCCESS' AND u.cost_usd >= 0 THEN u.cost_usd::numeric
            WHEN jsonb_typeof(u.provider_usage_raw_json->'provider_upstream_cost_usd') = 'number'
                 AND (u.provider_usage_raw_json->>'provider_upstream_cost_usd')::numeric >= 0
              THEN (u.provider_usage_raw_json->>'provider_upstream_cost_usd')::numeric
@@ -56,22 +98,24 @@ WITH resolved AS (
              THEN (u.provider_usage_raw_json->>'accounted_cost_usd')::numeric
            ELSE NULL
          END AS known_cost_usd
-  FROM run_step_usage u
-  LEFT JOIN app_user a ON a.id = u.user_id AND a.org_id = u.org_id
-  LEFT JOIN project p ON p.id = u.project_id AND p.org_id = u.org_id
+  FROM llm_usage_attempt_intent i
+  LEFT JOIN run_step_usage u ON u.physical_attempt_id = i.physical_attempt_id
+  LEFT JOIN managed_ai_usage_event m ON m.usage_event_id = u.id
+  LEFT JOIN app_user a ON a.id = i.user_id AND a.org_id = i.org_id
+  LEFT JOIN project p ON p.id = i.project_id AND p.org_id = i.org_id
   LEFT JOIN pipeline_run run_direct
-    ON run_direct.run_id = u.run_id AND run_direct.org_id = u.org_id
+    ON run_direct.run_id = i.run_id AND run_direct.org_id = i.org_id
   LEFT JOIN pipeline_run run_source
-    ON run_source.run_id = u.source_id AND run_source.org_id = u.org_id
+    ON run_source.run_id = i.source_id AND run_source.org_id = i.org_id
   LEFT JOIN agent_turn turn_row
-    ON turn_row.id = u.source_id AND turn_row.org_id = u.org_id
+    ON turn_row.id = i.source_id AND turn_row.org_id = i.org_id
   LEFT JOIN pipeline_run turn_run
-    ON turn_run.run_id = turn_row.linked_run_id AND turn_run.org_id = u.org_id
+    ON turn_run.run_id = turn_row.linked_run_id AND turn_run.org_id = i.org_id
   LEFT JOIN agent_session session_direct
-    ON session_direct.id = u.run_id AND session_direct.org_id = u.org_id
+    ON session_direct.id = i.run_id AND session_direct.org_id = i.org_id
   LEFT JOIN agent_session session_source
-    ON session_source.id = u.source_id AND session_source.org_id = u.org_id
-  WHERE u.org_id = ? AND u.created_at >= ? AND u.created_at < ?
+    ON session_source.id = i.source_id AND session_source.org_id = i.org_id
+  WHERE i.org_id = ? AND i.started_at >= ? AND i.started_at < ?
 )
 """;
 
@@ -92,8 +136,8 @@ WITH resolved AS (
     List<UsageAttempt> attempts = attempts(query, query.size(), query.offset());
     long pages = totalRows == 0 ? 0 : (totalRows + query.size() - 1) / query.size();
     return new LlmUsageAuditReport(
-        2,
-        "run_step_usage_attempt_ledger",
+        3,
+        "canonical_llm_usage_event",
         query.orgId(),
         new Window(
             query.fromDate(),
@@ -135,8 +179,16 @@ WITH resolved AS (
         text("source_id"),
         text("task_id"),
         text("agent_role"),
+        text("feature"),
         text("step_id"),
         text("retry_of"),
+        text("correlation_id"),
+        text("model_tier"),
+        text("logical_call_id"),
+        text("physical_attempt_id"),
+        text("parent_attempt_id"),
+        text("attempt_kind"),
+        text("attempt_ordinal"),
         text("provider"),
         text("model"),
         text("key_source"),
@@ -150,6 +202,8 @@ WITH resolved AS (
         text("reasoning_tokens"),
         text("known_cost_usd"),
         text("cost_status"),
+        text("managed_ai_credits"),
+        text("managed_ai_projection_status"),
         text("error_code"));
     for (UsageAttempt row : rows) {
       csv.row(
@@ -166,8 +220,16 @@ WITH resolved AS (
           text(row.sourceId()),
           text(row.taskId()),
           text(row.agentRole()),
+          text(row.feature()),
           text(row.stepId()),
           text(row.retryOf()),
+          text(row.correlationId()),
+          text(row.modelTier()),
+          text(row.logicalCallId()),
+          text(row.physicalAttemptId()),
+          text(row.parentAttemptId()),
+          text(row.attemptKind()),
+          number(row.attemptOrdinal()),
           text(row.provider()),
           text(row.model()),
           text(row.keySource()),
@@ -181,6 +243,8 @@ WITH resolved AS (
           number(row.reasoningTokens()),
           number(row.knownCostUsd()),
           text(row.costStatus()),
+          number(row.managedAiCredits()),
+          text(row.managedAiProjectionStatus()),
           text(row.errorCode()));
     }
     String safeOrg = query.orgId().replaceAll("[^A-Za-z0-9_-]", "_");
@@ -194,24 +258,26 @@ WITH resolved AS (
         jdbc.queryForMap(
             RESOLVED_CTE
                 + """
-                  SELECT COUNT(*) AS attempts,
-                         COUNT(*) FILTER (WHERE attempt_status='SUCCESS') AS successful_attempts,
-                         COUNT(*) FILTER (WHERE attempt_status='FAILED') AS failed_attempts,
-                         COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                         COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                         COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-                         COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
-                         COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-                         COALESCE(SUM(known_cost_usd), 0) AS known_cost_usd,
-                         COUNT(*) FILTER (WHERE known_cost_usd IS NULL) AS unknown_cost_attempts
-                  FROM resolved
-                  """,
+SELECT COUNT(*) AS attempts,
+       COUNT(*) FILTER (WHERE attempt_status='SUCCESS') AS successful_attempts,
+       COUNT(*) FILTER (WHERE attempt_status='FAILED') AS failed_attempts,
+       COUNT(*) FILTER (WHERE attempt_status='MISSING_TERMINAL') AS missing_terminal_attempts,
+       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+       COALESCE(SUM(known_cost_usd), 0) AS known_cost_usd,
+       COUNT(*) FILTER (WHERE known_cost_usd IS NULL) AS unknown_cost_attempts
+FROM resolved
+""",
             range);
     long unknown = longValue(row, "unknown_cost_attempts");
     return new UsageTotals(
         longValue(row, "attempts"),
         longValue(row, "successful_attempts"),
         longValue(row, "failed_attempts"),
+        longValue(row, "missing_terminal_attempts"),
         longValue(row, "input_tokens"),
         longValue(row, "output_tokens"),
         longValue(row, "cache_read_tokens"),
@@ -262,14 +328,18 @@ SELECT id, created_at, llm_execution_context_id, user_id,
        COALESCE(user_email, 'Unknown') AS user_email,
        project_id, COALESCE(project_name, 'No project') AS project_name,
        resolved_run_id, resolved_session_id, source_type, source_id, task_id,
-       agent_role, step_id, retry_of, provider, model, key_source, attempt_status,
+       agent_role, feature, step_id, retry_of, correlation_id, model_tier, logical_call_id,
+       physical_attempt_id, parent_attempt_id, attempt_kind, attempt_ordinal,
+       provider, model, key_source, attempt_status,
        attempt_number, latency_ms, input_tokens, output_tokens, cache_read_tokens,
        cache_write_tokens, reasoning_tokens, known_cost_usd,
        CASE
          WHEN known_cost_usd IS NOT NULL THEN 'KNOWN'
-         WHEN attempt_status <> 'FAILED' AND cost_usd < 0 THEN 'INVALID_NEGATIVE_COST'
+         WHEN attempt_status = 'MISSING_TERMINAL' THEN 'PENDING_TERMINAL'
+         WHEN attempt_status = 'SUCCESS' AND cost_usd < 0 THEN 'INVALID_NEGATIVE_COST'
          ELSE 'UNKNOWN_PROVIDER_NOT_REPORTED'
        END AS cost_status,
+       managed_ai_credits, managed_ai_projection_status,
        error_code
 FROM resolved
 ORDER BY created_at DESC, id DESC
@@ -310,7 +380,7 @@ SELECT COALESCE(SUM(b.ledger_cost), 0) AS ledger_cost,
        COUNT(*) FILTER (WHERE r.actual_cost_usd IS NULL) AS missing_records,
        COALESCE(SUM(b.unknown_cost_attempts), 0) AS unknown_cost_attempts
 FROM by_run b
-JOIN pipeline_run r ON r.run_id = b.run_id AND r.org_id = ?
+LEFT JOIN pipeline_run r ON r.run_id = b.run_id AND r.org_id = ?
 """,
             append(range(query), query.orgId()));
     UsageSide ledger = new UsageSide(decimal(row, "ledger_cost"), 0, 0, 0, 0, 0);
@@ -336,56 +406,28 @@ JOIN pipeline_run r ON r.run_id = b.run_id AND r.org_id = ?
         jdbc.queryForMap(
             """
 WITH ledger AS (
-  SELECT run_id, provider, model, agent_role, step_id,
-         COUNT(*) AS records,
-         SUM(input_tokens) AS input_tokens,
-         SUM(output_tokens) AS output_tokens,
-         SUM(reasoning_tokens) AS reasoning_tokens,
-         SUM(cache_read_tokens) AS cache_read_tokens,
-         SUM(cache_write_tokens) AS cache_write_tokens,
-         SUM(cost_usd)::numeric AS cost_usd
-  FROM run_step_usage
-  WHERE org_id = ? AND created_at >= ? AND created_at < ?
-    AND attempt_status = 'SUCCESS' AND key_source = 'PLATFORM'
-  GROUP BY run_id, provider, model, agent_role, step_id
+  SELECT u.id, u.input_tokens, u.output_tokens, u.reasoning_tokens,
+         u.cache_read_tokens, u.cache_write_tokens, u.cost_usd::numeric AS cost_usd
+  FROM run_step_usage u
+  WHERE u.org_id = ? AND u.created_at >= ? AND u.created_at < ?
+    AND u.attempt_status = 'SUCCESS' AND u.key_source = 'PLATFORM'
 ), managed AS (
-  SELECT run_id, provider, model, agent_role, step_id,
-         COUNT(*) AS records,
-         SUM(input_tokens) AS input_tokens,
-         SUM(output_tokens) AS output_tokens,
-         SUM(reasoning_tokens) AS reasoning_tokens,
-         SUM(cache_read_tokens) AS cache_read_tokens,
-         SUM(cache_write_tokens) AS cache_write_tokens,
-         SUM(raw_cost_usd)::numeric AS cost_usd
+  SELECT usage_event_id, input_tokens, output_tokens, reasoning_tokens,
+         cache_read_tokens, cache_write_tokens, raw_cost_usd::numeric AS cost_usd
   FROM managed_ai_usage_event
   WHERE org_id = ? AND created_at >= ? AND created_at < ?
-  GROUP BY run_id, provider, model, agent_role, step_id
 ), paired AS (
-  SELECT l.*, m.records AS managed_records,
+  SELECT l.*, m.usage_event_id,
          m.input_tokens AS managed_input_tokens,
          m.output_tokens AS managed_output_tokens,
          m.reasoning_tokens AS managed_reasoning_tokens,
          m.cache_read_tokens AS managed_cache_read_tokens,
          m.cache_write_tokens AS managed_cache_write_tokens,
          m.cost_usd AS managed_cost_usd,
-         (m.records IS NULL) AS ledger_only
+         (m.usage_event_id IS NULL) AS ledger_only,
+         (l.id IS NULL) AS managed_only
   FROM ledger l
-  LEFT JOIN managed m
-    ON m.run_id IS NOT DISTINCT FROM l.run_id
-   AND m.provider IS NOT DISTINCT FROM l.provider
-   AND m.model IS NOT DISTINCT FROM l.model
-   AND m.agent_role IS NOT DISTINCT FROM l.agent_role
-   AND m.step_id IS NOT DISTINCT FROM l.step_id
-), managed_only AS (
-  SELECT COALESCE(SUM(m.records), 0) AS records
-  FROM managed m
-  WHERE NOT EXISTS (
-    SELECT 1 FROM ledger l
-    WHERE m.run_id IS NOT DISTINCT FROM l.run_id
-      AND m.provider IS NOT DISTINCT FROM l.provider
-      AND m.model IS NOT DISTINCT FROM l.model
-      AND m.agent_role IS NOT DISTINCT FROM l.agent_role
-      AND m.step_id IS NOT DISTINCT FROM l.step_id)
+  FULL OUTER JOIN managed m ON m.usage_event_id = l.id
 )
 SELECT COALESCE(SUM(p.cost_usd), 0) AS ledger_cost,
        COALESCE(SUM(p.managed_cost_usd), 0) AS managed_cost,
@@ -399,9 +441,9 @@ SELECT COALESCE(SUM(p.cost_usd), 0) AS ledger_cost,
        COALESCE(SUM(p.managed_cache_read_tokens), 0) AS managed_cache_read_tokens,
        COALESCE(SUM(p.cache_write_tokens), 0) AS ledger_cache_write_tokens,
        COALESCE(SUM(p.managed_cache_write_tokens), 0) AS managed_cache_write_tokens,
-       COALESCE(SUM(p.records) FILTER (WHERE NOT p.ledger_only), 0) AS comparable_records,
-       COALESCE(SUM(p.records) FILTER (WHERE p.ledger_only), 0) AS missing_records,
-       (SELECT records FROM managed_only) AS comparison_only_records
+       COUNT(*) FILTER (WHERE NOT p.ledger_only AND NOT p.managed_only) AS comparable_records,
+       COUNT(*) FILTER (WHERE p.ledger_only) AS missing_records,
+       COUNT(*) FILTER (WHERE p.managed_only) AS comparison_only_records
 FROM paired p
 """,
             query.orgId(),
@@ -483,8 +525,16 @@ FROM paired p
         string(row, "source_id"),
         string(row, "task_id"),
         string(row, "agent_role"),
+        string(row, "feature"),
         string(row, "step_id"),
         string(row, "retry_of"),
+        string(row, "correlation_id"),
+        string(row, "model_tier"),
+        string(row, "logical_call_id"),
+        string(row, "physical_attempt_id"),
+        string(row, "parent_attempt_id"),
+        string(row, "attempt_kind"),
+        longValue(row, "attempt_ordinal"),
         string(row, "provider"),
         string(row, "model"),
         string(row, "key_source"),
@@ -498,6 +548,8 @@ FROM paired p
         longValue(row, "reasoning_tokens"),
         nullableDecimal(row, "known_cost_usd"),
         string(row, "cost_status"),
+        longValue(row, "managed_ai_credits"),
+        string(row, "managed_ai_projection_status"),
         string(row, "error_code"));
   }
 

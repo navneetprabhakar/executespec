@@ -329,7 +329,14 @@ public class ProjectArchitectureService {
         combined.inputTokens(),
         combined.outputTokens());
 
-    persistToWorkspace(projectId, codeMaps, repoArchDocs, repoFullNames, combined.markdown());
+    persistToWorkspace(
+        projectId,
+        codeMaps,
+        repoArchDocs,
+        repoFullNames,
+        combined.markdown(),
+        actorUserId,
+        confirmedActionReference);
     workspaceWarmer.warmDiskCache(projectId);
     // E1.2 — also publish each per-repo codemap to .executespec/arch/codemap.md
     // on the customer repo. Best-effort: never fails the regen flow.
@@ -587,7 +594,9 @@ public class ProjectArchitectureService {
       List<ProjectCodeMap> codeMaps,
       List<RepoArchitectureDoc> repoArchDocs,
       List<String> repoFullNames,
-      String archMarkdown) {
+      String archMarkdown,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     try {
       workspace.initIfMissing(projectId);
 
@@ -620,7 +629,9 @@ public class ProjectArchitectureService {
           projectId, "architecture.md", archMarkdown, "architecture: combined regenerated");
 
       LlmProvider provider = projectProviderResolver.resolve(projectId);
-      String summary = briefService.summarise(projectId, archMarkdown, provider);
+      String summary =
+          briefService.summarise(
+              projectId, archMarkdown, provider, actorUserId, confirmedActionReference);
       if (summary != null && !summary.isBlank()) {
         workspace.writeAndCommit(projectId, "summary.md", summary, "summary: regenerated");
       }

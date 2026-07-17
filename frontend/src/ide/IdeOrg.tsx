@@ -12,6 +12,7 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -1134,6 +1135,13 @@ export function IdeOrgSettings() {
           setSeats(next.seatCount ?? 1);
         }}
       />
+
+      {canEdit && (
+        <LlmUsageAuditPanel
+          orgId={org.id}
+          scopeLabel={`Tenant-only view for ${org.name || org.id}`}
+        />
+      )}
 
       {/* ── Profile ── */}
       <div className='ide-h2'>Profile</div>

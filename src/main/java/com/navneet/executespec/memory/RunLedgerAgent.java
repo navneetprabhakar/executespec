@@ -114,7 +114,7 @@ public class RunLedgerAgent {
 
       // Compact every 10 runs, starting at R20 (we want ≥10 uncompacted + 10 to compact).
       if (runNumber >= 20 && runNumber % 10 == 0) {
-        compactionService.compactIfNeeded(projectId, runNumber, orgId);
+        compactionService.compactIfNeeded(projectId, runNumber, orgId, run.getCreatedByUserId());
       }
     } catch (Exception e) {
       log.warn("RunLedgerAgent: failed for run {}: {}", runId, e.getMessage(), e);

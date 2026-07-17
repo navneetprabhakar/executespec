@@ -1,6 +1,7 @@
 package com.navneet.executespec.observability;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Component;
 
@@ -10,7 +11,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 
 /**
  * Central facade for all V2 Micrometer metrics.
@@ -58,12 +58,17 @@ import lombok.RequiredArgsConstructor;
  * </ul>
  */
 @Component
-@RequiredArgsConstructor
 public class Metrics {
 
   public static final String NS = "executespec.v2.";
 
   private final MeterRegistry registry;
+  private final AtomicLong staleLlmUsageIntents = new AtomicLong();
+
+  public Metrics(MeterRegistry registry) {
+    this.registry = registry;
+    registry.gauge(NS + "llm.usage.stale_intents", staleLlmUsageIntents);
+  }
 
   public void recordRunOutcome(String overall) {
     Counter.builder(NS + "run.outcome")
@@ -179,6 +184,23 @@ public class Metrics {
             Tags.of(
                 Tag.of("attemptStatus", nonNull(attemptStatus)), Tag.of("result", nonNull(result))))
         .register(registry)
+        .increment();
+  }
+
+  /** Current count of write-ahead intents whose terminal fact has not arrived before the SLA. */
+  public void recordStaleLlmUsageIntents(long count) {
+    staleLlmUsageIntents.set(Math.max(0, count));
+  }
+
+  /**
+   * Records secondary projection health after a provider has already returned successfully. These
+   * failures must be alerted/reconciled, never reclassified as provider failures or retried.
+   */
+  public void recordLlmPostSuccessProjection(String projection, String result) {
+    registry
+        .counter(
+            "executespec.v2.llm.post_success_projection",
+            Tags.of(Tag.of("projection", nonNull(projection)), Tag.of("result", nonNull(result))))
         .increment();
   }
 

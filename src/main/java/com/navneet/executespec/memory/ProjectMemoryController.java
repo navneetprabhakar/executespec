@@ -57,7 +57,7 @@ public class ProjectMemoryController {
             .findById(projectId)
             .map(com.navneet.executespec.auth.entity.Project::getOrgId)
             .orElse(null);
-    int version = compactionService.compactNow(projectId, orgId);
+    int version = compactionService.compactNow(projectId, orgId, userDetails.getUser().getId());
     return ResponseEntity.ok(
         java.util.Map.of("snapshotVersion", version, "compacted", version > 0));
   }

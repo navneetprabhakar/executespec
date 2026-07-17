@@ -124,6 +124,31 @@ public class AdminAnalyticsController {
         .body(llmUsageAuditService.report(auditQuery(orgId, from, to, timezone, page, size)));
   }
 
+  /**
+   * Downloadable JSON form of the same bounded report. This is intentionally not an unbounded
+   * database dump: attempts retain the normal 500-row page ceiling and rollups retain their
+   * independent 500-row ceiling, both advertised in the response body.
+   */
+  @GetMapping(value = "/llm-usage-audit.json", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<LlmUsageAuditReport> llmUsageAuditJson(
+      @RequestParam String orgId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "UTC") String timezone,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "500") int size,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertLlmAuditAccess(orgId, userDetails);
+    LlmUsageAuditQuery query = auditQuery(orgId, from, to, timezone, page, size);
+    String safeOrg = orgId.replaceAll("[^A-Za-z0-9_-]", "_");
+    String filename = "llm-usage-" + safeOrg + "-" + from + "-to-" + to + ".json";
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(llmUsageAuditService.report(query));
+  }
+
   /** Spreadsheet-safe, UTF-8 CSV detail export capped at 10,000 physical attempts. */
   @GetMapping(value = "/llm-usage-audit.csv", produces = "text/csv")
   public ResponseEntity<byte[]> llmUsageAuditCsv(

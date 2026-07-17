@@ -3,10 +3,12 @@ package com.navneet.executespec.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -58,11 +60,14 @@ class LlmRouterTest {
   private LlmExecutionPolicyFactory executionPolicyFactory;
   private ModelRegistry registry;
   private FeatureFlagService flags;
+  private Metrics metrics;
   private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
+  private AnthropicForcedToolClient anthropicForcedToolClient;
   private ManagedAiUsageService managedAiUsageService;
   private RunRoutePolicyService routePolicyService;
   private ObjectProvider<AnthropicChatModel> anthropicModelProvider;
+  private SseBroadcaster broadcaster;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
@@ -70,16 +75,48 @@ class LlmRouterTest {
     lenient().when(toolRegistry.bind(any())).thenReturn(List.of());
     openai = mock(OpenAiNativeToolClient.class);
     gemini = mock(GeminiNativeToolClient.class);
-    Metrics metrics = mock(Metrics.class);
+    metrics = mock(Metrics.class);
     costTracker = mock(RunCostTracker.class);
     stepUsageRecorder = mock(RunStepUsageRecorder.class);
+    lenient()
+        .when(
+            stepUsageRecorder.prepareAttempt(
+                any(LlmRequest.class),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyInt(),
+                anyString(),
+                nullable(String.class)))
+        .thenAnswer(
+            invocation -> {
+              LlmRequest request = invocation.getArgument(0);
+              String provider = invocation.getArgument(1);
+              String model = invocation.getArgument(2);
+              String keySource = invocation.getArgument(3);
+              int ordinal = invocation.getArgument(4);
+              String kind = invocation.getArgument(5);
+              String parent = invocation.getArgument(6);
+              return new RunStepUsageRecorder.AttemptHandle(
+                  request.usageLogicalCallId() + ":" + provider + ":" + ordinal,
+                  request.usageLogicalCallId(),
+                  parent,
+                  kind,
+                  ordinal,
+                  provider,
+                  model,
+                  "WORKHORSE",
+                  keySource,
+                  ordinal,
+                  null);
+            });
     lenient()
         .when(costTracker.record(anyString(), anyString(), anyString(), anyString(), any()))
         .thenReturn(new RunCostTracker.CallUsage("openai", "gpt-x", 1, 2, 0, 0, 0.01, 1, 0));
     lenient()
         .when(costTracker.snapshot(anyString()))
         .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
-    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
     executionDispatchGuard = mock(LlmExecutionDispatchGuard.class);
     executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
@@ -87,7 +124,7 @@ class LlmRouterTest {
     keySourceModeResolver = mock(RunKeySourceModeResolver.class);
     // Default: NOT a pure-BYOK run, so platform fallback is permitted (existing behavior).
     lenient().when(keySourceModeResolver.isOwnKeysRun(anyString())).thenReturn(false);
-    AnthropicForcedToolClient forced = mock(AnthropicForcedToolClient.class);
+    anthropicForcedToolClient = mock(AnthropicForcedToolClient.class);
     registry = mock(ModelRegistry.class);
     flags = mock(FeatureFlagService.class); // isEnabled defaults to false
     managedAiUsageService = mock(ManagedAiUsageService.class);
@@ -118,7 +155,7 @@ class LlmRouterTest {
             executionDispatchGuard,
             executionPolicyFactory,
             keySourceModeResolver,
-            forced,
+            anthropicForcedToolClient,
             registry,
             flags,
             managedAiUsageService,
@@ -321,6 +358,195 @@ class LlmRouterTest {
   }
 
   @Test
+  void anthropicForcedNullFallsBackWithOrderedPhysicalAttemptsAndOneCostProjection() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
+    when(anthropicForcedToolClient.forcedToolCallOutcome(anyString(), any(), any(), any(), any()))
+        .thenReturn(
+            new AnthropicForcedToolClient.ForcedToolCallOutcome(
+                null, false, new RuntimeException("forced transport failed"), true));
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+    LlmRequest request =
+        req("anthropic", "claude-forced-audit-test").toBuilder()
+            .toolChoice("required")
+            .agentRole("WorkerAgent")
+            .stepId("worker.salvage")
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    ArgumentCaptor<Integer> ordinal = ArgumentCaptor.forClass(Integer.class);
+    ArgumentCaptor<String> kind = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<String> parent = ArgumentCaptor.forClass(String.class);
+    verify(stepUsageRecorder, times(2))
+        .prepareAttempt(
+            eq(request),
+            eq("anthropic"),
+            eq("claude-forced-audit-test"),
+            eq("PLATFORM"),
+            ordinal.capture(),
+            kind.capture(),
+            parent.capture());
+    assertThat(ordinal.getAllValues()).containsExactly(1, 2);
+    assertThat(kind.getAllValues()).containsExactly("PRIMARY", "RETRY");
+    assertThat(parent.getAllValues())
+        .containsExactly(null, request.usageLogicalCallId() + ":anthropic:1");
+    verify(stepUsageRecorder)
+        .recordFailure(
+            argThat(handle -> handle.attemptOrdinal() == 1),
+            eq(request),
+            anyLong(),
+            any(RuntimeException.class));
+    verify(stepUsageRecorder)
+        .recordSuccess(
+            argThat(handle -> handle.attemptOrdinal() == 2),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
+    verify(costTracker, times(1))
+        .record(eq("run-1"), eq("T1"), eq("anthropic"), eq("claude-forced-audit-test"), any());
+    verify(managedAiUsageService, times(1))
+        .recordSuccessfulCall(
+            any(),
+            eq("run-1"),
+            eq("T1"),
+            eq("WorkerAgent"),
+            eq("worker.salvage"),
+            eq("anthropic"),
+            eq("claude-forced-audit-test"),
+            any(),
+            any(),
+            eq(RunKeyContext.Source.PLATFORM));
+    verify(stepUsageRecorder, never())
+        .recordSuccess(
+            any(LlmRequest.class),
+            eq("anthropic"),
+            anyString(),
+            anyString(),
+            anyInt(),
+            anyLong(),
+            any(),
+            any());
+  }
+
+  @Test
+  void anthropicForcedHttpSuccessWithoutToolAccountsSpendBeforeFallback() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
+    when(anthropicForcedToolClient.forcedToolCallOutcome(anyString(), any(), any(), any(), any()))
+        .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), false, null, true));
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+    LlmRequest request =
+        req("anthropic", "claude-forced-audit-test").toBuilder()
+            .toolChoice("required")
+            .agentRole("WorkerAgent")
+            .stepId("worker.salvage")
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    verify(costTracker, times(2))
+        .record(eq("run-1"), eq("T1"), eq("anthropic"), eq("claude-forced-audit-test"), any());
+    verify(stepUsageRecorder, times(2))
+        .recordSuccess(
+            any(RunStepUsageRecorder.AttemptHandle.class),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
+    verify(stepUsageRecorder, never())
+        .recordFailure(
+            any(RunStepUsageRecorder.AttemptHandle.class), eq(request), anyLong(), any());
+    verify(managedAiUsageService, times(2))
+        .recordSuccessfulCall(
+            any(),
+            eq("run-1"),
+            eq("T1"),
+            eq("WorkerAgent"),
+            eq("worker.salvage"),
+            eq("anthropic"),
+            eq("claude-forced-audit-test"),
+            any(),
+            any(),
+            eq(RunKeyContext.Source.PLATFORM));
+  }
+
+  @Test
+  void anthropicTemperatureDeprecationRetryHasOneChainAndOneFinalCostProjection() {
+    build();
+    String model = "claude-temperature-audit-test";
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class)))
+        .thenThrow(
+            new RuntimeException(
+                "400 - {\"error\":{\"message\":\"`temperature` is deprecated for this model.\"}}"))
+        .thenReturn(ok());
+    LlmRequest request =
+        req("anthropic", model).toBuilder()
+            .agentRole("ReviewerAgent")
+            .stepId("review.general")
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    ArgumentCaptor<Integer> ordinal = ArgumentCaptor.forClass(Integer.class);
+    ArgumentCaptor<String> kind = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<String> parent = ArgumentCaptor.forClass(String.class);
+    verify(stepUsageRecorder, times(2))
+        .prepareAttempt(
+            eq(request),
+            eq("anthropic"),
+            eq(model),
+            eq("PLATFORM"),
+            ordinal.capture(),
+            kind.capture(),
+            parent.capture());
+    assertThat(ordinal.getAllValues()).containsExactly(1, 2);
+    assertThat(kind.getAllValues()).containsExactly("PRIMARY", "RETRY");
+    assertThat(parent.getAllValues())
+        .containsExactly(null, request.usageLogicalCallId() + ":anthropic:1");
+    verify(stepUsageRecorder)
+        .recordFailure(
+            argThat(handle -> handle.attemptOrdinal() == 1),
+            eq(request),
+            anyLong(),
+            any(RuntimeException.class));
+    verify(stepUsageRecorder)
+        .recordSuccess(
+            argThat(handle -> handle.attemptOrdinal() == 2),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
+    verify(costTracker, times(1)).record(eq("run-1"), eq("T1"), eq("anthropic"), eq(model), any());
+    verify(managedAiUsageService, times(1))
+        .recordSuccessfulCall(
+            any(),
+            eq("run-1"),
+            eq("T1"),
+            eq("ReviewerAgent"),
+            eq("review.general"),
+            eq("anthropic"),
+            eq(model),
+            any(),
+            any(),
+            eq(RunKeyContext.Source.PLATFORM));
+
+    ArgumentCaptor<Prompt> prompts = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic, times(2)).call(prompts.capture());
+    AnthropicChatOptions first = (AnthropicChatOptions) prompts.getAllValues().get(0).getOptions();
+    AnthropicChatOptions second = (AnthropicChatOptions) prompts.getAllValues().get(1).getOptions();
+    assertThat(first.getTemperature()).isEqualTo(0.0);
+    assertThat(second.getTemperature()).isNull();
+  }
+
+  @Test
   void textSeamUsesYamlOutputCapWhenCallerOmitsMaxTokens() {
     build();
     when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(4096);
@@ -376,6 +602,7 @@ class LlmRouterTest {
             any());
     verify(managedAiUsageService)
         .recordSuccessfulCall(
+            any(),
             eq("run-1"),
             eq("T1"),
             eq("WorkerAgent"),
@@ -385,6 +612,110 @@ class LlmRouterTest {
             any(),
             any(),
             eq(RunKeyContext.Source.PLATFORM));
+  }
+
+  @Test
+  void managedAiProjectionFailureAfterProviderSuccessDoesNotRetryOrRecordProviderFailure() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    org.mockito.Mockito.doThrow(new RuntimeException("503 managed projection unavailable"))
+        .when(managedAiUsageService)
+        .recordSuccessfulCall(
+            any(),
+            anyString(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            anyString(),
+            any(),
+            any(),
+            any());
+
+    assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
+
+    verify(openai, times(1)).call(any());
+    verify(stepUsageRecorder, times(1))
+        .recordSuccess(
+            any(), eq("openai"), eq("gpt-x"), eq("PLATFORM"), eq(1), anyLong(), any(), any());
+    verify(stepUsageRecorder, never())
+        .recordFailure(any(), anyString(), anyString(), anyString(), anyInt(), anyLong(), any());
+    verify(metrics).recordLlmPostSuccessProjection("managed_ai", "failed");
+  }
+
+  @Test
+  void usageIntentPersistenceFailureBlocksProviderTransport() {
+    build();
+    org.mockito.Mockito.doThrow(
+            new RunStepUsageRecorder.LlmUsagePersistenceException(
+                "Provider call blocked", new IllegalStateException("database unavailable")))
+        .when(stepUsageRecorder)
+        .prepareAttempt(any(), eq("openai"), eq("gpt-x"), eq("PLATFORM"), eq(1));
+
+    assertThatThrownBy(() -> router.call(attributedReq("openai", "gpt-x")))
+        .isInstanceOf(RunStepUsageRecorder.LlmUsagePersistenceException.class)
+        .hasMessageContaining("Provider call blocked");
+
+    verify(openai, never()).call(any());
+    verify(stepUsageRecorder, never())
+        .recordFailure(any(), anyString(), anyString(), anyString(), anyInt(), anyLong(), any());
+  }
+
+  @Test
+  void costProjectionFailureAfterProviderSuccessRecordsUnknownCostSuccessWithoutRetry() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    when(costTracker.record(eq("run-1"), eq("T1"), eq("openai"), eq("gpt-x"), any()))
+        .thenThrow(new RuntimeException("503 cost projection unavailable"));
+
+    assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
+
+    verify(openai, times(1)).call(any());
+    verify(stepUsageRecorder, times(1))
+        .recordSuccess(
+            any(),
+            eq("openai"),
+            eq("gpt-x"),
+            eq("PLATFORM"),
+            eq(1),
+            anyLong(),
+            argThat(usage -> usage.costUsd() == -1.0 && usage.callIndex() == 0),
+            any());
+    verify(stepUsageRecorder, never())
+        .recordFailure(any(), anyString(), anyString(), anyString(), anyInt(), anyLong(), any());
+    verify(managedAiUsageService, never())
+        .recordSuccessfulCall(
+            any(),
+            anyString(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            anyString(),
+            any(),
+            any(),
+            any());
+    verify(metrics).recordLlmPostSuccessProjection("run_cost", "failed");
+    verify(metrics).recordLlmPostSuccessProjection("managed_ai", "skipped_unknown_cost");
+  }
+
+  @Test
+  void tokenEventFailureAfterProviderSuccessDoesNotRetryOrRecordProviderFailure() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    org.mockito.Mockito.doThrow(new RuntimeException("503 SSE projection unavailable"))
+        .when(broadcaster)
+        .emit(anyString(), any());
+
+    assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
+
+    verify(openai, times(1)).call(any());
+    verify(stepUsageRecorder, times(1))
+        .recordSuccess(
+            any(), eq("openai"), eq("gpt-x"), eq("PLATFORM"), eq(1), anyLong(), any(), any());
+    verify(stepUsageRecorder, never())
+        .recordFailure(any(), anyString(), anyString(), anyString(), anyInt(), anyLong(), any());
+    verify(metrics).recordLlmPostSuccessProjection("token_event", "failed");
   }
 
   @Test
@@ -455,7 +786,12 @@ class LlmRouterTest {
     when(registry.fallbackChainFor(anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    when(gemini.call(any())).thenReturn(ok());
+    RunCostTracker.CallUsage geminiUsage =
+        new RunCostTracker.CallUsage("gemini", "gem-x", 1, 2, 0, 0, 0.01, 1, 0);
+    when(gemini.callAudited(any(), any()))
+        .thenReturn(
+            new GeminiNativeToolClient.AuditedCallResult(
+                ok(), geminiUsage, "gemini-usage-1", true));
 
     LlmRequest req =
         req("openai", "gpt-x").toBuilder()
@@ -463,7 +799,7 @@ class LlmRouterTest {
             .stepId("planner.outline")
             .build();
     assertThat(router.call(req)).isNotNull();
-    verify(gemini, times(1)).call(any());
+    verify(gemini, times(1)).callAudited(any(), any());
     verify(stepUsageRecorder, times(4))
         .recordFailure(
             argThat(request -> "OutlinePlannerAgent".equals(request.agentRole())),
@@ -473,13 +809,13 @@ class LlmRouterTest {
             any(Integer.class),
             anyLong(),
             any());
-    verify(stepUsageRecorder)
+    verify(stepUsageRecorder, never())
         .recordSuccess(
-            argThat(candidate -> "OutlinePlannerAgent:planner.outline".equals(candidate.retryOf())),
+            any(LlmRequest.class),
             eq("gemini"),
             eq("gem-x"),
             eq("PLATFORM"),
-            eq(1),
+            anyInt(),
             anyLong(),
             any(),
             any());
@@ -492,7 +828,12 @@ class LlmRouterTest {
     when(registry.fallbackChainFor(anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-pro"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
-    when(gemini.call(any())).thenReturn(ok());
+    RunCostTracker.CallUsage geminiUsage =
+        new RunCostTracker.CallUsage("gemini", "gem-flash", 1, 2, 0, 0, 0.01, 1, 0);
+    when(gemini.callAudited(any(), any()))
+        .thenReturn(
+            new GeminiNativeToolClient.AuditedCallResult(
+                ok(), geminiUsage, "gemini-usage-2", true));
     when(managedAiUsageService.authorizeCall(
             anyString(), eq("gemini"), eq("gem-pro"), any(), any(), any()))
         .thenReturn(
@@ -511,21 +852,21 @@ class LlmRouterTest {
 
     ArgumentCaptor<GeminiNativeToolClient.GeminiToolCallRequest> captor =
         ArgumentCaptor.forClass(GeminiNativeToolClient.GeminiToolCallRequest.class);
-    verify(gemini).call(captor.capture());
+    verify(gemini).callAudited(captor.capture(), any());
     assertThat(captor.getValue().model()).isEqualTo("gem-flash");
-    verify(costTracker).record(eq("run-1"), eq("T1"), eq("gemini"), eq("gem-flash"), any());
-    verify(stepUsageRecorder)
+    verify(stepUsageRecorder, never())
         .recordSuccess(
-            argThat(candidate -> "OutlinePlannerAgent:planner.outline".equals(candidate.retryOf())),
+            any(LlmRequest.class),
             eq("gemini"),
             eq("gem-flash"),
             eq("PLATFORM"),
-            eq(1),
+            anyInt(),
             anyLong(),
             any(),
             any());
     verify(managedAiUsageService)
         .recordSuccessfulCall(
+            any(),
             eq("run-1"),
             eq("T1"),
             eq("OutlinePlannerAgent"),

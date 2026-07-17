@@ -9,6 +9,7 @@ import java.util.UUID;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
@@ -25,8 +26,121 @@ import lombok.extern.slf4j.Slf4j;
 public class RunStepUsageRecorder {
 
   private final RunStepUsageRepository repository;
+  private final LlmUsageAttemptIntentRepository intentRepository;
   private final LlmUsageAttributionResolver attributionResolver;
   private final Metrics metrics;
+  private final ModelRegistry modelRegistry;
+  private final LlmUsageRecoverySpool recoverySpool;
+
+  /**
+   * Persists the immutable attempt intent before any provider transport is invoked. Failure is
+   * deliberately fail-closed: an Enterprise provider call must not occur without durable audit
+   * identity.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AttemptHandle prepareAttempt(
+      LlmRequest request, String provider, String model, String keySource, int attemptNumber) {
+    return prepareAttempt(request, provider, model, keySource, attemptNumber, null, null);
+  }
+
+  /**
+   * Write-ahead intent for a governed non-chat capability such as an embedding HTTP request.
+   * Capability callers must retain the returned handle and use the matching terminal overload.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AttemptHandle prepareProviderCapabilityAttempt(
+      LlmExecutionReference reference,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber) {
+    if (runId == null || runId.isBlank()) throw new IllegalArgumentException("runId required");
+    var attribution = attributionResolver.resolve(reference);
+    AttemptHandle handle =
+        handleFor(null, provider, model, keySource, attemptNumber, "CAPABILITY", null, attribution);
+    LlmUsageAttemptIntent intent =
+        LlmUsageAttemptIntent.builder()
+            .physicalAttemptId(handle.physicalAttemptId())
+            .logicalCallId(handle.logicalCallId())
+            .parentAttemptId(handle.parentAttemptId())
+            .attemptKind(handle.attemptKind())
+            .attemptOrdinal(handle.attemptOrdinal())
+            .llmExecutionContextId(attribution.llmExecutionContextId())
+            .correlationId(firstNonBlank(attribution.correlationId(), runId))
+            .orgId(attribution.orgId())
+            .userId(attribution.userId())
+            .projectId(attribution.projectId())
+            .feature(attribution.feature())
+            .sourceType(attribution.sourceType())
+            .sourceId(firstNonBlank(attribution.sourceId(), runId))
+            .runId(runId)
+            .taskId(blankToNull(taskId))
+            .agentRole(firstNonBlank(agentRole, "UNKNOWN"))
+            .stepId(blankToNull(stepId))
+            .provider(handle.provider())
+            .model(handle.model())
+            .modelTier(handle.modelTier())
+            .keySource(handle.keySource())
+            .startedAt(Instant.now())
+            .build();
+    try {
+      intentRepository.save(intent);
+      metrics.recordLlmUsagePersistence("STARTED", "ok");
+      return handle;
+    } catch (RuntimeException persistenceFailure) {
+      metrics.recordLlmUsagePersistence("STARTED", "failed");
+      throw new LlmUsagePersistenceException(
+          "Provider capability blocked because usage intent could not be persisted",
+          persistenceFailure);
+    }
+  }
+
+  /**
+   * Persists a write-ahead intent for a provider client that performs multiple physical HTTP
+   * operations inside one router call (for example Gemini cache mint + generate retries). Attempt
+   * ordinals are supplied by the caller's single logical-call counter and the explicit parent links
+   * the resulting append-only chain.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AttemptHandle prepareAttempt(
+      LlmRequest request,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber,
+      String attemptKind,
+      String parentAttemptId) {
+    if (request == null) throw new IllegalArgumentException("request required");
+    AttemptHandle handle =
+        handleFor(
+            request,
+            provider,
+            model,
+            keySource,
+            attemptNumber,
+            attemptKind,
+            parentAttemptId,
+            attributionResolver.resolve(request));
+    try {
+      intentRepository.save(handle.toIntent(request));
+      metrics.recordLlmUsagePersistence("STARTED", "ok");
+      return handle;
+    } catch (RuntimeException persistenceFailure) {
+      metrics.recordLlmUsagePersistence("STARTED", "failed");
+      log.error(
+          "LLM attempt intent write FAILED run={} task={} provider={}; provider call blocked",
+          request.context().runId(),
+          request.context().taskId(),
+          provider,
+          persistenceFailure);
+      throw new LlmUsagePersistenceException(
+          "Provider call blocked because usage intent could not be persisted", persistenceFailure);
+    }
+  }
 
   /** Backward-compatible success API for older tests/callers. */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -53,7 +167,7 @@ public class RunStepUsageRecorder {
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void recordSuccess(
+  public String recordSuccess(
       LlmRequest request,
       String provider,
       String model,
@@ -62,8 +176,8 @@ public class RunStepUsageRecorder {
       long latencyMs,
       RunCostTracker.CallUsage usage,
       ChatResponse response) {
-    if (request == null || usage == null) return;
-    persist(
+    if (request == null || usage == null) return null;
+    return persist(
         request,
         request.context().runId(),
         request.context().taskId(),
@@ -81,7 +195,34 @@ public class RunStepUsageRecorder {
   }
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void recordFailure(
+  public String recordSuccess(
+      AttemptHandle handle,
+      LlmRequest request,
+      long latencyMs,
+      RunCostTracker.CallUsage usage,
+      ChatResponse response) {
+    if (handle == null || request == null || usage == null) return null;
+    return persist(
+        request,
+        request.context().runId(),
+        request.context().taskId(),
+        request.agentRole(),
+        request.stepId(),
+        retryOf(request, handle.attemptNumber()),
+        handle.provider(),
+        handle.model(),
+        handle.keySource(),
+        handle.attemptNumber(),
+        latencyMs,
+        usage,
+        response,
+        null,
+        handle.attribution(),
+        handle);
+  }
+
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public String recordFailure(
       LlmRequest request,
       String provider,
       String model,
@@ -89,9 +230,9 @@ public class RunStepUsageRecorder {
       int attemptNumber,
       long latencyMs,
       Throwable error) {
-    if (request == null) return;
+    if (request == null) return null;
     if (error == null) error = new IllegalStateException("provider failure detail unavailable");
-    persist(
+    return persist(
         request,
         request.context().runId(),
         request.context().taskId(),
@@ -108,9 +249,34 @@ public class RunStepUsageRecorder {
         error);
   }
 
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public String recordFailure(
+      AttemptHandle handle, LlmRequest request, long latencyMs, Throwable error) {
+    if (handle == null || request == null) return null;
+    Throwable resolvedError =
+        error == null ? new IllegalStateException("provider failure detail unavailable") : error;
+    return persist(
+        request,
+        request.context().runId(),
+        request.context().taskId(),
+        request.agentRole(),
+        request.stepId(),
+        retryOf(request, handle.attemptNumber()),
+        handle.provider(),
+        handle.model(),
+        handle.keySource(),
+        handle.attemptNumber(),
+        latencyMs,
+        null,
+        null,
+        resolvedError,
+        handle.attribution(),
+        handle);
+  }
+
   /** Records a successful physical attempt for a governed non-chat provider capability. */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void recordProviderCapabilitySuccess(
+  public String recordProviderCapabilitySuccess(
       LlmExecutionReference reference,
       String runId,
       String agentRole,
@@ -121,7 +287,7 @@ public class RunStepUsageRecorder {
       int attemptNumber,
       long latencyMs,
       RunCostTracker.CallUsage usage) {
-    persist(
+    return persist(
         null,
         runId,
         agentRole,
@@ -139,9 +305,39 @@ public class RunStepUsageRecorder {
         attributionResolver.resolve(reference));
   }
 
+  /** Terminal success paired to a prior capability intent. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public String recordProviderCapabilitySuccess(
+      AttemptHandle handle,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      long latencyMs,
+      RunCostTracker.CallUsage usage) {
+    if (handle == null) return null;
+    return persist(
+        null,
+        runId,
+        taskId,
+        agentRole,
+        stepId,
+        null,
+        handle.provider(),
+        handle.model(),
+        handle.keySource(),
+        handle.attemptNumber(),
+        latencyMs,
+        usage,
+        null,
+        null,
+        handle.attribution(),
+        handle);
+  }
+
   /** Records a failed physical attempt for a governed non-chat provider capability. */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void recordProviderCapabilityFailure(
+  public String recordProviderCapabilityFailure(
       LlmExecutionReference reference,
       String runId,
       String agentRole,
@@ -152,7 +348,7 @@ public class RunStepUsageRecorder {
       int attemptNumber,
       long latencyMs,
       Throwable error) {
-    persist(
+    return persist(
         null,
         runId,
         agentRole,
@@ -170,7 +366,37 @@ public class RunStepUsageRecorder {
         attributionResolver.resolve(reference));
   }
 
-  private void persist(
+  /** Terminal failure paired to a prior capability intent. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public String recordProviderCapabilityFailure(
+      AttemptHandle handle,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      long latencyMs,
+      Throwable error) {
+    if (handle == null) return null;
+    return persist(
+        null,
+        runId,
+        taskId,
+        agentRole,
+        stepId,
+        null,
+        handle.provider(),
+        handle.model(),
+        handle.keySource(),
+        handle.attemptNumber(),
+        latencyMs,
+        null,
+        null,
+        error == null ? new IllegalStateException("provider failure detail unavailable") : error,
+        handle.attribution(),
+        handle);
+  }
+
+  private String persist(
       LlmRequest request,
       String runId,
       String taskId,
@@ -185,7 +411,7 @@ public class RunStepUsageRecorder {
       RunCostTracker.CallUsage usage,
       ChatResponse response,
       Throwable error) {
-    persist(
+    return persist(
         request,
         runId,
         taskId,
@@ -200,10 +426,11 @@ public class RunStepUsageRecorder {
         usage,
         response,
         error,
+        null,
         null);
   }
 
-  private void persist(
+  private String persist(
       LlmRequest request,
       String runId,
       String taskId,
@@ -219,8 +446,45 @@ public class RunStepUsageRecorder {
       ChatResponse response,
       Throwable error,
       LlmUsageAttributionResolver.Attribution explicitAttribution) {
-    if (runId == null || runId.isBlank()) return;
+    return persist(
+        request,
+        runId,
+        taskId,
+        agentRole,
+        stepId,
+        retryOf,
+        provider,
+        model,
+        keySource,
+        attemptNumber,
+        latencyMs,
+        usage,
+        response,
+        error,
+        explicitAttribution,
+        null);
+  }
+
+  private String persist(
+      LlmRequest request,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String retryOf,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber,
+      long latencyMs,
+      RunCostTracker.CallUsage usage,
+      ChatResponse response,
+      Throwable error,
+      LlmUsageAttributionResolver.Attribution explicitAttribution,
+      AttemptHandle preparedHandle) {
+    if (runId == null || runId.isBlank()) return null;
     String status = error == null ? "SUCCESS" : "FAILED";
+    RunStepUsage row = null;
     try {
       LlmUsageAttributionResolver.Attribution attribution =
           explicitAttribution != null
@@ -238,15 +502,33 @@ public class RunStepUsageRecorder {
             attribution.sourceType(),
             attribution.sourceId());
       }
-      repository.save(
+      String resolvedProvider =
+          firstNonBlank(
+              firstNonBlank(provider, usage == null ? null : usage.provider()), "unknown");
+      String resolvedModel =
+          firstNonBlank(firstNonBlank(model, usage == null ? null : usage.model()), "unknown");
+      AttemptHandle resolvedHandle =
+          preparedHandle != null
+              ? preparedHandle
+              : handleFor(
+                  request,
+                  resolvedProvider,
+                  resolvedModel,
+                  keySource,
+                  attemptNumber,
+                  null,
+                  null,
+                  attribution);
+      row =
           RunStepUsage.builder()
-              .id(UUID.randomUUID().toString())
+              .id(resolvedHandle.physicalAttemptId())
               .runId(runId)
               .taskId(blankToNull(taskId))
               .agentRole(firstNonBlank(agentRole, "UNKNOWN"))
               .stepId(blankToNull(stepId))
               .retryOf(blankToNull(retryOf))
               .llmExecutionContextId(attribution.llmExecutionContextId())
+              .correlationId(firstNonBlank(attribution.correlationId(), runId))
               .orgId(attribution.orgId())
               .userId(attribution.userId())
               .projectId(attribution.projectId())
@@ -260,12 +542,14 @@ public class RunStepUsageRecorder {
               .errorRedacted(redact(error))
               .attemptNumber(Math.max(1, attemptNumber))
               .latencyMs(Math.max(0, latencyMs))
-              .provider(
-                  firstNonBlank(
-                      firstNonBlank(provider, usage == null ? null : usage.provider()), "unknown"))
-              .model(
-                  firstNonBlank(
-                      firstNonBlank(model, usage == null ? null : usage.model()), "unknown"))
+              .provider(resolvedProvider)
+              .model(resolvedModel)
+              .modelTier(modelRegistry.chainTierFor(resolvedModel))
+              .logicalCallId(resolvedHandle.logicalCallId())
+              .physicalAttemptId(resolvedHandle.physicalAttemptId())
+              .parentAttemptId(resolvedHandle.parentAttemptId())
+              .attemptKind(resolvedHandle.attemptKind())
+              .attemptOrdinal(resolvedHandle.attemptOrdinal())
               .inputTokens(usage == null ? 0 : usage.inputTokens())
               .outputTokens(usage == null ? 0 : usage.outputTokens())
               .cacheWriteTokens(usage == null ? 0 : usage.cacheWriteTokens())
@@ -275,8 +559,10 @@ public class RunStepUsageRecorder {
               .callIndex(usage == null ? 0 : usage.callIndex())
               .providerUsageRawJson(safeUsageMetadata(response, usage))
               .createdAt(Instant.now())
-              .build());
+              .build();
+      repository.save(row);
       metrics.recordLlmUsagePersistence(status, "ok");
+      return row.getId();
     } catch (Exception persistenceFailure) {
       metrics.recordLlmUsagePersistence(status, "failed");
       log.warn(
@@ -286,6 +572,104 @@ public class RunStepUsageRecorder {
           provider,
           status,
           persistenceFailure.getMessage());
+      if (row != null) recoverySpool.enqueue(row);
+      return null;
+    }
+  }
+
+  private AttemptHandle handleFor(
+      LlmRequest request,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber,
+      String explicitAttemptKind,
+      String explicitParentAttemptId,
+      LlmUsageAttributionResolver.Attribution attribution) {
+    String resolvedProvider = firstNonBlank(provider, "unknown");
+    String resolvedModel = firstNonBlank(model, "unknown");
+    String logicalCallId =
+        request == null
+            ? UUID.randomUUID().toString()
+            : firstNonBlank(request.usageLogicalCallId(), UUID.randomUUID().toString());
+    int ordinal = Math.max(1, attemptNumber);
+    String physicalAttemptId =
+        logicalCallId + ":" + resolvedProvider.toLowerCase(Locale.ROOT) + ":" + ordinal;
+    String attemptKind =
+        firstNonBlank(
+            explicitAttemptKind,
+            request == null
+                ? "CAPABILITY"
+                : request.retryOf() != null && !request.retryOf().isBlank()
+                    ? "FAILOVER"
+                    : ordinal > 1 ? "RETRY" : "PRIMARY");
+    String parentAttemptId =
+        firstNonBlank(
+            explicitParentAttemptId,
+            ordinal > 1
+                ? logicalCallId
+                    + ":"
+                    + resolvedProvider.toLowerCase(Locale.ROOT)
+                    + ":"
+                    + (ordinal - 1)
+                : request == null ? null : blankToNull(request.retryOf()));
+    return new AttemptHandle(
+        physicalAttemptId,
+        logicalCallId,
+        parentAttemptId,
+        attemptKind,
+        ordinal,
+        resolvedProvider,
+        resolvedModel,
+        modelRegistry.chainTierFor(resolvedModel),
+        firstNonBlank(keySource, "UNKNOWN").toUpperCase(Locale.ROOT),
+        ordinal,
+        attribution);
+  }
+
+  public record AttemptHandle(
+      String physicalAttemptId,
+      String logicalCallId,
+      String parentAttemptId,
+      String attemptKind,
+      long attemptOrdinal,
+      String provider,
+      String model,
+      String modelTier,
+      String keySource,
+      int attemptNumber,
+      LlmUsageAttributionResolver.Attribution attribution) {
+    private LlmUsageAttemptIntent toIntent(LlmRequest request) {
+      return LlmUsageAttemptIntent.builder()
+          .physicalAttemptId(physicalAttemptId)
+          .logicalCallId(logicalCallId)
+          .parentAttemptId(parentAttemptId)
+          .attemptKind(attemptKind)
+          .attemptOrdinal(attemptOrdinal)
+          .llmExecutionContextId(attribution.llmExecutionContextId())
+          .correlationId(firstNonBlank(attribution.correlationId(), request.context().runId()))
+          .orgId(attribution.orgId())
+          .userId(attribution.userId())
+          .projectId(attribution.projectId())
+          .feature(attribution.feature())
+          .sourceType(attribution.sourceType())
+          .sourceId(firstNonBlank(attribution.sourceId(), request.context().runId()))
+          .runId(request.context().runId())
+          .taskId(blankToNull(request.context().taskId()))
+          .agentRole(firstNonBlank(request.agentRole(), "UNKNOWN"))
+          .stepId(blankToNull(request.stepId()))
+          .provider(provider)
+          .model(model)
+          .modelTier(modelTier)
+          .keySource(keySource)
+          .startedAt(Instant.now())
+          .build();
+    }
+  }
+
+  public static final class LlmUsagePersistenceException extends RuntimeException {
+    public LlmUsagePersistenceException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 

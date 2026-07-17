@@ -69,10 +69,40 @@ public class AnthropicForcedToolClient {
       List<ToolCallback> tools,
       Integer maxTokens,
       String apiKeyOverride) {
+    ForcedToolCallOutcome outcome =
+        forcedToolCallOutcome(model, messages, tools, maxTokens, apiKeyOverride);
+    return outcome.usable() ? outcome.response() : null;
+  }
+
+  /** True only when the forced path will issue a physical provider request. */
+  public boolean canAttempt(
+      List<Message> messages, List<ToolCallback> tools, String apiKeyOverride) {
     String key =
         (apiKeyOverride != null && !apiKeyOverride.isBlank()) ? apiKeyOverride : platformApiKey;
-    if (key == null || key.isBlank()) return null;
-    if (tools == null || tools.isEmpty() || messages == null || messages.isEmpty()) return null;
+    return key != null
+        && !key.isBlank()
+        && tools != null
+        && !tools.isEmpty()
+        && messages != null
+        && !messages.isEmpty();
+  }
+
+  /**
+   * Auditable forced-call outcome. A provider HTTP success with no usable tool remains a successful
+   * paid response and carries its usage; transport/parsing failure is separate from "not
+   * attempted".
+   */
+  public ForcedToolCallOutcome forcedToolCallOutcome(
+      String model,
+      List<Message> messages,
+      List<ToolCallback> tools,
+      Integer maxTokens,
+      String apiKeyOverride) {
+    if (!canAttempt(messages, tools, apiKeyOverride)) {
+      return new ForcedToolCallOutcome(null, false, null, false);
+    }
+    String key =
+        (apiKeyOverride != null && !apiKeyOverride.isBlank()) ? apiKeyOverride : platformApiKey;
     try {
       // 1) Flatten: system -> system param; everything else -> one user transcript.
       StringBuilder system = new StringBuilder();
@@ -122,7 +152,9 @@ public class AnthropicForcedToolClient {
           transcript.append("\n");
         }
       }
-      if (transcript.length() == 0) return null;
+      if (transcript.length() == 0) {
+        return new ForcedToolCallOutcome(null, false, null, false);
+      }
 
       // 2) Tools -> AnthropicApi.Tool (input schema parsed to a Map).
       List<AnthropicApi.Tool> aTools = new ArrayList<>();
@@ -153,7 +185,13 @@ public class AnthropicForcedToolClient {
 
       AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
       AnthropicApi.ChatCompletionResponse resp = api.chatCompletionEntity(req).getBody();
-      if (resp == null || resp.content() == null) return null;
+      if (resp == null || resp.content() == null) {
+        return new ForcedToolCallOutcome(
+            null,
+            false,
+            new IllegalStateException("Anthropic returned an empty forced response"),
+            true);
+      }
 
       // 4) Parse content blocks -> text + forced tool call(s).
       StringBuilder text = new StringBuilder();
@@ -166,13 +204,6 @@ public class AnthropicForcedToolClient {
           calls.add(new AssistantMessage.ToolCall(cb.id(), "function", cb.name(), args));
         }
       }
-      if (calls.isEmpty()) {
-        log.info(
-            "Anthropic forced salvage: model returned no tool call (stopReason={})",
-            resp.stopReason());
-        return null; // nothing to dispatch — fall through
-      }
-
       ChatResponseMetadata.Builder meta = ChatResponseMetadata.builder().model(model);
       if (resp.usage() != null) {
         int in = resp.usage().inputTokens() == null ? 0 : resp.usage().inputTokens();
@@ -188,16 +219,28 @@ public class AnthropicForcedToolClient {
           resp.stopReason());
       AssistantMessage msg =
           AssistantMessage.builder().content(text.toString()).toolCalls(calls).build();
-      return new ChatResponse(
-          List.of(
-              new Generation(
-                  msg, ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
-          meta.build());
+      ChatResponse response =
+          new ChatResponse(
+              List.of(
+                  new Generation(
+                      msg,
+                      ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
+              meta.build());
+      if (calls.isEmpty()) {
+        log.info(
+            "Anthropic forced salvage: model returned no tool call (stopReason={})",
+            resp.stopReason());
+        return new ForcedToolCallOutcome(response, false, null, true);
+      }
+      return new ForcedToolCallOutcome(response, true, null, true);
     } catch (Exception e) {
       log.warn("Anthropic forced salvage failed — falling back to auto: {}", e.toString());
-      return null;
+      return new ForcedToolCallOutcome(null, false, e, true);
     }
   }
+
+  public record ForcedToolCallOutcome(
+      ChatResponse response, boolean usable, Throwable failure, boolean attempted) {}
 
   private static String trunc(String s, int max) {
     if (s == null) return "";

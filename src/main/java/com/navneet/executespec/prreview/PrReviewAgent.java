@@ -98,7 +98,8 @@ public class PrReviewAgent {
             req.prReviewId(),
             req.prReviewId(),
             provider,
-            null);
+            null,
+            req.actorUserId());
 
     ChatResponse resp;
     try {
@@ -306,7 +307,8 @@ public class PrReviewAgent {
       Integer additions,
       Integer deletions,
       String diff,
-      String provider) {}
+      String provider,
+      String actorUserId) {}
 
   public record AgentReviewComment(
       String filePath,

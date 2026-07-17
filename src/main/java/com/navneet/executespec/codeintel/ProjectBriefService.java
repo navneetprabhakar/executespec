@@ -101,6 +101,19 @@ public class ProjectBriefService {
    * returns a deterministic one-liner derived from the doc.
    */
   public String summarise(String projectId, String archMarkdown, LlmProvider provider) {
+    return summarise(projectId, archMarkdown, provider, null, null);
+  }
+
+  /**
+   * Confirmed architecture path: reuse the initiating actor's shared execution context so the
+   * summary cannot escape the action-scoped provider/model/call/token/USD budget.
+   */
+  public String summarise(
+      String projectId,
+      String archMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      com.navneet.executespec.executioncontext.LlmExecutionReference sharedReference) {
     if (archMarkdown == null || archMarkdown.isBlank()) return "";
     try {
       if (provider == null && projectProviderResolver == null) {
@@ -114,14 +127,17 @@ public class ProjectBriefService {
       }
       String contextId = "brief-" + java.util.UUID.randomUUID();
       var executionReference =
-          executionPolicyFactory.forProject(
-              projectId,
-              "project-brief",
-              "PROJECT_BRIEF",
-              contextId,
-              contextId,
-              effective.name(),
-              null);
+          sharedReference != null
+              ? sharedReference
+              : executionPolicyFactory.forProject(
+                  projectId,
+                  "project-brief",
+                  "PROJECT_BRIEF",
+                  contextId,
+                  contextId,
+                  effective.name(),
+                  null,
+                  actorUserId);
       Prompt prompt =
           new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(archMarkdown)));
       ChatResponse response =

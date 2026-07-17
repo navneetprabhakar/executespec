@@ -130,7 +130,8 @@ class RunPlanningCoordinator {
               projectType,
               providerEnum,
               projectMemorySnippet,
-              executionPolicyFactory.forRun(runId));
+              executionPolicyFactory.forRun(runId),
+              runId);
       RunCostTracker.Snapshot after = costTracker.snapshot(runId);
 
       long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());

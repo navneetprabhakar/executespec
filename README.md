@@ -155,6 +155,21 @@ after failure. Issue, deny, consume, expiry, replay, completion, and failure dec
 hash-chained `activity_audit`; V292 rejects audit-row UPDATE/DELETE and serializes cross-JVM chain
 appends with a PostgreSQL transaction advisory lock.
 
+### Enterprise LLM usage audit
+
+V293 records an immutable write-ahead intent before each known physical provider operation and an
+append-only terminal fact afterward. Retries, failovers, Gemini cache operations, Anthropic forced
+tool fallbacks, token/cache/reasoning usage, actual key source, actor, role, feature, project and run
+causality remain separately attributable. A missing terminal is surfaced as `MISSING_TERMINAL`
+rather than disappearing, and managed-AI credits link to the exact usage event instead of a fuzzy
+provider/model/time match.
+
+ORG_ADMIN users can inspect their own organization in Org settings; SUPER_ADMIN users can select a
+tenant in Admin analytics. JSON and formula-safe CSV exports use an inclusive organization-calendar
+date range plus an explicit IANA timezone. The same guarded API is available at
+`GET /api/admin/analytics/llm-usage-audit` and `/llm-usage-audit.csv`. Provider invoice comparison
+remains explicitly unavailable until a real upstream invoice/request ingestion contract exists.
+
 **Local observability (optional)**
 
 ```bash
