@@ -285,10 +285,16 @@ public class ProjectDashboardController {
                   value = "requirement",
                   required = false)
               String requirement,
+          @org.springframework.web.bind.annotation.RequestParam(
+                  value = "provider",
+                  required = false)
+              String provider,
+          @org.springframework.web.bind.annotation.RequestParam(value = "model", required = false)
+              String model,
           @org.springframework.security.core.annotation.AuthenticationPrincipal
               com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
+    return ResponseEntity.ok(estimationService.estimate(projectId, requirement, provider, model));
   }
 
   /**
