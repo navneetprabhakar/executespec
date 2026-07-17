@@ -168,6 +168,27 @@ public class SmartClassifierAgent {
       LlmProvider aiProvider,
       String projectMemorySnippet,
       com.navneet.executespec.executioncontext.LlmExecutionReference executionReference) {
+    return classify(
+        spec,
+        repoFullNames,
+        projectId,
+        projectType,
+        aiProvider,
+        projectMemorySnippet,
+        executionReference,
+        null);
+  }
+
+  /** Production overload carrying both durable policy and the real cost/usage run identity. */
+  public ClassificationResult classify(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
+      String usageRunId) {
     String cacheKey = cacheKey(spec, repoFullNames, projectId);
     if (cacheKey != null) {
       try {
@@ -221,7 +242,8 @@ public class SmartClassifierAgent {
             heuristic,
             aiProvider,
             projectId,
-            executionReference);
+            executionReference,
+            usageRunId);
     cachePut(cacheKey, verified);
     return verified;
   }
@@ -304,7 +326,8 @@ public class SmartClassifierAgent {
       HeuristicVerdict heuristic,
       LlmProvider aiProvider,
       String projectId,
-      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference) {
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
+      String usageRunId) {
     ResolvedModel resolved;
     try {
       resolved =
@@ -371,7 +394,9 @@ public class SmartClassifierAgent {
 
     ExecutionContext ctx =
         new ExecutionContext(
-            "classify-" + (projectId == null ? "anon" : projectId),
+            usageRunId == null || usageRunId.isBlank()
+                ? "classify-" + (projectId == null ? "anon" : projectId)
+                : usageRunId,
             "__planner_classifier__",
             Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath(),
             executionReference);

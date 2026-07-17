@@ -20,6 +20,7 @@ class ManagedAiUsageMapper {
       String userId,
       String orgId,
       ManagedAiUsagePeriod period,
+      String usageEventId,
       String runId,
       String taskId,
       String agentRole,
@@ -38,6 +39,7 @@ class ManagedAiUsageMapper {
         .periodId(period.getId())
         .userId(userId)
         .orgId(orgId)
+        .usageEventId(usageEventId)
         .runId(runId)
         .agentSessionId(runId != null && runId.startsWith("agent-") ? runId : null)
         .sourceType(sourceType(source))

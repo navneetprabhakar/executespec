@@ -4056,6 +4056,79 @@ paths:
                     items:
                       $ref: "#/components/schemas/TierLifecycleRow"
 
+  /admin/analytics/llm-usage-audit:
+    get:
+      tags: [Admin Analytics]
+      summary: Query the canonical tenant LLM-attempt ledger
+      description: |
+        Returns bounded JSON containing physical provider attempts, including failed retries and
+        failovers, plus tenant-scoped rollups and reconciliation status. SUPER_ADMIN may name any
+        organization; ORG_ADMIN may name only their own organization. BILLING_ADMIN, developers,
+        and project-only roles cannot read attempt-level facts. Dates are inclusive calendar dates
+        in the supplied IANA timezone and are converted to a half-open instant range. Known USD is
+        explicitly a lower bound when a failed provider attempt did not report cost.
+      parameters:
+        - { name: orgId, in: query, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: timezone, in: query, schema: { type: string, default: UTC, example: Asia/Kolkata } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, maximum: 100000, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: Tenant-scoped usage audit; Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmUsageAuditReport"
+        "400": { description: Invalid/broad date window, timezone, or pagination }
+        "403": { description: Caller is not SUPER_ADMIN or own-tenant ORG_ADMIN }
+
+  /admin/analytics/llm-usage-audit.json:
+    get:
+      tags: [Admin Analytics]
+      summary: Download a bounded JSON usage audit
+      description: Same tenant/date/RBAC contract as the query endpoint. Attempt rows remain capped at 500; this is not an unbounded dump.
+      parameters:
+        - { name: orgId, in: query, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: timezone, in: query, schema: { type: string, default: UTC } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, maximum: 100000, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+      responses:
+        "200":
+          description: Downloadable JSON report with no-store/nosniff headers.
+          headers:
+            Content-Disposition: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmUsageAuditReport"
+        "403": { description: Caller is not SUPER_ADMIN or own-tenant ORG_ADMIN }
+
+  /admin/analytics/llm-usage-audit.csv:
+    get:
+      tags: [Admin Analytics]
+      summary: Download spreadsheet-safe physical LLM attempts
+      description: Same tenant/date/RBAC contract as JSON. Capped at 10,000 rows; truncation is explicit in response headers. Text cells are escaped against spreadsheet formulas.
+      parameters:
+        - { name: orgId, in: query, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: timezone, in: query, schema: { type: string, default: UTC } }
+      responses:
+        "200":
+          description: UTF-8 CSV attempt export.
+          headers:
+            X-Export-Row-Limit: { schema: { type: integer, example: 10000 } }
+            X-Export-Row-Count: { schema: { type: integer } }
+            X-Export-Truncated: { schema: { type: boolean } }
+          content:
+            text/csv:
+              schema: { type: string }
+        "403": { description: Caller is not SUPER_ADMIN or own-tenant ORG_ADMIN }
+
   /admin/tiers/{tier}:
     put:
       tags: [Tier Lifecycle]
@@ -4915,6 +4988,140 @@ components:
             type: integer
         creditDefinition:
           type: string
+
+    LlmUsageAuditReport:
+      type: object
+      required: [schemaVersion, source, orgId, window, limits, page, totals, rollups, attempts, reconciliation]
+      properties:
+        schemaVersion: { type: integer, example: 3 }
+        source: { type: string, enum: [canonical_llm_usage_event] }
+        orgId: { type: string }
+        window:
+          type: object
+          properties:
+            from: { type: string, format: date }
+            to: { type: string, format: date }
+            timezone: { type: string }
+            fromInclusive: { type: string, format: date-time }
+            toExclusive: { type: string, format: date-time }
+        limits:
+          type: object
+          properties:
+            maximumWindowDays: { type: integer, example: 366 }
+            maximumPageSize: { type: integer, example: 500 }
+            rollupRowLimit: { type: integer, example: 500 }
+            rollupsTruncated: { type: boolean }
+            csvRowLimit: { type: integer, example: 10000 }
+        page:
+          type: object
+          properties:
+            number: { type: integer, format: int32 }
+            size: { type: integer, format: int32 }
+            totalRows: { type: integer, format: int64 }
+            totalPages: { type: integer, format: int64 }
+            returnedRows: { type: integer, format: int32 }
+        totals:
+          $ref: "#/components/schemas/LlmUsageTotals"
+        rollups:
+          type: array
+          description: Combined user/project/feature/provider/model/role/run/session/key-source/status groups, capped as declared in limits.
+          items:
+            $ref: "#/components/schemas/LlmUsageRollup"
+        attempts:
+          type: array
+          items:
+            $ref: "#/components/schemas/LlmUsageAttempt"
+        reconciliation:
+          type: object
+          properties:
+            tolerancePolicy: { type: object, additionalProperties: true }
+            runTotals: { $ref: "#/components/schemas/LlmUsageReconciliationResult" }
+            managedAiEvents: { $ref: "#/components/schemas/LlmUsageReconciliationResult" }
+            providerInvoiceStatus: { type: string }
+
+    LlmUsageTotals:
+      type: object
+      properties:
+        attempts: { type: integer, format: int64 }
+        successfulAttempts: { type: integer, format: int64 }
+        failedAttempts: { type: integer, format: int64 }
+        missingTerminalAttempts: { type: integer, format: int64 }
+        inputTokens: { type: integer, format: int64 }
+        outputTokens: { type: integer, format: int64 }
+        cacheReadTokens: { type: integer, format: int64 }
+        cacheWriteTokens: { type: integer, format: int64 }
+        reasoningTokens: { type: integer, format: int64 }
+        knownCostUsdLowerBound: { type: number }
+        unknownCostAttempts: { type: integer, format: int64 }
+        hasUnknownProviderCost: { type: boolean }
+
+    LlmUsageRollup:
+      type: object
+      properties:
+        userId: { type: string, nullable: true }
+        userEmail: { type: string, format: email, nullable: true }
+        projectId: { type: string, nullable: true }
+        projectName: { type: string, nullable: true }
+        feature: { type: string, nullable: true }
+        provider: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        agentRole: { type: string, nullable: true }
+        runId: { type: string, nullable: true }
+        sessionId: { type: string, nullable: true }
+        sourceType: { type: string, nullable: true }
+        sourceId: { type: string, nullable: true }
+        keySource: { type: string, nullable: true }
+        attemptStatus: { type: string, nullable: true }
+        attempts: { type: integer, format: int64 }
+        inputTokens: { type: integer, format: int64 }
+        outputTokens: { type: integer, format: int64 }
+        cacheReadTokens: { type: integer, format: int64 }
+        cacheWriteTokens: { type: integer, format: int64 }
+        reasoningTokens: { type: integer, format: int64 }
+        knownCostUsdLowerBound: { type: number }
+        unknownCostAttempts: { type: integer, format: int64 }
+
+    LlmUsageAttempt:
+      allOf:
+        - $ref: "#/components/schemas/LlmUsageRollup"
+        - type: object
+          description: The attempt shape uses the rollup dimensions but has per-attempt tokens/cost rather than aggregate attempts.
+          properties:
+            id: { type: string }
+            createdAt: { type: string, format: date-time }
+            llmExecutionContextId: { type: string, nullable: true }
+            taskId: { type: string, nullable: true }
+            stepId: { type: string, nullable: true }
+            retryOf: { type: string, nullable: true }
+            correlationId: { type: string }
+            modelTier: { type: string }
+            logicalCallId: { type: string }
+            physicalAttemptId: { type: string }
+            parentAttemptId: { type: string, nullable: true }
+            attemptKind: { type: string, enum: [PRIMARY, RETRY, FAILOVER, CACHE_MINT, CAPABILITY] }
+            attemptOrdinal: { type: integer, format: int64 }
+            attemptNumber: { type: integer, format: int32 }
+            latencyMs: { type: integer, format: int64 }
+            knownCostUsd: { type: number, nullable: true }
+            costStatus: { type: string }
+            managedAiCredits: { type: integer, format: int64 }
+            managedAiProjectionStatus: { type: string, enum: [RECORDED, NOT_APPLICABLE, UNRECONCILED, PENDING_TERMINAL] }
+            errorCode: { type: string, nullable: true }
+
+    LlmUsageReconciliationResult:
+      type: object
+      properties:
+        status: { type: string }
+        canonicalKnownCostUsd: { type: number }
+        comparisonCostUsd: { type: number }
+        costDifferenceUsd: { type: number }
+        appliedToleranceUsd: { type: number }
+        tokensCompared: { type: boolean }
+        comparableRecords: { type: integer, format: int64 }
+        missingComparisonRecords: { type: integer, format: int64 }
+        comparisonOnlyRecords: { type: integer, format: int64 }
+        unknownCostAttempts: { type: integer, format: int64 }
+        explanation: { type: string }
 
     OrgDto:
       type: object

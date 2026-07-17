@@ -16,6 +16,7 @@ import java.util.List;
 
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
+import com.navneet.executespec.cost.LlmUsageAttributionResolver;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
@@ -36,6 +37,28 @@ class EmbeddingServiceTest {
   private final OpenAiEmbeddingTransport transport = mock(OpenAiEmbeddingTransport.class);
   private final RunStepUsageRecorder usage = mock(RunStepUsageRecorder.class);
   private final ManagedAiUsageService managedUsage = mock(ManagedAiUsageService.class);
+  private final RunStepUsageRecorder.AttemptHandle attempt =
+      new RunStepUsageRecorder.AttemptHandle(
+          "attempt-1",
+          "logical-1",
+          null,
+          "CAPABILITY",
+          1,
+          "openai",
+          EmbeddingService.DEFAULT_MODEL,
+          "EMBEDDING",
+          "ORG",
+          1,
+          new LlmUsageAttributionResolver.Attribution(
+              "ctx-1",
+              "org-1",
+              "user-1",
+              "project-1",
+              null,
+              "ProjectCodeEmbedding",
+              "PROJECT_REPOSITORY",
+              "repo-1",
+              "repo-1"));
   private final LlmExecutionReference reference =
       new LlmExecutionReference("ctx-1", LlmExecutionScope.customer("org-1"));
   private EmbeddingService service;
@@ -53,6 +76,20 @@ class EmbeddingServiceTest {
             eq("openai"),
             nullable(String.class)))
         .thenReturn(reference);
+    when(usage.prepareProviderCapabilityAttempt(
+            any(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            eq(1)))
+        .thenReturn(attempt);
+    when(usage.recordProviderCapabilitySuccess(
+            eq(attempt), anyString(), anyString(), anyString(), anyString(), anyLong(), any()))
+        .thenReturn("usage-event-1");
   }
 
   @Test
@@ -76,15 +113,23 @@ class EmbeddingServiceTest {
 
     verify(transport, never()).embed(eq("global-key-must-not-win"), anyString(), any());
     verify(usage)
-        .recordProviderCapabilitySuccess(
+        .prepareProviderCapabilityAttempt(
             eq(reference),
             eq("embedding:repo-1"),
-            eq("ProjectCodeEmbedding"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
             eq("embedding.batch"),
             eq("openai"),
             eq(EmbeddingService.DEFAULT_MODEL),
             eq("ORG"),
-            eq(1),
+            eq(1));
+    verify(usage)
+        .recordProviderCapabilitySuccess(
+            eq(attempt),
+            eq("embedding:repo-1"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
+            eq("embedding.batch"),
             anyLong(),
             any());
     verify(managedUsage)
@@ -97,6 +142,7 @@ class EmbeddingServiceTest {
             eq(RunKeyContext.Source.ORG));
     verify(managedUsage)
         .recordSuccessfulCall(
+            eq("usage-event-1"),
             eq("embedding:repo-1"),
             eq("ProjectCodeEmbedding"),
             eq("ProjectCodeEmbedding"),
@@ -172,14 +218,11 @@ class EmbeddingServiceTest {
         .isInstanceOf(IllegalStateException.class);
     verify(usage)
         .recordProviderCapabilityFailure(
-            eq(reference),
+            eq(attempt),
             eq("embedding:source"),
-            eq("Feature"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
             eq("embedding.batch"),
-            eq("openai"),
-            eq(EmbeddingService.DEFAULT_MODEL),
-            eq("USER"),
-            eq(1),
             anyLong(),
             any(IllegalStateException.class));
   }

@@ -281,6 +281,7 @@ public class PrReviewService {
             .deletions(snap == null ? 0 : snap.deletions())
             .diff(snap == null ? "" : snap.diffPreview())
             .provider(aiProvider)
+            .actorUserId(row.getCreatedByUserId())
             .build();
 
     final PrReviewAgent.AgentReview result;

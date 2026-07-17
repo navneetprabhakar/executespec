@@ -35,6 +35,7 @@ public record LlmUsageAuditReport(
       long attempts,
       long successfulAttempts,
       long failedAttempts,
+      long missingTerminalAttempts,
       long inputTokens,
       long outputTokens,
       long cacheReadTokens,
@@ -87,8 +88,16 @@ public record LlmUsageAuditReport(
       String sourceId,
       String taskId,
       String agentRole,
+      String feature,
       String stepId,
       String retryOf,
+      String correlationId,
+      String modelTier,
+      String logicalCallId,
+      String physicalAttemptId,
+      String parentAttemptId,
+      String attemptKind,
+      long attemptOrdinal,
       String provider,
       String model,
       String keySource,
@@ -102,6 +111,8 @@ public record LlmUsageAuditReport(
       long reasoningTokens,
       BigDecimal knownCostUsd,
       String costStatus,
+      long managedAiCredits,
+      String managedAiProjectionStatus,
       String errorCode) {}
 
   public record Reconciliation(

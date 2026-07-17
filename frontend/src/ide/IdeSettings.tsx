@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {
   adminWriteConfirmation,
@@ -831,35 +832,46 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [members, setMembers] = useState<api.MemberUsage[] | null>(null);
+  const [orgs, setOrgs] = useState<api.OrgDto[]>([]);
+  const [auditOrgId, setAuditOrgId] = useState(orgId ?? '');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!orgId) {
+    setLoading(true);
+    if (orgId) {
+      Promise.allSettled([
+        api.getAnalyticsUsage('org', orgId, 30),
+        api.getAnalyticsBilling('org', orgId),
+        api.getAnalyticsMembers(orgId, 30),
+      ])
+        .then(([u, b, m]) => {
+          if (u.status === 'fulfilled') setUsage(u.value);
+          if (b.status === 'fulfilled') setBilling(b.value);
+          if (m.status === 'fulfilled') setMembers(m.value);
+        })
+        .finally(() => setLoading(false));
+    } else {
       setLoading(false);
-      return;
     }
-    Promise.allSettled([
-      api.getAnalyticsUsage('org', orgId, 30),
-      api.getAnalyticsBilling('org', orgId),
-      api.getAnalyticsMembers(orgId, 30),
-    ])
-      .then(([u, b, m]) => {
-        if (u.status === 'fulfilled') setUsage(u.value);
-        if (b.status === 'fulfilled') setBilling(b.value);
-        if (m.status === 'fulfilled') setMembers(m.value);
+    api
+      .adminListOrgs()
+      .then((items) => {
+        setOrgs(items);
+        setAuditOrgId((current) => current || items[0]?.id || '');
       })
-      .finally(() => setLoading(false));
+      .catch(() => setOrgs([]));
   }, [orgId]);
 
-  if (!orgId) return <div className='ide-empty'>No org context — analytics are org-scoped.</div>;
   if (loading) return <IdeLoader label='Loading analytics…' />;
 
   const costEntries = usage ? Object.entries(usage.costByModel || {}) : [];
   return (
     <>
-      <div className='ide-sub' style={{marginTop: -6}}>
-        Scoped to your org · last 30d.
-      </div>
+      {orgId && (
+        <div className='ide-sub' style={{marginTop: -6}}>
+          Scoped to your org · last 30d.
+        </div>
+      )}
 
       {usage && (
         <>
@@ -949,6 +961,36 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
             ))}
           </AdminList>
         </>
+      )}
+
+      <div className='ide-h2'>Audit tenant</div>
+      <div className='ide-card'>
+        <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+          Organization
+          <select
+            className='ide-input'
+            aria-label='Usage audit organization'
+            value={auditOrgId}
+            onChange={(event) => setAuditOrgId(event.target.value)}
+          >
+            {orgs.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · {item.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 7}}>
+          SUPER_ADMIN can select any tenant. Every query remains explicitly tenant-scoped; there is
+          no accidental cross-tenant combined export.
+        </div>
+      </div>
+      {auditOrgId && (
+        <LlmUsageAuditPanel
+          key={auditOrgId}
+          orgId={auditOrgId}
+          scopeLabel={`Operator view for ${orgs.find((item) => item.id === auditOrgId)?.name || auditOrgId}`}
+        />
       )}
     </>
   );

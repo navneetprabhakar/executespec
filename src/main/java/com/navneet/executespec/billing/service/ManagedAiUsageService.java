@@ -138,6 +138,27 @@ public class ManagedAiUsageService {
       RunCostTracker.CallUsage usage,
       RunKeyContext keys,
       RunKeyContext.Source source) {
+    recordSuccessfulCall(
+        null, runId, taskId, agentRole, stepId, provider, model, usage, keys, source);
+  }
+
+  /**
+   * Projects one immutable canonical provider-attempt fact into the managed-credit ledger. The
+   * exact usage-event id makes reconciliation deterministic and prevents a retry/failover with the
+   * same run/model/timestamp from being charged against the wrong attempt.
+   */
+  @Transactional
+  public void recordSuccessfulCall(
+      String usageEventId,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String provider,
+      String model,
+      RunCostTracker.CallUsage usage,
+      RunKeyContext keys,
+      RunKeyContext.Source source) {
     if (!properties.isEnabled() || usage == null || !modelClassifier.managedAiEnabled(model)) {
       return;
     }
@@ -168,6 +189,7 @@ public class ManagedAiUsageService {
             user.userId(),
             user.orgId(),
             period,
+            usageEventId,
             runId,
             taskId,
             agentRole,

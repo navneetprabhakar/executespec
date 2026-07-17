@@ -10,6 +10,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -614,54 +616,61 @@ public class LlmRouter {
       RunKeyContext.Source source,
       RunKeyContext keys) {
     RuntimeException lastError = null;
+    boolean geminiAuditedTransport = "gemini".equalsIgnoreCase(request.provider());
+    boolean anthropicAuditedTransport = "anthropic".equalsIgnoreCase(request.provider());
+    boolean providerOwnsPhysicalAccounting = geminiAuditedTransport || anthropicAuditedTransport;
+    AtomicInteger physicalAttemptOrdinal = new AtomicInteger();
+    AtomicReference<String> parentAttemptId = new AtomicReference<>(request.retryOf());
+    GeminiNativeToolClient.AuditContext geminiAuditContext =
+        geminiAuditedTransport
+            ? new GeminiNativeToolClient.AuditContext(
+                request, source.name(), physicalAttemptOrdinal, parentAttemptId)
+            : null;
+    PhysicalAttemptChain anthropicAuditContext =
+        anthropicAuditedTransport
+            ? new PhysicalAttemptChain(
+                request, source.name(), keys, source, physicalAttemptOrdinal, parentAttemptId)
+            : null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+      // Audit intent is write-ahead and fail-closed. If this durable append fails, the provider
+      // transport is never invoked and no unaccounted Enterprise spend can occur.
+      if (!providerOwnsPhysicalAccounting) {
+        stepUsageRecorder.prepareAttempt(
+            request, request.provider(), request.model(), source.name(), attempt);
+      }
       long start = System.currentTimeMillis();
+      ChatResponse resp;
+      CanonicalDispatchResult canonicalResult = null;
       try {
-        ChatResponse resp = dispatch(request, tools, resolvedKey);
-        long elapsed = System.currentTimeMillis() - start;
-        metrics.recordLlmLatency(
-            request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
-        metrics.recordKeySource(request.provider(), source.name());
-        String runId = request.context().runId();
-        String taskId = request.context().taskId();
-        RunCostTracker.CallUsage callUsage =
-            costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-        stepUsageRecorder.recordSuccess(
-            request,
-            request.provider(),
-            request.model(),
-            source.name(),
-            attempt,
-            elapsed,
-            callUsage,
-            resp);
-        managedAiUsageService.recordSuccessfulCall(
-            runId,
-            taskId,
-            request.agentRole(),
-            request.stepId(),
-            request.provider(),
-            request.model(),
-            callUsage,
-            keys,
-            source);
-        RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
-        broadcaster.emit(
-            runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
-        log.info(
-            "LlmRouter <- {} {} ok in {}ms (attempt {})",
-            request.provider(),
-            request.model(),
-            elapsed,
-            attempt);
-        return resp;
+        // Keep this try/catch strictly around the provider transport. Once a provider has returned
+        // successfully, no cost/accounting/telemetry projection is allowed to turn that physical
+        // success into a provider failure or cause the exact same request to be spent again.
+        if (geminiAuditedTransport) {
+          GeminiNativeToolClient.AuditedCallResult geminiResult =
+              callGeminiAudited(request, tools, resolvedKey, geminiAuditContext);
+          canonicalResult =
+              new CanonicalDispatchResult(
+                  geminiResult.response(),
+                  geminiResult.callUsage(),
+                  geminiResult.usageEventId(),
+                  geminiResult.costProjectionAvailable());
+          resp = canonicalResult.response();
+        } else if (anthropicAuditedTransport) {
+          canonicalResult =
+              callAnthropicAudited(request, tools, resolvedKey, anthropicAuditContext);
+          resp = canonicalResult.response();
+        } else {
+          resp = dispatch(request, tools, resolvedKey);
+        }
       } catch (RuntimeException e) {
         long elapsed = System.currentTimeMillis() - start;
         metrics.recordLlmLatency(
             request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
         metrics.recordKeySource(request.provider(), source.name());
-        stepUsageRecorder.recordFailure(
-            request, request.provider(), request.model(), source.name(), attempt, elapsed, e);
+        if (!providerOwnsPhysicalAccounting) {
+          stepUsageRecorder.recordFailure(
+              request, request.provider(), request.model(), source.name(), attempt, elapsed, e);
+        }
         log.warn(
             "LlmRouter <- {} {} FAILED in {}ms (attempt {}/{}): {}",
             request.provider(),
@@ -680,8 +689,157 @@ public class LlmRouter {
         }
         throw e;
       }
+
+      long elapsed = System.currentTimeMillis() - start;
+      recordPostSuccessMetric(
+          "transport_metrics",
+          () -> {
+            metrics.recordLlmLatency(
+                request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
+            metrics.recordKeySource(request.provider(), source.name());
+          });
+      String runId = request.context().runId();
+      String taskId = request.context().taskId();
+
+      RunCostTracker.CallUsage callUsage;
+      boolean costProjectionAvailable;
+      String canonicalUsageEventId;
+      if (canonicalResult != null) {
+        callUsage = canonicalResult.callUsage();
+        costProjectionAvailable = canonicalResult.costProjectionAvailable();
+        canonicalUsageEventId = canonicalResult.usageEventId();
+        metrics.recordLlmPostSuccessProjection(
+            "run_cost", costProjectionAvailable ? "ok" : "failed");
+      } else {
+        costProjectionAvailable = true;
+        canonicalUsageEventId = null;
+        try {
+          callUsage = costTracker.record(runId, taskId, request.provider(), request.model(), resp);
+          metrics.recordLlmPostSuccessProjection("run_cost", "ok");
+        } catch (RuntimeException projectionFailure) {
+          costProjectionAvailable = false;
+          callUsage = unknownCostUsage(request, resp);
+          recordPostSuccessProjectionFailure(request, "run_cost", projectionFailure);
+        }
+      }
+
+      final RunCostTracker.CallUsage usageForLedger = callUsage;
+      final int physicalAttempt = attempt;
+      final String[] usageEventId = {canonicalUsageEventId};
+      if (canonicalResult == null) {
+        recordPostSuccessMetric(
+            "attempt_ledger",
+            () ->
+                usageEventId[0] =
+                    stepUsageRecorder.recordSuccess(
+                        request,
+                        request.provider(),
+                        request.model(),
+                        source.name(),
+                        physicalAttempt,
+                        elapsed,
+                        usageForLedger,
+                        resp));
+      }
+
+      if (costProjectionAvailable) {
+        recordPostSuccessMetric(
+            "managed_ai",
+            () ->
+                managedAiUsageService.recordSuccessfulCall(
+                    usageEventId[0],
+                    runId,
+                    taskId,
+                    request.agentRole(),
+                    request.stepId(),
+                    request.provider(),
+                    request.model(),
+                    usageForLedger,
+                    keys,
+                    source));
+      } else {
+        // A negative sentinel in the canonical row makes the cost explicitly unknown. Do not feed
+        // it into the managed-credit projection; reconciliation will expose the missing projection.
+        metrics.recordLlmPostSuccessProjection("managed_ai", "skipped_unknown_cost");
+      }
+
+      recordPostSuccessMetric(
+          "token_event",
+          () -> {
+            RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
+            broadcaster.emit(
+                runId,
+                RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
+          });
+      log.info(
+          "LlmRouter <- {} {} ok in {}ms (attempt {})",
+          request.provider(),
+          request.model(),
+          elapsed,
+          attempt);
+      return resp;
     }
     throw lastError; // unreachable: loop body always returns or throws
+  }
+
+  private void recordPostSuccessMetric(String projection, Runnable action) {
+    try {
+      action.run();
+      metrics.recordLlmPostSuccessProjection(projection, "ok");
+    } catch (RuntimeException projectionFailure) {
+      metrics.recordLlmPostSuccessProjection(projection, "failed");
+      log.error(
+          "LLM post-success projection failed projection={} (provider response will not be"
+              + " retried): {}",
+          projection,
+          projectionFailure.getClass().getSimpleName());
+    }
+  }
+
+  private void recordPostSuccessProjectionFailure(
+      LlmRequest request, String projection, RuntimeException failure) {
+    metrics.recordLlmPostSuccessProjection(projection, "failed");
+    log.error(
+        "LLM post-success projection failed run={} task={} provider={} projection={}"
+            + " (provider response will not be retried): {}",
+        request.context().runId(),
+        request.context().taskId(),
+        request.provider(),
+        projection,
+        failure.getClass().getSimpleName());
+  }
+
+  /**
+   * Preserve the successful physical-attempt fact when the in-memory cost projection itself fails.
+   * Cost {@code -1} is the report's explicit unknown-cost sentinel; it must never be projected into
+   * managed credits. Generic token fields remain useful evidence without inventing a price.
+   */
+  private static RunCostTracker.CallUsage unknownCostUsage(LlmRequest request, ChatResponse resp) {
+    var usage = resp == null || resp.getMetadata() == null ? null : resp.getMetadata().getUsage();
+    long input = usage == null || usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
+    long output =
+        usage == null || usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
+    long cacheWrite = responseMetadataLong(resp, "cache_creation_input_tokens");
+    long cacheRead = responseMetadataLong(resp, "cache_read_input_tokens");
+    long thinking = responseMetadataLong(resp, "thinking_tokens");
+    long reasoning = thinking > 0 ? thinking : responseMetadataLong(resp, "reasoning_tokens");
+    if (thinking > 0) output = Math.min(Long.MAX_VALUE, output + thinking);
+    return new RunCostTracker.CallUsage(
+        request.provider(),
+        request.model(),
+        input,
+        output,
+        cacheWrite,
+        cacheRead,
+        -1.0,
+        0,
+        reasoning);
+  }
+
+  private static long responseMetadataLong(ChatResponse response, String key) {
+    if (response == null || response.getMetadata() == null) return 0;
+    Object value = response.getMetadata().get(key);
+    return value instanceof Number number ? Math.max(0, number.longValue()) : 0;
   }
 
   /** Backoff sleep between same-provider retries. Package-private so tests can no-op it (spy). */
@@ -893,6 +1051,16 @@ public class LlmRouter {
   }
 
   private ChatResponse callAnthropic(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    return callAnthropicInternal(r, tools, apiKey, null).response();
+  }
+
+  private CanonicalDispatchResult callAnthropicAudited(
+      LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
+    return callAnthropicInternal(r, tools, apiKey, auditContext);
+  }
+
+  private CanonicalDispatchResult callAnthropicInternal(
+      LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
@@ -911,11 +1079,28 @@ public class LlmRouter {
     // bypass to the low-level AnthropicApi with ToolChoiceAny (the model MUST emit a tool call).
     // Fail-safe: null result → fall through to the normal AnthropicChatModel path, so this can
     // never regress production Anthropic traffic and only runs on an already-failing salvage call.
-    if ("required".equals(r.toolChoice())) {
-      ChatResponse forced =
-          anthropicForcedToolClient.forcedToolCall(
+    if ("required".equals(r.toolChoice())
+        && anthropicForcedToolClient.canAttempt(r.messages(), tools, apiKey)) {
+      RunStepUsageRecorder.AttemptHandle forcedHandle = prepareAnthropicAttempt(auditContext);
+      long forcedStartedAt = System.currentTimeMillis();
+      AnthropicForcedToolClient.ForcedToolCallOutcome forced =
+          anthropicForcedToolClient.forcedToolCallOutcome(
               r.model(), r.messages(), tools, r.maxTokens(), apiKey);
-      if (forced != null) return forced;
+      if (forced.failure() != null || forced.response() == null) {
+        recordAnthropicFailure(
+            auditContext,
+            forcedHandle,
+            forcedStartedAt,
+            forced.failure() == null
+                ? new IllegalStateException("Anthropic forced tool attempt returned no response")
+                : forced.failure());
+      } else if (forced.usable()) {
+        return completeAnthropicSuccess(
+            r, forced.response(), auditContext, forcedHandle, forcedStartedAt);
+      } else {
+        completeAnthropicIntermediateSuccess(
+            r, forced.response(), auditContext, forcedHandle, forcedStartedAt);
+      }
       log.info("Anthropic forced-salvage produced nothing — falling through to auto tool-choice");
     }
     // Prompt caching — must-have for cost control on multi-iteration tasks.
@@ -958,9 +1143,15 @@ public class LlmRouter {
     if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
     if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
+    RunStepUsageRecorder.AttemptHandle primaryHandle = prepareAnthropicAttempt(auditContext);
+    long primaryStartedAt = System.currentTimeMillis();
+    ChatResponse primaryResponse;
     try {
-      return model.call(new Prompt(r.messages(), b.build()));
+      primaryResponse = model.call(new Prompt(r.messages(), b.build()));
+      if (primaryResponse == null)
+        throw new IllegalStateException("Anthropic returned empty response");
     } catch (RuntimeException ex) {
+      recordAnthropicFailure(auditContext, primaryHandle, primaryStartedAt, ex);
       if (!AnthropicModelOptions.isTemperatureDeprecatedError(ex)) throw ex;
       ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
       log.warn(
@@ -977,8 +1168,116 @@ public class LlmRouter {
               .internalToolExecutionEnabled(false);
       if (cache != null) retry.cacheOptions(cache);
       if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
-      return model.call(new Prompt(r.messages(), retry.build()));
+      RunStepUsageRecorder.AttemptHandle retryHandle = prepareAnthropicAttempt(auditContext);
+      long retryStartedAt = System.currentTimeMillis();
+      ChatResponse retryResponse;
+      try {
+        retryResponse = model.call(new Prompt(r.messages(), retry.build()));
+        if (retryResponse == null)
+          throw new IllegalStateException("Anthropic returned empty response");
+      } catch (RuntimeException retryFailure) {
+        recordAnthropicFailure(auditContext, retryHandle, retryStartedAt, retryFailure);
+        throw retryFailure;
+      }
+      return completeAnthropicSuccess(r, retryResponse, auditContext, retryHandle, retryStartedAt);
     }
+    return completeAnthropicSuccess(
+        r, primaryResponse, auditContext, primaryHandle, primaryStartedAt);
+  }
+
+  private RunStepUsageRecorder.AttemptHandle prepareAnthropicAttempt(
+      PhysicalAttemptChain auditContext) {
+    if (auditContext == null) return null;
+    int ordinal = auditContext.attemptOrdinal().incrementAndGet();
+    String attemptKind =
+        ordinal == 1 && auditContext.request().retryOf() != null
+            ? "FAILOVER"
+            : ordinal == 1 ? "PRIMARY" : "RETRY";
+    return stepUsageRecorder.prepareAttempt(
+        auditContext.request(),
+        "anthropic",
+        auditContext.request().model(),
+        auditContext.keySource(),
+        ordinal,
+        attemptKind,
+        auditContext.parentAttemptId().get());
+  }
+
+  private void recordAnthropicFailure(
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt,
+      Throwable failure) {
+    if (auditContext == null || handle == null) return;
+    stepUsageRecorder.recordFailure(
+        handle,
+        auditContext.request(),
+        Math.max(0, System.currentTimeMillis() - startedAt),
+        failure);
+    auditContext.parentAttemptId().set(handle.physicalAttemptId());
+  }
+
+  private CanonicalDispatchResult completeAnthropicSuccess(
+      LlmRequest request,
+      ChatResponse response,
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt) {
+    if (auditContext == null || handle == null) {
+      return new CanonicalDispatchResult(response, null, null, true);
+    }
+    RunCostTracker.CallUsage usage;
+    boolean costProjectionAvailable = true;
+    try {
+      usage =
+          costTracker.record(
+              request.context().runId(),
+              request.context().taskId(),
+              "anthropic",
+              request.model(),
+              response);
+    } catch (RuntimeException projectionFailure) {
+      costProjectionAvailable = false;
+      usage = unknownCostUsage(request, response);
+      log.error(
+          "Anthropic final HTTP success cost projection failed; provider response will not be"
+              + " retried: {}",
+          projectionFailure.getClass().getSimpleName());
+    }
+    String usageEventId =
+        stepUsageRecorder.recordSuccess(
+            handle, request, Math.max(0, System.currentTimeMillis() - startedAt), usage, response);
+    auditContext.parentAttemptId().set(handle.physicalAttemptId());
+    return new CanonicalDispatchResult(response, usage, usageEventId, costProjectionAvailable);
+  }
+
+  /** Account a paid but semantically unusable HTTP 200 before issuing the fallback request. */
+  private void completeAnthropicIntermediateSuccess(
+      LlmRequest request,
+      ChatResponse response,
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt) {
+    CanonicalDispatchResult result =
+        completeAnthropicSuccess(request, response, auditContext, handle, startedAt);
+    if (!result.costProjectionAvailable()) {
+      metrics.recordLlmPostSuccessProjection("managed_ai", "skipped_unknown_cost");
+      return;
+    }
+    recordPostSuccessMetric(
+        "managed_ai",
+        () ->
+            managedAiUsageService.recordSuccessfulCall(
+                result.usageEventId(),
+                request.context().runId(),
+                request.context().taskId(),
+                request.agentRole(),
+                request.stepId(),
+                "anthropic",
+                request.model(),
+                result.callUsage(),
+                auditContext.keys(),
+                auditContext.source()));
   }
 
   /**
@@ -1061,18 +1360,30 @@ public class LlmRouter {
     // to submitPlan only), force Gemini to ANY mode — the model MUST emit a function
     // call. This prevents gemini-2.5-flash's "emit Python code as function call"
     // degradation under heavy prompts that otherwise causes MALFORMED_FUNCTION_CALL.
+    return geminiNativeToolClient.call(geminiRequest(r, tools, apiKey));
+  }
+
+  private GeminiNativeToolClient.AuditedCallResult callGeminiAudited(
+      LlmRequest r,
+      List<ToolCallback> tools,
+      String apiKey,
+      GeminiNativeToolClient.AuditContext auditContext) {
+    return geminiNativeToolClient.callAudited(geminiRequest(r, tools, apiKey), auditContext);
+  }
+
+  private GeminiNativeToolClient.GeminiToolCallRequest geminiRequest(
+      LlmRequest r, List<ToolCallback> tools, String apiKey) {
     boolean forceToolCall = r.toolsOverride() != null && !r.toolsOverride().isEmpty();
-    return geminiNativeToolClient.call(
-        GeminiNativeToolClient.GeminiToolCallRequest.builder()
-            .model(r.model())
-            .messages(r.messages())
-            .tools(tools)
-            .temperature(r.temperature())
-            .maxOutputTokens(r.maxTokens())
-            .forceToolCall(forceToolCall)
-            .apiKey(apiKey)
-            .readTimeoutSeconds(r.readTimeoutSeconds())
-            .build());
+    return GeminiNativeToolClient.GeminiToolCallRequest.builder()
+        .model(r.model())
+        .messages(r.messages())
+        .tools(tools)
+        .temperature(r.temperature())
+        .maxOutputTokens(r.maxTokens())
+        .forceToolCall(forceToolCall)
+        .apiKey(apiKey)
+        .readTimeoutSeconds(r.readTimeoutSeconds())
+        .build();
   }
 
   private ChatResponse callOpenAi(LlmRequest r, List<ToolCallback> tools, String apiKey) {
@@ -1193,4 +1504,18 @@ public class LlmRouter {
         ? model.substring(0, model.length() - "-native".length())
         : model;
   }
+
+  private record PhysicalAttemptChain(
+      LlmRequest request,
+      String keySource,
+      RunKeyContext keys,
+      RunKeyContext.Source source,
+      AtomicInteger attemptOrdinal,
+      AtomicReference<String> parentAttemptId) {}
+
+  private record CanonicalDispatchResult(
+      ChatResponse response,
+      RunCostTracker.CallUsage callUsage,
+      String usageEventId,
+      boolean costProjectionAvailable) {}
 }

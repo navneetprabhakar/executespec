@@ -45,6 +45,9 @@ public class RunStepUsage {
   @Column(name = "llm_execution_context_id", length = 64)
   private String llmExecutionContextId;
 
+  @Column(name = "correlation_id", nullable = false, length = 96)
+  private String correlationId;
+
   @Column(name = "org_id", length = 64)
   private String orgId;
 
@@ -89,6 +92,24 @@ public class RunStepUsage {
 
   @Column(name = "model", nullable = false, length = 128)
   private String model;
+
+  @Column(name = "model_tier", nullable = false, length = 32)
+  private String modelTier;
+
+  @Column(name = "logical_call_id", nullable = false, length = 96)
+  private String logicalCallId;
+
+  @Column(name = "physical_attempt_id", nullable = false, length = 160)
+  private String physicalAttemptId;
+
+  @Column(name = "parent_attempt_id", length = 160)
+  private String parentAttemptId;
+
+  @Column(name = "attempt_kind", nullable = false, length = 24)
+  private String attemptKind;
+
+  @Column(name = "attempt_ordinal", nullable = false)
+  private long attemptOrdinal;
 
   @Column(name = "input_tokens", nullable = false)
   private long inputTokens;

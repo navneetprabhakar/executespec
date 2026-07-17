@@ -37,6 +37,9 @@ public class ManagedAiUsageEvent {
   @Column(name = "agent_session_id")
   private String agentSessionId;
 
+  @Column(name = "usage_event_id", length = 160)
+  private String usageEventId;
+
   @Column(name = "source_type", nullable = false, length = 32)
   private String sourceType;
 

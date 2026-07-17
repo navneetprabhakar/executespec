@@ -21,3 +21,17 @@ groups:
           silence_policy: >-
             Silence only during a recorded database maintenance window with submissions paused;
             reconcile affected provider attempts before clearing the incident.
+      - alert: CanonicalLlmUsageTerminalMissing
+        expr: executespec_v2_llm_usage_stale_intents > 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "LLM provider attempts are missing terminal usage facts"
+          description: >-
+            One or more write-ahead provider-attempt intents have remained without an immutable
+            terminal fact beyond the configured five-minute integrity window.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec/blob/main/docs/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure

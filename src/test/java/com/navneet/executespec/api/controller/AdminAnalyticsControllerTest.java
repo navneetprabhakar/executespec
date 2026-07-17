@@ -17,6 +17,7 @@ import com.navneet.executespec.cost.LlmUsageAuditQuery;
 import com.navneet.executespec.cost.LlmUsageAuditService;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.server.ResponseStatusException;
 
 class AdminAnalyticsControllerTest {
@@ -104,6 +105,46 @@ class AdminAnalyticsControllerTest {
                     principal))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("403");
+  }
+
+  @Test
+  void developerCannotReadPhysicalAttemptFacts() {
+    AppUserDetails principal = principal("user-1", "org-a", "USER", "DEVELOPER");
+
+    assertThatThrownBy(
+            () ->
+                controller.llmUsageAudit(
+                    "org-a",
+                    LocalDate.of(2026, 7, 1),
+                    LocalDate.of(2026, 7, 31),
+                    "UTC",
+                    0,
+                    100,
+                    principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("403");
+  }
+
+  @Test
+  void superAdminCanDownloadAnyOrgJsonWithNoStoreHeaders() {
+    AppUserDetails principal = principal("root", "operator-org", "SUPER_ADMIN", "DEVELOPER");
+
+    var response =
+        controller.llmUsageAuditJson(
+            "customer-org",
+            LocalDate.of(2026, 7, 1),
+            LocalDate.of(2026, 7, 31),
+            "Asia/Kolkata",
+            0,
+            500,
+            principal);
+
+    verify(llmUsageAuditService).report(any(LlmUsageAuditQuery.class));
+    org.assertj.core.api.Assertions.assertThat(
+            response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+        .contains("llm-usage-customer-org-2026-07-01-to-2026-07-31.json");
+    org.assertj.core.api.Assertions.assertThat(response.getHeaders().getFirst("Cache-Control"))
+        .isEqualTo("no-store");
   }
 
   @Test

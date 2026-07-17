@@ -124,6 +124,18 @@ public class EmbeddingService {
     for (int from = 0; from < texts.size(); from += BATCH_SIZE) {
       batchNumber++;
       List<String> batch = texts.subList(from, Math.min(from + BATCH_SIZE, texts.size()));
+      String taskId = "embedding.batch." + batchNumber;
+      var attempt =
+          usageRecorder.prepareProviderCapabilityAttempt(
+              reference,
+              runId,
+              taskId,
+              "EmbeddingService",
+              "embedding.batch",
+              PROVIDER,
+              model,
+              dispatch.keySource().name(),
+              batchNumber);
       long started = System.currentTimeMillis();
       OpenAiEmbeddingTransport.Result result;
       try {
@@ -131,14 +143,11 @@ public class EmbeddingService {
       } catch (RuntimeException providerFailure) {
         long latency = Math.max(0, System.currentTimeMillis() - started);
         usageRecorder.recordProviderCapabilityFailure(
-            reference,
+            attempt,
             runId,
-            feature,
+            taskId,
+            "EmbeddingService",
             "embedding.batch",
-            PROVIDER,
-            model,
-            dispatch.keySource().name(),
-            batchNumber,
             latency,
             providerFailure);
         throw providerFailure;
@@ -149,19 +158,12 @@ public class EmbeddingService {
       double cost = inputTokens * inputCostPerMillionUsd / 1_000_000d;
       RunCostTracker.CallUsage callUsage =
           new RunCostTracker.CallUsage(PROVIDER, model, inputTokens, 0, 0, 0, cost, batchNumber, 0);
-      usageRecorder.recordProviderCapabilitySuccess(
-          reference,
-          runId,
-          feature,
-          "embedding.batch",
-          PROVIDER,
-          model,
-          dispatch.keySource().name(),
-          batchNumber,
-          latency,
-          callUsage);
+      String usageEventId =
+          usageRecorder.recordProviderCapabilitySuccess(
+              attempt, runId, taskId, "EmbeddingService", "embedding.batch", latency, callUsage);
       try {
         managedAiUsageService.recordSuccessfulCall(
+            usageEventId,
             runId,
             feature,
             feature,
@@ -172,7 +174,7 @@ public class EmbeddingService {
             managedKeys,
             dispatch.keySource());
       } catch (RuntimeException accountingFailure) {
-        // The provider succeeded and V283 already holds the canonical physical-attempt row. Do not
+        // The provider succeeded and the canonical physical-attempt row already exists. Do not
         // misclassify or repeat the provider call because the secondary managed-credit projection
         // failed; reconciliation will expose the discrepancy for operator repair.
         log.error(
