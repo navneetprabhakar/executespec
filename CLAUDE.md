@@ -223,6 +223,11 @@ npm --prefix frontend run lint
 # Run locally
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
 
+# Guarded live-provider fixture (reserve exact provider/model/run scope first)
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -Plive-llm-test \
+  -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
+  spring-boot:run -Dspring-boot.run.profiles=local
+
 # Local observability stack
 cd observability && docker compose up -d
 # Grafana http://localhost:3001 (admin/admin), Prometheus :9090, Tempo :3200

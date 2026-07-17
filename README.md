@@ -119,6 +119,19 @@ Run submit advanced options include continuation controls: "Confirm model upgrad
 
 Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane.
 
+Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
+`scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:
+
+```bash
+mvn -Plive-llm-test \
+  -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
+  spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+The Spring Boot plugin propagates the profile's safety properties into the forked application JVM.
+Without both the profile and a matching reservation, `LlmRouter` rejects provider dispatch. Reconcile
+or conservatively close the reservation after the test; never reuse it for a different run.
+
 Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
 
 **Local observability (optional)**
