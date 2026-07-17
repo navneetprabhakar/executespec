@@ -4,11 +4,11 @@
 
 **Tracker state:** LIVE — update after every material implementation, verification, spend, commit, PR, deployment, benchmark, blocker or contradiction
 
-**Last updated:** 2026-07-17 22:02 IST — Phase 4 deterministic implementation is locally complete: full backend verify, focused provider/ledger tests, frontend gates, V292→V293 upgrade, V1→V293 clean install/DDL validation and docs integrity pass; checkpoint is next, then Phase 5 security/isolation
+**Last updated:** 2026-07-17 22:05 IST — Phase 4 deterministic implementation and synchronized checkpoint are complete and pushed: B `e6cef79aa`, C unchanged `8434b92b`, D `26bb3bf`; Phase 5 security/isolation is active next
 
 **Owner/session:** Codex / active persistent goal session
 
-**Current phase:** Phases 1–3 complete; Phase 4 token/cost deterministic implementation complete locally; Phase 5 security/isolation hardening is next after checkpoint
+**Current phase:** Phases 1–4 complete at synchronized branch checkpoints; Phase 5 security/isolation hardening is next
 
 **Release decision:** NOT READY
 **Benchmark spend authorization:** CLOSED — official-rules, product-QA, model-switch and local-canary gates have not passed
@@ -17,9 +17,9 @@
 
 | Repository | Branch and HEAD | Remote relationship | Worktree | Baseline comparison | PR/CI | Environment |
 | --- | --- | --- | --- | --- | --- | --- |
-| Backend/Web (B) | `codex/brownfield-rca-remediation-20260717` at pushed checkpoint `126a2bec4` | checkpoint matches remote; Phase 4 changes are local/uncommitted | dirty: Phase 4 ready for checkpoint | Branch-only comparison must be refreshed before PR | Full `mvn verify` 3,137/3,137; Phase 4 focused backend 71/71; usage UI 2/2 + build/format/lint; tagged V292→V293 PostgreSQL 1/1; clean-install/DDL validation 6/6 | Local; deployed tuple unverified |
+| Backend/Web (B) | Phase 4 implementation checkpoint `e6cef79aa`; later tracker-only sync may advance branch HEAD | Phase 4 implementation checkpoint pushed | clean immediately after checkpoint; tracker sync only afterward | Branch-only comparison must be refreshed before PR | Full `mvn verify` 3,137/3,137; Phase 4 focused backend 71/71; usage UI 2/2 + build/format/lint; tagged V292→V293 PostgreSQL 1/1; clean-install/DDL validation 6/6 | Local; deployed tuple unverified |
 | CLI/OpenTUI/VS Code (C) | `codex/brownfield-rca-remediation-20260717` at `8434b92b` | matches pushed remote branch | clean after checkpoint | Branch-only comparison must be refreshed before PR | Core 166/166; CLI 763/763; VS Code 14/14; build/format PASS | Local/npm/dev tuple unverified |
-| Documentation (D) | `codex/brownfield-rca-remediation-20260717` at `16d0afa` | matches pushed remote branch | clean after checkpoint | Branch-only comparison must be refreshed before PR | Docs 56/56; strict integrity 0 findings | Local/canonical publication unverified |
+| Documentation (D) | Phase 4 evidence checkpoint `26bb3bf`; later status-sync commits may advance branch HEAD | Phase 4 evidence checkpoint pushed | clean immediately after checkpoint; status sync only afterward | Branch-only comparison must be refreshed before PR | Docs 86/86; strict integrity 0 findings | Local/canonical publication unverified |
 
 This is the verified local Step 3 checkpoint, not a release tuple. Open-PR/CI, deployed versions,
 effective flags, persona/provider runtime evidence, and later benchmark gates remain separate work.
@@ -41,7 +41,7 @@ Each row maps exactly to the immutable requirement with the same ID. `Commit/PR:
 | ID | Requirement | Status | Owner/session | Repos | Implementation evidence | Test/runtime evidence | Blockers | Next action | Commit/PR | Environment | Cost/spend | Completion gate |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | CTRL-01 | Immutable plan + live tracker | PASS | Codex/active | B,D | Master, tracker and current-state audit are committed and cross-linked | Docs 56/56; strict integrity 0 findings; synchronized checkpoint pushed | None | Continue updating this tracker after every material gate | B `2f117554f`; D `16d0afa` | Local/GitHub | $0 | Cold-resume documents and committed links exist |
-| AUD-01 | Git/remotes/divergence/dirty state | VERIFYING | Codex/active | B,C,D | Full HEAD/remote SHAs, branch-only commit lists and dirty-state qualification captured in `enterprise-hardening-current-state-audit-2026-07-17.md` | B=`4c9442bd8634305686b372efc746427b73cb506f` (remote `31682354e4d2d0f2965810c18c9ae433ac9aa9bc`); C=`46970f3815cbd22788acbde83a1a2880cc7e91ea`; D=`c906287295188158514be495339f8449382e3d9a` | Uncommitted active work means tuple will move | Refresh SHAs at checkpoint and preserve before/after tuple | Pending | Local | $0 | All repositories reproducibly inventoried |
+| AUD-01 | Git/remotes/divergence/dirty state | PASS_PHASE_4 | Codex/active | B,C,D | Phase 4 tuple is B `e6cef79aa7dce30053b90434b084aa9c302d24ae`, C `8434b92b9c0d1ff1919183405f7f2a3022259d4b`, D `26bb3bf10416837338857bc6f7dd438f4a8ce7a8` | Each local SHA equals its branch remote and all three worktrees were clean immediately after push | Tuple will move when Phase 5 begins | Preserve this tuple as the Phase 4 before-state | Pushed | Local/GitHub | $0 | All repositories reproducibly inventoried |
 | AUD-02 | Per-commit patch review | NOT_STARTED | Codex/active | B,C,D | None | None | None | Review every branch commit patch | Pending | Local | $0 | Every patch classified |
 | AUD-03 | PR and CI audit | AUDITING | Codex/active | B,C,D | Open drafts: B #284→dev, C #21→main, D #1→main | B/C latest pushed CI green; D current pushed head red on duplicate reason IDs; duplicate IDs corrected locally and full 55-test docs gate now passes | B unpushed commit + new local docs; D fix unpushed | Preserve exact PR/run URLs in audit artifact, recheck after checkpoints | Pending | GitHub/local | $0 | Exact PR/check state recorded |
 | AUD-04 | Deployed/client version compatibility | FAIL | Codex/active | B,C,D | Source root declares backend 2.0.0/V293; CLI workspace root 1.0.0 | Dev health/root HTTP 200; npm reports `executespec` 1.0.2, `@executespec/cli` 1.0.1, `@executespec/core` 1.0.2; deployed commit still unverified | Version/package tuple inconsistent | Inspect package manifests and authenticated dev build identity | Pending | Dev/npm/local | $0 | Exact compatible tuple |
@@ -87,7 +87,7 @@ Each row maps exactly to the immutable requirement with the same ID. `Commit/PR:
 | CHAT-09 | Per-turn and confirmed-action budgets | VERIFYING | `/root/chat_guardrails` complete | B,C,D | Chat caps remain 5 rounds/12 tools/40K tokens/$0.50/60K chars; V292 scope-hashed shared action caps are architecture 1m/$10/64, docs 200k/$3/2, review 300k/$5/2 | Limit and confirmation budget tests PASS | Live provider boundary/cost-ledger canary remains | Run bounded live denial at each action cap during provider QA | Pending | Local/dev | $0 | Hard auditable limits |
 | CHAT-10 | Safe guardrail outage behavior | PASS | `/root/chat_guardrails` complete | B,D | Guardrail resolution failure uses HIGH fail-safe, emits warning and metric instead of LOW | Resolver tests PASS | Alert rule/deployed signal is part of SEC-11 | Add monitoring alert and deployed outage probe | Pending | Local | $0 | Safe posture + alert |
 | CHAT-11 | Immutable decisions + injection corpus | VERIFYING | `/root/chat_guardrails` complete | B,D | Security decisions remain secret-free/hash-chained; V292 rejects audit UPDATE/DELETE and transaction-advisory-locks the tail read/append across JVMs | Hash-chain/audit tests PASS; real V291→V292 mutation rejection PASS | Full deployed runtime injection corpus and long-term WORM retention/archival policy remain | Run runtime corpus and define retention/archive control | Pending | Local/Postgres/dev | $0 | Replayable cross-JVM audit + adversarial proof |
-| USAGE-01 | Canonical usage event | PASS_LOCAL | Codex/active | B,D | V293 adds explicit correlation/model tier, logical-call/physical-attempt/parent/ordinal/kind fields, exact managed-credit linkage, canonical joined view and immutable write-ahead attempt intent; Enterprise reporting is now intent-first so a process-lost terminal cannot disappear | Real PostgreSQL 16 V292→V293 1/1 PASS: legacy backfill, long IDs, exact credits, missing-terminal report visibility, byte-identical replay, material mutation rejection and idempotent migration rerun; focused backend 71/71 and clean-install/DDL validation 6/6 PASS | V293 remains uncommitted; full-system live provider/runtime reconciliation remains later QA | Finish final Phase 4 compile/format/diff gates, then checkpoint | Pending | Local/Postgres 16 | $0 | Every customer attempt has durable intent, terminal fact and exact dimensions |
+| USAGE-01 | Canonical usage event | PASS_LOCAL | Codex/active | B,D | V293 adds explicit correlation/model tier, logical-call/physical-attempt/parent/ordinal/kind fields, exact managed-credit linkage, canonical joined view and immutable write-ahead attempt intent; Enterprise reporting is now intent-first so a process-lost terminal cannot disappear | Real PostgreSQL 16 V292→V293 1/1 PASS: legacy backfill, long IDs, exact credits, missing-terminal report visibility, byte-identical replay, material mutation rejection and idempotent migration rerun; focused backend 71/71 and clean-install/DDL validation 6/6 PASS | Full-system live provider/runtime reconciliation remains later QA | Preserve at B `e6cef79aa`; reconcile bounded live calls on the pinned candidate | B `e6cef79aa`; D `26bb3bf` | Local/Postgres 16 | $0 | Every customer attempt has durable intent, terminal fact and exact dimensions |
 | USAGE-02 | Failed/retry/failover attempts | PASS_LOCAL | Codex + `/root/usage_coverage_audit` | B,D | Outer router isolates transport from projections; Gemini cache mint/cached-404/internal-429 and Anthropic forced-tool/no-tool fallback/temperature-deprecation paths each write ordered intent/terminal facts with exact parent links and no duplicate outer terminal | Provider-attempt cohort 40/40 and full focused Phase 4 backend cohort 71/71 PASS, including paid Anthropic HTTP-200/no-tool accounting before fallback | Live provider invoice reconciliation remains Phase 5/6 evidence, not a deterministic accounting blocker | Preserve in final regression and reconcile bounded live calls later | Pending | Local | $0 | Ordered physical HTTP attempts, retries and failovers reconstruct exactly |
 | USAGE-03 | OpenAI/DeepSeek reasoning tokens | VERIFYING | `/root/usage_attribution` complete | B,D | OpenAI-wire parser captures reasoning-token metadata | `OpenAiNativeToolClientUsageTest` PASS in 40-test cohort | Live native DeepSeek proof deferred to bounded provider QA | Exercise one bounded native call and reconcile returned usage | Pending | Local/dev | $0 | Returned reasoning retained |
 | USAGE-04 | Phase attribution | VERIFYING | Codex/active | B,D | SmartClassifier receives the real run id; architecture summary reuses confirmed actor/budget; PR Review passes the initiator; embeddings use write-ahead per-batch task identity and memory compaction propagates manual/run initiators | ProjectBrief/PR Review 3/3; embedding/recorder 13/13; memory focused cohort PASS | Production-shaped multi-stage run reconciliation remains | Reconcile one multi-stage run after local deployment | Pending | Local/dev | $0 | Phase and actor sums reconcile to exact run facts |
@@ -148,7 +148,7 @@ Each row maps exactly to the immutable requirement with the same ID. `Commit/PR:
 | GLM-02 | Optional 20+20 gate | NOT_STARTED | Future Luna phase | B,D | None | None | First-10 evidence/budget | Decide later | Pending | Benchmark | $0 | Written evidence-based decision |
 | GLM-03 | Independent provider caps | NOT_STARTED | Future Luna phase | B,D | None | None | Usage controls | Implement before dispatch | Pending | Providers | $0/$25 each | Neither cap exceeded |
 | FIX-01 | RCA→fix→regression→rerun | NOT_STARTED | Codex/active | B,C,D | None | None | Findings pending | Open RCAs as found | Pending | All | $0 | Every finding disposition evidenced |
-| REL-01 | Synchronized verified checkpoints | PASS_PHASE_3 | Codex/active | B,C,D | Step 3 checkpoint is B `2f117554f`, C `8434b92b`, D `16d0afa` on the shared branch | Remote SHAs equal local SHAs; all three worktrees clean after push | This is not release approval | Use this tuple as the Phase 4 baseline | Pushed | Local/GitHub | $0 | Verified phase checkpoint exists |
+| REL-01 | Synchronized verified checkpoints | PASS_PHASE_4 | Codex/active | B,C,D | Phase 4 checkpoint is B `e6cef79aa`, C `8434b92b`, D `26bb3bf` on the shared branch | Remote SHAs equal local SHAs; all three worktrees clean after push | This is not release approval | Use this tuple as the Phase 5 baseline | Pushed | Local/GitHub | $0 | Verified phase checkpoint exists |
 | REL-02 | PRs after dev/QA | NOT_STARTED | Codex/active | B,C,D | None | None | Work incomplete | Defer PR update | Pending | GitHub | $0 | CI + QA evidence attached |
 | REL-03 | Release only after gates | NOT_STARTED | Navneet+Codex | B,C,D | None | None | Many open gates | Keep release closed | Pending | Dev/prod/npm | $0 | Full completion audit passes |
 | REL-04 | Final docs/evidence/manuals | NOT_STARTED | Codex/active | B,C,D | None | None | Final tuple absent | Continuously update, reseal at end | Pending | Local/dev | $0 | Reproducible, rendered, secret-free |
@@ -160,23 +160,21 @@ No genuine impasse exists. Runtime credentials, Bitbucket PAT, cloud/DNS authori
 
 ## 5. Immediate next actions
 
-1. Checkpoint the locally green Phase 4 backend/Web and documentation changes without altering the
-   already-clean CLI repository.
-2. Start Phase 5 with SEC-01 through SEC-14: credential lifecycle, secret/artifact scanning,
+1. Start Phase 5 with SEC-01 through SEC-14: credential lifecycle, secret/artifact scanning,
    endpoint/service authorization inventory, public-link abuse, input/tool guardrails, dependency
    posture, audit retention and deployed alert qualification.
-3. Preserve V293 and the Step 3 confirmation/read-only contracts in every regression; keep provider
+2. Preserve V293 and the Step 3 confirmation/read-only contracts in every regression; keep provider
    spend, benchmark infrastructure and DNS changes at zero until their explicit gates pass.
-4. Defer live ORG_ADMIN/SUPER_ADMIN cross-org usage-report proof and provider reconciliation to the
+3. Defer live ORG_ADMIN/SUPER_ADMIN cross-org usage-report proof and provider reconciliation to the
    pinned-candidate runtime gate; deterministic local evidence is complete but not deployed proof.
 
 ### Phase 4 completion/resume state (2026-07-17 22:02 IST)
 
-- Pushed baseline: B `126a2bec4`, C `8434b92b`, D `16d0afa`; all on
+- Pushed Phase 4 tuple: B `e6cef79aa`, C `8434b92b`, D `26bb3bf`; all on
   `codex/brownfield-rca-remediation-20260717`.
-- Local Phase 4 is ready for checkpoint. Do not discard the dirty worktree before commit/push.
-  Backend full verify is 3,137/3,137; focused Phase 4 is 71/71; frontend usage audit is 2/2 plus
-  production build/format/lint; docs are 86/86 with strict integrity at zero findings.
+- Phase 4 is committed and pushed. Backend full verify is 3,137/3,137; focused Phase 4 is 71/71;
+  frontend usage audit is 2/2 plus production build/format/lint; docs are 86/86 with strict
+  integrity at zero findings.
 - New migration reservation: V293 only. Do not create another V293.
 - Active implementation files include `LlmRequest`, `LlmRouter`, `RunStepUsage*`,
   `LlmUsageAttributionResolver`, `LlmUsageAttemptIntent*`, `ManagedAiUsageEvent/Mapper/Service`,
@@ -207,3 +205,4 @@ No genuine impasse exists. Runtime credentials, Bitbucket PAT, cloud/DNS authori
 | 2026-07-17 Phase-4-ledger-2 | Executed the real V292→V293 PostgreSQL rehearsal; added fail-closed pre-dispatch intent, atomic secret-free terminal WAL/replay, actual classifier run identity, shared confirmed architecture-summary context and PR Review initiator attribution. Corrected the earlier integration-profile false-positive in the tracker. | Focused 37/37 PASS; tagged PostgreSQL 16 integration 1/1 PASS; no provider/API call, VM, DNS or infrastructure; $0 |
 | 2026-07-17 Phase-4-ledger-3 | Added ordered Gemini physical-attempt accounting; changed Enterprise usage reporting to intent-first facts with causality/model-tier/correlation and exact managed-credit joins; completed Org/SUPER_ADMIN Web audit surface; made embedding calls write intent before HTTP with per-batch identity; propagated memory-compaction actors. | Gemini/recorder/router 39/39; embedding/recorder 13/13; memory focused PASS; usage UI 2/2 + build/format/lint; tagged PostgreSQL report/migration 1/1; no provider/API call, VM, DNS or infrastructure; $0 |
 | 2026-07-17 Phase-4-ledger-4 | Closed Anthropic provider-internal attempt accounting, including transport failure, forced-tool fallback, paid HTTP-200/no-tool fallback and temperature-deprecation retry; added stale-intent gauge/critical alert and restart-shaped terminal replay evidence. | Provider-attempt 40/40 and full focused backend 71/71 PASS; usage UI 2/2 + production build/format/lint PASS; tagged PostgreSQL V292→V293 1/1 and clean-install/DDL validation 6/6 PASS; no provider/API call, VM, DNS or infrastructure; $0 |
+| 2026-07-17 Phase-4-checkpoint | Fixed the full-suite migration-inventory pin, ran the complete regression, synchronized canonical docs, and pushed the Phase 4 tuple. | B `e6cef79aa` (3,137/3,137), C unchanged `8434b92b`, D `26bb3bf` (86/86, strict integrity clean); $0 |
