@@ -8,6 +8,15 @@ aggregate updates once a task is terminal; it only repairs a non-terminal row wh
 before its first status flush. This is a durable write fence, not proof that an in-flight provider
 call itself can be replayed across JVMs.
 
+Every pessimistic-lock task write (`findByIdForUpdate`) MUST run inside a transaction. Status
+transitions go through `TaskStatusPersistenceService.persist` (`@Transactional` + `@Retryable`), and
+the V250 goal/continuation evidence goes through `TaskStatusPersistenceService.persistGoalDecisionJson`
+(same seam, added 2026-07-17). The executor's inline lock in `persistGoalAndContinuationDecision`
+survives only as the mocked-repo/bounded-constructor fallback. Reaching a pessimistic lock without an
+ambient transaction throws `TransactionRequiredException`: on the normal terminal path a transaction
+exists, but on the fast-fail path (early worker router/provider error) it does not — before the fix
+that silently dropped the goal decision exactly when an operator needed it (RL-2026-07-070).
+
 > Last reviewed: 2026-06-10 (1.0.0-M1).
 >
 > V1 `PipelineHarness` was deleted in deprecation P1-P6 (2026-04-13). The live entry point is `integration/RunOrchestrator`; `harness/` now holds the V2 sequential executor + the workspace + gate primitives that survived from the V1 era.
