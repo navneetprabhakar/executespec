@@ -137,3 +137,26 @@ After all three DeepSeek campaigns close, run the separately planned
 DeepSeek→GLM escalation cohort. Do not change production defaults or Enterprise /
 BYOK single-provider policy before that experiment's cost, quality, latency,
 trajectory, and policy-compliance report is reviewed.
+
+## Tracker cleanup evidence (2026-07-18)
+
+The benchmark VM tracker was inspected directly in PostgreSQL. Rows with
+`FAILED`, `STOPPED`, or `CANCELLED` status were absent (an idempotent cleanup
+returned zero rows). One historical SWE-bench row was also identified as an
+invalid pre-fix run: `86b1eed7-35d5-4daf-8266-997e268a0730` was labelled `DONE`
+despite `0/10`, zero input/output tokens, and no provider evidence. That row was
+deleted from `benchmark_run` (dependent benchmark events/tasks cascade); no
+`pipeline_run`, workspace, trajectory, or valid result was deleted.
+
+Post-cleanup tracker state:
+
+| Run | Status | Evidence |
+|---|---|---|
+| `3da69653-c05b-4099-85aa-0ede3751f611` | DONE | DeepSeek Lite corrected recovery, 6/10, non-zero usage |
+| `e3af80de-5050-4268-b9e1-e16ed53a6ed5` | DONE | GLM 5.2 Lite10, 7/10, official scorer evidence |
+| `6fe55eaf-70dc-461e-9668-a83c6dfb9afb` | RUNNING | one-task DeepSeek TB smoke; retain until terminal evidence is captured |
+
+The active smoke row currently shows zero tracker tokens/cost until its trial
+publishes `TASK_SCORED`; the bridge publishes terminal usage today, while the
+server-side worker ledger already contains live usage. This is a live-progress
+tracking gap to fix or explicitly document before a long campaign.
