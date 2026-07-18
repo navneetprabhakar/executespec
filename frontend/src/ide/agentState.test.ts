@@ -239,7 +239,7 @@ describe('agentState', () => {
     expect(sessionTitle(session)).toHaveLength(54);
     expect(pct(5, 20)).toBe(25);
     expect(pct(5, 0)).toBe(0);
-    expect(currency(4.125)).toBe('$4.13');
+    expect(currency(4.125)).toBe('$4.1250');
     expect(currency(-1)).toBe('n/a');
   });
 
