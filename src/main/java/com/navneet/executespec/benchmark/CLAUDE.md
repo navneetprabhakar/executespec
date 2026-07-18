@@ -77,6 +77,11 @@ Diff capture hardening (RL-2026-06-030): both benchmark paths drain shell output
 runs instead of waiting for process exit before reading stdout, so large diffs cannot deadlock the
 capture helper. Redis `appendonlydir/**` runtime artifacts are excluded; NodeBB/Redis smoke runs can
 otherwise create 100KB+ AOF noise and hide a valid source diff behind a timeout/empty patch.
+Capture first installs the exact `/testbed` (Lite) or `/app` (Pro) repository as `safe.directory`
+in the container's protected global Git config. Do not replace this with command-scope `git -c`:
+the Ubuntu security-backport in the cached Git 2.34 SWE images ignores that scope and still rejects
+the host-UID bind mount as dubious ownership. Container names and workdirs are allow-listed before
+building the shell command; capture fails closed on every non-zero Git exit.
 
 ## Reused from `swebench/` (sandbox layer — sound, not the problem)
 

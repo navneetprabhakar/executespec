@@ -461,6 +461,17 @@ public class BenchmarkGenerationService {
 
   private String captureDiff(
       String containerName, String baseCommit, String workdir, boolean proExcludes) {
+    String cmd = captureDiffCommand(containerName, baseCommit, workdir, proExcludes);
+    ShellResult diff = run(cmd, 120);
+    return captureDiffOutput(diff);
+  }
+
+  static String captureDiffCommand(
+      String containerName, String baseCommit, String workdir, boolean proExcludes) {
+    if (containerName == null || !containerName.matches("bench-gen-[0-9a-f]{8}")) {
+      throw new IllegalArgumentException("invalid benchmark container name");
+    }
+    String safeWorkdir = validatedBenchmarkWorkdir(workdir);
     String diffTarget = validatedDiffTarget(baseCommit);
     String excludes = diffExcludes(proExcludes);
     String cmd =
@@ -468,17 +479,25 @@ public class BenchmarkGenerationService {
             + containerName
             + " sh -c '"
             + "set -e; cd "
-            + workdir
-            + "; git -c safe.directory="
-            + workdir
-            + " add -N --all >/dev/null; git -c safe.directory="
-            + workdir
-            + " diff "
+            + safeWorkdir
+            // Ubuntu's security-backported Git 2.34 ignores safe.directory from command-scope
+            // `git -c`; it accepts the trust boundary only from protected (global/system) config.
+            // The cleanroom is isolated and --rm, and the path is restricted to the two harness
+            // workdirs below, so replace any image default with exactly this repository.
+            + "; git config --global --replace-all safe.directory "
+            + safeWorkdir
+            + "; git add -N --all >/dev/null; git diff "
             + diffTarget
             + excludes
             + "'";
-    ShellResult diff = run(cmd, 120);
-    return captureDiffOutput(diff);
+    return cmd;
+  }
+
+  static String validatedBenchmarkWorkdir(String workdir) {
+    if (!"/testbed".equals(workdir) && !"/app".equals(workdir)) {
+      throw new IllegalArgumentException("invalid benchmark workdir");
+    }
+    return workdir;
   }
 
   static String captureDiffOutput(ShellResult diff) {
