@@ -85,6 +85,11 @@ SECRET_TEXT_PATTERNS = (
                r"(?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 )
 
+PRE_PROVIDER_CONCURRENCY_429 = "PRE_PROVIDER_CONCURRENCY_429"
+AMBIGUOUS_PRESSURE = "AMBIGUOUS_PRESSURE"
+ABORT_AMBIGUOUS = "ABORT_AMBIGUOUS"
+SERVER_CONCURRENCY_MESSAGE = "benchmark generation concurrency exhausted"
+
 
 # ---------- shared ----------
 
@@ -542,6 +547,122 @@ def benchmark_deadline_fields(task_timeout_seconds, shutdown_reserve_seconds, no
     }
 
 
+def classify_generation_http_error(status, body):
+    """Classify only the server's exact semaphore 429 as provably pre-provider."""
+    message = ""
+    try:
+        decoded = json.loads(body or "{}")
+        message = str(decoded.get("message") or decoded.get("error") or "")
+    except (TypeError, ValueError):
+        message = str(body or "")
+    normalized = message.lower()
+    if int(status) == 429 and SERVER_CONCURRENCY_MESSAGE in normalized:
+        return PRE_PROVIDER_CONCURRENCY_429
+    if int(status) == 429 or int(status) in (408, 425, 502, 503, 504):
+        return AMBIGUOUS_PRESSURE
+    return ABORT_AMBIGUOUS
+
+
+def classify_generation_exception(error):
+    text = str(error).lower()
+    pressure_markers = (
+        "429", "rate limit", "too many requests", "connect", "connection",
+        "timed out", "timeout", "reset by peer", "temporarily unavailable",
+    )
+    return AMBIGUOUS_PRESSURE if any(marker in text for marker in pressure_markers) \
+        else ABORT_AMBIGUOUS
+
+
+def apply_failed_request_reservation(budget, reservation_key, classification):
+    """Release only when ExecuteSpec itself proves provider dispatch never started."""
+    if classification == PRE_PROVIDER_CONCURRENCY_429:
+        budget.release(reservation_key)
+        return "RELEASED_PRE_PROVIDER"
+    return "PRESERVED_INDETERMINATE"
+
+
+def lower_concurrency(current):
+    current = max(1, int(current))
+    if current > 4:
+        return 4
+    if current > 2:
+        return 2
+    return 1
+
+
+def dispatch_adaptive_waves(instance_ids, initial_concurrency, run_one):
+    """Dispatch bounded waves and never refill a wave while its requests are in flight.
+
+    Exact server semaphore 429s are safe to retry once the next lower wave starts. Any ambiguous
+    request failure stops all later waves because its provider-spend outcome is unknown.
+    """
+    pending = list(instance_ids)
+    if len(pending) != len(set(pending)):
+        raise ValueError("adaptive dispatch received duplicate instance ids")
+    concurrency = max(1, int(initial_concurrency))
+    results = []
+    transitions = []
+
+    while pending:
+        wave, pending = pending[:concurrency], pending[concurrency:]
+        if len(wave) == 1:
+            wave_results = [run_one(wave[0])]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(wave)) as executor:
+                wave_results = list(executor.map(run_one, wave))
+        results.extend(wave_results)
+
+        retry_pre_provider = [
+            result["instance_id"] for result in wave_results
+            if result and result.get("dispatchClassification") == PRE_PROVIDER_CONCURRENCY_429
+        ]
+        ambiguous = any(
+            result and result.get("dispatchClassification") in
+            (AMBIGUOUS_PRESSURE, ABORT_AMBIGUOUS)
+            for result in wave_results
+        )
+        pressure = bool(retry_pre_provider) or any(
+            result and result.get("dispatchClassification") == AMBIGUOUS_PRESSURE
+            for result in wave_results
+        )
+        if not pressure and not ambiguous:
+            continue
+
+        previous_concurrency = concurrency
+        lowered = lower_concurrency(previous_concurrency) if pressure else previous_concurrency
+        if lowered < previous_concurrency:
+            transitions.append({"from": concurrency, "to": lowered})
+            print(f"adaptive concurrency step-down: {concurrency} -> {lowered}")
+            concurrency = lowered
+
+        if ambiguous:
+            return {
+                "results": results,
+                "remaining": retry_pre_provider + pending,
+                "finalConcurrency": concurrency,
+                "transitions": transitions,
+                "aborted": True,
+            }
+        if retry_pre_provider and concurrency == previous_concurrency:
+            # Already at concurrency 1: do not loop forever on a closed server admission gate.
+            return {
+                "results": results,
+                "remaining": retry_pre_provider + pending,
+                "finalConcurrency": concurrency,
+                "transitions": transitions,
+                "aborted": True,
+            }
+        pending = retry_pre_provider + pending
+
+    return {
+        "results": results,
+        "remaining": [],
+        "finalConcurrency": concurrency,
+        "transitions": transitions,
+        "aborted": False,
+    }
+
+
 def cmd_generate(a):
     if a.k <= 0:
         sys.exit("--k must be positive")
@@ -549,6 +670,12 @@ def cmd_generate(a):
         sys.exit("--concurrency must be positive")
     if a.expected_total <= 0:
         sys.exit("--expected-total must be positive")
+    requested_max_new_tasks = getattr(a, "max_new_tasks", None)
+    if requested_max_new_tasks is not None and int(requested_max_new_tasks) <= 0:
+        sys.exit("--max-new-tasks must be positive")
+    max_new_tasks = int(requested_max_new_tasks or 0)
+    if max_new_tasks and a.k != 1:
+        sys.exit("--max-new-tasks is valid only for a resumable pass@1 run (--k 1)")
     task_timeout_seconds = int(getattr(a, "task_timeout_seconds", 3600))
     shutdown_reserve_seconds = int(getattr(a, "shutdown_reserve_seconds", 120))
     if task_timeout_seconds <= 0:
@@ -647,31 +774,31 @@ def cmd_generate(a):
         for instance_id, row in completed.items():
             budget.settle(f"pass{k}:{instance_id}", row["costUsd"])
         done = set(completed)
-        todo = [iid for iid in instances if iid not in done]
-        print(f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} done, {len(todo)} to run, concurrency {a.concurrency})")
+        all_todo = [iid for iid in instances if iid not in done]
+        todo = all_todo[:max_new_tasks] if max_new_tasks else all_todo
+        deferred_count = len(all_todo) - len(todo)
+        print(
+            f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} done, "
+            f"{len(todo)} in this wave, {deferred_count} deferred, concurrency {a.concurrency})")
         mf_lock = threading.Lock()
         counter = {
-            "n": 0,
+            "attempts": 0,
             "successful": 0,
             "durations": [row.get("seconds") for row in completed.values()
                           if row.get("seconds") is not None],
         }
-        stop_dispatch = threading.Event()
-
         def run_one(iid):
-            if stop_dispatch.is_set():
-                return None
             t0 = time.time()
             row = {"instance_id": iid, "pass": k, "model": a.model}
             reservation_key = f"pass{k}:{iid}"
             reserved = False
-            provider_dispatched = False
+            request_started = False
             try:
                 reserved = budget.reserve(reservation_key)
                 if not reserved:
                     return completed.get(iid)
                 with mf_lock:
-                    remaining = max(0, len(instances) - len(done) - counter["n"])
+                    remaining = max(0, len(instances) - len(completed))
                     eta = estimate_eta_seconds(
                         counter["durations"], remaining, a.concurrency)
                 tracking_event(
@@ -686,7 +813,7 @@ def cmd_generate(a):
                         "message": f"attempt {k} started for {iid}",
                     },
                 )
-                provider_dispatched = True
+                request_started = True
                 deadline_fields = benchmark_deadline_fields(
                     task_timeout_seconds, shutdown_reserve_seconds)
                 st, d = post_authenticated(
@@ -724,17 +851,48 @@ def cmd_generate(a):
                     # explicit. Submission-required campaigns fail closed below.
                     row["trajectoryError"] = str(trajectory_error)[:300]
             except urllib.error.HTTPError as e:
-                row.update(status=e.code, error=e.read().decode()[:300], seconds=round(time.time() - t0, 1))
-                stop_dispatch.set()
+                error_body = e.read().decode(errors="replace")[:1000]
+                if request_started:
+                    classification = classify_generation_http_error(e.code, error_body)
+                    reservation_state = apply_failed_request_reservation(
+                        budget, reservation_key, classification) if reserved else "NOT_RESERVED"
+                else:
+                    classification = ABORT_AMBIGUOUS
+                    if reserved:
+                        budget.release(reservation_key)
+                        reservation_state = "RELEASED_BEFORE_REQUEST"
+                    else:
+                        reservation_state = "NOT_RESERVED"
+                row.update(
+                    status=e.code,
+                    error=error_body[:300],
+                    seconds=round(time.time() - t0, 1),
+                    dispatchClassification=classification,
+                    reservationState=reservation_state,
+                    recommendedConcurrency=lower_concurrency(a.concurrency),
+                )
             except Exception as e:  # record and continue; manifest is the audit trail
-                row.update(status=-1, error=str(e)[:300], seconds=round(time.time() - t0, 1))
-                if provider_dispatched:
-                    stop_dispatch.set()
-            if row.get("status") != 200 and reserved and not provider_dispatched:
-                budget.release(reservation_key)
+                classification = (
+                    classify_generation_exception(e) if request_started else ABORT_AMBIGUOUS)
+                if reserved and request_started:
+                    reservation_state = apply_failed_request_reservation(
+                        budget, reservation_key, classification)
+                elif reserved:
+                    budget.release(reservation_key)
+                    reservation_state = "RELEASED_BEFORE_REQUEST"
+                else:
+                    reservation_state = "NOT_RESERVED"
+                row.update(
+                    status=-1,
+                    error=str(e)[:300],
+                    seconds=round(time.time() - t0, 1),
+                    dispatchClassification=classification,
+                    reservationState=reservation_state,
+                    recommendedConcurrency=lower_concurrency(a.concurrency),
+                )
             with mf_lock:
-                counter["n"] += 1
-                i = counter["n"]
+                counter["attempts"] += 1
+                i = counter["attempts"]
                 with open(attempts, "a") as af:
                     af.write(json.dumps(row) + "\n")
                     af.flush()
@@ -744,11 +902,11 @@ def cmd_generate(a):
                     # Manifest-first makes a crash recoverable: on resume this exact terminal row
                     # deterministically settles any still-RESERVED ledger entry.
                     budget.settle(reservation_key, row["costUsd"])
-                print(f"   [{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
+                print(f"   [attempt {i}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
                 if row.get("status") == 200:
                     counter["successful"] += 1
                     counter["durations"].append(row["seconds"])
-                remaining = max(0, len(instances) - len(done) - counter["n"])
+                remaining = max(0, len(instances) - len(completed))
                 eta = estimate_eta_seconds(counter["durations"], remaining, a.concurrency)
                 try:
                     tracking_event(
@@ -756,19 +914,47 @@ def cmd_generate(a):
                         {"type": "RUN_PROGRESS", "taskName": iid, "attempt": k,
                          "esRunId": row.get("runId"), "etaSeconds": eta,
                          "outcome": row.get("outcome"),
-                         "message": f"[{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')}"
+                         "message": f"[attempt {i}] {iid}: {row.get('outcome') or row.get('error','?')}"
                                     f" patch={row.get('patchBytes')}B ${row.get('costUsd')} {row['seconds']}s (UNSCORED)"})
                 except Exception:
-                    stop_dispatch.set()
+                    # Propagate out of this bounded wave. The dispatcher does not launch the next
+                    # wave until every current future returns, so no separate stop flag is needed.
                     raise
             return row
 
-        if a.concurrency <= 1:
-            for iid in todo:
-                run_one(iid)
-        else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=a.concurrency) as ex:
-                list(ex.map(run_one, todo))
+        dispatch = dispatch_adaptive_waves(todo, a.concurrency, run_one)
+        if dispatch["aborted"]:
+            tracking_event(
+                token_box,
+                refresh_lock,
+                bench_id,
+                {
+                    "type": "RUN_FAILED",
+                    "message":
+                        "adaptive generation stopped before new work; "
+                        f"remaining={len(dispatch['remaining'])} "
+                        f"recommendedConcurrency={dispatch['finalConcurrency']}",
+                },
+            )
+            sys.exit(
+                "adaptive generation stopped fail-closed; reconcile preserved reservations "
+                f"before resuming at concurrency {dispatch['finalConcurrency']}")
+        if deferred_count and len(completed) < a.expected_total:
+            tracking_event(
+                token_box,
+                refresh_lock,
+                bench_id,
+                {
+                    "type": "RUN_PROGRESS",
+                    "message":
+                        f"qualification wave complete: {len(completed)}/{a.expected_total}; "
+                        f"resume same output directory for next {deferred_count}",
+                },
+            )
+            print(
+                f"qualification wave complete: {len(completed)}/{a.expected_total}; "
+                "resume with the same --out directory")
+            return
         if len(completed) != a.expected_total:
             tracking_event(token_box, refresh_lock, bench_id, {"type": "RUN_FAILED",
                            "message": f"generation incomplete: {len(completed)}/{a.expected_total} terminal rows"})
@@ -1127,6 +1313,9 @@ def main():
     g.add_argument("--limit", type=int, default=0)
     g.add_argument("--out", required=True)
     g.add_argument("--concurrency", type=int, default=1, help="parallel generate requests (server cap is max-concurrent-runs; watch RAM)")
+    g.add_argument(
+        "--max-new-tasks", type=int,
+        help="launch at most the next N unfinished tasks, then exit RUN_PROGRESS for safe resume")
     g.add_argument("--expected-total", type=int, required=True,
                    help="exact frozen dataset cardinality; mismatch stops before provider dispatch")
     g.add_argument("--per-task-cap-usd", type=Decimal, required=True,

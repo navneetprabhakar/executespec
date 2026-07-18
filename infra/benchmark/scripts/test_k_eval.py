@@ -1,5 +1,6 @@
 import argparse
 import importlib.util
+import io
 import json
 from pathlib import Path
 import threading
@@ -55,6 +56,7 @@ def generate_args(tmp_path, dataset, expected_total):
         opening_balance_usd=k_eval.Decimal("25"),
         task_timeout_seconds=3600,
         shutdown_reserve_seconds=120,
+        max_new_tasks=None,
     )
 
 
@@ -74,6 +76,17 @@ def test_generate_rejects_timeout_without_cleanup_reserve_before_login(tmp_path,
     monkeypatch.setattr(
         k_eval, "login", lambda: pytest.fail("login must not occur before timeout validation"))
     with pytest.raises(SystemExit, match="must exceed"):
+        k_eval.cmd_generate(args)
+
+
+def test_generate_rejects_non_positive_max_new_tasks_before_login(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "a"}]))
+    args = generate_args(tmp_path, dataset, 1)
+    args.max_new_tasks = 0
+    monkeypatch.setattr(
+        k_eval, "login", lambda: pytest.fail("login must not occur before wave-cap validation"))
+    with pytest.raises(SystemExit, match="must be positive"):
         k_eval.cmd_generate(args)
 
 
@@ -263,6 +276,60 @@ def test_campaign_budget_resume_fails_on_unresolved_reservation(tmp_path):
     resumed = k_eval.CampaignBudget(path, "2", "20", "25", 10)
     with pytest.raises(RuntimeError, match="unresolved reservation"):
         resumed.reserve("a")
+
+
+def test_pre_provider_429_releases_but_ambiguous_failure_preserves_reservation(tmp_path):
+    released = k_eval.CampaignBudget(tmp_path / "released.json", "1", "1", "1", 1)
+    released.reserve("a")
+    assert k_eval.apply_failed_request_reservation(
+        released, "a", k_eval.PRE_PROVIDER_CONCURRENCY_429) == "RELEASED_PRE_PROVIDER"
+    assert released.reserve("a")
+
+    preserved = k_eval.CampaignBudget(tmp_path / "preserved.json", "1", "1", "1", 1)
+    preserved.reserve("a")
+    assert k_eval.apply_failed_request_reservation(
+        preserved, "a", k_eval.AMBIGUOUS_PRESSURE) == "PRESERVED_INDETERMINATE"
+    with pytest.raises(RuntimeError, match="unresolved reservation"):
+        preserved.reserve("a")
+
+
+def test_adaptive_waves_step_down_without_duplicate_success_launch():
+    calls = {}
+    lock = threading.Lock()
+
+    def run_one(instance_id):
+        with lock:
+            calls[instance_id] = calls.get(instance_id, 0) + 1
+            attempt = calls[instance_id]
+        if instance_id == "b" and attempt == 1:
+            return {
+                "instance_id": instance_id,
+                "dispatchClassification": k_eval.PRE_PROVIDER_CONCURRENCY_429,
+            }
+        return {"instance_id": instance_id, "status": 200}
+
+    result = k_eval.dispatch_adaptive_waves(["a", "b", "c", "d", "e"], 4, run_one)
+
+    assert result["aborted"] is False
+    assert result["transitions"] == [{"from": 4, "to": 2}]
+    assert calls == {"a": 1, "b": 2, "c": 1, "d": 1, "e": 1}
+
+
+def test_ambiguous_pressure_stops_before_next_wave_and_does_not_retry():
+    calls = []
+
+    def run_one(instance_id):
+        calls.append(instance_id)
+        classification = k_eval.AMBIGUOUS_PRESSURE if instance_id == "a" else None
+        return {"instance_id": instance_id, "dispatchClassification": classification}
+
+    result = k_eval.dispatch_adaptive_waves(["a", "b", "c", "d"], 2, run_one)
+
+    assert result["aborted"] is True
+    assert result["finalConcurrency"] == 1
+    assert set(calls) == {"a", "b"}
+    assert calls.count("a") == 1
+    assert set(result["remaining"]) == {"c", "d"}
 
 
 def test_campaign_budget_two_runner_objects_share_latest_reservations(tmp_path):
@@ -485,6 +552,174 @@ def test_generate_emits_durable_started_progress_and_trajectory(tmp_path, monkey
     assert progress["etaSeconds"] == 0
     assert (tmp_path / "out" / row["trajectoryLocation"]).is_file()
     assert len(row["trajectorySha256"]) == 64
+
+
+def configure_generate_without_network(monkeypatch, events):
+    monkeypatch.setattr(k_eval, "login", lambda: "token")
+    monkeypatch.setattr(k_eval, "tracking_start", lambda *args: "benchmark-id")
+    monkeypatch.setattr(
+        k_eval,
+        "tracking_event",
+        lambda _token, _lock, _bench, body: events.append(body.copy()),
+    )
+    monkeypatch.setattr(
+        k_eval,
+        "durable_trajectory_artifact",
+        lambda _out, _attempt, instance_id, *_args: (
+            f"trajectories/{instance_id}.ndjson", "a" * 64),
+    )
+
+
+def successful_generation(instance_id):
+    return {
+        "outcome": "COMPLETED",
+        "patchBytes": 42,
+        "runId": f"run-{instance_id}",
+        "iterations": 7,
+        "proPatchJson": None,
+        "predsJson": f"/private/{instance_id}.preds.json",
+        "submissionPatch": f"/private/{instance_id}.patch",
+        "costUsd": "0.25",
+        "inputTokens": 100,
+        "outputTokens": 20,
+    }
+
+
+def test_cmd_generate_releases_exact_semaphore_429_before_aborting(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "a"}]))
+    args = generate_args(tmp_path, dataset, 1)
+    args.concurrency = 1
+    args.per_task_cap_usd = k_eval.Decimal("1")
+    args.campaign_cap_usd = k_eval.Decimal("1")
+    args.opening_balance_usd = k_eval.Decimal("1")
+    events = []
+    configure_generate_without_network(monkeypatch, events)
+
+    def semaphore_429(*_args, **_kwargs):
+        body = json.dumps({"message": "benchmark generation concurrency exhausted for a"})
+        raise urllib.error.HTTPError("/generate", 429, "busy", {}, io.BytesIO(body.encode()))
+
+    monkeypatch.setattr(k_eval, "post_authenticated", semaphore_429)
+
+    with pytest.raises(SystemExit, match="adaptive generation stopped fail-closed"):
+        k_eval.cmd_generate(args)
+
+    ledger = json.loads((tmp_path / "out" / "campaign.budget.json").read_text())
+    attempt = json.loads((tmp_path / "out" / "pass1.attempts.jsonl").read_text())
+    assert ledger["tasks"] == {}
+    assert attempt["dispatchClassification"] == k_eval.PRE_PROVIDER_CONCURRENCY_429
+    assert attempt["reservationState"] == "RELEASED_PRE_PROVIDER"
+    assert events[-1]["type"] == "RUN_FAILED"
+
+
+def test_cmd_generate_preserves_ambiguous_connect_reservation_and_stops(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "a"}, {"instance_id": "b"}]))
+    args = generate_args(tmp_path, dataset, 2)
+    args.concurrency = 1
+    args.per_task_cap_usd = k_eval.Decimal("1")
+    args.campaign_cap_usd = k_eval.Decimal("2")
+    args.opening_balance_usd = k_eval.Decimal("2")
+    events = []
+    configure_generate_without_network(monkeypatch, events)
+    calls = []
+
+    def ambiguous_connect(_path, body, *_args, **_kwargs):
+        calls.append(body["instanceId"])
+        raise urllib.error.URLError("connection reset after request dispatch")
+
+    monkeypatch.setattr(k_eval, "post_authenticated", ambiguous_connect)
+
+    with pytest.raises(SystemExit, match="reconcile preserved reservations"):
+        k_eval.cmd_generate(args)
+
+    ledger = json.loads((tmp_path / "out" / "campaign.budget.json").read_text())
+    assert calls == ["a"]
+    assert ledger["tasks"]["pass1:a"]["status"] == "RESERVED"
+    assert "pass1:b" not in ledger["tasks"]
+
+
+def test_cmd_generate_steps_down_and_retries_only_proven_pre_provider_task(
+        tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    instances = ["a", "b", "c", "d", "e"]
+    dataset.write_text(json.dumps([{"instance_id": value} for value in instances]))
+    args = generate_args(tmp_path, dataset, len(instances))
+    args.concurrency = 4
+    args.per_task_cap_usd = k_eval.Decimal("1")
+    args.campaign_cap_usd = k_eval.Decimal("5")
+    args.opening_balance_usd = k_eval.Decimal("5")
+    events = []
+    configure_generate_without_network(monkeypatch, events)
+    calls = {}
+    lock = threading.Lock()
+
+    def generate(_path, body, *_args, **_kwargs):
+        instance_id = body["instanceId"]
+        with lock:
+            calls[instance_id] = calls.get(instance_id, 0) + 1
+            attempt = calls[instance_id]
+        if instance_id == "b" and attempt == 1:
+            payload = json.dumps(
+                {"message": "benchmark generation concurrency exhausted for b"}).encode()
+            raise urllib.error.HTTPError(
+                "/generate", 429, "busy", {}, io.BytesIO(payload))
+        return 200, successful_generation(instance_id)
+
+    monkeypatch.setattr(k_eval, "post_authenticated", generate)
+
+    k_eval.cmd_generate(args)
+
+    manifest = k_eval.load_generation_manifest(tmp_path / "out" / "pass1.manifest.jsonl")
+    assert set(manifest) == set(instances)
+    assert calls == {"a": 1, "b": 2, "c": 1, "d": 1, "e": 1}
+    assert len((tmp_path / "out" / "pass1.attempts.jsonl").read_text().splitlines()) == 6
+
+
+def test_max_new_tasks_resumes_one_campaign_without_duplicate_launch(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    instances = ["a", "b", "c", "d"]
+    dataset.write_text(json.dumps([{"instance_id": value} for value in instances]))
+    args = generate_args(tmp_path, dataset, len(instances))
+    args.per_task_cap_usd = k_eval.Decimal("1")
+    args.campaign_cap_usd = k_eval.Decimal("4")
+    args.opening_balance_usd = k_eval.Decimal("4")
+    events = []
+    configure_generate_without_network(monkeypatch, events)
+    calls = []
+    monkeypatch.setattr(
+        k_eval,
+        "post_authenticated",
+        lambda _path, body, *_args, **_kwargs: (
+            calls.append(body["instanceId"]) or 200,
+            successful_generation(body["instanceId"]),
+        ),
+    )
+
+    args.concurrency = 1
+    args.max_new_tasks = 1
+    k_eval.cmd_generate(args)
+    assert set(k_eval.load_generation_manifest(
+        tmp_path / "out" / "pass1.manifest.jsonl")) == {"a"}
+    assert events[-1]["type"] == "RUN_PROGRESS"
+
+    args.concurrency = 2
+    args.max_new_tasks = 2
+    k_eval.cmd_generate(args)
+    assert set(k_eval.load_generation_manifest(
+        tmp_path / "out" / "pass1.manifest.jsonl")) == {"a", "b", "c"}
+    assert events[-1]["type"] == "RUN_PROGRESS"
+
+    args.concurrency = 4
+    args.max_new_tasks = 1
+    k_eval.cmd_generate(args)
+    manifest = k_eval.load_generation_manifest(tmp_path / "out" / "pass1.manifest.jsonl")
+    ledger = json.loads((tmp_path / "out" / "campaign.budget.json").read_text())
+    assert set(manifest) == set(instances)
+    assert calls == instances
+    assert len(calls) == len(set(calls))
+    assert all(value["status"] == "SETTLED" for value in ledger["tasks"].values())
 
 
 def test_submission_required_rejects_k_greater_than_one_before_login(

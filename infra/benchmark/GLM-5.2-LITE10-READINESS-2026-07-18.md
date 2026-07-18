@@ -25,11 +25,12 @@ conditional Terminal-Bench and GLM TB-subset requirements.
   disabled.
 - Assembled patch prompt is 7,583 characters, SHA-256
   `2aec80c6af57ac09686723496c3025d9c7ef4019c3c8ea36407c55ed83e332b1`.
-- Generation concurrency is currently 2; planned official scoring concurrency is 4.
+- Generation uses resumable C1 → C2 → C4 qualification over one exact ten-row campaign; official
+  scoring concurrency remains 4. The frozen new-task waves are 1, 2, 4 and the final 3.
 - Local code now carries a harness-supplied absolute epoch deadline and shutdown reserve through
   the admin request, `EngineBudget`, `CodeGenEngineImpl` and `WorkerTaskRequest`. The server clamps
   the deadline to its configured task maximum and will not accept a reserve below 120 seconds.
-  Focused Java deadline/engine tests and all 41 `k-eval.py` tests pass. Deployment/VM proof is still
+  Focused Java deadline/engine tests and all 49 `k-eval.py` tests pass. Deployment/VM proof is still
   required before spend.
 
 ## Dispatch blockers
@@ -51,8 +52,11 @@ conditional Terminal-Bench and GLM TB-subset requirements.
    capture and exact manifest/result guards.
 4. **The repository runner gates are implemented locally, not deployed.** Tracker creation/events
    fail closed; failed/401 rows never count as complete; 401 refresh retries exactly once under the
-   same reservation; duplicate/malformed terminal rows fail; campaign reservations are durable.
-   VM checksum parity and deployed smoke evidence remain required.
+   same reservation; duplicate/malformed terminal rows fail; campaign reservations are durable;
+   bounded waves adapt 4 → 2 → 1; only the exact pre-provider semaphore 429 releases a reservation;
+   ambiguous pressure preserves it and stops later waves; `--max-new-tasks` resumes C1/C2/C4 on one
+   ledger without duplicate task launch. VM checksum parity and deployed smoke evidence remain
+   required.
 5. **VM-side short-lived admin auth is absent.** `.espec-admin.env` is missing. Use a protected
    short-lived token or a `0600` credential file and remove it after the run.
 6. **Full durable trajectories are absent.** Persist redacted JSONL continuously per task, including
@@ -97,10 +101,10 @@ validate every ID, base commit, image digest and result cardinality before dispa
   - SHA-256: `b498cf6d7af26f6f97ddbf7927f0cd5e0e47d115d3d775318b4515f3887a3950`
 - Reproducibility manifest:
   `infra/benchmark/datasets/swebench-lite10-glm-5.2-2026-07-18.manifest.json`
-  - 12,641 bytes
-  - SHA-256: `c2674d897a826b7fb10f49451a8e9c54a08d600743f2a5592f7756b1f3cf383a`
+  - 12,732 bytes
+  - SHA-256: `be9655d57239364fca90092faa0138f9fb2e271296cfb2aef6ed909d1a7d6923`
 - Validator: `infra/benchmark/scripts/validate-lite10-freeze.py`
-  - SHA-256: `61f676de58eea6dc224bbc1f5e4d20cd1b1d73e9f86ef0ba6214fe4782010de0`
+  - SHA-256: `29bb0a7c842f0e46c9df2715cf4d985c7f843800fb858c43cf485719a1f4ad91`
 
 The frozen rows are structural copies of the matching rows in the authoritative local 300-row
 `swebench_lite_test.json`; no field or value was dropped or rewritten. The manifest independently
@@ -113,8 +117,9 @@ The model matrix permits 32,000 output tokens for `glm-5.2`, while PATCH executi
 sets `CodeGenEngineImpl.MAX_TOKENS_PER_CALL=16_000`; the manifest records both values and the 16,000
 effective request limit. It also freezes temperature 0, 220 iterations, four bounded same-provider
 attempts, no cross-provider fallback, a 3,600-second task deadline with a 120-second shutdown
-reserve, generation concurrency 2, scoring concurrency 4, official scorer 4.1.0, 1,800-second
-verifier timeout, `k=1`, denominator 10 and the approved no-top-up budget gates.
+reserve, qualified generation concurrency 4 after C1/C2/C4, scoring concurrency 4, official scorer
+4.1.0, 1,800-second verifier timeout, `k=1`, denominator 10 and the approved no-top-up budget
+gates.
 The local machine's `swebench 3.0.17` was not used to transform or score the rows.
 
 Deterministic validation command:
@@ -139,7 +144,8 @@ registry config digests match the freeze.
 1. Close all blockers above with deterministic tests and deploy the exact complete JAR/runner.
 2. Record opening provider balance and reserve the $20 campaign before any provider call.
 3. Create the tracking run fail-closed and verify authenticated UI/API visibility.
-4. Dispatch at generation concurrency 2 with per-task $2 and campaign $20 limits.
+4. Dispatch cumulative qualification waves C1=1 task, C2=2 new tasks, C4=4 new tasks, then the
+   final 3 at qualified C4, using one output directory, tracker and campaign ledger.
 5. Persist/reconcile trajectory, provider attempts, tokens and costs continuously.
 6. Score only after 10/10 non-duplicate terminal predictions exist; use official scorer concurrency 4.
 7. Independently review all patches and verifier outcomes; never use ExecuteSpec's internal score as

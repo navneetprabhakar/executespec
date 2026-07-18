@@ -27,7 +27,9 @@
     "sameProviderMaxAttempts": 4,
     "crossProviderFallback": false,
     "k": 1,
-    "generationConcurrency": 2,
+    "generationConcurrency": 4,
+    "qualificationNewTaskWaves": [1, 2, 4, 3],
+    "adaptiveConcurrencyLadder": [4, 2, 1],
     "expectedTotal": 10,
     "perTaskCapUsd": "2.00",
     "campaignCapUsd": "20.00",
@@ -49,10 +51,10 @@
     "emptyPatchPolicy": "retain as explicit unresolved; never omit from denominator"
   },
   "provenance": {
-    "repositoryGitCommitAtFreeze": "68757d69ac9c4d8163af0abf28bbf5a0f1db387d",
+    "repositoryGitCommitAtFreeze": "f49ee95d94e135112ff1c51d1003ce656ff96340",
     "repositoryDirtyAtFreeze": true,
     "runnerFile": "infra/benchmark/scripts/k-eval.py",
-    "runnerSha256": "2f95f50b64ec0c13ad85598eb3b2289b6d6a2c12e560e612a00297a9c9174f04",
+    "runnerSha256": "ff76ac1ef1917370790a07c0d831ef648b2a992765e62a954097b3a7dc419fb2",
     "imageDigestResolution": "docker manifest inspect --verbose against docker.io on 2026-07-18; descriptor and config digests recorded",
     "localExtractionPython": "3.x json module only; local swebench 3.0.17 was not used to transform rows",
     "dispatchTupleStillRequired": "Record deployed Git/JAR/tool-schema/prompt bytes and actual OpenRouter upstream per physical attempt before spend"

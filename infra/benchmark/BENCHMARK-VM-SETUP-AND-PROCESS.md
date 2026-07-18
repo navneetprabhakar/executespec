@@ -143,13 +143,32 @@ with the official SWE-bench v4.1 standard harness. `score-watcher.py` is **Pro-o
 `SWE-bench_Pro-os/swe_bench_pro_eval.py` against the Pro dataset) and must not be used for Lite.
 Rebuild the Lite dataset from HF and use the pinned benchmark virtualenv on the VM:
 
+Use one frozen dataset, one output directory, one campaign ledger and one tracking sidecar for the
+entire C1 → C2 → C4 qualification. Before each command, set the server's
+`SWEBENCH_MAX_CONCURRENT_RUNS` to the command's `--concurrency` and restart it cleanly. Do not create
+a new output directory between stages.
+
 ```bash
-python3 infra/benchmark/scripts/k-eval.py generate \
-  --provider openrouter --model glm-5.2 \
-  --dataset /path/to/frozen-lite10.json --expected-total 10 \
-  --k 1 --concurrency 2 --out /path/to/glm-lite10 \
-  --per-task-cap-usd 2 --campaign-cap-usd 20 --opening-balance-usd 25 \
+COMMON=(
+  python3 infra/benchmark/scripts/k-eval.py generate
+  --provider openrouter --model glm-5.2
+  --dataset /path/to/frozen-lite10.json --expected-total 10
+  --k 1 --out /path/to/glm-lite10
+  --per-task-cap-usd 2 --campaign-cap-usd 20 --opening-balance-usd 24.897977
   --task-timeout-seconds 3600 --shutdown-reserve-seconds 120
+)
+
+# C1: cumulative manifest must become 1/10.
+"${COMMON[@]}" --concurrency 1 --max-new-tasks 1
+
+# C2: same output/ledger/tracker; cumulative manifest must become 3/10.
+"${COMMON[@]}" --concurrency 2 --max-new-tasks 2
+
+# C4: same output/ledger/tracker; cumulative manifest must become 7/10.
+"${COMMON[@]}" --concurrency 4 --max-new-tasks 4
+
+# C4 qualified: finish the exact denominator; cumulative manifest must become 10/10.
+"${COMMON[@]}" --concurrency 4 --max-new-tasks 3
 ```
 
 All three monetary flags and the exact cardinality are mandatory. The campaign cap spans every
@@ -161,6 +180,27 @@ silently double-spend. The canonical manifest contains only unique HTTP-200 term
 attempts remain in the separate `passN.attempts.jsonl` audit trail. The command-wide budget ledger
 uses an OS file lock, so a duplicate process using the same output directory sees current
 reservations instead of oversubscribing from stale memory.
+
+`--max-new-tasks N` is positive-only and pass@1-only. It launches only the next N unfinished
+dataset rows, writes canonical terminal rows exactly as normal, publishes `RUN_PROGRESS` rather
+than `RUN_FAILED`, and exits successfully for an intentional partial wave. Resume uses the same
+manifest, campaign ledger, tracking sidecar and exact expected cardinality; completed tasks are
+never relaunched.
+
+Generation is wave-based: it never refills a wave while requests are in flight. The runner steps
+4 → 2 → 1 only after pressure. Only an HTTP 429 carrying ExecuteSpec's exact
+`benchmark generation concurrency exhausted` message proves the semaphore rejected the request
+before provider dispatch; that reservation is released and that one task may be retried at the next
+lower wave. A generic 429, rate limit, connect timeout/reset, 5xx pressure, or any ambiguous request
+keeps its reservation and stops every later wave. Reconcile that provider request manually before
+resuming. At concurrency 1, another explicit semaphore 429 stops instead of looping.
+
+Each qualification stage passes only when the cumulative manifest count is exactly 1, 3, 7, then
+10; every new ledger row is `SETTLED`; there is no `dispatchClassification`, 429/5xx/connect timeout,
+unresolved reservation, stale active attempt, orphan `bench-gen-*` container, OOM, or missing
+trajectory hash; and observed heap/RSS/available memory retain operator-approved headroom. Any
+adaptive step-down means the requested level did not qualify even if lower-concurrency retries
+finished successfully.
 
 The generation runner computes an absolute epoch deadline immediately before each HTTP request.
 The same deadline and reserve reach the worker and tool-dispatch budget; the HTTP timeout is 60
