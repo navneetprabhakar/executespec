@@ -277,6 +277,41 @@ class BenchmarkTrackingServiceTest {
   }
 
   @Test
+  void acceptsTheDurableNdjsonTrajectoryFormatOnProgress() {
+    BenchmarkRun run =
+        service.start("SWE_BENCH", "lite-one", "openrouter", "glm-5.2", 1, 10, null, "u1", true);
+    String sha = "a".repeat(64);
+
+    service.ingest(
+        run.getId(),
+        "RUN_PROGRESS",
+        "astropy__astropy-12907",
+        1,
+        null,
+        "es-1",
+        null,
+        null,
+        null,
+        "provider-free capture recovered",
+        null,
+        null,
+        null,
+        null,
+        "pass1.trajectories/c5278309.ndjson",
+        sha,
+        null);
+
+    assertThat(service.activeAttempts(run.getId()))
+        .singleElement()
+        .satisfies(
+            attempt -> {
+              assertThat(attempt.getTrajectoryLocation())
+                  .isEqualTo("pass1.trajectories/c5278309.ndjson");
+              assertThat(attempt.getTrajectorySha256()).isEqualTo(sha);
+            });
+  }
+
+  @Test
   void rejectsTrajectoryLocationsThatCouldPersistCredentials() {
     BenchmarkRun run =
         service.start(
