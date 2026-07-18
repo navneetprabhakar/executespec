@@ -358,7 +358,7 @@ export function IdeProjectPulse() {
             {isSuperAdmin && (
               <Metric
                 label='Model spend · 30d'
-                value={spent != null ? `$${spent.toFixed(2)}` : '—'}
+                value={spent != null ? `$${spent.toFixed(4)}` : '—'}
               />
             )}
             <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
@@ -522,7 +522,7 @@ export function IdeProjectPulse() {
                         className='ide-mono'
                         style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                       >
-                        ${cost.toFixed(2)}
+                        ${cost.toFixed(4)}
                       </span>
                     )}
                   </Link>
@@ -618,7 +618,7 @@ function RunDetailPanel({
       {isSuperAdmin && (
         <div className='ide-kv'>
           <span>Model spend</span>
-          <span>${cost.toFixed(2)}</span>
+          <span>${cost.toFixed(4)}</span>
         </div>
       )}
       <div className='ide-kv'>
@@ -1009,7 +1009,7 @@ export function IdeProjectRuns() {
                         ) : null}
                         {typeof cost === 'number' && cost > 0 && (
                           <span className='ide-mono' style={{fontSize: 11}}>
-                            ${cost.toFixed(2)}
+                            ${cost.toFixed(4)}
                           </span>
                         )}
                       </span>

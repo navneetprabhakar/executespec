@@ -43,9 +43,8 @@ export function fmtMs(ms: number): string {
 }
 
 export function fmtCost(usd: number): string {
-  if (!usd) return '$0.00';
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
+  if (!Number.isFinite(usd)) return '$0.0000';
+  return `$${usd.toFixed(4)}`;
 }
 
 export function relativeTime(iso: string): string {

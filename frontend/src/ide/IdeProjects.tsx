@@ -10,6 +10,7 @@ import {
 } from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {fmtCost} from '@/lib/utils';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -137,7 +138,7 @@ export default function IdeProjects() {
           {[
             ['Avg score', avg != null ? `${Math.round(avg)}%` : '—'],
             ...(isSuperAdmin
-              ? ([['Model spend', spent != null ? `$${spent.toFixed(2)}` : '—']] as const)
+              ? ([['Model spend', spent != null ? fmtCost(spent) : '—']] as const)
               : []),
             ['Tech debt', techDebt != null ? String(techDebt) : '—'],
           ].map(([k, v]) => (

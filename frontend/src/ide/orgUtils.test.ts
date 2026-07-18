@@ -23,7 +23,7 @@ import type * as api from '@/lib/api';
 describe('orgUtils', () => {
   it('formats money and domain inputs consistently', () => {
     expect(formatUsd(null)).toBe('—');
-    expect(formatUsd(12)).toBe('$12.00');
+    expect(formatUsd(12)).toBe('$12.0000');
     expect(domainListFromEmail('forge@executespec.ai')).toEqual(['executespec.ai']);
     expect(domainListFromEmail('forge@gmail.com')).toEqual([]);
     expect(parseDomainList(' Acme.COM, , example.io ')).toEqual(['acme.com', 'example.io']);

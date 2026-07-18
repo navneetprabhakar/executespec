@@ -611,7 +611,7 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
               ['Total runs', String(usage.totalRuns)],
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
-              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(2)}`],
+              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='signal-quick-card'>
                 <h4>{label}</h4>
@@ -631,7 +631,7 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
         <>
           <SectionHeader>Cost by model</SectionHeader>
           <Card>
-            <KvList pairs={costEntries.map(([m, c]) => ({k: m, v: `$${c.toFixed(2)}`}))} />
+            <KvList pairs={costEntries.map(([m, c]) => ({k: m, v: `$${c.toFixed(4)}`}))} />
           </Card>
         </>
       )}

@@ -699,5 +699,5 @@ export function pct(used: number, total: number): number {
 
 export function currency(value: number): string {
   if (!Number.isFinite(value) || value < 0) return 'n/a';
-  return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(4)}`;
 }

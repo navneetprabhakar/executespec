@@ -69,7 +69,7 @@ def render(rw, stats, name, total, running):
         "__NAME__": html.escape(name), "__STATUS__": status, "__SC_COLOR__": sc_color,
         "__PCT__": str(pct), "__SCORED__": str(scored), "__TOTAL__": str(total),
         "__PASSED__": str(passed), "__TRIALS__": str(trials), "__PR__": f"{pr:.0f}",
-        "__SOLVED__": str(solved), "__COST__": f"{cost:.2f}", "__ERR__": str(errored),
+        "__SOLVED__": str(solved), "__COST__": f"{cost:.4f}", "__ERR__": str(errored),
         "__RUN__": str(nrun), "__CELLS__": cells, "__TS__": time.strftime("%H:%M:%S"),
         "__DATE__": time.strftime("%Y-%m-%d"),
     }
@@ -171,7 +171,7 @@ def main():
                 seen.add(t)
                 p, n = sum(rw[t]), len(rw[t])
                 ping(f"{'✅ PASS' if p > 0 else '❌ FAIL'}  {t}  ({p}/{n})\n"
-                     f"→ {resolved}/{scored} resolved · {a.total} total · ${cost:.2f}")
+                     f"→ {resolved}/{scored} resolved · {a.total} total · ${cost:.4f}")
         # heartbeat digest (alive signal between completions)
         if a.heartbeat and (cyc[0] == 1 or cyc[0] % a.heartbeat == 0):
             ping(f"📊 {a.name} · {time.strftime('%H:%M')} · {scored}/{a.total} scored · "

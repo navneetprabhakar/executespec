@@ -211,7 +211,7 @@ export function IdeRuns() {
                       </span>
                     )}
                     {isSuperAdmin && cost != null && (
-                      <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
+                      <span className='ide-mono ide-work-cost'>${cost.toFixed(4)}</span>
                     )}
                   </span>
                 </Link>

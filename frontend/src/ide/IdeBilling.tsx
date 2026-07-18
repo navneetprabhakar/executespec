@@ -212,7 +212,7 @@ export function IdeBilling() {
               }}
             >
               <Stat label='Work runs' value={<>{periodRuns}</>} />
-              {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(2)}`} />}
+              {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(4)}`} />}
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
           </div>
@@ -396,7 +396,7 @@ export function IdeBilling() {
             </div>
             <div className='ide-kv'>
               <span>{isSuperAdmin ? 'Model spend (cycle)' : 'Billing meter'}</span>
-              <span>{isSuperAdmin ? `$${totalSpend.toFixed(2)}` : 'AI credits'}</span>
+              <span>{isSuperAdmin ? `$${totalSpend.toFixed(4)}` : 'AI credits'}</span>
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
               <span>Successful work (30d)</span>

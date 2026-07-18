@@ -142,6 +142,14 @@ already-healthy `:8080` backend instead of starting its own.
 `FULL-731-PRO-VM-RUNBOOK-2026-07-07.md` for the batching pattern; Lite is 300 instances, so much
 smaller than the 731 Pro run). Rebuild the dataset from HF; clone the official scorer.
 
+Generation and scoring are separate concurrency controls. `k-eval.py generate --concurrency N`
+limits in-flight ExecuteSpec runs; the official scorer must use the bounded watcher
+`infra/benchmark/scripts/score-watcher.py` with `SCORE_WORKERS=N` (default `2` on the canary VM).
+Each scorer worker gets an isolated output directory and emits its reward only after the official
+verifier returns. Keep the score worker count below the VM's container/memory budget; parallel
+scoring is safe, but unbounded Docker fan-out can make results less reliable. The Pro driver uses
+the same rule through `swe-pro-iteration.py --score-workers N` → `swe_bench_pro_eval.py --num_workers N`.
+
 ---
 
 ## 7. Track & capture
