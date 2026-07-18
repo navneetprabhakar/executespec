@@ -103,6 +103,14 @@ def validate(source: Path, frozen: Path, manifest_path: Path, verify_registry: b
     require(config.get("strictProvider") is True, "strict provider must be true")
     require(config.get("crossProviderFallback") is False, "cross-provider fallback must be false")
     require(config.get("expectedTotal") == 10, "generation denominator is not ten")
+    require(config.get("generationConcurrency") == 4,
+            "qualified generation concurrency is not four")
+    require(config.get("qualificationNewTaskWaves") == [1, 2, 4, 3],
+            "qualification waves must cover C1, C2, C4, then the final three")
+    require(sum(config["qualificationNewTaskWaves"]) == config["expectedTotal"],
+            "qualification waves do not cover the exact denominator")
+    require(config.get("adaptiveConcurrencyLadder") == [4, 2, 1],
+            "adaptive concurrency ladder is not frozen to 4 -> 2 -> 1")
     per_task_cap = Decimal(str(config.get("perTaskCapUsd")))
     campaign_cap = Decimal(str(config.get("campaignCapUsd")))
     opening_balance = Decimal(str(config.get("recordedOpeningBalanceUsd")))
