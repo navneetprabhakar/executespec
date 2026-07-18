@@ -95,6 +95,11 @@ public class BenchmarkGenerationService {
    * terminates, then returns the captured diff + cost.
    */
   public GenerateResult generate(String instanceId, String aiProvider, String modelName) {
+    return generate(instanceId, aiProvider, modelName, null);
+  }
+
+  public GenerateResult generate(
+      String instanceId, String aiProvider, String modelName, Double requestedHardCapUsd) {
     if (!props.isEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "swebench is disabled (set swebench.enabled=true)");
@@ -109,7 +114,7 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
-    double hardCapUsd = validatedHardCapUsd();
+    double hardCapUsd = validatedHardCapUsd(requestedHardCapUsd);
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);
@@ -229,14 +234,24 @@ public class BenchmarkGenerationService {
     }
   }
 
-  private double validatedHardCapUsd() {
-    double value = props.getHardCapUsd();
-    if (!Double.isFinite(value) || value <= 0.0) {
+  private double validatedHardCapUsd(Double requestedHardCapUsd) {
+    return effectiveHardCapUsd(props.getHardCapUsd(), requestedHardCapUsd);
+  }
+
+  static double effectiveHardCapUsd(double configuredHardCapUsd, Double requestedHardCapUsd) {
+    if (!Double.isFinite(configuredHardCapUsd) || configuredHardCapUsd <= 0.0) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR,
           "swebench.hard-cap-usd must be a finite positive value");
     }
-    return value;
+    if (requestedHardCapUsd == null) {
+      return configuredHardCapUsd;
+    }
+    if (!Double.isFinite(requestedHardCapUsd) || requestedHardCapUsd <= 0.0) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "hardCapUsd must be a finite positive value");
+    }
+    return Math.min(configuredHardCapUsd, requestedHardCapUsd);
   }
 
   void acquireGenerationSlot(String instanceId) {

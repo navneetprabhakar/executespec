@@ -15,6 +15,10 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   (`USER`, `ORG`, or `PLATFORM`). Dispatch must resolve the current credential later.
 - `LlmExecutionPolicyFactory` reconstructs a customer context from the authoritative run, agent
   session or project plus the current org/user policy. OWN_KEYS never adds a PLATFORM source.
+- Customer `OWN_KEYS` contexts narrow `allowedProviders`, credential provenance and model policy
+  to the explicitly selected provider and set `allowProviderFailover=false`. Other configured BYOK
+  keys remain stored but are ineligible for dispatch, model/provider continuation and chat/action
+  work unless the customer explicitly selects that provider for a new context.
 - Chat turns use `forChatTurn`: V283 usage is attributed to the initiating actor, while a
   cross-org project collaborator is bound to the host project's org and credential subject. Its
   V282 budget carries the chat token/USD/provider-call ceilings and is embedded in the immutable
@@ -49,9 +53,15 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 
 - Pipeline planning, worker, reviewer and child compaction calls inherit one run context.
 - `LlmExecutionPolicyFactory.forRun` first recovers the original tenant-scoped idempotent
-  `pipeline/PIPELINE_RUN/{runId}/route-v1` reference. It must not rebuild the context from mutable
-  run rows after planning persists derived budget fields; doing so changes the fingerprint and
-  breaks approval-stage recovery (Phase-6 F7, fixed 2026-07-18).
+  `pipeline/PIPELINE_RUN/{runId}/route-v1` reference. `OWN_KEYS` runs use
+  `route-v2-own-keys-provider-lock`, deliberately bypassing any legacy multi-provider route-v1
+  snapshot so recovery cannot restore the former cross-provider eligibility. Recovery always
+  checks for the v2 OWN_KEYS generation before reading the org's current mode; a later
+  OWN_KEYS-to-HYBRID change therefore returns the immutable v2 context and dispatch rejects the
+  stale mode instead of creating a broader route-v1 context. Within each policy generation, the
+  factory must not rebuild the context from mutable run rows after planning persists derived budget
+  fields; doing so changes the fingerprint and breaks approval-stage recovery (Phase-6 F7, fixed
+  2026-07-18).
 - Run report, test generation, prompt optimisation, code-map/assessment and run ledger text calls
   recover the same context from the persisted run primary key. The post-run chat copilot instead
   mints a dedicated per-turn context via `forRunChatTurn(runId, turnId)` — identical

@@ -2,6 +2,7 @@ package com.navneet.executespec.benchmark;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,5 +61,20 @@ class BenchmarkControllerSmokeTest {
         .containsEntry("image", "jefzda/sweap-images:nodebb-nodebb-049989")
         .containsEntry("enabled", "true")
         .containsEntry("benchProjectId", "bench-project");
+  }
+
+  @Test
+  void forwardsOperatorHardCapToGenerationService() {
+    BenchmarkGenerationService generationService = mock(BenchmarkGenerationService.class);
+    SwebenchProperties props = new SwebenchProperties();
+    BenchmarkController controller =
+        new BenchmarkController(generationService, mock(SwebenchInstanceLoader.class), props);
+    BenchmarkController.SubmitRequest request =
+        new BenchmarkController.SubmitRequest(
+            "django__django-11001", "openrouter", "glm-5.2", null, null, 2.0);
+
+    controller.generate(request);
+
+    verify(generationService).generate("django__django-11001", "openrouter", "glm-5.2", 2.0);
   }
 }

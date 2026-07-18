@@ -144,6 +144,24 @@ with the official SWE-bench v4.1 standard harness. `score-watcher.py` is **Pro-o
 Rebuild the Lite dataset from HF and use the pinned benchmark virtualenv on the VM:
 
 ```bash
+python3 infra/benchmark/scripts/k-eval.py generate \
+  --provider openrouter --model glm-5.2 \
+  --dataset /path/to/frozen-lite10.json --expected-total 10 \
+  --k 1 --concurrency 2 --out /path/to/glm-lite10 \
+  --per-task-cap-usd 2 --campaign-cap-usd 20 --opening-balance-usd 25
+```
+
+All three monetary flags and the exact cardinality are mandatory. The campaign cap spans every
+requested `k` pass; the command refuses before login/tracking unless it can reserve
+`per-task-cap × expected-total × k`. Tracking creation and event
+publication fail closed. A 401 refreshes once and retries the same reserved request; a second 401
+or an indeterminate in-flight request leaves its reservation outstanding so a resume cannot
+silently double-spend. The canonical manifest contains only unique HTTP-200 terminal rows; failed
+attempts remain in the separate `passN.attempts.jsonl` audit trail. The command-wide budget ledger
+uses an OS file lock, so a duplicate process using the same output directory sees current
+reservations instead of oversubscribing from stale memory.
+
+```bash
 SCORE_WORKERS=4
 PREDS=/path/to/lite-preds.jsonl
 RUN_ID=executespec-lite-$(date +%Y%m%d-%H%M%S)

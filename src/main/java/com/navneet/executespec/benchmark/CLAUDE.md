@@ -53,6 +53,13 @@ worker needs, call `CodeGenEngine.solve(...)`, then capture the official patch a
 `BenchmarkRunService` BUILD-stop-at-worker implementation was deleted so it cannot drift into a
 second benchmark generation path.
 
+The admin request's optional `hardCapUsd` is tighten-only: the effective worker cap is
+`min(swebench.hard-cap-usd, request.hardCapUsd)`, and a non-finite/non-positive request is rejected
+before worker dispatch. `k-eval.py generate` always supplies this field from its required
+`--per-task-cap-usd` and separately reserves the required aggregate campaign cap in one atomic,
+OS-file-locked ledger spanning every requested `k` pass. A stale in-flight reservation fails closed
+on resume rather than risking a second provider dispatch.
+
 This prevents two benchmark codegen paths from drifting. Product BUILD runs still use
 classifier/planner/reviewer; product PATCH/autofix and benchmark generation share the engine seam.
 

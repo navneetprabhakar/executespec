@@ -364,15 +364,20 @@ public class SmartClassifierAgent {
                   "REPO_COUNT",
                   String.valueOf(repoFullNames == null ? 1 : repoFullNames.size()),
                   "REPO_NAMES",
-                  repoFullNames == null || repoFullNames.isEmpty()
-                      ? "(none)"
-                      : String.join(", ", repoFullNames),
+                  untrustedClassifierEvidence(
+                      "REPO_NAMES",
+                      repoFullNames == null || repoFullNames.isEmpty()
+                          ? "(none)"
+                          : String.join(", ", repoFullNames)),
                   "PROJECT_TYPE",
-                  projectType == null ? "unknown" : projectType,
+                  untrustedClassifierEvidence(
+                      "PROJECT_TYPE", projectType == null ? "unknown" : projectType),
                   "PROJECT_MEMORY",
-                  projectMemorySnippet == null || projectMemorySnippet.isBlank()
-                      ? "(no project memory yet)"
-                      : projectMemorySnippet,
+                  untrustedClassifierEvidence(
+                      "PROJECT_MEMORY",
+                      projectMemorySnippet == null || projectMemorySnippet.isBlank()
+                          ? "(no project memory yet)"
+                          : projectMemorySnippet),
                   "SPEC",
                   spec));
     } catch (Exception e) {
@@ -442,6 +447,10 @@ public class SmartClassifierAgent {
       metrics.recordClassifierVerifier("SKIPPED_LLM_CALL");
       return fallback(heuristic, "LLM call failed: " + truncForCopy(e.getMessage()));
     }
+  }
+
+  static String untrustedClassifierEvidence(String label, String content) {
+    return PromptTrustBoundary.wrap(label, content);
   }
 
   /** Truncate exception messages so the persisted classifierReasoning stays readable. */
