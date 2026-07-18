@@ -197,6 +197,64 @@ and the 116-requirement crosswalk; none of that substitutes for the still-open d
 
 ## Amendments
 
+### A2 — 2026-07-18 IST: post-benchmark cross-model/provider escalation experiment
+
+**Approved by:** Navneet Prabhakar in the active goal conversation.
+
+**Affected IDs:** PAR-02, PAR-03, DS-02, DS-04/05, GLM-01/02, and the live
+continuation/provider-policy requirements.
+
+After the current benchmark campaigns close, run a separate, explicitly labelled
+routing experiment to test whether a cheap-first route can obtain most of the
+quality of the stronger model without paying the stronger-model price on every
+task. This is an experiment, not permission to change production defaults or to
+override Enterprise/BYOK provider pins.
+
+#### Hypothesis
+
+1. Start eligible tasks on native DeepSeek V4 Pro (cost-efficient workhorse).
+2. Escalate only when deterministic signals indicate that the current attempt is
+   stuck or low quality: no meaningful progress, repeated tool/test failure,
+   failed build, unresolved reviewer findings, low completion confidence, or a
+   benchmark-verifier failure.
+3. Use GLM 5.2 through the approved OpenRouter route as the stronger escalation
+   candidate, subject to the existing confirmation, benchmark-prior, provider-key,
+   tier, and per-run spend policies.
+4. Compare against DeepSeek-only and GLM-only controls on the same frozen tasks.
+
+#### Required cohort and evidence
+
+- Use a frozen, stratified cohort covering simple, medium, multi-file, and
+  failure/recovery tasks; reuse task IDs across controls.
+- Run three arms: DeepSeek-only, GLM-only, and DeepSeek→GLM escalation. Keep
+  prompt, tools, timeout, context budget, and verifier versions identical.
+- Record per task: provider/model for every call, escalation trigger, attempts,
+  completion outcome, verified score, tests/build/reviewer evidence, latency,
+  input/output/cache/reasoning tokens, provider-reported cost, and duplicate-spend
+  checks. Preserve the full hashed trajectory for every arm.
+- Report quality uplift, cost per resolved task, p50/p95 latency, escalation rate,
+  false-escalation rate, recovery success, and timeout/error rates. Include 95%
+  confidence intervals where the cohort size permits; do not infer superiority
+  from a single task or headline score.
+
+#### Safety gates
+
+- Do not run this until the active SWE/TB benchmark runs are terminal and their
+  ledgers are reconciled.
+- Do not enable automatic escalation in production from this experiment alone.
+- Enterprise/TEAM/BYOK single-provider policy and explicit per-run route pins must
+  remain hard constraints; a candidate outside the approved provider set is a
+  denial, not a fallback.
+- Start with recommendation-only/advisory mode, then a bounded canary requiring
+  explicit approval for GLM escalation. Promote an automatic policy only if it
+  improves resolved quality at an agreed cost ceiling with no material increase
+  in duplicate spend, timeout, or policy-escape failures.
+
+**Deliverable:** a versioned routing-evaluation report, raw manifests/trajectories,
+reconciled cost ledger, and a go/no-go decision for model-matrix/continuation
+defaults. The existing cheap-first production setting remains unchanged until
+that decision is recorded.
+
 ### A1 — 2026-07-18 IST: benchmark order, full Pro scope and model-gate waiver
 
 **Approved by:** Navneet Prabhakar in the active goal conversation.
