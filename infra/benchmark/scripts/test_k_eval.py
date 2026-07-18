@@ -782,6 +782,328 @@ def test_publish_carries_scorer_classification_and_trajectory(monkeypatch, tmp_p
     assert failed["trajectorySha256"] == "b" * 64
 
 
+def recovery_fixture(tmp_path):
+    out = tmp_path / "campaign"
+    out.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    output_dir = tmp_path / "generation-output"
+    output_dir.mkdir()
+    instance_id = "astropy__astropy-12907"
+    run_id = "c5278309-a985-46c5-bd85-3525ef0d1db7"
+    base_commit = "d" * 40
+    image = "swebench/test@sha256:" + "f" * 64
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{
+        "instance_id": instance_id,
+        "base_commit": base_commit,
+    }]))
+    trajectory = out / "pass1.trajectories" / "run.ndjson"
+    trajectory.parent.mkdir()
+    trajectory.write_bytes(b'{"type":"TOOL_CALL"}\n{"type":"RUN_COMPLETED"}\n')
+    trajectory_sha = k_eval.sha256_file(trajectory)
+    patch = b"diff --git a/example.py b/example.py\n+fixed = True\n"
+    patch_sha = k_eval.sha256_bytes(patch)
+    workspace_sha = "1" * 64
+    failed_tracker = "6fa6f3ad-08a9-452d-a744-595572b242d8"
+    tracking = {
+        "benchmarkId": failed_tracker,
+        "provider": "openrouter",
+        "model": "glm-5.2",
+        "attempt": 1,
+        "totalTasks": 1,
+        "submissionRequired": False,
+    }
+    tracking_file = out / "pass1.tracking.json"
+    tracking_file.write_text(json.dumps(tracking))
+    write_jsonl(out / "pass1.attempts.jsonl", [{
+        "instance_id": instance_id,
+        "pass": 1,
+        "status": 500,
+        "dispatchClassification": k_eval.ABORT_AMBIGUOUS,
+        "reservationState": "PRESERVED_INDETERMINATE",
+        "error": "HTTP 500 benchmark patch capture failed: dubious ownership",
+    }])
+    budget = k_eval.CampaignBudget(out / "campaign.budget.json", "2", "2", "2", 1)
+    budget.reserve("pass1:" + instance_id)
+    evidence = {
+        "schemaVersion": 1,
+        "instanceId": instance_id,
+        "runId": run_id,
+        "provider": "openrouter",
+        "model": "glm-5.2",
+        "datasetSha256": k_eval.sha256_file(dataset),
+        "baseCommit": base_commit,
+        "image": image,
+        "workspace": str(workspace.resolve()),
+        "outputDir": str(output_dir.resolve()),
+        "pipeline": {
+            "status": "FAILED",
+            "originalHttpStatus": 500,
+            "statusReason": k_eval.CAPTURE_FAILURE_PREFIX + ": dubious ownership",
+        },
+        "engine": {"outcome": "COMPLETED", "iterations": 14, "toolCalls": 14},
+        "usage": {
+            "calls": 15,
+            "intents": 15,
+            "terminalUsage": 15,
+            "outboxCompleted": 15,
+            "unmatchedIntents": 0,
+            "inputTokens": 179765,
+            "outputTokens": 2306,
+            "cacheReadTokens": 150272,
+            "cacheWriteTokens": 0,
+            "reasoningTokens": 533,
+            "costUsd": "0.090212",
+        },
+        "trajectory": {"sha256": trajectory_sha, "eventCount": 2},
+        "failedBenchmarkId": failed_tracker,
+    }
+    evidence_file = tmp_path / "server-evidence.json"
+    evidence_file.write_text(json.dumps(evidence))
+    args = argparse.Namespace(
+        dataset=str(dataset), expected_total=1, out=str(out), pass_number=1,
+        instance_id=instance_id, run_id=run_id, provider="openrouter", model="glm-5.2",
+        workspace=str(workspace), output_dir=str(output_dir), image=image, workdir="/testbed",
+        pro=False, server_evidence=str(evidence_file), trajectory=str(trajectory),
+        trajectory_sha256=trajectory_sha, workspace_evidence_sha256=workspace_sha,
+        expected_patch_sha256=patch_sha, expected_patch_bytes=len(patch),
+        per_task_cap_usd=k_eval.Decimal("2"), campaign_cap_usd=k_eval.Decimal("2"),
+        opening_balance_usd=k_eval.Decimal("2"),
+        new_tracker_id="recovered-tracker-0001",
+    )
+    workspace_state = {
+        "head": base_commit,
+        "patch": patch,
+        "patchBytes": len(patch),
+        "patchSha256": patch_sha,
+        "workspaceEvidenceSha256": workspace_sha,
+    }
+    return args, evidence, evidence_file, patch, workspace_state, tracking_file
+
+
+def forbid_recovery_network(monkeypatch):
+    for name in ("login", "post", "post_authenticated"):
+        monkeypatch.setattr(
+            k_eval, name,
+            lambda *args, _name=name, **kwargs: pytest.fail(
+                f"provider-free recovery invoked {_name}"))
+
+
+def test_recover_capture_is_provider_free_atomic_and_idempotent(tmp_path, monkeypatch):
+    args, _evidence, _evidence_file, patch, workspace_state, tracking_file = \
+        recovery_fixture(tmp_path)
+    original_tracking = tracking_file.read_bytes()
+    captures = []
+    forbid_recovery_network(monkeypatch)
+    monkeypatch.setattr(
+        k_eval, "inspect_recovery_workspace", lambda *unused: workspace_state.copy())
+    monkeypatch.setattr(
+        k_eval, "capture_recovered_diff",
+        lambda *unused: captures.append("captured") or patch)
+
+    k_eval.cmd_recover_capture(args)
+    k_eval.cmd_recover_capture(args)
+
+    out = Path(args.out)
+    manifest = k_eval.load_generation_manifest(out / "pass1.manifest.jsonl")
+    row = manifest[args.instance_id]
+    assert row["status"] == k_eval.RECOVERED_CAPTURE_STATUS
+    assert row["status"] != 200
+    assert row["providerDispatch"] is False
+    assert row["usageCalls"] == row["usageIntents"] == row["terminalUsageRows"] == 15
+    assert row["outboxCompletedRows"] == 15
+    assert row["unmatchedUsageIntents"] == 0
+    assert row["cacheReadTokens"] == 150272
+    assert row["reasoningTokens"] == 533
+    assert Path(row["submissionPatch"]).read_bytes() == patch
+    assert row["predsSha256"] == k_eval.sha256_file(Path(row["predsJson"]))
+    assert json.loads(Path(row["predsJson"]).read_text())[args.instance_id][
+        "model_patch"] == patch.decode()
+    assert captures == ["captured"]
+    ledger = json.loads((out / "campaign.budget.json").read_text())
+    assert ledger["tasks"]["pass1:" + args.instance_id]["status"] == "SETTLED"
+    audits = [json.loads(line) for line in (out / "pass1.attempts.jsonl").read_text().splitlines()]
+    assert len([row for row in audits if row.get("type") ==
+                "CAPTURE_RECOVERED_PROVIDER_FREE"]) == 1
+    assert tracking_file.read_bytes() == original_tracking
+    lineage = json.loads((out / "pass1.recovery-tracking.json").read_text())
+    assert lineage["benchmarkId"] == args.new_tracker_id
+    assert lineage["previousFailedBenchmarkId"] == "6fa6f3ad-08a9-452d-a744-595572b242d8"
+    assert not list(out.rglob("*.tmp"))
+
+
+def test_recovery_workspace_inspection_uses_isolated_protected_git_config(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    k_eval.run_local(["git", "init", "-q"], cwd=workspace)
+    k_eval.run_local(["git", "config", "user.email", "test@example.com"], cwd=workspace)
+    k_eval.run_local(["git", "config", "user.name", "Test"], cwd=workspace)
+    source = workspace / "example.py"
+    source.write_text("value = 1\n")
+    k_eval.run_local(["git", "add", "example.py"], cwd=workspace)
+    k_eval.run_local(["git", "commit", "-q", "-m", "base"], cwd=workspace)
+    base = k_eval.run_local(["git", "rev-parse", "HEAD"], cwd=workspace).decode().strip()
+    source.write_text("value = 2\n")
+
+    inspected = k_eval.inspect_recovery_workspace(workspace, base, False)
+
+    assert inspected["head"] == base
+    assert inspected["patchBytes"] > 0
+    assert b"-value = 1" in inspected["patch"]
+    assert b"+value = 2" in inspected["patch"]
+    assert len(inspected["workspaceEvidenceSha256"]) == 64
+
+
+def test_recovery_capture_never_pulls_image(tmp_path, monkeypatch):
+    patch = b"diff --git a/example.py b/example.py\n"
+    state = {
+        "patch": patch,
+        "workspaceEvidenceSha256": "a" * 64,
+    }
+    docker_calls = []
+
+    def local(args, cwd=None, env=None):
+        if args[0] == "docker":
+            docker_calls.append(args)
+            return patch
+        return b""
+
+    monkeypatch.setattr(k_eval, "run_local", local)
+    monkeypatch.setattr(
+        k_eval, "inspect_recovery_workspace", lambda *unused: state.copy())
+
+    captured = k_eval.capture_recovered_diff(
+        tmp_path, tmp_path, "swebench/test@sha256:" + "f" * 64,
+        "/testbed", "d" * 40, False)
+
+    assert captured == patch
+    assert len(docker_calls) == 1
+    assert "--pull=never" in docker_calls[0]
+    assert docker_calls[0][docker_calls[0].index("--network") + 1] == "none"
+
+
+def test_generate_prefers_validated_recovery_tracker_without_reusing_failed_tracker(
+        tmp_path, monkeypatch):
+    args, _evidence, _evidence_file, patch, workspace_state, tracking_file = \
+        recovery_fixture(tmp_path)
+    failed_tracking = tracking_file.read_bytes()
+    forbid_recovery_network(monkeypatch)
+    monkeypatch.setattr(
+        k_eval, "inspect_recovery_workspace", lambda *unused: workspace_state.copy())
+    monkeypatch.setattr(k_eval, "capture_recovered_diff", lambda *unused: patch)
+    k_eval.cmd_recover_capture(args)
+
+    events = []
+    monkeypatch.setattr(k_eval, "login", lambda: "token")
+    monkeypatch.setattr(
+        k_eval, "tracking_event",
+        lambda _token, _lock, benchmark_id, body: events.append((benchmark_id, body.copy())))
+    monkeypatch.setattr(
+        k_eval, "post_authenticated",
+        lambda *unused, **kwargs: pytest.fail("completed recovery must not redispatch provider"))
+    generate = generate_args(tmp_path, Path(args.dataset), 1)
+    generate.out = args.out
+    generate.provider = args.provider
+    generate.model = args.model
+    generate.concurrency = 1
+    generate.per_task_cap_usd = args.per_task_cap_usd
+    generate.campaign_cap_usd = args.campaign_cap_usd
+    generate.opening_balance_usd = args.opening_balance_usd
+
+    k_eval.cmd_generate(generate)
+
+    assert events
+    assert {benchmark_id for benchmark_id, _body in events} == {args.new_tracker_id}
+    assert tracking_file.read_bytes() == failed_tracking
+
+
+def test_generate_rejects_malformed_recovery_tracker_before_dispatch(tmp_path, monkeypatch):
+    args, _evidence, _evidence_file, _patch, _workspace_state, _tracking = \
+        recovery_fixture(tmp_path)
+    recovery = Path(args.out) / "pass1.recovery-tracking.json"
+    recovery.write_text(json.dumps({
+        "benchmarkId": "new-tracker",
+        "previousFailedBenchmarkId": "wrong-failed-tracker",
+        "recoveredRunId": args.run_id,
+        "recoveryEvidenceSha256": "a" * 64,
+    }))
+    monkeypatch.setattr(k_eval, "login", lambda: "token")
+    monkeypatch.setattr(
+        k_eval, "post_authenticated",
+        lambda *unused, **kwargs: pytest.fail("malformed lineage must not dispatch provider"))
+    generate = generate_args(tmp_path, Path(args.dataset), 1)
+    generate.out = args.out
+    generate.provider = args.provider
+    generate.model = args.model
+    generate.concurrency = 1
+    generate.per_task_cap_usd = args.per_task_cap_usd
+    generate.campaign_cap_usd = args.campaign_cap_usd
+    generate.opening_balance_usd = args.opening_balance_usd
+
+    with pytest.raises(SystemExit, match="tracking lineage validation failed"):
+        k_eval.cmd_generate(generate)
+
+
+@pytest.mark.parametrize(
+    "mutate,error",
+    [
+        (lambda args, evidence: evidence["pipeline"].update({"status": "COMPLETE"}),
+         "capture-failure pipeline proof"),
+        (lambda args, evidence: evidence["usage"].update({"outboxCompleted": 14}),
+         "usage intents/terminal rows are incomplete"),
+        (lambda args, evidence: setattr(args, "trajectory_sha256", "0" * 64),
+         "trajectory hash/count verification failed"),
+        (lambda args, evidence: setattr(args, "workspace_evidence_sha256", "0" * 64),
+         "workspace evidence SHA-256 mismatch"),
+        (lambda args, evidence: setattr(args, "image", "swebench/test:latest"),
+         "pinned by sha256 digest"),
+    ],
+)
+def test_recover_capture_fails_closed_before_artifacts(
+        tmp_path, monkeypatch, mutate, error):
+    args, evidence, evidence_file, patch, workspace_state, _tracking = recovery_fixture(tmp_path)
+    mutate(args, evidence)
+    evidence_file.write_text(json.dumps(evidence))
+    forbid_recovery_network(monkeypatch)
+    monkeypatch.setattr(
+        k_eval, "inspect_recovery_workspace", lambda *unused: workspace_state.copy())
+    monkeypatch.setattr(
+        k_eval, "capture_recovered_diff",
+        lambda *unused: pytest.fail("capture must not occur after failed recovery proof"))
+
+    with pytest.raises(SystemExit, match=error):
+        k_eval.cmd_recover_capture(args)
+
+    assert not (Path(args.output_dir) / "submission.patch").exists()
+    assert not (Path(args.output_dir) / "preds.json").exists()
+    ledger = json.loads((Path(args.out) / "campaign.budget.json").read_text())
+    assert ledger["tasks"]["pass1:" + args.instance_id]["status"] == "RESERVED"
+
+
+def test_recover_capture_requires_preserved_indeterminate_attempt(tmp_path, monkeypatch):
+    args, _evidence, _evidence_file, _patch, workspace_state, _tracking = \
+        recovery_fixture(tmp_path)
+    attempts = Path(args.out) / "pass1.attempts.jsonl"
+    row = json.loads(attempts.read_text())
+    row["reservationState"] = "RELEASED_PRE_PROVIDER"
+    write_jsonl(attempts, [row])
+    forbid_recovery_network(monkeypatch)
+    monkeypatch.setattr(
+        k_eval, "inspect_recovery_workspace", lambda *unused: workspace_state.copy())
+
+    with pytest.raises(SystemExit, match="exactly one preserved-indeterminate"):
+        k_eval.cmd_recover_capture(args)
+
+
+def test_recovered_manifest_requires_exact_provenance(tmp_path):
+    manifest = tmp_path / "manifest.jsonl"
+    row = terminal_row() | {"status": k_eval.RECOVERED_CAPTURE_STATUS}
+    write_jsonl(manifest, [row])
+    with pytest.raises(SystemExit, match="missing"):
+        k_eval.load_generation_manifest(manifest)
+
+
 def test_result_evidence_classifies_explicit_timeout_without_guessing(tmp_path):
     result = tmp_path / "results.json"
     result.write_text(json.dumps([

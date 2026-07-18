@@ -202,6 +202,25 @@ trajectory hash; and observed heap/RSS/available memory retain operator-approved
 adaptive step-down means the requested level did not qualify even if lower-concurrency retries
 finished successfully.
 
+### Provider-free recovery of a post-provider capture failure
+
+Never rerun a task whose model completed but whose patch-capture response failed. Use
+`k-eval.py recover-capture` only when the original attempt is exactly
+`PRESERVED_INDETERMINATE`, its pipeline remains truthfully `FAILED` with the capture-failure
+prefix, every physical LLM intent has terminal usage/outbox evidence, and the frozen workspace and
+complete trajectory still exist. The command does not authenticate or call a provider. It requires
+an immutable image digest, uses `docker --pull=never --network none` against an evidence copy,
+records `RECOVERED_PROVIDER_FREE` (never fabricates HTTP 200), writes artifacts/audit/manifest
+atomically, and settles the existing reservation only after the manifest is durable.
+
+Create a separate 10-task tracker before recovery and pass its ID as `--new-tracker-id`. The failed
+`passN.tracking.json` stays immutable; the recovery command writes validated lineage to
+`passN.recovery-tracking.json`, which later `generate` resumes prefer. A malformed or contradictory
+lineage aborts before generation. Keep the server/DB evidence JSON, source workspace hash, exact
+patch bytes/hash, trajectory bytes/hash/event count, original tracker and new tracker IDs in the
+campaign directory. Run the command twice: the second invocation must be idempotent and must not
+change the manifest, predictions, patch, audit cardinality or settled cost.
+
 The generation runner computes an absolute epoch deadline immediately before each HTTP request.
 The same deadline and reserve reach the worker and tool-dispatch budget; the HTTP timeout is 60
 seconds longer than the task deadline so the client does not abandon server work. The server may
