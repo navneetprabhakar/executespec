@@ -39,6 +39,16 @@ public class LlmUsageIntegrityMonitor {
               Long.class,
               Math.max(1, staleAfterSeconds));
       metrics.recordStaleLlmUsageIntents(count == null ? 0 : count);
+      var backlog =
+          jdbc.queryForMap(
+              """
+              SELECT COUNT(*) FILTER (WHERE status IN ('PENDING','PROCESSING')) AS pending,
+                     COUNT(*) FILTER (WHERE status='DEAD') AS dead
+              FROM llm_usage_terminal_outbox
+              """);
+      metrics.recordLlmUsageRecoveryBacklog(
+          ((Number) backlog.getOrDefault("pending", 0L)).longValue(),
+          ((Number) backlog.getOrDefault("dead", 0L)).longValue());
     } catch (RuntimeException failure) {
       metrics.recordLlmUsagePersistence("INTEGRITY_MONITOR", "failed");
       log.error("Unable to measure stale LLM usage intents", failure);

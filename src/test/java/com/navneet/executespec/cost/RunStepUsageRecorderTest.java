@@ -23,27 +23,32 @@ import org.springframework.ai.chat.messages.UserMessage;
 
 class RunStepUsageRecorderTest {
 
-  private final RunStepUsageRepository repository =
-      org.mockito.Mockito.mock(RunStepUsageRepository.class);
   private final LlmUsageAttributionResolver attributionResolver =
       org.mockito.Mockito.mock(LlmUsageAttributionResolver.class);
   private final LlmUsageAttemptIntentRepository intentRepository =
       org.mockito.Mockito.mock(LlmUsageAttemptIntentRepository.class);
   private final Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
   private final ModelRegistry modelRegistry = org.mockito.Mockito.mock(ModelRegistry.class);
+  private final LlmUsageTerminalOutbox terminalOutbox =
+      org.mockito.Mockito.mock(LlmUsageTerminalOutbox.class);
   private final LlmUsageRecoverySpool recoverySpool =
       org.mockito.Mockito.mock(LlmUsageRecoverySpool.class);
   private final RunStepUsageRecorder recorder =
       new RunStepUsageRecorder(
-          repository, intentRepository, attributionResolver, metrics, modelRegistry, recoverySpool);
+          intentRepository,
+          attributionResolver,
+          metrics,
+          modelRegistry,
+          terminalOutbox,
+          recoverySpool);
 
   @Test
   @DisplayName("records role/step/retry attribution with per-call usage")
   void recordsAttribution() {
     RunCostTracker.CallUsage usage =
         new RunCostTracker.CallUsage("deepseek", "deepseek-v4", 11, 7, 3, 5, 0.0123, 4, 2);
-    when(repository.save(any(RunStepUsage.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
+        .thenReturn(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
 
     recorder.record(
         "run-1",
@@ -56,7 +61,7 @@ class RunStepUsageRecorderTest {
         usage);
 
     ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
-    verify(repository).save(captor.capture());
+    verify(terminalOutbox).persist(captor.capture());
     RunStepUsage row = captor.getValue();
     assertThat(row.getRunId()).isEqualTo("run-1");
     assertThat(row.getTaskId()).isEqualTo("task-1");
@@ -96,8 +101,8 @@ class RunStepUsageRecorderTest {
                 "run-1",
                 "corr-1"));
     when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
-    when(repository.save(any(RunStepUsage.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
+        .thenReturn(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
 
     recorder.recordFailure(
         request,
@@ -109,7 +114,7 @@ class RunStepUsageRecorderTest {
         new IllegalStateException("Authorization: Bearer sk-secret-value-123456789"));
 
     ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
-    verify(repository).save(captor.capture());
+    verify(terminalOutbox).persist(captor.capture());
     RunStepUsage row = captor.getValue();
     assertThat(row.getAttemptStatus()).isEqualTo("FAILED");
     assertThat(row.getAttemptNumber()).isEqualTo(2);
@@ -137,7 +142,8 @@ class RunStepUsageRecorderTest {
     LlmRequest request = request();
     when(attributionResolver.resolve(request))
         .thenReturn(LlmUsageAttributionResolver.Attribution.unattributed("run-1"));
-    when(repository.save(any(RunStepUsage.class))).thenThrow(new IllegalStateException("db down"));
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
+        .thenThrow(new IllegalStateException("db down"));
 
     recorder.recordFailure(
         request, "openai", "gpt", "PLATFORM", 1, 1, new RuntimeException("timeout"));
@@ -220,7 +226,7 @@ class RunStepUsageRecorderTest {
         .isInstanceOf(RunStepUsageRecorder.LlmUsagePersistenceException.class)
         .hasMessageContaining("Provider call blocked");
     verify(metrics).recordLlmUsagePersistence("STARTED", "failed");
-    verify(repository, never()).save(any());
+    verify(terminalOutbox, never()).persist(any());
   }
 
   @Test
@@ -230,7 +236,7 @@ class RunStepUsageRecorderTest {
     recorder.record(
         null, "task-1", "WorkerAgent", "worker.iteration-1", null, "openai", "gpt", null);
 
-    verify(repository, never()).save(any());
+    verify(terminalOutbox, never()).persist(any());
   }
 
   @Test
@@ -249,8 +255,8 @@ class RunStepUsageRecorderTest {
                 "PROJECT_DOCUMENT",
                 "doc-1",
                 "corr-embed"));
-    when(repository.save(any(RunStepUsage.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
+        .thenReturn(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
     RunCostTracker.CallUsage call =
         new RunCostTracker.CallUsage(
             "openai", "text-embedding-3-small", 42, 0, 0, 0, 0.00000084, 1, 0);
@@ -268,7 +274,7 @@ class RunStepUsageRecorderTest {
         call);
 
     ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
-    verify(repository).save(captor.capture());
+    verify(terminalOutbox).persist(captor.capture());
     RunStepUsage row = captor.getValue();
     assertThat(row.getLlmExecutionContextId()).isEqualTo("llmctx-embed");
     assertThat(row.getOrgId()).isEqualTo("org-1");

@@ -130,6 +130,38 @@ public class PrReviewController {
         .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
+  @PostMapping("/api/pr-reviews/{id}/cancel")
+  public ResponseEntity<Void> cancel(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    PrReview review = requireWritableReview(id, userDetails);
+    if (!service.requestCancellation(review.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "review is not cancellable");
+    }
+    return ResponseEntity.accepted().build();
+  }
+
+  @PostMapping("/api/pr-reviews/{id}/retry")
+  public ResponseEntity<PrReviewDto> retry(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    PrReview review = requireWritableReview(id, userDetails);
+    if (!service.retryReview(review.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "review is not retryable");
+    }
+    return ResponseEntity.accepted().body(PrReviewDto.from(service.findById(id)));
+  }
+
+  private PrReview requireWritableReview(UUID id, AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    PrReview review = service.findById(id);
+    if (review == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found");
+    }
+    projectAccessGuard.assertCanWrite(review.getProjectId(), userDetails);
+    return review;
+  }
+
   /** Get a single review by id (with comments inlined for convenience). */
   @GetMapping("/api/pr-reviews/{id}")
   public ResponseEntity<PrReviewWithComments> get(

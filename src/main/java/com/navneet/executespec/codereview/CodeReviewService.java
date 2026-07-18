@@ -15,27 +15,29 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import jakarta.annotation.PreDestroy;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.codereview.repository.CodeReviewIssueRepository;
 import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.reviewjob.ReviewBackgroundJobStore;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
@@ -96,27 +98,51 @@ public class CodeReviewService {
   private final GitHubRepoService github;
   private final TierConfigRepository tierConfigRepo;
   private final ProjectProviderResolver projectProviderResolver;
+  private final ReviewBackgroundJobStore reviewJobStore;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final ModelResolver modelResolver;
+  private final ProjectRepository projectRepository;
+  private final AppUserRepository appUserRepository;
+  private final ObjectMapper objectMapper;
 
   /**
-   * Dispatch pool — sized as {@code clamp(2, 8, cores × 1)}. Code-review scans clone a repo, shell
-   * out to semgrep, and make one LLM call — I/O-bound but heavy enough that we don't want runaway
-   * concurrency. Floor at 2 so even a single-core CI agent has parallelism; ceiling at 8 so a
-   * 16-core dev box doesn't fan out into git+semgrep contention.
+   * Source-compatible constructor retained for focused tests that exercise only tier/provider
+   * helpers.
    */
-  private final ExecutorService pool =
-      Executors.newFixedThreadPool(
-          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 2, 8),
-          r -> {
-            Thread t = new Thread(r, "code-review-dispatch");
-            t.setDaemon(true);
-            return t;
-          });
-
-  @PreDestroy
-  void shutdown() {
-    pool.shutdown();
-    log.info("CodeReviewService dispatch pool shutdown signaled");
+  CodeReviewService(
+      CodeReviewScanRepository scanRepo,
+      CodeReviewIssueRepository issueRepo,
+      SemgrepRunner semgrep,
+      CodeReviewAgent agent,
+      WorkspaceInitService workspaceInitService,
+      RunCostTracker costTracker,
+      SseBroadcaster broadcaster,
+      ProjectRepoRepository projectRepoRepo,
+      GitHubRepoService github,
+      TierConfigRepository tierConfigRepo,
+      ProjectProviderResolver projectProviderResolver) {
+    this(
+        scanRepo,
+        issueRepo,
+        semgrep,
+        agent,
+        workspaceInitService,
+        costTracker,
+        broadcaster,
+        projectRepoRepo,
+        github,
+        tierConfigRepo,
+        projectProviderResolver,
+        null,
+        null,
+        null,
+        null,
+        null,
+        new ObjectMapper());
   }
+
+  /** No service-owned queue remains; retained as a no-op for source compatibility. */
+  void shutdown() {}
 
   public void assertTierAndQuota(AppUser user) {
     if (user == null) throw new TierBlockedException("authentication required");
@@ -210,11 +236,10 @@ public class CodeReviewService {
     }
     final String resolvedSha = sha;
 
-    // Idempotency — if a COMPLETE scan exists for this exact SHA, return it.
+    // V299 idempotency covers queued/running/terminal work for the immutable repo/SHA tuple.
     Optional<CodeReviewScan> existing =
-        scanRepo.findFirstByProjectIdAndRepoFullNameAndStatusOrderByStartedAtDesc(
-            projectId, repoFullName, "COMPLETE");
-    if (existing.isPresent() && resolvedSha.equals(existing.get().getScannedSha())) {
+        scanRepo.findByProjectIdAndRepoIdAndScannedSha(projectId, repoId, resolvedSha);
+    if (existing.isPresent()) {
       log.info(
           "CodeReview idempotent re-use scan={} project={} repo={} sha={}",
           existing.get().getId(),
@@ -240,55 +265,120 @@ public class CodeReviewService {
     String channel = "code-review-" + saved.getId();
     broadcaster.emit(channel, RunEvent.runStatus(channel, "QUEUED"));
 
-    final UUID scanId = saved.getId();
-    final String patForDispatch = pat;
-    final String actorUserId = user == null ? null : user.getId();
-    final Map<String, String> routeSnapshot =
-        confirmedProvider == null
-            ? RunModelOverrides.capture()
-            : RunModelOverrides.withRunPin(Map.of(), confirmedProvider, confirmedModel);
-    pool.submit(
-        () ->
-            RunModelOverrides.runWith(
-                routeSnapshot,
-                () -> {
-                  try {
-                    runScan(
-                        scanId,
-                        projectId,
-                        repoId,
-                        repoFullName,
-                        resolvedSha,
-                        patForDispatch,
-                        confirmedProvider,
-                        confirmedModel,
-                        actorUserId,
-                        confirmedActionReference);
-                  } catch (Throwable t) {
-                    log.error("CodeReview dispatch threw for scan={}", scanId, t);
-                    failScan(scanId, "dispatch error: " + t.getMessage());
-                    broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", t.getMessage()));
-                  }
-                }));
+    String actorUserId = user == null ? null : user.getId();
+    var project = projectRepository.findById(projectId).orElseThrow();
+    LlmProvider provider =
+        confirmedProvider == null ? projectProviderResolver.resolve(projectId) : confirmedProvider;
+    String model =
+        confirmedModel == null
+            ? modelResolver.resolve("CodeReviewAgent", provider).getModel()
+            : confirmedModel;
+    LlmExecutionReference executionReference =
+        confirmedActionReference == null
+            ? executionPolicyFactory.forProject(
+                projectId,
+                "code-review",
+                "CODE_REVIEW",
+                saved.getId().toString(),
+                saved.getId().toString(),
+                provider.name(),
+                model,
+                actorUserId)
+            : confirmedActionReference;
+    try {
+      String payload =
+          objectMapper.writeValueAsString(Map.of("repoFullName", repoFullName, "sha", resolvedSha));
+      reviewJobStore.createOrGet(
+          new ReviewBackgroundJobStore.Job(
+              UUID.randomUUID(),
+              ReviewBackgroundJobStore.Type.CODE_REVIEW,
+              saved.getId(),
+              projectId,
+              project.getOrgId(),
+              repoId,
+              actorUserId,
+              "code-review:" + projectId + ":" + repoId + ":" + resolvedSha,
+              provider.name(),
+              model,
+              executionReference.contextId(),
+              executionReference.scope().mode().name(),
+              executionReference.scope().orgId(),
+              payload,
+              null,
+              null,
+              ReviewBackgroundJobStore.Status.QUEUED,
+              0,
+              3,
+              Instant.now(),
+              null,
+              0,
+              null,
+              null,
+              null,
+              null,
+              null,
+              Instant.now(),
+              null,
+              null));
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new IllegalStateException("could not encode code review job", impossible);
+    }
     return saved;
   }
 
-  void runScan(
-      UUID scanId,
-      String projectId,
-      UUID repoId,
+  /** Executes one V299 job using only its durable actor, route and target snapshots. */
+  public DurableCodeReviewResult runDurableJob(
+      ReviewBackgroundJobStore.Lease lease, String repoFullName, String sha, Runnable checkpoint) {
+    ReviewBackgroundJobStore.Job job = lease.job();
+    AppUser actor =
+        appUserRepository
+            .findById(job.requestedByUserId())
+            .orElseThrow(() -> new IllegalStateException("review actor no longer exists"));
+    var scope =
+        new com.navneet.executespec.executioncontext.LlmExecutionScope(
+            com.navneet.executespec.executioncontext.LlmExecutionScope.ScopeMode.valueOf(
+                job.executionScopeMode()),
+            job.executionScopeOrgId());
+    var reference = new LlmExecutionReference(job.executionContextId(), scope);
+    LlmProvider provider = LlmProvider.valueOf(job.provider());
+    java.util.concurrent.atomic.AtomicReference<DurableCodeReviewResult> result =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    RunModelOverrides.runWith(
+        RunModelOverrides.withRunPin(Map.of(), provider, job.model()),
+        () ->
+            result.set(
+                runScan(
+                    lease,
+                    repoFullName,
+                    sha,
+                    actor.getGithubPat(),
+                    provider,
+                    job.model(),
+                    actor.getId(),
+                    reference,
+                    checkpoint)));
+    return result.get();
+  }
+
+  DurableCodeReviewResult runScan(
+      ReviewBackgroundJobStore.Lease lease,
       String repoFullName,
       String sha,
       String pat,
       LlmProvider confirmedProvider,
       String confirmedModel,
       String actorUserId,
-      LlmExecutionReference confirmedActionReference) {
+      LlmExecutionReference confirmedActionReference,
+      Runnable checkpoint) {
+    UUID scanId = lease.job().subjectId();
+    String projectId = lease.job().projectId();
+    UUID repoId = lease.job().repoId();
     String channel = "code-review-" + scanId;
     long start = System.currentTimeMillis();
+    checkpoint.run();
 
     // 1. CLONING — provision a workspace at workspace/{scan-{scanId}} and clone the repo.
-    setStatus(scanId, "CLONING");
+    requireStatusUpdate(reviewJobStore.updateCodeReviewStatus(lease, "CLONING"));
     broadcaster.emit(channel, RunEvent.runStatus(channel, "CLONING"));
     broadcaster.emit(
         channel, RunEvent.log(channel, "scan", "Cloning " + repoFullName + " @ " + shortSha(sha)));
@@ -299,20 +389,20 @@ public class CodeReviewService {
       String cloneUrl = resolveCloneUrl(repoId, repoFullName);
       workspaceInitService.cloneFromRepo(workspaceRunId, cloneUrl, pat);
       workspaceRoot = workspaceInitService.runWorkspacePath(workspaceRunId);
+      checkpoint.run();
     } catch (Exception e) {
       log.warn("CodeReview clone failed scan={}: {}", scanId, e.getMessage());
-      failScan(scanId, "clone: " + e.getMessage());
       broadcaster.emit(channel, RunEvent.log(channel, "scan", "❌ Clone failed: " + e.getMessage()));
-      broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", "clone failed"));
-      return;
+      throw new IllegalStateException("clone failed", e);
     }
 
     // 2. STATIC_RUNNING — semgrep
-    setStatus(scanId, "STATIC_RUNNING");
+    requireStatusUpdate(reviewJobStore.updateCodeReviewStatus(lease, "STATIC_RUNNING"));
     broadcaster.emit(channel, RunEvent.runStatus(channel, "STATIC_RUNNING"));
     broadcaster.emit(channel, RunEvent.log(channel, "scan", "Running semgrep static analysis…"));
 
     SemgrepRunner.ScanResult staticResult = semgrep.scan(workspaceRoot);
+    checkpoint.run();
     int staticCount = staticResult.findings().size();
     broadcaster.emit(
         channel,
@@ -332,7 +422,7 @@ public class CodeReviewService {
                     + ") — continuing with LLM-only pass")));
 
     // 3. LLM_RUNNING — augmentation pass
-    setStatus(scanId, "LLM_RUNNING");
+    requireStatusUpdate(reviewJobStore.updateCodeReviewStatus(lease, "LLM_RUNNING"));
     broadcaster.emit(channel, RunEvent.runStatus(channel, "LLM_RUNNING"));
     broadcaster.emit(
         channel,
@@ -384,24 +474,33 @@ public class CodeReviewService {
     CodeReviewAgent.AgentResult agentResult;
     try {
       agentResult = agent.review(agentReq);
+      checkpoint.run();
     } catch (Exception e) {
       log.warn("CodeReview agent failed scan={}: {}", scanId, e.getMessage());
-      failScan(scanId, "agent: " + e.getMessage());
       broadcaster.emit(
           channel, RunEvent.log(channel, "scan", "❌ LLM pass failed: " + e.getMessage()));
-      broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", "agent failed"));
-      return;
+      throw new IllegalStateException("agent failed", e);
     }
 
-    // 4. Persist + finalize
+    return new DurableCodeReviewResult(
+        staticResult, agentResult, totalFiles, totalLoc, System.currentTimeMillis() - start);
+  }
+
+  /** Locks the V299 fence and publishes result + terminal job state in one transaction. */
+  @Transactional
+  public void publishDurableResult(
+      ReviewBackgroundJobStore.Lease lease, DurableCodeReviewResult result) {
+    reviewJobStore.requireLiveLeaseForUpdate(lease);
     CodeReviewSummary summary =
         completeScan(
-            scanId,
-            staticResult,
-            agentResult,
-            totalFiles,
-            totalLoc,
-            System.currentTimeMillis() - start);
+            lease.job().subjectId(),
+            result.staticResult(),
+            result.agentResult(),
+            result.totalFiles(),
+            result.totalLoc(),
+            result.durationMs());
+    if (!reviewJobStore.complete(lease)) throw new ReviewBackgroundJobStore.LeaseFencedException();
+    String channel = "code-review-" + lease.job().subjectId();
     broadcaster.emit(
         channel,
         RunEvent.log(
@@ -418,6 +517,17 @@ public class CodeReviewService {
                 + " static findings dropped as false positives."));
     broadcaster.emit(channel, RunEvent.complete(channel, "COMPLETE", "scan complete"));
   }
+
+  private static void requireStatusUpdate(boolean updated) {
+    if (!updated) throw new ReviewBackgroundJobStore.LeaseFencedException();
+  }
+
+  public record DurableCodeReviewResult(
+      SemgrepRunner.ScanResult staticResult,
+      CodeReviewAgent.AgentResult agentResult,
+      int totalFiles,
+      int totalLoc,
+      long durationMs) {}
 
   /** Resolve the linked project's configured provider; never hardcode a review-only provider. */
   String resolveProvider(String projectId) {
@@ -542,21 +652,30 @@ public class CodeReviewService {
             });
   }
 
+  public boolean requestCancellation(UUID scanId) {
+    var job = reviewJobStore.requestCancellation(ReviewBackgroundJobStore.Type.CODE_REVIEW, scanId);
+    if (job.isEmpty()
+        || job.get().status().terminal()
+            && job.get().status() != ReviewBackgroundJobStore.Status.CANCELLED) {
+      return false;
+    }
+    return true;
+  }
+
   @Transactional
-  void failScan(UUID scanId, String reason) {
+  public boolean retryScan(UUID scanId) {
+    var job = reviewJobStore.retry(ReviewBackgroundJobStore.Type.CODE_REVIEW, scanId);
+    if (job.isEmpty() || job.get().status() != ReviewBackgroundJobStore.Status.QUEUED) return false;
     scanRepo
         .findById(scanId)
         .ifPresent(
-            r -> {
-              r.setStatus("FAILED");
-              r.setFailureReason(reason);
-              r.setFinishedAt(Instant.now());
-              if (r.getStartedAt() != null) {
-                r.setDurationMs(
-                    java.time.Duration.between(r.getStartedAt(), Instant.now()).toMillis());
-              }
-              scanRepo.save(r);
+            row -> {
+              row.setStatus("QUEUED");
+              row.setFinishedAt(null);
+              row.setFailureReason(null);
+              scanRepo.save(row);
             });
+    return true;
   }
 
   // File sampling for the LLM prompt

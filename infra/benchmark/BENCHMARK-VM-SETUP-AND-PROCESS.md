@@ -148,7 +148,8 @@ python3 infra/benchmark/scripts/k-eval.py generate \
   --provider openrouter --model glm-5.2 \
   --dataset /path/to/frozen-lite10.json --expected-total 10 \
   --k 1 --concurrency 2 --out /path/to/glm-lite10 \
-  --per-task-cap-usd 2 --campaign-cap-usd 20 --opening-balance-usd 25
+  --per-task-cap-usd 2 --campaign-cap-usd 20 --opening-balance-usd 25 \
+  --task-timeout-seconds 3600 --shutdown-reserve-seconds 120
 ```
 
 All three monetary flags and the exact cardinality are mandatory. The campaign cap spans every
@@ -160,6 +161,13 @@ silently double-spend. The canonical manifest contains only unique HTTP-200 term
 attempts remain in the separate `passN.attempts.jsonl` audit trail. The command-wide budget ledger
 uses an OS file lock, so a duplicate process using the same output directory sees current
 reservations instead of oversubscribing from stale memory.
+
+The generation runner computes an absolute epoch deadline immediately before each HTTP request.
+The same deadline and reserve reach the worker and tool-dispatch budget; the HTTP timeout is 60
+seconds longer than the task deadline so the client does not abandon server work. The server may
+tighten the requested deadline to `swebench.task-wall-timeout-minutes` and enforces a minimum
+120-second shutdown reserve. A requested deadline that cannot leave that reserve is rejected before
+container setup or provider dispatch.
 
 ```bash
 SCORE_WORKERS=4

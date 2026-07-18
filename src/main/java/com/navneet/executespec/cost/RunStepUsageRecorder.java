@@ -25,11 +25,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunStepUsageRecorder {
 
-  private final RunStepUsageRepository repository;
   private final LlmUsageAttemptIntentRepository intentRepository;
   private final LlmUsageAttributionResolver attributionResolver;
   private final Metrics metrics;
   private final ModelRegistry modelRegistry;
+  private final LlmUsageTerminalOutbox terminalOutbox;
   private final LlmUsageRecoverySpool recoverySpool;
 
   /**
@@ -560,8 +560,10 @@ public class RunStepUsageRecorder {
               .providerUsageRawJson(safeUsageMetadata(response, usage))
               .createdAt(Instant.now())
               .build();
-      repository.save(row);
-      metrics.recordLlmUsagePersistence(status, "ok");
+      LlmUsageTerminalOutbox.PersistResult result = terminalOutbox.persist(row);
+      metrics.recordLlmUsagePersistence(
+          status,
+          result == LlmUsageTerminalOutbox.PersistResult.MATERIALIZED ? "ok" : "durably_queued");
       return row.getId();
     } catch (Exception persistenceFailure) {
       metrics.recordLlmUsagePersistence(status, "failed");
@@ -572,6 +574,9 @@ public class RunStepUsageRecorder {
           provider,
           status,
           persistenceFailure.getMessage());
+      // PostgreSQL may itself be unavailable, which prevents even an outbox stage. Preserve the
+      // exact fact locally as a last resort; V293's intent remains the cross-JVM missing-terminal
+      // signal and the critical persistence metric must page operators.
       if (row != null) recoverySpool.enqueue(row);
       return null;
     }

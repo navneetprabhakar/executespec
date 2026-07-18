@@ -45,7 +45,9 @@ public class BenchmarkController {
       // gets the project's codemap/arch/RAG injected. Null/absent → blind (the bench project).
       String projectId,
       java.util.List<String> selectedRepoIds,
-      Double hardCapUsd) {}
+      Double hardCapUsd,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {}
 
   /** Compatibility alias for the single benchmark codegen path. */
   @PostMapping("/run")
@@ -75,7 +77,12 @@ public class BenchmarkController {
         req.modelName());
     return ResponseEntity.ok(
         generationService.generate(
-            req.instanceId(), req.aiProvider(), req.modelName(), req.hardCapUsd()));
+            req.instanceId(),
+            req.aiProvider(),
+            req.modelName(),
+            req.hardCapUsd(),
+            req.absoluteDeadlineEpochMs(),
+            req.shutdownReserveMs()));
   }
 
   /** Read-only preview — what image / repo / base commit this instance resolves to. */

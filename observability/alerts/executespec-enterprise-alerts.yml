@@ -35,3 +35,31 @@ groups:
             terminal fact beyond the configured five-minute integrity window.
           runbook_url: >-
             https://github.com/navneetprabhakar/executespec/blob/main/docs/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageRecoveryBacklog
+        expr: executespec_v2_llm_usage_recovery_pending > 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM terminal usage recovery is backlogged"
+          description: >-
+            Exact terminal usage facts remain in the V298 database outbox and have not yet been
+            materialized into run_step_usage. Provider dispatch should be paused if this persists.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec/blob/main/docs/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageRecoveryDeadLetter
+        expr: executespec_v2_llm_usage_recovery_dead > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM terminal usage recovery contains a dead letter"
+          description: >-
+            A checksum-invalid or malformed terminal usage fact was retained for operator
+            investigation and was not inserted into the canonical ledger.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec/blob/main/docs/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure

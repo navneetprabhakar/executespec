@@ -22,13 +22,13 @@ class LlmUsageRecoverySpoolTest {
 
   @Test
   void atomicallySpoolsAndReplaysExactTerminalFact() throws Exception {
-    RunStepUsageRepository repository = org.mockito.Mockito.mock(RunStepUsageRepository.class);
+    LlmUsageTerminalOutbox terminalOutbox = org.mockito.Mockito.mock(LlmUsageTerminalOutbox.class);
     Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
-    when(repository.save(any(RunStepUsage.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
+        .thenReturn(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
     LlmUsageRecoverySpool spool =
         new LlmUsageRecoverySpool(
-            repository,
+            terminalOutbox,
             new ObjectMapper().findAndRegisterModules(),
             metrics,
             temporaryDirectory.toString());
@@ -41,14 +41,14 @@ class LlmUsageRecoverySpoolTest {
     // filesystem record, not in-memory queue state from the writer instance.
     LlmUsageRecoverySpool restarted =
         new LlmUsageRecoverySpool(
-            repository,
+            terminalOutbox,
             new ObjectMapper().findAndRegisterModules(),
             metrics,
             temporaryDirectory.toString());
     restarted.replayPending();
 
     ArgumentCaptor<RunStepUsage> captor = ArgumentCaptor.forClass(RunStepUsage.class);
-    verify(repository).save(captor.capture());
+    verify(terminalOutbox).persist(captor.capture());
     assertThat(captor.getValue()).usingRecursiveComparison().isEqualTo(row);
     assertThat(jsonFileCount()).isZero();
     verify(metrics).recordLlmUsagePersistence("SUCCESS", "spooled");
@@ -57,13 +57,13 @@ class LlmUsageRecoverySpoolTest {
 
   @Test
   void failedReplayRemainsDurableForNextSweep() throws Exception {
-    RunStepUsageRepository repository = org.mockito.Mockito.mock(RunStepUsageRepository.class);
+    LlmUsageTerminalOutbox terminalOutbox = org.mockito.Mockito.mock(LlmUsageTerminalOutbox.class);
     Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
-    when(repository.save(any(RunStepUsage.class)))
+    when(terminalOutbox.persist(any(RunStepUsage.class)))
         .thenThrow(new IllegalStateException("database still unavailable"));
     LlmUsageRecoverySpool spool =
         new LlmUsageRecoverySpool(
-            repository,
+            terminalOutbox,
             new ObjectMapper().findAndRegisterModules(),
             metrics,
             temporaryDirectory.toString());

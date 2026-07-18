@@ -119,6 +119,9 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .stagnationForceAfter(stagnationDisabled)
         .requireTestVerification(requireTestVerification(request))
         .wallClockSeconds(request.budget() == null ? null : request.budget().wallClockSeconds())
+        .absoluteDeadlineEpochMs(
+            request.budget() == null ? null : request.budget().absoluteDeadlineEpochMs())
+        .shutdownReserveMs(request.budget() == null ? null : request.budget().shutdownReserveMs())
         .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
         .verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
         // progress-v2 (V255, default OFF): novelty-based progress + repetition force + bounded

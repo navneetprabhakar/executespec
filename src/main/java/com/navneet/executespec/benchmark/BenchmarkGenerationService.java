@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.CodeGenEngine;
+import com.navneet.executespec.engine.EngineBudget;
 import com.navneet.executespec.engine.EngineOutcome;
 import com.navneet.executespec.engine.EngineRequest;
 import com.navneet.executespec.engine.EngineResult;
@@ -63,6 +64,7 @@ import lombok.extern.slf4j.Slf4j;
 public class BenchmarkGenerationService {
 
   private static final ObjectMapper JSON = new ObjectMapper();
+  static final long DEFAULT_SHUTDOWN_RESERVE_MS = 120_000L;
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
@@ -97,11 +99,21 @@ public class BenchmarkGenerationService {
    * terminates, then returns the captured diff + cost.
    */
   public GenerateResult generate(String instanceId, String aiProvider, String modelName) {
-    return generate(instanceId, aiProvider, modelName, null);
+    return generate(instanceId, aiProvider, modelName, null, null, null);
   }
 
   public GenerateResult generate(
       String instanceId, String aiProvider, String modelName, Double requestedHardCapUsd) {
+    return generate(instanceId, aiProvider, modelName, requestedHardCapUsd, null, null);
+  }
+
+  public GenerateResult generate(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      Double requestedHardCapUsd,
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs) {
     if (!props.isEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "swebench is disabled (set swebench.enabled=true)");
@@ -109,6 +121,12 @@ public class BenchmarkGenerationService {
     if (instanceId == null || instanceId.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instanceId required");
     }
+    DeadlineBudget deadline =
+        effectiveDeadlineBudget(
+            requestedDeadlineEpochMs,
+            requestedShutdownReserveMs,
+            props.getTaskWallTimeoutMinutes(),
+            Instant.now().toEpochMilli());
 
     SwebenchInstanceLoader.SwebenchInstance instance = loader.findById(instanceId);
     String image = loader.imageNameFor(instanceId);
@@ -178,6 +196,13 @@ public class BenchmarkGenerationService {
                   .runId(runId)
                   .taskId("__root__")
                   .verifyMode(VerifyMode.NONE)
+                  .budget(
+                      new EngineBudget(
+                          null,
+                          deadline.wallClockSeconds(),
+                          hardCapUsd,
+                          deadline.deadlineEpochMs(),
+                          deadline.shutdownReserveMs()))
                   .build());
 
       String patch =
@@ -255,6 +280,53 @@ public class BenchmarkGenerationService {
           HttpStatus.BAD_REQUEST, "hardCapUsd must be a finite positive value");
     }
     return Math.min(configuredHardCapUsd, requestedHardCapUsd);
+  }
+
+  record DeadlineBudget(long deadlineEpochMs, long shutdownReserveMs, int wallClockSeconds) {}
+
+  static DeadlineBudget effectiveDeadlineBudget(
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs,
+      int configuredTimeoutMinutes,
+      long nowEpochMs) {
+    if (configuredTimeoutMinutes <= 0) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "swebench.task-wall-timeout-minutes must be positive");
+    }
+    if (requestedShutdownReserveMs != null && requestedShutdownReserveMs < 0) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "shutdownReserveMs must be non-negative");
+    }
+
+    long configuredDurationMs;
+    long configuredDeadline;
+    try {
+      configuredDurationMs = Math.multiplyExact((long) configuredTimeoutMinutes, 60_000L);
+      configuredDeadline = Math.addExact(nowEpochMs, configuredDurationMs);
+    } catch (ArithmeticException overflow) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "configured benchmark deadline overflows epoch millis");
+    }
+
+    long deadline =
+        requestedDeadlineEpochMs == null
+            ? configuredDeadline
+            : Math.min(requestedDeadlineEpochMs, configuredDeadline);
+    long reserve =
+        Math.max(
+            DEFAULT_SHUTDOWN_RESERVE_MS,
+            requestedShutdownReserveMs == null
+                ? DEFAULT_SHUTDOWN_RESERVE_MS
+                : requestedShutdownReserveMs);
+    if (deadline <= nowEpochMs || deadline - nowEpochMs <= reserve) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "absoluteDeadlineEpochMs must leave more time than shutdownReserveMs");
+    }
+
+    long remainingMs = deadline - nowEpochMs;
+    long seconds = Math.max(1L, (remainingMs + 999L) / 1_000L);
+    return new DeadlineBudget(deadline, reserve, (int) Math.min(Integer.MAX_VALUE, seconds));
   }
 
   void acquireGenerationSlot(String instanceId) {

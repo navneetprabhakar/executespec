@@ -21,11 +21,13 @@
 - `agent_usage_ledger` is a compatibility roll-up for agent turns, not the canonical provider-call
   ledger. Enterprise audit and FinOps queries start from `llm_usage_attempt_intent` and left-join
   the terminal fact so process loss remains visible.
-- Intent persistence fails closed before provider transport. A terminal-write failure never
-  replaces or retries a successful provider response; it emits a metric and writes a secret-free,
-  atomic local recovery record for idempotent replay. The recovery directory must be persistent for
-  process-restart durability; the database intent remains the missing-terminal signal if local
-  storage is lost.
+- Intent persistence fails closed before provider transport. V298 stages the exact bounded,
+  secret-free terminal fact in `llm_usage_terminal_outbox` in an independent transaction before
+  canonical materialization. SHA-256 identity, a unique physical-attempt key, fenced leases and
+  `SKIP LOCKED` claims let any JVM replay it exactly once without retrying a successful provider
+  response. `LlmUsageRecoverySpool` is only the last resort when PostgreSQL cannot accept even the
+  outbox stage; that directory must be shared/persistent for cross-node recovery during a total
+  database outage, while the immutable intent remains the durable missing-terminal signal.
 
 ## Enterprise audit surface
 
@@ -60,7 +62,8 @@ Provider-invoice reconciliation remains `NOT_AVAILABLE_NO_PROVIDER_INVOICE_OR_RE
 provider invoice/export ingestion or durable upstream request/invoice id.
 
 `RunStepUsageRecorder` emits `executespec.v2.llm.usage.persistence{result="failed"}` when the
-canonical write fails. Prometheus loads `observability/alerts/executespec-enterprise-alerts.yml` and
-raises a labeled critical rule on any such failure. Alertmanager/pager delivery must still be
-qualified per environment. V293's intent plus `LlmUsageRecoverySpool` provide local replay;
-cross-node replicated terminal recovery and ledger retention/partitioning remain release work.
+canonical write fails. V298 also exposes pending/dead recovery gauges and critical alerts; the
+database outbox scheduler can claim an expired lease and recover the exact fact on another JVM.
+Prometheus loads `observability/alerts/executespec-enterprise-alerts.yml`. Alertmanager/pager
+delivery, deployed multi-JVM process-kill/DB-denial qualification, a shared fallback directory for
+total PostgreSQL outage, and ledger retention/partitioning remain release work.

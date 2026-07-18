@@ -11,6 +11,7 @@ import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -73,6 +74,12 @@ public class PrReviewAgent {
     // PrReviewAgent is registered as PLANNING there. The lookup falls back to WORKHORSE with a
     // WARN log if the YAML is ever missing the entry — boot won't fail, just degrade.
     ResolvedModel resolved = modelResolver.resolve("PrReviewAgent", providerEnum);
+    if (req.model() != null
+        && (!req.model().equals(resolved.getModel())
+            || resolved.getActualProvider() != providerEnum)) {
+      throw new PrReviewAgentException(
+          "pinned provider/model route changed before PR review dispatch");
+    }
 
     String systemPrompt;
     try {
@@ -91,15 +98,17 @@ public class PrReviewAgent {
 
     SubmitReviewToolCallback submitTool = new SubmitReviewToolCallback();
     var executionReference =
-        executionPolicyFactory.forProject(
-            req.projectId(),
-            "pr-review",
-            "PR_REVIEW",
-            req.prReviewId(),
-            req.prReviewId(),
-            provider,
-            null,
-            req.actorUserId());
+        req.executionReference() != null
+            ? req.executionReference()
+            : executionPolicyFactory.forProject(
+                req.projectId(),
+                "pr-review",
+                "PR_REVIEW",
+                req.prReviewId(),
+                req.prReviewId(),
+                provider,
+                req.model(),
+                req.actorUserId());
 
     ChatResponse resp;
     try {
@@ -316,7 +325,9 @@ public class PrReviewAgent {
       Integer deletions,
       String diff,
       String provider,
-      String actorUserId) {}
+      String model,
+      String actorUserId,
+      LlmExecutionReference executionReference) {}
 
   public record AgentReviewComment(
       String filePath,
