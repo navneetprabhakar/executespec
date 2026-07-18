@@ -5,6 +5,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
@@ -139,7 +140,11 @@ public class ProjectBriefService {
                   null,
                   actorUserId);
       Prompt prompt =
-          new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(archMarkdown)));
+          new Prompt(
+              List.of(
+                  new SystemMessage(SUMMARY_SYSTEM),
+                  new UserMessage(
+                      PromptTrustBoundary.wrap("PROJECT_BRIEF_EVIDENCE", archMarkdown))));
       ChatResponse response =
           llmRouter.callText(
               resolved.providerName(),

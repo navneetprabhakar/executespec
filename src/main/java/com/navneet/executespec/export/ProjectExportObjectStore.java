@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 
 import org.springframework.stereotype.Component;
 
@@ -39,6 +40,7 @@ public class ProjectExportObjectStore {
   private final AgentProperties agentProperties;
   private final ProjectExportProperties properties;
   private final GcsWorkspaceStore gcs;
+  private final ArtifactPublicationGuard publicationGuard;
 
   public Path createStagingFile(UUID jobId, long fencingToken) throws IOException {
     Path staging = root().resolve(".staging");
@@ -53,6 +55,7 @@ public class ProjectExportObjectStore {
       UUID jobId, long fencingToken, String projectId, Path archive, String contentType)
       throws IOException {
     if (!Files.isRegularFile(archive)) throw new IOException("export staging artifact missing");
+    publicationGuard.assertTarGzipSafe(archive);
     long size = Files.size(archive);
     String sha256 = sha256(archive);
     String relative = "project-exports/" + jobId + "/" + fencingToken + ".tar.gz";
@@ -86,10 +89,21 @@ public class ProjectExportObjectStore {
   public void copyTo(String objectKey, OutputStream destination) throws IOException {
     if (objectKey == null) throw new IOException("export artifact unavailable");
     if (objectKey.startsWith(GCS_PREFIX)) {
-      gcs.copyObjectTo(objectKey.substring(GCS_PREFIX.length()), destination);
+      Path validation = Files.createTempFile(root(), "project-export-validation-", ".tar.gz");
+      ownerOnly(validation);
+      try {
+        try (OutputStream file = Files.newOutputStream(validation)) {
+          gcs.copyObjectTo(objectKey.substring(GCS_PREFIX.length()), file);
+        }
+        publicationGuard.assertTarGzipSafe(validation);
+        Files.copy(validation, destination);
+      } finally {
+        Files.deleteIfExists(validation);
+      }
       return;
     }
     Path source = localObjectPath(objectKey);
+    publicationGuard.assertTarGzipSafe(source);
     try (InputStream in = Files.newInputStream(source)) {
       in.transferTo(destination);
     }

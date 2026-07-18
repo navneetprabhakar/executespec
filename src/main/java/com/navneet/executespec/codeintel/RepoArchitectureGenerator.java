@@ -3,6 +3,7 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.LlmProvider;
@@ -118,7 +119,9 @@ public class RepoArchitectureGenerator {
     String userPayload = "Repository: " + repoFullName + "\n\n" + "Code map:\n\n" + codeMapMarkdown;
 
     List<Message> messages =
-        List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
+        List.of(
+            new SystemMessage(SYSTEM_PROMPT),
+            new UserMessage(PromptTrustBoundary.wrap("REPO_ARCHITECTURE_EVIDENCE", userPayload)));
     String contextId = "repo-arch-" + java.util.UUID.randomUUID();
     var executionReference =
         confirmedActionReference != null

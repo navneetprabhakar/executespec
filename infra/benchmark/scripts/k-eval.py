@@ -39,7 +39,10 @@ import concurrent.futures
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 import fcntl
+import hashlib
 import json
+import math
+import re
 import threading
 import os
 import pathlib
@@ -52,6 +55,35 @@ import urllib.request
 BASE = os.environ.get("ES_BASE", "http://localhost:8080")
 HOME = pathlib.Path.home()
 MONEY_QUANTUM = Decimal("0.000001")
+REDACTED = "[REDACTED]"
+SENSITIVE_FIELD_NAMES = {
+    "authorization", "proxyauthorization", "apikey", "accesskey", "secretkey",
+    "accesstoken", "refreshtoken", "idtoken", "password", "passwd", "secret",
+    "credential", "credentials", "cookie", "setcookie", "privatekey", "token",
+    "bearertoken", "authtoken", "clientsecret", "passwordhash", "pat",
+    "personalaccesstoken",
+}
+SENSITIVE_FIELD_SUFFIXES = (
+    "apikey", "accesstoken", "refreshtoken", "idtoken", "password", "passwd",
+    "secret", "credential", "privatekey", "token",
+)
+SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"\bes_pat_[A-Za-z0-9._-]{8,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\bAIza[A-Za-z0-9_-]{20,}"),
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    re.compile(
+        r"(?i)\b(api[_-]?key|(?:personal[_-]?access|access|refresh|auth)?[_-]?token|pat|"
+        r"password|passwd|secret|credential)\s*([:=])\s*(?!\[REDACTED\])"
+        r"([^\s,;&}\]]+)"),
+    re.compile(
+        r"(?i)(?:~|/)[^\s\"']*(?:\.env|creds?|credentials?|key[_-]?rotation|secrets?)"
+        r"[^\s\"']*"),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END "
+               r"(?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+)
 
 
 # ---------- shared ----------
@@ -114,14 +146,68 @@ def post_authenticated(path, body, token_box, refresh_lock, timeout=3900):
         return post(path, body, token_box["t"], timeout=timeout)
 
 
+def get(path, token=None, timeout=60):
+    req = urllib.request.Request(
+        BASE + path,
+        method="GET",
+        headers={"Authorization": "Bearer " + token} if token else {},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.status, json.loads(response.read().decode() or "null")
+
+
+def get_authenticated(path, token_box, refresh_lock, timeout=60):
+    """GET once, refresh a rejected token once, then fail closed."""
+    token_used = token_box["t"]
+    try:
+        return get(path, token_used, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401:
+            raise
+        with refresh_lock:
+            if token_box["t"] == token_used:
+                token_box["t"] = login()
+        return get(path, token_box["t"], timeout=timeout)
+
+
+def get_bytes(path, token=None, timeout=60):
+    """GET a bounded binary artifact and retain response metadata for integrity checks."""
+    req = urllib.request.Request(
+        BASE + path,
+        method="GET",
+        headers={"Authorization": "Bearer " + token} if token else {},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.status, response.read(), {
+            key.lower(): value for key, value in response.headers.items()
+        }
+
+
+def get_bytes_authenticated(path, token_box, refresh_lock, timeout=60):
+    """Binary GET once, refresh a rejected token once, then fail closed."""
+    token_used = token_box["t"]
+    try:
+        return get_bytes(path, token_used, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401:
+            raise
+        with refresh_lock:
+            if token_box["t"] == token_used:
+                token_box["t"] = login()
+        return get_bytes(path, token_box["t"], timeout=timeout)
+
+
 # ---------- tracking (in-app /benchmark UI) ----------
 
-def tracking_start(token_box, refresh_lock, provider, model, k, total, dataset_label):
+def tracking_start(
+        token_box, refresh_lock, provider, model, k, total, dataset_label,
+        submission_required=False):
     """Register this generation run before spend. Missing tracking is fatal."""
     _st, data = post_authenticated(
         "/api/v2/test/benchmark/start",
         {"suite": "SWE_BENCH", "dataset": dataset_label, "provider": provider,
-         "model": model, "k": k, "totalTasks": total, "harborJobName": "k-eval-local"},
+         "model": model, "k": k, "totalTasks": total, "harborJobName": "k-eval-local",
+         "submissionRequired": bool(submission_required)},
         token_box, refresh_lock, timeout=30)
     benchmark_id = data.get("id")
     if not isinstance(benchmark_id, str) or not benchmark_id.strip():
@@ -294,12 +380,13 @@ def load_generation_manifest(path):
             raise SystemExit(f"malformed manifest row {line_number}: instance_id missing")
         if row.get("status") != 200:
             continue
-        required = ("outcome", "runId", "costUsd", "submissionPatch", "predsJson", "proPatchJson")
+        # proPatchJson is SWE-bench Pro-only; Lite generation correctly returns null for it.
+        required = ("outcome", "runId", "costUsd", "submissionPatch", "predsJson")
         missing = [key for key in required if row.get(key) is None]
         if missing:
             raise SystemExit(
                 f"malformed terminal manifest row {line_number} for {instance_id}: missing {missing}")
-        text_fields = ("outcome", "runId", "submissionPatch", "predsJson", "proPatchJson")
+        text_fields = ("outcome", "runId", "submissionPatch", "predsJson")
         invalid_text = [key for key in text_fields if not isinstance(row.get(key), str)]
         if invalid_text:
             raise SystemExit(
@@ -322,6 +409,128 @@ def write_generation_manifest(path, completed, ordered_ids):
     temporary.replace(path)
 
 
+def trajectory_artifact(out_root, pass_number, instance_id, run_id, replay):
+    """Persist the actual run event trajectory; return a safe relative reference and digest.
+
+    Raw events stay in the operator artifact directory.  Only the path relative to ``out_root``
+    and the SHA-256 are published to the benchmark API; host paths and event content never are.
+    """
+    if not isinstance(replay, dict):
+        raise ValueError("run event-log replay response must be a JSON object")
+    if not replay.get("available"):
+        raise ValueError(
+            "run event-log replay is unavailable: " + str(replay.get("reason") or "unknown"))
+    if replay.get("truncated"):
+        raise ValueError("run event-log replay is truncated; refusing incomplete trajectory evidence")
+    events = replay.get("events")
+    if not isinstance(events, list):
+        raise ValueError("run event-log replay events must be a JSON array")
+    if not events:
+        raise ValueError("run event-log response is empty; refusing placeholder trajectory evidence")
+    directory = out_root / f"pass{pass_number}.trajectories"
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:24] + ".json"
+    path = directory / filename
+    trajectory = redact_trajectory_value({
+        "schemaVersion": 1,
+        "taskName": instance_id,
+        "attempt": int(pass_number),
+        "runId": run_id,
+        "lastEventId": replay.get("lastEventId"),
+        "events": events,
+    })
+    encoded = (json.dumps(trajectory, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    assert_no_recognized_secret(encoded.decode("utf-8"))
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(encoded)
+    temporary.replace(path)
+    relative = path.relative_to(out_root).as_posix()
+    return relative, hashlib.sha256(encoded).hexdigest()
+
+
+def durable_trajectory_artifact(
+        out_root, pass_number, instance_id, run_id, token_box, refresh_lock):
+    """Download the complete benchmark-profile trajectory and verify its server checksum.
+
+    The endpoint is deliberately separate from the 500-event customer SSE replay. It returns
+    redacted NDJSON and a ``truncated=false`` integrity contract. Any missing header, empty body,
+    checksum mismatch, or truncation fails the submission evidence path closed.
+    """
+    status, encoded, headers = get_bytes_authenticated(
+        f"/api/v2/test/benchmark/runs/{run_id}/trajectory",
+        token_box,
+        refresh_lock,
+        timeout=120,
+    )
+    if status != 200:
+        raise ValueError(f"durable trajectory returned HTTP {status}")
+    if headers.get("x-trajectory-truncated", "").lower() != "false":
+        raise ValueError("durable trajectory is truncated or missing completeness contract")
+    expected = headers.get("x-trajectory-sha256", "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise ValueError("durable trajectory is missing a valid SHA-256")
+    actual = hashlib.sha256(encoded).hexdigest()
+    if actual != expected:
+        raise ValueError("durable trajectory checksum mismatch")
+    try:
+        count = int(headers.get("x-trajectory-event-count", "0"))
+    except ValueError as exc:
+        raise ValueError("durable trajectory event count is malformed") from exc
+    if not encoded or count <= 0 or encoded.count(b"\n") != count:
+        raise ValueError("durable trajectory is empty or has an inconsistent event count")
+    decoded = encoded.decode("utf-8")
+    assert_no_recognized_secret(decoded)
+    directory = out_root / f"pass{pass_number}.trajectories"
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:24] + ".ndjson"
+    path = directory / filename
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(encoded)
+    temporary.replace(path)
+    return path.relative_to(out_root).as_posix(), actual
+
+
+def redact_trajectory_value(value, field_name=None):
+    """Recursively redact recognized secret fields and credential-bearing strings."""
+    normalized_field = re.sub(r"[^a-z0-9]", "", str(field_name or "").lower())
+    if (normalized_field in SENSITIVE_FIELD_NAMES
+            or normalized_field.endswith(SENSITIVE_FIELD_SUFFIXES)):
+        return REDACTED
+    if isinstance(value, dict):
+        return {str(key): redact_trajectory_value(child, key) for key, child in value.items()}
+    if isinstance(value, list):
+        return [redact_trajectory_value(child) for child in value]
+    if not isinstance(value, str):
+        return value
+    redacted = value
+    for pattern in SECRET_TEXT_PATTERNS:
+        if "api[_-]?key" in pattern.pattern or "personal[_-]?access" in pattern.pattern:
+            redacted = pattern.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", redacted)
+        elif pattern.pattern.startswith("(?i)\\bBearer"):
+            redacted = pattern.sub("Bearer " + REDACTED, redacted)
+        elif "(?:~|/)" in pattern.pattern:
+            redacted = pattern.sub("[REDACTED_PATH]", redacted)
+        else:
+            redacted = pattern.sub(REDACTED, redacted)
+    return redacted
+
+
+def assert_no_recognized_secret(serialized):
+    """Refuse persistence if a recognized credential pattern survived redaction."""
+    for pattern in SECRET_TEXT_PATTERNS:
+        if pattern.search(serialized):
+            raise ValueError("recognized secret remained after trajectory redaction")
+
+
+def estimate_eta_seconds(durations, remaining, concurrency):
+    """Conservative wall ETA from completed attempts; unknown until one attempt finishes."""
+    usable = [float(value) for value in durations if value is not None and float(value) >= 0]
+    if not usable or remaining <= 0:
+        return 0 if remaining <= 0 else None
+    waves = math.ceil(remaining / max(1, int(concurrency)))
+    return max(0, math.ceil(statistics.mean(usable) * waves))
+
+
 # ---------- generate ----------
 
 def cmd_generate(a):
@@ -331,6 +540,9 @@ def cmd_generate(a):
         sys.exit("--concurrency must be positive")
     if a.expected_total <= 0:
         sys.exit("--expected-total must be positive")
+    submission_required = bool(getattr(a, "submission_required", False))
+    if submission_required and a.k != 1:
+        sys.exit("--submission-required is valid only for a frozen pass@1 run (--k 1)")
     dataset_rows = json.load(open(a.dataset))
     if not isinstance(dataset_rows, list):
         sys.exit("dataset must be a JSON array")
@@ -377,6 +589,7 @@ def cmd_generate(a):
                 "model": a.model,
                 "attempt": k,
                 "totalTasks": len(instances),
+                "submissionRequired": submission_required,
             }
             mismatched = [
                 key for key, value in expected_tracking.items()
@@ -389,9 +602,12 @@ def cmd_generate(a):
                 {"type": "RUN_PROGRESS", "message": "fail-closed generation resume preflight"})
         else:
             try:
+                # One benchmark row represents one pass. `attempt=k` distinguishes the sidecars;
+                # sending the command-wide k here would make each row expect totalTasks*k scores
+                # even though publish closes that single pass with exactly totalTasks scores.
                 bench_id = tracking_start(
-                    token_box, refresh_lock, a.provider, a.model, a.k, len(instances),
-                    f"{dataset_label} pass{k}")
+                    token_box, refresh_lock, a.provider, a.model, 1, len(instances),
+                    f"{dataset_label} pass{k}", submission_required)
             except Exception as exc:
                 sys.exit(f"tracking start failed before provider dispatch: {exc}")
             atomic_json_write(
@@ -402,6 +618,7 @@ def cmd_generate(a):
                     "model": a.model,
                     "attempt": k,
                     "totalTasks": len(instances),
+                    "submissionRequired": submission_required,
                 },
             )
         manifest = out_root / f"pass{k}.manifest.jsonl"
@@ -416,7 +633,12 @@ def cmd_generate(a):
         todo = [iid for iid in instances if iid not in done]
         print(f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} done, {len(todo)} to run, concurrency {a.concurrency})")
         mf_lock = threading.Lock()
-        counter = {"n": 0, "successful": 0}
+        counter = {
+            "n": 0,
+            "successful": 0,
+            "durations": [row.get("seconds") for row in completed.values()
+                          if row.get("seconds") is not None],
+        }
         stop_dispatch = threading.Event()
 
         def run_one(iid):
@@ -431,6 +653,22 @@ def cmd_generate(a):
                 reserved = budget.reserve(reservation_key)
                 if not reserved:
                     return completed.get(iid)
+                with mf_lock:
+                    remaining = max(0, len(instances) - len(done) - counter["n"])
+                    eta = estimate_eta_seconds(
+                        counter["durations"], remaining, a.concurrency)
+                tracking_event(
+                    token_box,
+                    refresh_lock,
+                    bench_id,
+                    {
+                        "type": "TASK_STARTED",
+                        "taskName": iid,
+                        "attempt": k,
+                        "etaSeconds": eta,
+                        "message": f"attempt {k} started for {iid}",
+                    },
+                )
                 provider_dispatched = True
                 st, d = post_authenticated(
                     "/api/admin/benchmark/generate",
@@ -454,6 +692,16 @@ def cmd_generate(a):
                 if actual_cost > budget.per_task_cap:
                     raise RuntimeError(
                         f"task {iid} cost {actual_cost} exceeded hard cap {budget.per_task_cap}")
+                try:
+                    trajectory_location, trajectory_sha256 = durable_trajectory_artifact(
+                        out_root, k, iid, row["runId"], token_box, refresh_lock)
+                    row["trajectoryLocation"] = trajectory_location
+                    row["trajectorySha256"] = trajectory_sha256
+                except Exception as trajectory_error:
+                    # Generation already spent provider money and returned canonical usage. Keep
+                    # the successful terminal row resumable, but make missing trajectory evidence
+                    # explicit. Submission-required campaigns fail closed below.
+                    row["trajectoryError"] = str(trajectory_error)[:300]
             except urllib.error.HTTPError as e:
                 row.update(status=e.code, error=e.read().decode()[:300], seconds=round(time.time() - t0, 1))
                 stop_dispatch.set()
@@ -478,10 +726,14 @@ def cmd_generate(a):
                 print(f"   [{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
                 if row.get("status") == 200:
                     counter["successful"] += 1
+                    counter["durations"].append(row["seconds"])
+                remaining = max(0, len(instances) - len(done) - counter["n"])
+                eta = estimate_eta_seconds(counter["durations"], remaining, a.concurrency)
                 try:
                     tracking_event(
                         token_box, refresh_lock, bench_id,
-                        {"type": "RUN_PROGRESS", "taskName": iid, "esRunId": row.get("runId"),
+                        {"type": "RUN_PROGRESS", "taskName": iid, "attempt": k,
+                         "esRunId": row.get("runId"), "etaSeconds": eta,
                          "outcome": row.get("outcome"),
                          "message": f"[{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')}"
                                     f" patch={row.get('patchBytes')}B ${row.get('costUsd')} {row['seconds']}s (UNSCORED)"})
@@ -500,6 +752,24 @@ def cmd_generate(a):
             tracking_event(token_box, refresh_lock, bench_id, {"type": "RUN_FAILED",
                            "message": f"generation incomplete: {len(completed)}/{a.expected_total} terminal rows"})
             sys.exit(f"generation incomplete: {len(completed)}/{a.expected_total} terminal rows")
+        if submission_required:
+            missing_trajectory = sorted(
+                instance_id for instance_id, row in completed.items()
+                if not row.get("trajectoryLocation") or not row.get("trajectorySha256"))
+            if missing_trajectory:
+                tracking_event(
+                    token_box,
+                    refresh_lock,
+                    bench_id,
+                    {
+                        "type": "RUN_FAILED",
+                        "message": "submission trajectory export incomplete: "
+                                   f"{len(missing_trajectory)}/{a.expected_total}",
+                    },
+                )
+                sys.exit(
+                    "submission-required generation lacks trajectory evidence for "
+                    f"{len(missing_trajectory)} task(s): {', '.join(missing_trajectory[:5])}")
         if todo and counter["successful"] == 0:
             tracking_event(token_box, refresh_lock, bench_id, {"type": "RUN_FAILED",
                            "message": "generation preflight failed; no tasks completed"})
@@ -525,6 +795,7 @@ def cmd_publish(a):
     if not benchmark_id:
         sys.exit("publish requires --benchmark-id or --tracking-file from generate")
     scores = load_results(a.results)
+    score_evidence = load_result_evidence(a.results)
     manifest_rows = {}
     manifest_ids = []
     if a.manifest:
@@ -534,14 +805,27 @@ def cmd_publish(a):
     if expected_total is None and a.tracking_file:
         expected_total = metadata.get("totalTasks")
     validate_publish_coverage(scores, manifest_ids, expected_total)
+    submission_required = bool(metadata.get("submissionRequired", False)) if a.tracking_file else False
+    if submission_required:
+        missing_trajectory = sorted(
+            instance_id for instance_id, row in manifest_rows.items()
+            if not row.get("trajectoryLocation") or not row.get("trajectorySha256"))
+        if missing_trajectory:
+            sys.exit(
+                "publish refused: submission-required run lacks trajectory evidence for "
+                f"{len(missing_trajectory)} task(s): {', '.join(missing_trajectory[:5])}")
     posted = 0
     for instance_id in sorted(scores):
         row = manifest_rows.get(instance_id, {})
+        evidence = score_evidence.get(instance_id, {})
         body = {
             "type": "TASK_SCORED",
             "taskName": instance_id,
             "attempt": attempt,
             "reward": int(scores[instance_id]),
+            "outcome": evidence.get("outcome"),
+            "reason": evidence.get("reason"),
+            "failureClassification": evidence.get("failureClassification"),
         }
         if row.get("runId"):
             body["esRunId"] = row["runId"]
@@ -551,6 +835,14 @@ def cmd_publish(a):
             body["inputTokens"] = int(row["inputTokens"])
         if row.get("outputTokens") is not None:
             body["outputTokens"] = int(row["outputTokens"])
+        trajectory_location = row.get("trajectoryLocation")
+        trajectory_sha = row.get("trajectorySha256")
+        if bool(trajectory_location) != bool(trajectory_sha):
+            sys.exit(
+                f"publish refused: incomplete trajectory evidence for {instance_id}")
+        if trajectory_location:
+            body["trajectoryLocation"] = trajectory_location
+            body["trajectorySha256"] = trajectory_sha
         try:
             post_authenticated(
                 f"/api/v2/test/benchmark/{benchmark_id}/event",
@@ -597,6 +889,84 @@ def validate_publish_coverage(scores, manifest_ids, expected_total=None):
         raise SystemExit(
             f"publish refused: official result count {len(score_ids)} != expected total {int(expected_total)}"
         )
+
+
+def load_result_evidence(path):
+    """Return scorer-grounded outcome/failure evidence without inventing infra causes."""
+    document = json.load(open(path))
+    scores = load_results(path)
+    evidence = {
+        instance_id: {
+            "outcome": "PASSED" if reward else "FAILED",
+            "reason": None,
+            "failureClassification": "NONE" if reward else "UNKNOWN",
+        }
+        for instance_id, reward in scores.items()
+    }
+    if isinstance(document, dict) and isinstance(document.get("submitted_ids"), list):
+        categories = (
+            ("resolved_ids", "PASSED", "NONE", None),
+            ("unresolved_ids", "FAILED", "AGENT_OR_TEST_FAILURE", "official verifier unresolved"),
+            ("empty_patch_ids", "EMPTY_PATCH", "AGENT_OR_TEST_FAILURE", "empty patch"),
+            # The aggregate official report does not distinguish scorer, image, or harness errors.
+            # Preserve that uncertainty instead of falsely labelling every error as infrastructure.
+            ("error_ids", "SCORER_ERROR", "UNKNOWN", "official scorer reported an error"),
+        )
+        for field, outcome, classification, reason in categories:
+            for instance_id in document.get(field, []):
+                evidence[instance_id] = {
+                    "outcome": outcome,
+                    "reason": reason,
+                    "failureClassification": classification,
+                }
+        return evidence
+    if isinstance(document, dict) and isinstance(document.get("resolved"), list):
+        for instance_id in document.get("unresolved", []):
+            evidence[instance_id] = {
+                "outcome": "FAILED",
+                "reason": "official verifier unresolved",
+                "failureClassification": "AGENT_OR_TEST_FAILURE",
+            }
+        for instance_id in document.get("failed", []):
+            evidence[instance_id] = {
+                "outcome": "SCORER_ERROR",
+                "reason": "official scorer reported a failure",
+                "failureClassification": "UNKNOWN",
+            }
+        return evidence
+    rows = document if isinstance(document, list) else []
+    if isinstance(document, dict):
+        rows = [dict(value, instance_id=key) for key, value in document.items()
+                if isinstance(value, dict)]
+    for row in rows:
+        instance_id = row.get("instance_id")
+        if instance_id not in evidence:
+            continue
+        outcome = str(row.get("outcome") or evidence[instance_id]["outcome"])
+        reason = row.get("reason") or row.get("error")
+        explicit = str(row.get("failureClassification") or "").upper()
+        allowed = {"NONE", "TIMEOUT", "INFRASTRUCTURE", "VERIFIER",
+                   "AGENT_OR_TEST_FAILURE", "UNKNOWN"}
+        if explicit not in allowed:
+            normalized = f"{outcome} {reason or ''}".upper()
+            if "TIMEOUT" in normalized or "TIMED OUT" in normalized:
+                explicit = "TIMEOUT"
+            elif "VERIFIER" in normalized or "SCORER" in normalized:
+                explicit = "VERIFIER"
+            elif any(word in normalized for word in ("INFRA", "CONTAINER", "IMAGE PULL")):
+                explicit = "INFRASTRUCTURE"
+            elif scores[instance_id]:
+                explicit = "NONE"
+            elif reason or outcome != "FAILED":
+                explicit = "AGENT_OR_TEST_FAILURE"
+            else:
+                explicit = "UNKNOWN"
+        evidence[instance_id] = {
+            "outcome": outcome,
+            "reason": str(reason)[:500] if reason is not None else None,
+            "failureClassification": explicit,
+        }
+    return evidence
 
 
 # ---------- result parsing (tolerant) ----------
@@ -744,6 +1114,9 @@ def main():
                    help="aggregate reservation ceiling across this pass")
     g.add_argument("--opening-balance-usd", type=Decimal, required=True,
                    help="operator-recorded provider balance; must cover the campaign reservation")
+    g.add_argument(
+        "--submission-required", action="store_true",
+        help="mark this frozen pass@1 as a leaderboard-submission candidate; requires --k 1")
 
     p = sub.add_parser("publish")
     p.add_argument("--results", required=True, help="official scorer eval_results.json")

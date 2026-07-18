@@ -285,6 +285,17 @@ public class OrgController {
             userDetails.getUser().getId()));
   }
 
+  /** Destructive key removal is intentionally separate from patch-style key replacement. */
+  @DeleteMapping("/me/settings/ai-keys/{provider}")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<OrgDto> revokeOrgAiKey(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String provider) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    return ResponseEntity.ok(
+        orgService.revokeAiKey(orgId, provider, userDetails.getUser().getId()));
+  }
+
   // Org-level model-matrix overrides (F3, BYOK/TEAM/ENTERPRISE)
 
   record ModelOverridesRequest(Map<String, String> overrides) {}

@@ -49,7 +49,7 @@ export const authChangePassword = (currentPassword: string | null, newPassword: 
     body: JSON.stringify({currentPassword, newPassword}),
   });
 
-/** Saves per-user AI provider API keys. Pass empty string to clear. */
+/** Patch-style save: blank fields leave existing provider keys unchanged. */
 export const updateAiKeySettings = (
   openAiApiKey: string,
   anthropicApiKey: string,
@@ -67,6 +67,11 @@ export const updateAiKeySettings = (
       fireworksApiKey,
     }),
   });
+
+/** Explicit destructive removal; raw key material is never returned. */
+export const revokeAiKey = (
+  provider: 'ANTHROPIC' | 'OPENAI' | 'GEMINI' | 'DEEPSEEK' | 'FIREWORKS',
+) => req<void>(`/auth/settings/ai-keys/${provider.toLowerCase()}`, {method: 'DELETE'});
 
 /** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
 export const validateAiKey = (
@@ -102,6 +107,9 @@ export const updateOrgAiKeySettings = (
       fireworksApiKey,
     }),
   });
+export const revokeOrgAiKey = (
+  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks',
+) => req<OrgDto>(`/org/me/settings/ai-keys/${provider}`, {method: 'DELETE'});
 export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
   req<OrgDto>(`/admin/orgs/${id}/api-keys`, {method: 'PUT', body: JSON.stringify({provided})});
 

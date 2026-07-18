@@ -1,5 +1,13 @@
 # `report/` — validation reports and score evidence
 
+Validation-report inputs and test-failure details are wrapped user evidence. Static report and JSON
+output policy stays in `SystemMessage`; repository-derived issue descriptions, expected/actual
+values, conventions, and generated evidence never receive system authority.
+
+Public-link creation, PDF download, and the legacy public report endpoint apply the
+high-confidence generated-secret scanner immediately before publication. Credential-like material
+fails closed with 422 and no matched value is returned.
+
 `ValidationReportService` is the score/evidence boundary. It persists deterministic build/test/reviewer
 signals, derives the internal verified/rubric summaries, and reconstructs the reloadable
 `verificationLedger` for authenticated and shared report DTOs.

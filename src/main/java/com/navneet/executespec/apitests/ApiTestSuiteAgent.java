@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -117,9 +118,7 @@ public class ApiTestSuiteAgent {
         new Prompt(
             List.of(
                 new SystemMessage(system),
-                new UserMessage(
-                    "Generate OpenAPI 3.0 YAML for these backend API source files:\n\n"
-                        + controllerContent)));
+                new UserMessage(PromptTrustBoundary.wrap("API_SOURCE_FILES", controllerContent))));
 
     var llmResponse =
         llmRouter.callText(

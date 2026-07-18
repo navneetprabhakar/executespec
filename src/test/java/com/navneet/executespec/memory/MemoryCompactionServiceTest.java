@@ -25,7 +25,11 @@ import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -91,15 +95,22 @@ class MemoryCompactionServiceTest {
             executionPolicyFactory);
 
     assertThat(service.compactNow("project-1", "org-1")).isEqualTo(1);
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
     verify(llmRouter)
         .callText(
             eq("anthropic"),
             eq("claude-haiku-4-5-20251001"),
-            anyList(),
+            messages.capture(),
             eq("compact-project-1"),
             eq("memory-compaction"),
             eq("compact"),
             eq(executionReference));
+    assertThat(messages.getValue().get(0)).isInstanceOf(SystemMessage.class);
+    assertThat(messages.getValue().get(1)).isInstanceOf(UserMessage.class);
+    assertThat(messages.getValue().get(0).getText()).doesNotContain("compact prompt");
+    assertThat(messages.getValue().get(1).getText())
+        .contains("<<<UNTRUSTED_PROJECT_MEMORY_EVIDENCE", "compact prompt");
   }
 
   private static ChatResponse ok(String text) {

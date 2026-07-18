@@ -642,6 +642,39 @@ public class OrgService {
     return result;
   }
 
+  /** Explicitly revoke one org provider credential; blank PUT fields never perform deletion. */
+  @Transactional
+  public OrgDto revokeAiKey(String orgId, String provider, String actorId) {
+    Org org =
+        orgRepo
+            .findById(orgId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+    String normalized = normalizeProvider(provider);
+    boolean existed =
+        switch (normalized) {
+          case "anthropic" ->
+              clearPresent(org.getAnthropicApiKey(), () -> org.setAnthropicApiKey(null));
+          case "openai" -> clearPresent(org.getOpenAiApiKey(), () -> org.setOpenAiApiKey(null));
+          case "gemini" -> clearPresent(org.getGeminiApiKey(), () -> org.setGeminiApiKey(null));
+          case "openrouter" ->
+              clearPresent(org.getOpenRouterApiKey(), () -> org.setOpenRouterApiKey(null));
+          case "deepseek" ->
+              clearPresent(org.getDeepSeekApiKey(), () -> org.setDeepSeekApiKey(null));
+          case "fireworks" ->
+              clearPresent(org.getFireworksApiKey(), () -> org.setFireworksApiKey(null));
+          default ->
+              throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported provider");
+        };
+    org.setUpdatedAt(Instant.now());
+    OrgDto result = OrgDto.from(orgRepo.save(org));
+    auditOrgEvent(
+        "ORG_AI_KEY_REVOKED",
+        orgId,
+        actorId,
+        Map.of("provider", normalized, "previouslyPresent", existed));
+    return result;
+  }
+
   // Key source mode & provider restriction settings
 
   private static final java.util.Set<String> VALID_KEY_SOURCE_MODES =
@@ -803,6 +836,12 @@ public class OrgService {
 
   private static boolean present(String s) {
     return s != null && !s.isBlank();
+  }
+
+  private static boolean clearPresent(String current, Runnable clear) {
+    boolean present = present(current);
+    clear.run();
+    return present;
   }
 
   private static String blankToNull(String s) {

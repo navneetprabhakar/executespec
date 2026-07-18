@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
@@ -130,7 +131,9 @@ public class ArchitectureDocGenerator {
     String userPayload = buildPayload(projectId, repoArchDocs, repoFullNames);
 
     List<Message> messages =
-        List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
+        List.of(
+            new SystemMessage(SYSTEM_PROMPT),
+            new UserMessage(PromptTrustBoundary.wrap("ARCHITECTURE_EVIDENCE", userPayload)));
     String contextId = "combined-arch-" + java.util.UUID.randomUUID();
     var executionReference =
         confirmedActionReference != null

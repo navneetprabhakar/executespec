@@ -46,8 +46,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class BenchmarkTrackingService {
 
+  private static final java.time.Duration ACTIVE_ATTEMPT_HEARTBEAT_TTL =
+      java.time.Duration.ofMinutes(15);
+
   private final BenchmarkRunRepository runs;
   private final BenchmarkTaskResultRepository taskResults;
+  private final BenchmarkActiveAttemptRepository activeAttempts;
   private final BenchmarkEventRepository events;
   private final SseBroadcaster sse;
   private final ObjectMapper mapper;
@@ -66,6 +70,20 @@ public class BenchmarkTrackingService {
       int totalTasks,
       String harborJobName,
       String userId) {
+    return start(suite, dataset, provider, model, k, totalTasks, harborJobName, userId, false);
+  }
+
+  public BenchmarkRun start(
+      String suite,
+      String dataset,
+      String provider,
+      String model,
+      int k,
+      int totalTasks,
+      String harborJobName,
+      String userId,
+      boolean submissionRequired) {
+    Instant now = Instant.now();
     BenchmarkRun run =
         BenchmarkRun.builder()
             .id(UUID.randomUUID().toString())
@@ -80,11 +98,15 @@ public class BenchmarkTrackingService {
             .costUsd(BigDecimal.ZERO)
             .harborJobName(harborJobName)
             .createdByUserId(userId)
-            .createdAt(Instant.now())
-            .startedAt(Instant.now())
+            .createdAt(now)
+            .startedAt(now)
+            .lastProgressAt(now)
+            .submissionRequired(submissionRequired)
+            .submissionReadiness(submissionRequired ? "IN_PROGRESS" : "NOT_REQUIRED")
             .build();
     runs.save(run);
     record(
+        run,
         run.getId(),
         "RUN_STARTED",
         suite + " · " + model + " · k=" + run.getK() + " · " + run.getTotalTasks() + " tasks",
@@ -127,6 +149,10 @@ public class BenchmarkTrackingService {
         message,
         payloadJson,
         null,
+        null,
+        null,
+        null,
+        null,
         null);
   }
 
@@ -145,6 +171,45 @@ public class BenchmarkTrackingService {
       String payloadJson,
       String outcome,
       String reason) {
+    return ingest(
+        runId,
+        type,
+        taskName,
+        attempt,
+        reward,
+        esRunId,
+        cost,
+        inputTokens,
+        outputTokens,
+        message,
+        payloadJson,
+        outcome,
+        reason,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  @Transactional
+  public BenchmarkRun ingest(
+      String runId,
+      String type,
+      String taskName,
+      Integer attempt,
+      Integer reward,
+      String esRunId,
+      BigDecimal cost,
+      Long inputTokens,
+      Long outputTokens,
+      String message,
+      String payloadJson,
+      String outcome,
+      String reason,
+      String failureClassification,
+      String trajectoryLocation,
+      String trajectorySha256,
+      Long etaSeconds) {
     // Lock the parent row before allocating the per-run event sequence and checking the
     // task-attempt idempotency key.  Harbor publishes results concurrently; without this lock two
     // JVMs can both allocate the same seq or race the unique task-attempt insert.
@@ -152,7 +217,35 @@ public class BenchmarkTrackingService {
         runs.findByIdForUpdate(runId)
             .orElseThrow(() -> new IllegalArgumentException("benchmark run not found: " + runId));
 
-    switch (type == null ? "" : type) {
+    String eventType = type == null ? "" : type;
+    Instant now = Instant.now();
+    if (taskName != null && taskName.length() > 200) {
+      throw new IllegalArgumentException("taskName must be at most 200 characters");
+    }
+    if (attempt != null && attempt < 1) {
+      throw new IllegalArgumentException("attempt must be positive");
+    }
+    String eventTrajectoryLocation =
+        firstNonBlank(trajectoryLocation, extractField(payloadJson, "trajectoryLocation"));
+    String eventTrajectorySha =
+        firstNonBlank(trajectorySha256, extractField(payloadJson, "trajectorySha256"));
+    validateTrajectory(eventTrajectoryLocation, eventTrajectorySha);
+    Long eventEta = etaSeconds == null ? extractLong(payloadJson, "etaSeconds") : etaSeconds;
+    if (eventEta != null && eventEta < 0) {
+      throw new IllegalArgumentException("etaSeconds must be non-negative");
+    }
+    switch (eventType) {
+      case "TASK_STARTED" ->
+          upsertActiveAttempt(
+              run, taskName, attempt, eventEta, eventTrajectoryLocation, eventTrajectorySha, now);
+      case "RUN_PROGRESS" -> {
+        if (taskName != null && !taskName.isBlank()) {
+          upsertActiveAttempt(
+              run, taskName, attempt, eventEta, eventTrajectoryLocation, eventTrajectorySha, now);
+        }
+        run.setLastProgressAt(now);
+        if (eventEta != null && eventEta >= 0) run.setEtaSeconds(eventEta);
+      }
       case "TASK_SCORED" -> {
         if (taskName != null && !taskName.isBlank()) {
           upsertTaskResult(
@@ -165,18 +258,30 @@ public class BenchmarkTrackingService {
               inputTokens,
               outputTokens,
               firstNonBlank(outcome, extractField(payloadJson, "outcome")),
-              firstNonBlank(reason, extractField(payloadJson, "reason")));
+              firstNonBlank(reason, extractField(payloadJson, "reason")),
+              failureClassification,
+              eventTrajectoryLocation,
+              eventTrajectorySha);
+          activeAttempts.deleteByBenchmarkRunIdAndTaskNameAndAttempt(
+              runId, taskName, attempt == null ? 1 : attempt);
           recompute(run);
         }
       }
       case "RUN_DONE" -> {
         recompute(run);
         run.setStatus("DONE");
-        run.setFinishedAt(Instant.now());
+        run.setFinishedAt(now);
+        run.setEtaSeconds(0L);
+        activeAttempts.deleteByBenchmarkRunId(runId);
+        run.setActiveAttemptCount(0);
+        recomputeSubmissionReadiness(run);
       }
       case "RUN_FAILED" -> {
         run.setStatus("FAILED");
-        run.setFinishedAt(Instant.now());
+        run.setFinishedAt(now);
+        run.setEtaSeconds(0L);
+        activeAttempts.deleteByBenchmarkRunId(runId);
+        run.setActiveAttemptCount(0);
         if (message != null && !message.isBlank()) {
           run.setError(message.length() > 4000 ? message.substring(0, 4000) : message);
         }
@@ -184,19 +289,33 @@ public class BenchmarkTrackingService {
       case "SUBMISSION_STARTED" -> run.setSubmissionStatus("SUBMITTING");
       case "SUBMITTED" -> {
         run.setSubmissionStatus("SUBMITTED");
+        run.setSubmissionReadiness("SUBMITTED");
+        run.setSubmissionReadinessReason(null);
         String url = extractField(payloadJson, "url");
         if (url != null) {
           run.setLeaderboardUrl(url.length() > 300 ? url.substring(0, 300) : url);
         }
       }
-      case "SUBMISSION_FAILED" -> run.setSubmissionStatus("FAILED");
+      case "SUBMISSION_FAILED" -> {
+        run.setSubmissionStatus("FAILED");
+        run.setSubmissionReadiness("BLOCKED");
+        run.setSubmissionReadinessReason(
+            message == null || message.isBlank() ? "submission failed" : truncate(message, 500));
+      }
       default -> {
         /* RUN_PROGRESS, LOG, or any future type — persisted + broadcast verbatim below. */
       }
     }
 
+    run.setLastProgressAt(now);
+    if (!"RUN_DONE".equals(eventType)
+        && !"SUBMITTED".equals(eventType)
+        && !"SUBMISSION_FAILED".equals(eventType)) {
+      recomputeSubmissionReadiness(run);
+    }
+
     runs.save(run);
-    record(runId, type, message, payloadJson, taskName, reward);
+    record(run, runId, type, message, payloadJson, taskName, reward);
     return run;
   }
 
@@ -259,6 +378,7 @@ public class BenchmarkTrackingService {
       payload.put("outputTokens", run.getOutputTokens());
       payload.put("costUsd", run.getCostUsd());
       record(
+          run,
           runId,
           "USAGE_RECONCILED",
           "Rebuilt benchmark usage from canonical provider-attempt ledger",
@@ -283,7 +403,10 @@ public class BenchmarkTrackingService {
       Long inputTokens,
       Long outputTokens,
       String outcome,
-      String reason) {
+      String reason,
+      String failureClassification,
+      String trajectoryLocation,
+      String trajectorySha256) {
     int att = attempt == null ? 1 : attempt;
     boolean exists =
         taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(runId).stream()
@@ -301,6 +424,9 @@ public class BenchmarkTrackingService {
             .esRunId(esRunId)
             .outcome(truncate(outcome, 40))
             .reason(truncate(reason, 500))
+            .failureClassification(classifyFailure(reward, failureClassification, outcome, reason))
+            .trajectoryLocation(truncate(trajectoryLocation, 1000))
+            .trajectorySha256(normalizeSha(trajectorySha256))
             .costUsd(cost == null ? BigDecimal.ZERO : cost)
             .inputTokens(inputTokens == null ? 0L : Math.max(0L, inputTokens))
             .outputTokens(outputTokens == null ? 0L : Math.max(0L, outputTokens))
@@ -329,11 +455,168 @@ public class BenchmarkTrackingService {
     run.setCostUsd(cost);
     run.setInputTokens(inTok);
     run.setOutputTokens(outTok);
+    run.setCompletedAttempts(all.size());
+    run.setActiveAttemptCount((int) activeAttempts.countByBenchmarkRunId(run.getId()));
+    if (run.getStatus() != null && !run.getStatus().matches("DONE|FAILED|CANCELLED")) {
+      run.setEtaSeconds(estimateEtaSeconds(run));
+    }
+  }
+
+  private void upsertActiveAttempt(
+      BenchmarkRun run,
+      String taskName,
+      Integer attempt,
+      Long etaSeconds,
+      String trajectoryLocation,
+      String trajectorySha256,
+      Instant now) {
+    if (taskName == null || taskName.isBlank()) {
+      throw new IllegalArgumentException("TASK_STARTED requires taskName");
+    }
+    int att = attempt == null ? 1 : attempt;
+    if (att < 1) throw new IllegalArgumentException("attempt must be positive");
+    BenchmarkActiveAttempt active =
+        activeAttempts
+            .findByBenchmarkRunIdAndTaskNameAndAttempt(run.getId(), taskName, att)
+            .orElseGet(
+                () ->
+                    BenchmarkActiveAttempt.builder()
+                        .id(UUID.randomUUID().toString())
+                        .benchmarkRunId(run.getId())
+                        .taskName(taskName)
+                        .attempt(att)
+                        .startedAt(now)
+                        .build());
+    active.setLastProgressAt(now);
+    active.setStaleAfter(now.plus(ACTIVE_ATTEMPT_HEARTBEAT_TTL));
+    if (etaSeconds != null && etaSeconds >= 0) active.setEtaSeconds(etaSeconds);
+    if (trajectoryLocation != null)
+      active.setTrajectoryLocation(truncate(trajectoryLocation, 1000));
+    if (trajectorySha256 != null) active.setTrajectorySha256(normalizeSha(trajectorySha256));
+    activeAttempts.save(active);
+    run.setActiveAttemptCount((int) activeAttempts.countByBenchmarkRunId(run.getId()));
+    // Repository count may not include an unflushed insert under mocked/non-JPA stores.
+    if (run.getActiveAttemptCount() == 0) run.setActiveAttemptCount(1);
+    run.setLastProgressAt(now);
+    if (etaSeconds != null && etaSeconds >= 0) run.setEtaSeconds(etaSeconds);
+  }
+
+  private void recomputeSubmissionReadiness(BenchmarkRun run) {
+    if ("SUBMITTED".equals(run.getSubmissionReadiness())) return;
+    if (!run.isSubmissionRequired()) {
+      run.setSubmissionReadiness("NOT_REQUIRED");
+      run.setSubmissionReadinessReason(null);
+      return;
+    }
+    if ("FAILED".equals(run.getStatus()) || "CANCELLED".equals(run.getStatus())) {
+      run.setSubmissionReadiness("BLOCKED");
+      run.setSubmissionReadinessReason("benchmark ended with status " + run.getStatus());
+      return;
+    }
+    if (!"DONE".equals(run.getStatus())) {
+      run.setSubmissionReadiness("IN_PROGRESS");
+      run.setSubmissionReadinessReason("benchmark has not reached DONE");
+      return;
+    }
+    List<BenchmarkTaskResult> all =
+        taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(run.getId());
+    long expected = (long) run.getTotalTasks() * Math.max(1, run.getK());
+    if (expected <= 0 || all.size() != expected) {
+      run.setSubmissionReadiness("BLOCKED");
+      run.setSubmissionReadinessReason(
+          "terminal attempts " + all.size() + "/" + Math.max(0L, expected));
+      return;
+    }
+    long missingTrajectories =
+        all.stream()
+            .filter(
+                t ->
+                    t.getTrajectoryLocation() == null
+                        || t.getTrajectoryLocation().isBlank()
+                        || t.getTrajectorySha256() == null
+                        || t.getTrajectorySha256().isBlank())
+            .count();
+    if (missingTrajectories > 0) {
+      run.setSubmissionReadiness("BLOCKED");
+      run.setSubmissionReadinessReason(
+          missingTrajectories + " terminal attempt(s) lack trajectory location/hash");
+      return;
+    }
+    run.setSubmissionReadiness("READY");
+    run.setSubmissionReadinessReason(null);
+  }
+
+  private Long estimateEtaSeconds(BenchmarkRun run) {
+    long expected = (long) run.getTotalTasks() * Math.max(1, run.getK());
+    if (expected <= 0 || run.getCompletedAttempts() <= 0 || run.getStartedAt() == null) return null;
+    long elapsed = run.getElapsedSeconds();
+    long remaining = Math.max(0L, expected - run.getCompletedAttempts());
+    return Math.max(0L, Math.round((double) elapsed * remaining / run.getCompletedAttempts()));
+  }
+
+  private String classifyFailure(Integer reward, String explicit, String outcome, String reason) {
+    if (reward != null && reward > 0) return "NONE";
+    String normalized = explicit == null ? "" : explicit.trim().toUpperCase();
+    if (normalized.matches("TIMEOUT|INFRASTRUCTURE|VERIFIER|AGENT_OR_TEST_FAILURE|UNKNOWN")) {
+      return normalized;
+    }
+    String evidence =
+        ((outcome == null ? "" : outcome) + " " + (reason == null ? "" : reason)).toUpperCase();
+    if (evidence.contains("TIMEOUT") || evidence.contains("TIMED OUT")) return "TIMEOUT";
+    if (evidence.contains("INFRA")
+        || evidence.contains("CONTAINER")
+        || evidence.contains("BRIDGE")) {
+      return "INFRASTRUCTURE";
+    }
+    if (evidence.contains("VERIFIER") || evidence.contains("SCORER")) return "VERIFIER";
+    if (!evidence.isBlank()) return "AGENT_OR_TEST_FAILURE";
+    return "UNKNOWN";
+  }
+
+  private void validateTrajectory(String location, String sha256) {
+    boolean hasLocation = location != null && !location.isBlank();
+    boolean hasSha = sha256 != null && !sha256.isBlank();
+    if (hasLocation != hasSha) {
+      throw new IllegalArgumentException(
+          "trajectoryLocation and trajectorySha256 must be supplied together");
+    }
+    if (hasSha && !sha256.trim().matches("(?i)[0-9a-f]{64}")) {
+      throw new IllegalArgumentException("trajectorySha256 must be 64 hexadecimal characters");
+    }
+    if (hasLocation) {
+      String value = location.trim();
+      // The authority is a bucket/namespace, never URL user-info. Keep ':' and '@' available only
+      // after the first slash where they are ordinary object-key characters.
+      boolean allowedObjectScheme =
+          value.matches(
+              "(?i)^(gs|s3|artifact)://[A-Za-z0-9][A-Za-z0-9._-]{0,254}/[A-Za-z0-9._/@+:-]+$");
+      boolean looksLikeAnotherUri = value.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*$");
+      boolean safeRelativePath =
+          value.matches("^[A-Za-z0-9][A-Za-z0-9._/@+-]*\\.(json|jsonl|atif|gz|zst|zip)$");
+      boolean unsafe =
+          value.length() > 1000
+              || value.matches(".*[\\r\\n\\u0000].*")
+              || value.contains("?")
+              || value.contains("#")
+              || value.matches("(?i).*(bearer|api[_-]?key|token=|secret=|credential=).*")
+              || java.util.Arrays.stream(value.replace('\\', '/').split("/")).anyMatch(".."::equals)
+              || (looksLikeAnotherUri && !allowedObjectScheme)
+              || (!looksLikeAnotherUri && !safeRelativePath);
+      if (unsafe) {
+        throw new IllegalArgumentException(
+            "trajectoryLocation must be a secret-free path or gs://, s3://, artifact:// reference");
+      }
+    }
+  }
+
+  private String normalizeSha(String sha256) {
+    return sha256 == null ? null : sha256.trim().toLowerCase();
   }
 
   // ── Event persistence + SSE re-broadcast ────────────────────────────────
 
   private void record(
+      BenchmarkRun run,
       String runId,
       String type,
       String message,
@@ -359,7 +642,7 @@ public class BenchmarkTrackingService {
               type == null ? "UNKNOWN" : type,
               runId,
               taskName,
-              ssePayload(type, taskName, reward, message),
+              ssePayload(run, type, taskName, reward, message),
               Instant.now()));
       if ("RUN_DONE".equals(type) || "RUN_FAILED".equals(type)) {
         sse.complete(runId);
@@ -370,7 +653,8 @@ public class BenchmarkTrackingService {
     }
   }
 
-  private String ssePayload(String type, String taskName, Integer reward, String message) {
+  private String ssePayload(
+      BenchmarkRun run, String type, String taskName, Integer reward, String message) {
     try {
       Map<String, Object> m = new LinkedHashMap<>();
       m.put("type", type);
@@ -383,6 +667,11 @@ public class BenchmarkTrackingService {
       if (message != null) {
         m.put("message", message);
       }
+      m.put("activeAttemptCount", run.getActiveAttemptCount());
+      m.put("completedAttempts", run.getCompletedAttempts());
+      m.put("elapsedSeconds", run.getElapsedSeconds());
+      m.put("etaSeconds", run.getEtaSeconds());
+      m.put("submissionReadiness", run.getSubmissionReadiness());
       return mapper.writeValueAsString(m);
     } catch (Exception e) {
       return message == null ? "" : message;
@@ -406,6 +695,16 @@ public class BenchmarkTrackingService {
       var node = mapper.readTree(payloadJson).path(field);
       return node.isMissingNode() || node.isNull() ? null : node.asText();
     } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private Long extractLong(String payloadJson, String field) {
+    String value = extractField(payloadJson, field);
+    if (value == null) return null;
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException ignored) {
       return null;
     }
   }
@@ -440,6 +739,10 @@ public class BenchmarkTrackingService {
 
   public List<BenchmarkEvent> events(String id) {
     return events.findByBenchmarkRunIdOrderBySeqAsc(id);
+  }
+
+  public List<BenchmarkActiveAttempt> activeAttempts(String id) {
+    return activeAttempts.findByBenchmarkRunIdOrderByStartedAtAsc(id);
   }
 
   /** Live SSE feed for one run, reusing the shared broadcaster (Redis-backed + replay). */

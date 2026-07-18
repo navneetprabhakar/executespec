@@ -17,6 +17,19 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Missing provider input should resolve through `AiProviderPreferenceService` before falling back to project or YAML defaults.
 - Legacy `GOOGLE` input is accepted as `GEMINI`; persistence should use canonical enum names.
 
+## BYOK credential mutation
+
+- User and org provider-key PUTs are patch-style: null/blank fields leave existing credentials
+  unchanged because the Web UI saves one provider at a time.
+- Destructive removal is explicit and provider-scoped: `DELETE
+  /api/auth/settings/ai-keys/{provider}` for personal keys and `DELETE
+  /api/org/me/settings/ai-keys/{provider}` for org keys.
+- Both revoke paths are authenticated, tier/role gated, secret-free in their response and append an
+  audit event (`USER_AI_KEY_REVOKED` or `ORG_AI_KEY_REVOKED`). Never reintroduce blank-means-delete
+  semantics; it can erase unrelated providers through positional client payloads.
+- Credential removal intentionally invalidates subsequent dispatch through V282 current-credential
+  re-authorization. Existing execution snapshots do not preserve plaintext credentials.
+
 ## Data Export
 
 - `GET /api/auth/me/data-export` is a ZIP-only personal-data export. Browser/download clients should send `Accept: application/zip`; JSON-default clients receive a clear `406` body with `error=data_export_requires_zip_accept` instead of a misleading route miss.

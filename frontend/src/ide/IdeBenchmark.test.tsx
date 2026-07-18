@@ -77,4 +77,77 @@ describe('IdeBenchmark mobile run cards', () => {
     expect(card?.textContent).toContain('$1.2500');
     expect(card?.textContent).toContain('12K↑ 678↓');
   });
+
+  it('reloads durable attempt, ETA, trajectory and readiness evidence on detail', async () => {
+    api.getBenchmark.mockResolvedValue({
+      run: {
+        id: 'run-1',
+        suite: 'SWE_BENCH',
+        dataset: 'lite-10',
+        provider: 'openrouter',
+        model: 'glm-5.2',
+        k: 1,
+        totalTasks: 10,
+        resolvedTasks: 0,
+        status: 'RUNNING',
+        costUsd: 0.0001,
+        createdAt: '2026-07-18T08:00:00Z',
+        startedAt: '2026-07-18T08:00:00Z',
+        activeAttemptCount: 1,
+        completedAttempts: 3,
+        elapsedSeconds: 120,
+        etaSeconds: 280,
+        submissionReadiness: 'IN_PROGRESS',
+        submissionReadinessReason: 'benchmark has not reached DONE',
+      },
+      activeAttempts: [
+        {
+          id: 'active-1',
+          benchmarkRunId: 'run-1',
+          taskName: 'django__django-123',
+          attempt: 1,
+          startedAt: new Date().toISOString(),
+          lastProgressAt: new Date().toISOString(),
+          staleAfter: new Date(Date.now() - 60_000).toISOString(),
+          stale: true,
+          etaSeconds: 45,
+        },
+      ],
+      tasks: [
+        {
+          id: 'task-1',
+          benchmarkRunId: 'run-1',
+          taskName: 'django__django-100',
+          attempt: 1,
+          reward: 0,
+          outcome: 'TIMEOUT',
+          failureClassification: 'TIMEOUT',
+          trajectoryLocation: 'gs://evidence/run-1/task-1.json',
+          trajectorySha256: 'a'.repeat(64),
+          costUsd: 0.0001,
+          createdAt: '2026-07-18T08:01:00Z',
+        },
+      ],
+      events: [],
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/benchmark/run-1']}>
+          <Routes>
+            <Route path='/benchmark/:benchmarkId' element={<IdeBenchmark />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('1 active · 3 scored');
+    expect(host.textContent).toContain('4m 40s');
+    expect(host.textContent).toContain('django__django-123');
+    expect(host.textContent).toContain('stale heartbeat');
+    expect(host.textContent).toContain('TIMEOUT');
+    expect(host.textContent).toContain('a1 trajectory · aaaaaaaaaa…');
+    expect(host.textContent).toContain('IN_PROGRESS');
+  });
 });

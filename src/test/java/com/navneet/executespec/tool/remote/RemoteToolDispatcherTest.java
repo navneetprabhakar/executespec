@@ -94,6 +94,45 @@ class RemoteToolDispatcherTest {
   }
 
   @Test
+  void expiredAbsoluteDeadlineRefusesToolWithoutEmission() throws Exception {
+    dispatcher.register(
+        "r1",
+        RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH,
+        System.currentTimeMillis() - 1,
+        5_000L);
+
+    JsonNode result =
+        om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{\"command\":\"sleep 5\"}"));
+
+    assertThat(result.path("ok").asBoolean()).isFalse();
+    assertThat(result.path("kind").asText()).isEqualTo("DEADLINE_EXCEEDED");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+  }
+
+  @Test
+  void deadlineAndShutdownReserveArePropagatedInToolFrame() throws Exception {
+    long deadline = System.currentTimeMillis() + 60_000L;
+    dispatcher.register("r1", RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH, deadline, 7_000L);
+    doAnswer(
+            inv -> {
+              RunEvent ev = inv.getArgument(1);
+              String callId = om.readTree(ev.payload()).path("callId").asText();
+              dispatcher.complete("r1", callId, "{\"ok\":true,\"content\":\"done\"}");
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    dispatcher.dispatch("r1", "t1", "readFile", "{\"path\":\"x\"}");
+
+    ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
+    verify(broadcaster).emit(eq("r1"), cap.capture());
+    JsonNode frame = om.readTree(cap.getValue().payload());
+    assertThat(frame.path("absoluteDeadlineEpochMs").asLong()).isEqualTo(deadline);
+    assertThat(frame.path("shutdownReserveMs").asLong()).isEqualTo(7_000L);
+  }
+
+  @Test
   void dispatch_emitsToolCall_andReturnsClientResult() throws Exception {
     dispatcher.register("r1");
     // Simulate the client replying the instant the TOOL_CALL is emitted.

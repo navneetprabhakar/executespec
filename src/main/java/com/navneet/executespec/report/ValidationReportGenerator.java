@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
@@ -49,7 +50,8 @@ public class ValidationReportGenerator {
 
   public LlmReportResult generate(ReportInput input) throws IOException {
     String systemPrompt = promptTemplate.getContentAsString(StandardCharsets.UTF_8);
-    String userMessage = buildUserMessage(input);
+    String userMessage =
+        PromptTrustBoundary.wrap("VALIDATION_REPORT_EVIDENCE", buildUserMessage(input));
 
     Prompt prompt =
         new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userMessage)));

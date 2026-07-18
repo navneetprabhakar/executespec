@@ -148,6 +148,12 @@ import lombok.Builder;
  * @param strictProvider operator/evaluation route pin. When true, this worker pass must not enter
  *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
  *     allow-listed fallback instead. Null/false preserves normal routing.
+ * @param absoluteDeadlineEpochMs optional absolute wall-clock deadline shared by the worker,
+ *     provider calls, remote tools, terminal finalizer, and benchmark adapter. Unlike the legacy
+ *     relative wall-clock cap, time spent queueing before the worker starts is included.
+ * @param shutdownReserveMs protected tail budget for terminal classification, durable cost/state
+ *     writes, SSE completion, and trajectory flushing. New provider/tool calls may use only {@code
+ *     deadline-now-reserve}; null/negative is treated as zero.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -173,7 +179,9 @@ public record WorkerTaskRequest(
     Boolean verifyBeforeComplete,
     Boolean progressV2,
     Boolean autoVerify,
-    Boolean strictProvider) {
+    Boolean strictProvider,
+    Long absoluteDeadlineEpochMs,
+    Long shutdownReserveMs) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

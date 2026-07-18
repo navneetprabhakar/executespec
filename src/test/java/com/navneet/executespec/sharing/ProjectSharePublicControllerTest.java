@@ -29,6 +29,7 @@ import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sharing.controller.ProjectSharePublicController;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
@@ -77,7 +78,31 @@ class ProjectSharePublicControllerTest {
             mock(PrReviewRepository.class),
             mock(PrReviewCommentRepository.class),
             mock(ProjectArchitectureDocRepository.class),
-            projectRepo);
+            projectRepo,
+            new GeneratedSecretScanner(),
+            new ObjectMapper().findAndRegisterModules());
+  }
+
+  @Test
+  void publicPayloadWithCredentialLikeMaterialIsRejectedWithoutReturningTheCredential() {
+    String secret = "github_pat_" + "A1".repeat(25);
+    ProjectShareLink link =
+        ProjectShareLink.builder()
+            .id(UUID.randomUUID())
+            .projectId("p-1")
+            .token("tok-secret")
+            .surface(ProjectShareLink.Surface.PROJECT_OVERVIEW)
+            .label("leaked " + secret)
+            .createdByUserId("u-1")
+            .createdAt(Instant.now())
+            .build();
+    when(linkService.resolveActive(eq("tok-secret"), any())).thenReturn(link);
+
+    ResponseStatusException error =
+        assertThrows(ResponseStatusException.class, () -> controller.meta("tok-secret", request));
+
+    assertEquals(422, error.getStatusCode().value());
+    assertFalse(error.getReason().contains(secret));
   }
 
   @Test

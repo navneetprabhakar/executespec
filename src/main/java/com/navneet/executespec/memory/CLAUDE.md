@@ -1,5 +1,13 @@
 # `memory/` — Project memory and ledger
 
+## Prompt authority boundary (2026-07-18)
+
+Project memory, architecture, retrieved documents, ledger inputs, and compacted snapshots are
+project-controlled evidence. Project Chat now keeps all of those blocks in a dedicated
+`UserMessage`; its `SystemMessage` contains only server-owned role/tool policy. `RunLedgerAgent` and
+`MemoryCompactionService` similarly keep their templates/data in wrapped user evidence instead of
+assembling project content into system prompts.
+
 Project-scoped run ledgers are compacted into versioned memory snapshots. Memory generation is
 best-effort: a failed model call must never fail the customer run.
 

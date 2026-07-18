@@ -65,6 +65,10 @@ public class TerminalBenchRunService {
   @Value("${terminal-bench.worker-wall-clock-seconds:1410}")
   private int workerWallClockSeconds;
 
+  /** Tail protected from new LLM/tool work so terminal state and ATIF evidence can flush. */
+  @Value("${terminal-bench.shutdown-reserve-seconds:45}")
+  private int shutdownReserveSeconds;
+
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
   private static final int TB_STAGNATION_FORCE_AFTER = 64;
@@ -216,7 +220,8 @@ iterating needlessly.
 """;
 
   /** Result of launching a run: the runId plus a freshly minted scoped SSE token for the client. */
-  public record StartResult(String runId, String sseToken) {}
+  public record StartResult(
+      String runId, String sseToken, long absoluteDeadlineEpochMs, long shutdownReserveMs) {}
 
   /**
    * Persist a run (ownership stamped), bind it to remote tool execution, and launch the worker on a
@@ -228,8 +233,13 @@ iterating needlessly.
       String instruction,
       String provider,
       String model,
-      Integer maxIterations) {
+      Integer maxIterations,
+      Long requestedAbsoluteDeadlineEpochMs) {
     String runId = UUID.randomUUID().toString();
+    long now = System.currentTimeMillis();
+    long absoluteDeadlineEpochMs =
+        resolveAbsoluteDeadline(
+            requestedAbsoluteDeadlineEpochMs, now, workerWallClockSeconds, shutdownReserveSeconds);
     String userId = String.valueOf(userDetails.getUser().getId());
     String orgId = userDetails.getUser().getOrgId();
 
@@ -256,11 +266,16 @@ iterating needlessly.
             .totalOutputTokens(0)
             .build();
     stateStore.saveRun(run);
+    broadcaster.registerBenchmarkTrajectory(runId);
 
     // 2) Bind the run to remote tool execution BEFORE the worker runs → isRemote(runId)=true, so
     //    every worker tool call dispatches to the connected client over SSE (ToolRegistry:149)
     //    instead of executing on the server. No worker change required.
-    remoteToolDispatcher.register(runId, RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+    remoteToolDispatcher.register(
+        runId,
+        RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH,
+        absoluteDeadlineEpochMs,
+        Math.max(0, shutdownReserveSeconds) * 1000L);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
     log.info("[TB] started remote worker run={} provider={} model={}", runId, provider, model);
 
@@ -269,14 +284,40 @@ iterating needlessly.
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()
         .name("tb-run-" + runId)
-        .start(snapshot.wrap(() -> runWorker(runId, instruction, provider, model, maxIterations)));
+        .start(
+            snapshot.wrap(
+                () ->
+                    runWorker(
+                        runId,
+                        instruction,
+                        provider,
+                        model,
+                        maxIterations,
+                        absoluteDeadlineEpochMs)));
 
     String sseToken = jwtUtil.generateSseToken(userId, runId);
-    return new StartResult(runId, sseToken);
+    return new StartResult(
+        runId, sseToken, absoluteDeadlineEpochMs, Math.max(0, shutdownReserveSeconds) * 1000L);
+  }
+
+  static long resolveAbsoluteDeadline(
+      Long requestedEpochMs, long nowEpochMs, int serverMaxSeconds, int shutdownReserveSeconds) {
+    long serverDeadline = nowEpochMs + Math.max(1, serverMaxSeconds) * 1000L;
+    long minimumUsable = Math.max(0, shutdownReserveSeconds) * 1000L + 1000L;
+    if (requestedEpochMs == null || requestedEpochMs <= 0) return serverDeadline;
+    if (requestedEpochMs - nowEpochMs < minimumUsable) {
+      throw new IllegalArgumentException("absolute deadline leaves no executable budget");
+    }
+    return Math.min(requestedEpochMs, serverDeadline);
   }
 
   private void runWorker(
-      String runId, String instruction, String provider, String model, Integer maxIterations) {
+      String runId,
+      String instruction,
+      String provider,
+      String model,
+      Integer maxIterations,
+      long absoluteDeadlineEpochMs) {
     Path workspace = null;
     String finalStatus = "FAILED";
     String reason = null;
@@ -299,6 +340,8 @@ iterating needlessly.
                   .stagnationForceAfter(TB_STAGNATION_FORCE_AFTER)
                   .temperature(0.0)
                   .wallClockSeconds(workerWallClockSeconds)
+                  .absoluteDeadlineEpochMs(absoluteDeadlineEpochMs)
+                  .shutdownReserveMs(Math.max(0, shutdownReserveSeconds) * 1000L)
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)

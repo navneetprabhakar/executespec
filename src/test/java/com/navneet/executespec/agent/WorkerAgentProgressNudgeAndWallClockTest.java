@@ -8,6 +8,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -52,6 +53,27 @@ import org.springframework.ai.chat.model.Generation;
  * <p>Wall-clock cap: sibling of the iter cap. Whichever fires first wins.
  */
 class WorkerAgentProgressNudgeAndWallClockTest {
+
+  @Test
+  void expiredAbsoluteDeadlineRefusesProviderCallAndUsesDistinctClassification() {
+    Fixture f = newWorker(List.of());
+    WorkerResult result =
+        f.worker()
+            .run(
+                WorkerTaskRequest.builder()
+                    .provider("anthropic")
+                    .model("claude-haiku-4-5-20251001")
+                    .systemPrompt("system")
+                    .userPrompt("do thing")
+                    .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-progress")))
+                    .maxIterations(10)
+                    .absoluteDeadlineEpochMs(System.currentTimeMillis() - 1)
+                    .shutdownReserveMs(5_000L)
+                    .build());
+
+    assertEquals(WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED, result.outcome());
+    verifyNoInteractions(f.router());
+  }
 
   private static AssistantMessage.ToolCall toolCall(String name, String args) {
     return new AssistantMessage.ToolCall("call_" + UUID.randomUUID(), "function", name, args);

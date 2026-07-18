@@ -25,7 +25,11 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -90,15 +94,25 @@ class RunLedgerAgentTest {
 
     agent.generateLedgerEntry("run-1");
 
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
     verify(llmRouter)
         .callText(
             eq("openai"),
             eq("gpt-5.4-mini"),
-            anyList(),
+            messages.capture(),
             eq("run-1"),
             eq("run-ledger"),
             eq("generate"),
             eq(executionReference));
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(0))
+        .isInstanceOf(SystemMessage.class);
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(1))
+        .isInstanceOf(UserMessage.class);
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(0).getText())
+        .doesNotContain("ledger prompt");
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(1).getText())
+        .contains("<<<UNTRUSTED_RUN_LEDGER_EVIDENCE", "ledger prompt");
     verify(ledgerRepo).save(any(ProjectRunLedger.class));
   }
 

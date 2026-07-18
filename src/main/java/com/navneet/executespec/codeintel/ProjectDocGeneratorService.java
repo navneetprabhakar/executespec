@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -296,7 +297,10 @@ public class ProjectDocGeneratorService {
     String exactModel = RunModelOverrides.lookup(effective, resolved.getAgentTier());
 
     Prompt prompt =
-        new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPayload)));
+        new Prompt(
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload))));
 
     String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
     if (executionPolicyFactory == null) {

@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -179,7 +180,11 @@ public class PromptOptimiserAgent {
             + patterns.stream().map(p -> "- " + p).collect(Collectors.joining("\n"));
 
     Prompt prompt =
-        new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userMessage)));
+        new Prompt(
+            List.of(
+                new SystemMessage(SYSTEM_PROMPT),
+                new UserMessage(
+                    PromptTrustBoundary.wrap("PROMPT_OPTIMISER_EVIDENCE", userMessage))));
 
     ResolvedModel resolved = modelResolver.resolve("PromptOptimiserAgent", run.getAiProviderEnum());
     var response =

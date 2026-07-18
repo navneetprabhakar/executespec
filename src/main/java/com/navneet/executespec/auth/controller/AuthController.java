@@ -404,11 +404,24 @@ public class AuthController {
           "AI key management requires a PRO or ENTERPRISE plan with org admin access");
     }
     AppUser user = userDetails.getUser();
-    user.setOpenAiApiKey(blankToNull(req.openAiApiKey()));
-    user.setAnthropicApiKey(blankToNull(req.anthropicApiKey()));
-    user.setGeminiApiKey(blankToNull(req.geminiApiKey()));
-    user.setDeepSeekApiKey(blankToNull(req.deepSeekApiKey()));
-    user.setFireworksApiKey(blankToNull(req.fireworksApiKey()));
+    // Patch semantics: the Web settings surface saves one provider at a time. Omitted/blank
+    // fields therefore mean "leave unchanged". Destructive removal has a separate authenticated
+    // DELETE route below so a UI serialization detail can never erase unrelated credentials.
+    if (blankToNull(req.openAiApiKey()) != null) {
+      user.setOpenAiApiKey(req.openAiApiKey().strip());
+    }
+    if (blankToNull(req.anthropicApiKey()) != null) {
+      user.setAnthropicApiKey(req.anthropicApiKey().strip());
+    }
+    if (blankToNull(req.geminiApiKey()) != null) {
+      user.setGeminiApiKey(req.geminiApiKey().strip());
+    }
+    if (blankToNull(req.deepSeekApiKey()) != null) {
+      user.setDeepSeekApiKey(req.deepSeekApiKey().strip());
+    }
+    if (blankToNull(req.fireworksApiKey()) != null) {
+      user.setFireworksApiKey(req.fireworksApiKey().strip());
+    }
     userRepo.save(user);
     log.info(
         "User {} updated AI key settings — openai={}, anthropic={}, gemini={}, deepseek={},"
@@ -436,6 +449,38 @@ public class AuthController {
             + "}");
 
     return ResponseEntity.ok(currentUserDto(user, userDetails));
+  }
+
+  @DeleteMapping("/settings/ai-keys/{provider}")
+  public ResponseEntity<Void> revokeAiKey(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String provider) {
+    var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+    if (!perms.canManageAiKeys()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "AI key management requires a PRO or ENTERPRISE plan with org admin access");
+    }
+    String normalized = normalizeAiProvider(provider);
+    AppUser user = userDetails.getUser();
+    boolean existed =
+        switch (normalized) {
+          case "openai" -> clearPresent(user.getOpenAiApiKey(), () -> user.setOpenAiApiKey(null));
+          case "anthropic" ->
+              clearPresent(user.getAnthropicApiKey(), () -> user.setAnthropicApiKey(null));
+          case "gemini" -> clearPresent(user.getGeminiApiKey(), () -> user.setGeminiApiKey(null));
+          case "deepseek" ->
+              clearPresent(user.getDeepSeekApiKey(), () -> user.setDeepSeekApiKey(null));
+          case "fireworks" ->
+              clearPresent(user.getFireworksApiKey(), () -> user.setFireworksApiKey(null));
+          default ->
+              throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported provider");
+        };
+    userRepo.save(user);
+    recordSettingsAudit(
+        user,
+        "USER_AI_KEY_REVOKED",
+        "{\"provider\":\"" + normalized + "\",\"previouslyPresent\":" + existed + "}");
+    return ResponseEntity.noContent().build();
   }
 
   record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
@@ -689,6 +734,26 @@ public class AuthController {
 
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
+  }
+
+  private static String normalizeAiProvider(String provider) {
+    if (provider == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provider is required");
+    }
+    String normalized = provider.strip().toLowerCase(java.util.Locale.ROOT);
+    if ("google".equals(normalized)) normalized = "gemini";
+    if (!java.util.Set.of("anthropic", "openai", "gemini", "deepseek", "fireworks")
+        .contains(normalized)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Unsupported personal-key provider: " + provider);
+    }
+    return normalized;
+  }
+
+  private static boolean clearPresent(String current, Runnable clear) {
+    boolean present = current != null && !current.isBlank();
+    clear.run();
+    return present;
   }
 
   private void recordSettingsAudit(AppUser user, String eventType, String newValueJson) {

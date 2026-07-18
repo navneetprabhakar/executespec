@@ -5,6 +5,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
@@ -251,7 +252,9 @@ public class RunCodeMapService {
         llmRouter.callText(
             route.providerName(),
             route.getModel(),
-            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            java.util.List.of(
+                new SystemMessage(system),
+                new UserMessage(PromptTrustBoundary.wrap("RAW_CODEMAP_SCAN", user))),
             runId,
             "RunCodeMapService",
             "codemap.summary",

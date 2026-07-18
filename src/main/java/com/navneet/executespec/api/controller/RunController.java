@@ -1,10 +1,8 @@
 package com.navneet.executespec.api.controller;
 
 import java.io.IOException;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1277,17 +1275,9 @@ public class RunController {
             .body(repoZip);
       }
 
-      // Path 1: GCS archive — redirect to signed URL
-      if (run.getGcsWorkspaceKey() != null) {
-        URL signedUrl =
-            gcsWorkspaceStore.signedDownloadUrl(run.getGcsWorkspaceKey(), Duration.ofMinutes(5));
-        log.debug("Redirecting download for run {} to GCS signed URL", id);
-        return ResponseEntity.status(HttpStatus.FOUND)
-            .header(HttpHeaders.LOCATION, signedUrl.toString())
-            .build();
-      }
-
-      // Path 2: Local workspace — zip on the fly and stream
+      // Local workspaces are zipped and scanned on the fly. Archived workspaces are downloaded
+      // through the same service and every ZIP member is scanned before bytes are returned. A
+      // direct GCS redirect would bypass that final publication gate for historical archives.
       try {
         Path zipPath = workspaceExportService.exportWorkspace(id);
         String runId8 = id.substring(0, Math.min(8, id.length()));

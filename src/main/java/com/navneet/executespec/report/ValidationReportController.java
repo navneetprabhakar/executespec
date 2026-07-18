@@ -3,10 +3,13 @@ package com.navneet.executespec.report;
 import java.time.Instant;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.report.model.ValidationReportShareDTO;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -31,6 +34,8 @@ public class ValidationReportController {
   private final RunAccessGuard runAccessGuard;
   private final PipelineRunRepository runRepository;
   private final ProjectShareLinkService shareLinkService;
+  private final GeneratedSecretScanner secretScanner;
+  private final ObjectMapper objectMapper;
 
   @GetMapping("/runs/{runId}/report")
   public ResponseEntity<ValidationReportDTO> getReport(
@@ -50,10 +55,12 @@ public class ValidationReportController {
 
     runAccessGuard.requireRunWriteAccess(runId, userDetails);
 
-    reportService
-        .findEntityByRunId(runId)
-        .orElseThrow(
-            () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No report for this run"));
+    var report =
+        reportService
+            .findEntityByRunId(runId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No report for this run"));
+    assertPublicationSafe(report);
 
     var run =
         runRepository
@@ -90,6 +97,8 @@ public class ValidationReportController {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No report for this run"));
 
+    assertPublicationSafe(entity);
+
     byte[] pdf = pdfService.generatePdf(entity);
 
     return ResponseEntity.ok()
@@ -102,10 +111,28 @@ public class ValidationReportController {
 
   @GetMapping("/reports/shared/{shareToken}")
   public ResponseEntity<ValidationReportShareDTO> getSharedReport(@PathVariable String shareToken) {
-
     return reportService
         .getByShareToken(shareToken)
-        .map(ResponseEntity::ok)
+        .map(
+            report -> {
+              assertPublicationSafe(report);
+              return ResponseEntity.ok(report);
+            })
         .orElse(ResponseEntity.notFound().build());
+  }
+
+  private void assertPublicationSafe(Object report) {
+    final String serialized;
+    try {
+      serialized = objectMapper.writeValueAsString(report);
+    } catch (JsonProcessingException invalid) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY, "Report could not be validated for publication");
+    }
+    if (secretScanner.scan(serialized).isPresent()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Report contains credential-like material and cannot be published");
+    }
   }
 }

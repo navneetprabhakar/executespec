@@ -72,6 +72,16 @@ function relTime(iso?: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function duration(seconds?: number | null): string {
+  const s = Math.max(0, Math.round(Number(seconds ?? 0)));
+  if (!Number.isFinite(s)) return '—';
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
 function evColor(type: string): string {
   const t = type.toUpperCase();
   if (t === 'RUN_DONE' || t === 'SUBMITTED') return 'var(--ide-green)';
@@ -259,9 +269,14 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
         {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
       </td>
       <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
-        {dateTime(r.createdAt)}
+        {r.activeAttemptCount ? `${r.activeAttemptCount} active · ` : ''}
+        {duration(r.elapsedSeconds)} elapsed
         <div style={{fontSize: 11}}>
-          {r.finishedAt ? `done ${dateTime(r.finishedAt)}` : relTime(r.createdAt)}
+          {r.finishedAt
+            ? `done ${dateTime(r.finishedAt)}`
+            : r.etaSeconds != null
+              ? `ETA ${duration(r.etaSeconds)}`
+              : relTime(r.createdAt)}
         </div>
       </td>
       <td style={{...TD, width: 36}}>
@@ -319,6 +334,9 @@ function RunCard({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
         </KV>
         <KV k='Attempts'>k={r.k}</KV>
         <KV k='Time'>{dateTime(r.createdAt)}</KV>
+        <KV k='Progress'>
+          {r.activeAttemptCount || 0} active · {r.completedAttempts || 0} scored
+        </KV>
       </div>
     </article>
   );
@@ -458,7 +476,14 @@ function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: num
             </span>
           );
         const pass = a.reward > 0;
-        const extra = [a.outcome, a.reason].filter(Boolean).join(' · ');
+        const extra = [
+          a.outcome,
+          a.failureClassification,
+          a.reason,
+          a.trajectorySha256 ? `trajectory ${a.trajectorySha256.slice(0, 10)}…` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
         return (
           <span
             key={i}
@@ -506,6 +531,11 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                     {[g.outcome, g.reason].filter(Boolean).join(' · ')}
                   </div>
                 )}
+                {!g.passed && g.attempts[g.attempts.length - 1]?.failureClassification && (
+                  <div style={{marginTop: 3, color: MUTED, fontSize: 11}}>
+                    {g.attempts[g.attempts.length - 1]?.failureClassification}
+                  </div>
+                )}
               </td>
               <td style={TD}>
                 <AttemptPips attempts={g.attempts} k={k} />
@@ -522,7 +552,51 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                 ) : (
                   <span style={{color: MUTED}}>—</span>
                 )}
+                {g.attempts
+                  .filter((a) => a.trajectoryLocation)
+                  .map((a) => (
+                    <div
+                      key={`trajectory-${a.attempt}`}
+                      style={{marginTop: 3, color: MUTED, fontSize: 11, maxWidth: 220}}
+                      title={`${a.trajectoryLocation}\nsha256:${a.trajectorySha256}`}
+                    >
+                      a{a.attempt} trajectory · {a.trajectorySha256?.slice(0, 10)}…
+                    </div>
+                  ))}
               </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ActiveAttempts({attempts}: {attempts: api.BenchmarkActiveAttempt[]}) {
+  if (!attempts.length) return null;
+  return (
+    <div className='ide-card' style={{padding: 0, overflowX: 'auto'}}>
+      <table style={{width: '100%', borderCollapse: 'collapse'}}>
+        <thead>
+          <tr>
+            {['Task', 'Attempt', 'Elapsed', 'ETA', 'Last heartbeat'].map((h) => (
+              <th key={h} style={TH}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {attempts.map((a) => (
+            <tr key={a.id} style={{borderTop: '1px solid var(--ide-border)'}}>
+              <td style={{...TD, fontFamily: 'monospace'}}>{a.taskName}</td>
+              <td style={TD}>
+                #{a.attempt}{' '}
+                {a.stale && <span style={{color: 'var(--ide-red)'}}>· stale heartbeat</span>}
+              </td>
+              <td style={TD}>{duration((Date.now() - Date.parse(a.startedAt)) / 1000)}</td>
+              <td style={TD}>{a.etaSeconds == null ? '—' : duration(a.etaSeconds)}</td>
+              <td style={TD}>{relTime(a.lastProgressAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -560,6 +634,7 @@ function EventLog({events}: {events: api.BenchmarkEvent[]}) {
 
 function Detail({d}: {d: api.BenchmarkDetail}) {
   const r = d.run;
+  const activeAttempts = d.activeAttempts ?? [];
   const groups = groupTasks(d.tasks);
   const status = effectiveStatus(r);
   const runDone = ['DONE', 'FAILED', 'CANCELLED'].includes(status.toUpperCase());
@@ -597,7 +672,18 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <KV k='Provider'>{r.provider}</KV>
         <KV k='Dataset'>{r.dataset || '—'}</KV>
         <KV k='Submission'>{r.submissionStatus || '—'}</KV>
-        <KV k='Started'>{relTime(r.startedAt)}</KV>
+        <KV k='Readiness'>
+          {r.submissionReadiness || 'NOT_REQUIRED'}
+          {r.submissionReadinessReason && (
+            <div style={{fontSize: 11, color: MUTED}}>{r.submissionReadinessReason}</div>
+          )}
+        </KV>
+        <KV k='Elapsed / ETA'>
+          {duration(r.elapsedSeconds)} / {r.etaSeconds == null ? '—' : duration(r.etaSeconds)}
+        </KV>
+        <KV k='Attempts'>
+          {r.activeAttemptCount || 0} active · {r.completedAttempts || 0} scored
+        </KV>
       </div>
 
       {r.leaderboardUrl && (
@@ -615,6 +701,15 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <div style={{marginTop: 12}}>
           <ErrCard msg={r.error} />
         </div>
+      )}
+
+      {activeAttempts.length > 0 && (
+        <>
+          <div className='ide-h2' style={{marginTop: 18}}>
+            Active attempts ({activeAttempts.length})
+          </div>
+          <ActiveAttempts attempts={activeAttempts} />
+        </>
       )}
 
       <div className='ide-h2' style={{marginTop: 18}}>

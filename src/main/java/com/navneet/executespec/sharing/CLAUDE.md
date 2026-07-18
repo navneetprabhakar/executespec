@@ -25,7 +25,9 @@
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
   Validation-report shares include the same score summary and verification ledger as the authenticated
   report (with deterministic, LLM-derived, and unmeasured evidence labels); no credentials or
-  internal run-goal state is exposed.
+  internal run-goal state is exposed. Every serialized public payload is checked by
+  `GeneratedSecretScanner` immediately before response; credential-like content fails closed with
+  422 and the matched value is never returned.
 
 ## Schema (V175 + V287)
 

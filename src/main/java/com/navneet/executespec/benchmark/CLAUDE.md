@@ -158,8 +158,9 @@ harnesses next) runs the benchmark and **publishes events** here; ExecuteSpec **
 re-broadcasts (SSE) → shows**. No in-app Harbor subprocess — Harbor still owns the verifier + the official
 `harbor upload`.
 
-**Suite-agnostic by construction.** Every suite's harness POSTs the *same* event shapes (`TASK_SCORED`
-`{task, attempt, reward, esRunId?, cost, inputTokens?, outputTokens?}` / `RUN_PROGRESS` / `RUN_DONE` / `SUBMISSION_*`) to the *same*
+**Suite-agnostic by construction.** Every suite's harness POSTs the *same* event shapes (`TASK_STARTED`
+/ `RUN_PROGRESS` / `TASK_SCORED` `{task, attempt, reward, esRunId?, cost, inputTokens?, outputTokens?,
+failureClassification?, trajectoryLocation?, trajectorySha256?}` / `RUN_DONE` / `SUBMISSION_*`) to the *same*
 ingest endpoint; `benchmark_run.suite` (`BenchmarkSuite`: TERMINAL_BENCH / SWE_BENCH / PROGRAM_BENCH —
 stored as a String, not a JPA enum, so a new suite needs no migration) is the only discriminator. TB is the
 first consumer; SWE-bench + ProgramBench plug in with no schema change.
@@ -169,8 +170,10 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
 | File | Purpose |
 |------|---------|
 | `BenchmarkTrackingController.java` | `@RequestMapping("/api/v2/test/benchmark")` + `@Profile({"local","dev","benchmark"})` + `@PreAuthorize("hasRole('SUPER_ADMIN')")` (the `/api/v2/test/**` matcher is also SUPER_ADMIN-gated — same operator-only surface as `terminalbench/`). `POST /start` (register a tracked run → `BenchmarkRun`), `POST /{id}/event` (ingest one published event), `POST /{id}/reconcile-usage` (server-side usage repair), `GET` (list 50), `GET /{id}` (run + task results + events), `GET /{id}/events` (live SSE). DTOs are inline records. **Named distinctly from the SWE-bench `BenchmarkController`** (concern 1) to avoid a class/path collision. |
-| `BenchmarkTrackingService.java` | `start` / `ingest` / `reconcileUsage` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt), including optional `outcome` / `outcome_reason` and `inputTokens` / `outputTokens` from the bridge, then recomputes `resolved_tasks` (distinct tasks with ≥1 passing attempt), `cost_usd`, and run token totals; `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). `reconcileUsage` locks the tracked run, follows task `esRunId` links and replaces usage projections from canonical `run_step_usage` rows without changing verifier evidence. Unknown event types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
-| `BenchmarkRun` / `BenchmarkTaskResult` / `BenchmarkEvent` | Entities (`@Data @Builder`, app-set `String id`). See **V236**. |
+| `BenchmarkTrackingService.java` | `start` / `ingest` / `reconcileUsage` / reads + `subscribe`. `TASK_STARTED` and task-bearing `RUN_PROGRESS` upsert the durable, concurrent active-attempt projection; `TASK_SCORED` removes that attempt and idempotently inserts its terminal row with normalized failure class plus trajectory location/hash. Run rows persist active/completed counts, last progress, ETA and submission readiness. `RUN_DONE` marks a submission-required run READY only when every expected attempt exists and has paired trajectory provenance; incomplete/missing evidence is BLOCKED. SSE contains the same progress projection used by reload, while detail reads rebuild from PostgreSQL rather than process memory. `reconcileUsage` follows task `esRunId` links and replaces usage projections from canonical `run_step_usage` rows without changing verifier evidence. |
+| `BenchmarkRun` / `BenchmarkActiveAttempt` / `BenchmarkTaskResult` / `BenchmarkEvent` | Entities (`@Data @Builder`, app-set `String id`). V297's active-attempt relation supports concurrency without collapsing several workers into one misleading current-task field. |
+| `BenchmarkTrajectoryStore.java` | Registers only durable benchmark/SWE/Program/TB runs, captures their SSE envelopes as bounded append-only NDJSON under an OS file lock, recursively redacts before append, fsyncs each write, expires files after seven days, and re-parses/re-redacts/re-scans a point-in-time copy before export. Eligibility uses a bounded eight-hour cache with database fallback after restart; missing rows are not negative-cached. The 256 MiB per-run cap fails closed rather than emitting a silently truncated leaderboard trajectory. |
+| `BenchmarkTrajectoryController.java` | Profile-local/dev/benchmark, SUPER_ADMIN and `RunAccessGuard` protected `GET /api/v2/test/benchmark/runs/{runId}/trajectory`. Streams only the prepared snapshot and returns run id, exact event count, SHA-256, retention and `truncated=false` headers. |
 | `BenchmarkSuite` | The suite discriminator enum + `isKnown(String)`. |
 | `Benchmark{Run,TaskResult,Event}Repository` | `JpaRepository<X, String>` finders. |
 
@@ -188,6 +191,16 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
   migration fails with a diagnostic if historical duplicate sequences exist; it never silently
   rewrites audit history. `scripts/k-eval.py publish` emits scored task events plus `RUN_DONE` after
   an external scorer completes, while `generate` remains explicitly open/UNSCORED.
+- **V297** `V297__benchmark_durable_progress_and_trajectory.sql` — persists concurrent active
+  attempts, completed count, progress timestamp, ETA, normalized terminal failure classification,
+  trajectory location/SHA-256 and deterministic submission readiness. Existing tracked runs remain
+  `submission_required=false` / `NOT_REQUIRED`; leaderboard-intended starts opt in explicitly.
+  Trajectory content is never stored in these tables: only a secret-free local/object reference
+  (`gs://`, `s3://`, `artifact://` or a path without traversal/query/credential material) and the
+  lowercase SHA-256 are admitted, with paired database constraints as a second backstop.
+  Active attempts carry a persisted 15-minute heartbeat deadline. A backend restart reloads the
+  rows; expired rows remain visible as `stale=true` instead of being silently counted as healthy or
+  deleted, and the harness can reconcile them with a new progress/terminal event.
 
 ### Status
 
@@ -198,3 +211,17 @@ submission status) is implemented as `frontend/src/ide/IdeBenchmark.tsx`; the br
 and detail endpoints because EventSource cannot send the bearer token. Current internal benchmark
 scope: k=1, no submission, DeepSeek V4 native Pro/Flash, Sonnet 5, Sonnet 4.6, GLM 5.2 via
 OpenRouter.
+
+### 2026-07-18 local verification boundary
+
+- Full backend `mvn -q verify`: 3,243/3,243, zero failures/errors/skips.
+- Trajectory store/controller focused tests: 10/10.
+- `infra/benchmark/scripts/test_k_eval.py`: 39/39; runner and Harbor adapter bytecode compile.
+- Web benchmark projection: 61 files/269 tests plus production build/format/lint.
+- V296→V297 Testcontainers upgrade and clean-install/Hibernate validation pass.
+
+These prove the local implementation, not the completion gate. Before paid dispatch, deploy an exact
+tuple with a persistent trajectory root and prove browser/API reload, backend restart, harness download,
+event-count/SHA parity and zero missing trajectories. A horizontally scaled deployment must mount one
+shared root or replace it with an object-store-backed implementation; node-local directories are not a
+valid multi-JVM contract.
