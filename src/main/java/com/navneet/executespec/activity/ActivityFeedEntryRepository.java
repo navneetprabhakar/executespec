@@ -63,17 +63,15 @@ public interface ActivityFeedEntryRepository
   // type from the column side.
   @Query(
       value =
-          "SELECT a.* FROM activity_feed a "
-              + "WHERE a.project_id = :projectId "
-              + "AND a.occurred_at >= :from AND a.occurred_at < :to "
-              + "AND a.event_type IN (:eventTypes) "
-              + "AND (CAST(:actorUserId AS uuid) IS NULL OR a.actor_user_id = CAST(:actorUserId AS uuid)) "
-              + "AND (CAST(:targetType AS text) IS NULL OR a.target_type = CAST(:targetType AS text)) "
-              + "AND (CAST(:targetId AS text) IS NULL OR a.target_id = CAST(:targetId AS text)) "
-              + "AND (CAST(:cursorOccurredAt AS timestamp) IS NULL "
-              + "OR a.occurred_at < CAST(:cursorOccurredAt AS timestamp) "
-              + "OR (a.occurred_at = CAST(:cursorOccurredAt AS timestamp) AND a.id < CAST(:cursorId AS uuid))) "
-              + "ORDER BY a.occurred_at DESC, a.id DESC",
+          "SELECT a.* FROM activity_feed a WHERE a.project_id = :projectId AND a.occurred_at >="
+              + " :from AND a.occurred_at < :to AND a.event_type IN (:eventTypes) AND"
+              + " (CAST(:actorUserId AS uuid) IS NULL OR a.actor_user_id = CAST(:actorUserId AS"
+              + " uuid)) AND (CAST(:targetType AS text) IS NULL OR a.target_type = CAST(:targetType"
+              + " AS text)) AND (CAST(:targetId AS text) IS NULL OR a.target_id = CAST(:targetId AS"
+              + " text)) AND (CAST(:cursorOccurredAt AS timestamp) IS NULL OR a.occurred_at <"
+              + " CAST(:cursorOccurredAt AS timestamp) OR (a.occurred_at = CAST(:cursorOccurredAt"
+              + " AS timestamp) AND a.id < CAST(:cursorId AS uuid))) ORDER BY a.occurred_at DESC,"
+              + " a.id DESC",
       nativeQuery = true)
   List<ActivityFeedEntry> findFilteredPage(
       @Param("projectId") UUID projectId,
