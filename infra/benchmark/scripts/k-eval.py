@@ -160,7 +160,7 @@ def cmd_generate(a):
         todo = [iid for iid in instances if iid not in done]
         print(f"== pass {k}/{a.k}: {len(instances)} instances ({len(done)} done, {len(todo)} to run, concurrency {a.concurrency})")
         mf_lock = threading.Lock()
-        counter = {"n": 0}
+        counter = {"n": 0, "successful": 0}
         token_box = {"t": token}
 
         def run_one(iid):
@@ -195,6 +195,8 @@ def cmd_generate(a):
                     mf.write(json.dumps(row) + "\n")
                     mf.flush()
                 print(f"   [{i}/{len(todo)}] {iid}: {row.get('outcome') or row.get('error','?')} ({row['seconds']}s)")
+                if row.get("status") == 200:
+                    counter["successful"] += 1
                 tracking_event(
                     token_box["t"], bench_id,
                     {"type": "RUN_PROGRESS", "taskName": iid, "esRunId": row.get("runId"),
@@ -209,8 +211,12 @@ def cmd_generate(a):
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=a.concurrency) as ex:
                 list(ex.map(run_one, todo))
-        tracking_event(token, bench_id, {"type": "RUN_PROGRESS",
-                                         "message": f"pass {k}/{a.k} generation complete — score externally, then post rewards"})
+        if bench_id and todo and counter["successful"] == 0:
+            tracking_event(token, bench_id, {"type": "RUN_FAILED",
+                                             "message": "generation preflight failed; no tasks dispatched"})
+        else:
+            tracking_event(token, bench_id, {"type": "RUN_PROGRESS",
+                                             "message": f"pass {k}/{a.k} generation complete — score externally, then post rewards"})
         print(f"== pass {k} manifest: {manifest}")
     print("\ngenerate done. Score each pass with the Scale harness, then: k-eval.py aggregate <k eval_results.json>")
 
