@@ -53,6 +53,11 @@ HOME = pathlib.Path.home()
 # ---------- shared ----------
 
 def load_env():
+    # CI/operator runs may inject short-lived credentials without rewriting the local file.
+    override_email = os.environ.get("ES_ADMIN_EMAIL")
+    override_pw = os.environ.get("ES_ADMIN_PW")
+    if override_email and override_pw:
+        return override_email, override_pw
     envf = HOME / "swebench-bench" / ".espec-admin.env"
     env = {}
     for line in envf.read_text().splitlines():

@@ -262,6 +262,7 @@ F1 run-chat 500 (V282 idempotency collision) · F2 FREE→DeepSeek lock · F3 sh
 ### Phase 7 harness hardening — local checkpoint (2026-07-18, no spend)
 - **Tracking closure:** `k-eval.py generate` now persists a tracking sidecar and its `publish` command posts official `TASK_SCORED` events followed by `RUN_DONE`; this closes the prior stale-RUNNING gap.
 - **Cross-JVM ordering:** tracking ingestion locks the parent benchmark row while allocating event sequence/task-attempt state; V296 adds a unique `(benchmark_run_id, seq)` constraint and fails closed if historical duplicates exist. Isolated PostgreSQL clean-install and V294→V296 upgrade rehearsals both passed.
+- **Local canary attempt:** the harness was re-enabled with `SWEBENCH_ENABLED=true`, but the first two x86 Astropy cleanroom images were not cached on this Apple Silicon host; Docker pulls stalled for about two minutes and were stopped before provider dispatch. Result: 0/10 attempted, $0 provider spend. The cloud benchmark VM remains the correct execution target once its image cache is verified.
 - **TB safety:** setup `exception.txt` is classified as infrastructure failure; incomplete trial sets become `RUN_FAILED` and return non-zero; late worker finally blocks preserve terminal/cancelled states.
 - **Verification:** focused Java tests, Python bridge tests (2/2), Python syntax checks, and backend compile passed. Full `mvn verify` is running next; no VM/DNS/provider action has occurred.
 
