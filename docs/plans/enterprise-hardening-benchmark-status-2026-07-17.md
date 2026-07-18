@@ -4,11 +4,11 @@
 
 **Tracker state:** LIVE — update after every material implementation, verification, spend, commit, PR, deployment, benchmark, blocker or contradiction
 
-**Last updated:** 2026-07-17 23:40 IST — Phase 5 security/isolation is active. The first-pass Phase 5 cohort — bounded event replay/paging, authorization/IDOR fixes, static symlink denial, V294 governed report sharing, trusted-edge identity handling and a high-confidence generated-secret gate on backend file writes — is now **committed and pushed** at backend `8bc97f1d0` (GTM docs `c6466d70e`), HEAD == origin. The combined Phase 5 cohort passes 129/129; an isolated-mirror re-verify of the focused unit/slice subset ran 100/100 before push. Remaining Phase 5 items (host-shell isolation, cursor/async export bounds, upload AV, cross-JVM recovery, endpoint-by-endpoint authz, observability) stay open, not falsely closed.
+**Last updated:** 2026-07-18 IST — **PAUSED by founder.** Phases 1–5 complete/committed; Phase 6 substantially done (six real defects F1–F6 found via live QA, all fixed + live-verified + pushed) with 6 parallel adversarial subagents finishing the remainder; Phase 7 (official benchmark rules) done. Current heads: **backend `98f7d8b47`, docs `a8a652e`, migration head `V295`**; branch `codex/brownfield-rca-remediation-20260717`, HEAD == origin, trees clean. Backend running locally (`local` profile, live-LLM, native DeepSeek). Benchmark VM **stopped/parked** (`TERMINATED`, zero compute). See **§7 Session resume state** at the bottom for the full cold-resume picture.
 
 **Owner/session:** Codex / active persistent goal session
 
-**Current phase:** Phases 1–4 complete at synchronized branch checkpoints; Phase 5 security/isolation hardening is in progress
+**Current phase:** Phases 1–5 complete; Phase 6 QA in progress (F1–F6 fixed; 6 subagents finishing CLI/injection/routing/RBAC/500-hunt/WebUI); Phase 7 rules review complete. PAUSED before triaging the remaining subagent reports.
 
 **Release decision:** NOT READY
 **Benchmark spend authorization:** CLOSED — official-rules, product-QA, model-switch and local-canary gates have not passed
@@ -230,3 +230,56 @@ No genuine impasse exists. Runtime credentials, Bitbucket PAT, cloud/DNS authori
 | 2026-07-18 Phase-5-verify-13 | Verified SEC-13 (Sarvam) and SEC-12 (FastContext) exclusion/containment by static inspection plus the passing full regression: `LlmProvider` enum carries no SARVAM, only immutable V256/V263 cleanup migrations and exclusion tests reference it, and neither Sarvam nor FastContext classes exist in the running build's `target/classes`; FastContext is absent from README/customer docs. Deployed picker/failover runtime confirmation is deferred to Phase 6. | Sarvam removal contract + upgrade integration tests PASS in the 3163-test regression; `grep`/enum/`target/classes` inspection clean; no provider/API call, VM, DNS or infrastructure; $0 |
 | 2026-07-17 Phase-5-smoke-12 | Runtime smoke of the pushed Phase-5 build (backend restarted from HEAD with `live-llm.enabled=true`, native DeepSeek). New greenfield run `eb88a21d` (PRO user) reached COMPLETE/CLEAN_COMPLETION, verifiedScore 94, real `calc.py`/`test_calc.py` + executed pytest, `keySource=PLATFORM`, $0.0096. New project (TEAM user) + project-scoped run `8db4b42c` reached COMPLETE/CLEAN_COMPLETION, verifiedScore 94, projectId bound and visible via `GET /api/runs?projectId=`. Phase-5 authz did NOT over-restrict (PRO submit, TEAM project+run, PROTOTYPE gate bypass, project association all OK). Minor non-blocking notes: empty-string `projectId` submit FAILED with null statusReason/errorMessage (input-edge/observability nit; UI never sends ""); `filesGenerated` DTO field returned null though files exist; `revalidate-ent` creds-file entry is stale/invalid. | 2 runs COMPLETE @94 + 1 empty-projectId edge FAILED; ~$0.025 native DeepSeek; backend/live-LLM only, no VM/DNS/infra; recorded in spend ledger |
 | 2026-07-17 Phase-5-commit-11 | Committed and pushed the first-pass Phase 5 security/isolation cohort (event replay/paging `PageBounds`, execution/report/share/webhook authz + IDOR fixes, `PathSafety` symlink denial, V294 governed validation-report sharing, trusted-edge `remoteAddr` identity, `GeneratedSecretScanner` write/edit gate) plus in-commit doc-refresh (CLAUDE.md, README, openapi, per-package CLAUDE.md, this tracker). GTM/competitive docs committed separately. | Isolated-mirror re-verify 100/100 focused unit/slice tests + full tree compile PASS; `git diff --check` clean; backend `8bc97f1d0`, GTM `c6466d70e`, pushed HEAD == origin; no provider/API call, VM, DNS or infrastructure; $0 |
+
+## 7. Session resume state (2026-07-18, PAUSED)
+
+Cold-resume snapshot so another session/model can continue without chat history.
+
+### Heads & environment
+- Branch `codex/brownfield-rca-remediation-20260717` (all three repos). HEAD == origin, trees clean.
+  - Backend/Web `98f7d8b47`; Docs `a8a652e`; CLI unchanged from the last synchronized checkpoint.
+- Migration head **V295** (`V295__team_byok_execution_view_parity.sql`).
+- Local backend RUNNING: `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.jvmArguments="-Dexecutespec.live-llm.enabled=true"` → :8080, live-LLM ON, native DeepSeek cheapest. Local profile has `crypto.enabled=false` (no envelope gate) and real provider keys in `application-local.yml`.
+- Test users in `~/Desktop/local_creds.txt` (revalidate-free/pro/team@test.local / REDACTED_FOR_PUBLIC_RELEASE). A working SUPER_ADMIN was set this session: `programbench@bench.local` with a throwaway local bcrypt password (NOT recorded here). `admin@executespec.ai` login is unreliable due to a stale-cache gotcha after direct DB writes — use a fresh untouched user if seeding.
+- psql: `PGPASSWORD=postgres /Applications/Postgres.app/Contents/Versions/18/bin/psql -U postgres -h localhost -d executespec`.
+- Isolated-mirror verify pattern (so `mvn` never disturbs the running backend): rsync repo → scratchpad `es-mirror` (exclude .git/target/node_modules), run `mvn -o test -Dtest=...` there.
+
+### Founder decisions locked this session
+- **Model gate:** proceed on the current model through all phases (GPT-5.6 Luna requirement WAIVED for this session). Benchmark results come from DeepSeek/GLM regardless.
+- **F2:** FREE tier hard-locked to `deepseek-v4-flash-native` (shipped).
+- **F6:** TEAM + BYOK get `execution_view_enabled` parity with ENTERPRISE (shipped as V295).
+- **Spend:** TB v2.1 native DeepSeek historically <$25, funds present in the DeepSeek account. SWE-bench Lite to run after TB finishes. VM safety auto-stop should be **24h** when the VM is restarted.
+
+### Phase 6 — six real defects found via LIVE QA, all fixed + live-verified + pushed
+F1 run-chat 500 (V282 idempotency collision) · F2 FREE→DeepSeek lock · F3 share links unusable (`token:null`, JPA-merge dropped a `@Transient`) · F4 export download 500 (wildcard `ResponseEntity<?>` blocked streaming) · F5 activity feed 500 (untyped NULL bind) · F6 TEAM/BYOK execution-view parity (V295). Full detail + RCAs in `../../executespec-docs/backend/qa/phase6-enterprise-qa-report-2026-07-18.md`.
+- **Meta-finding:** all 5 code defects passed unit tests but broke in production — systemic mock-vs-real gap (mocked repos + direct controller calls hide real persistence + Spring serialization). Recommended a Testcontainers/MockMvc smoke tier. NOT yet built.
+
+### Phase 7 — official rules digested (no spend)
+`infra/benchmark/PHASE7-BENCHMARK-RULES-DIGEST-2026-07-18.md`. Key compliance gaps to fix BEFORE a leaderboard submission (internal validation runs are unaffected):
+- **TB 2.1 leaderboard:** needs ≥5 trials/task, DEFAULT timeouts (no agent/verifier/resource overrides), public `harbor run --upload` with ATIF trajectories. Our `run-tb.sh` is k=1 + Harbor-timeout-override + private → validation-only. A submittable profile must be added.
+- **SWE-bench Lite:** full `evaluation/lite/<date>_<model>/` bundle (all_preds+metadata+per-instance trajs+logs), pass@1 blind; confirm Lite is still an accepting split (else self-host).
+
+### 6 parallel adversarial subagents (Phase-6 remainder) — 5 done, 1 running at pause
+Discovery-only (no restarts/commits/destructive changes). Full findings F7–F15 + RCAs are in the Phase-6 report `../../executespec-docs/backend/qa/phase6-enterprise-qa-report-2026-07-18.md` (docs `481dfa1`). NONE fixed yet (paused before triage).
+- **DONE injection/chat corpus:** clean — no exploitable injection/leak/unconfirmed-action (1 LOW = F12 output-scrub).
+- **DONE CLI/OpenTUI:** F8 (P1 `rm -r -f` bypasses local guard under --allow-all), F9 (P2 stream-json EPIPE hang), F10 (P2 misleading not-found msg), F13 (P3 unknown flags ignored). Build+auth+enum+idempotency GREEN.
+- **DONE provider/routing/cost/plan-gate:** 🔴 **F7 (P0)** — PRODUCTION plan-gate approve→execute FAILS 100% + task retry + validation-report + accuracy-assessment all fail, from a budget-fingerprint instability in the durable execution-context recovery (`RunOrchestrator:1424` creates context before `persistEstimate` sets hard_cap; `forRun` fingerprint includes budget). Same class as F1, for resume/retry/report roots. Cost/estimate-by-model/FREE-lock/pin/reject-cancel/refund GREEN. F11 (LOW, FREE shows premium model labels).
+- **DONE persona/RBAC matrix:** ✅ NO defects (BILLING_ADMIN/cross-org ORG_ADMIN/external ADMIN/DEV/VIEWER all correctly gated; IDOR + escalation all 403; V198 3-gate proof). Informational: ProjectChat compact/compile/clear guard write only at service layer.
+- **DONE remaining-API 500-hunt:** 🔴 **F14 (P1/HIGH)** — LLM usage-audit surface (`/api/admin/analytics/llm-usage-audit[.json|.csv]`) 500s on every valid request in ALL profiles incl. prod (`@Transactional(isolation=REPEATABLE_READ)` vs `handling_mode=...RELEASE_AFTER_TRANSACTION`). F15 (P2 export missing-job 500→should-404). E1 = environmental only (feature-flags/tiers NoClassDefFoundError from `target/classes` recompiled under the live JVM this session — **restart the backend clean on resume**). Broad downloads/webhooks/contracts/standards GREEN.
+- **RUNNING (1):** deep Web UI browser QA (owns the browser pane at :5173).
+
+**Triage priority on resume:** F7 (P0, blocks the default PRODUCTION path — release blocker) → F14 (P1, usage-audit DOA all profiles) → F8 (P1, CLI destructive-guard bypass) → F15/F9/F10 (P2) → F11/F12/F13 (LOW). Restart the backend clean first (E1).
+
+### Benchmark environment (parked)
+- GCP project `executespecv1` (PROD project — stay surgical). VM `benchmark-instance` (e2-standard-16, 1TB, us-east4-a) is **STOPPED/TERMINATED** (disk + toolchain preserved; compute billing off). LB static IP **8.232.173.180**; Cloudflare A-record `benchmark.executespec.ai` → that IP was set DNS-only by the founder; Google-managed cert `benchmark-instance-ssl`. Terraform: `infra/benchmark/` (LOCAL state, isolated from prod/dev). Results bucket `executespec-swebench-lite-20260718-results`.
+- The VM installs only the TOOLCHAIN; the ExecuteSpec build must be DEPLOYED (git archive of the then-current HEAD) — the founder emphasized "upload correct and current build."
+- **Prior orphaned `tb21-20260715-a1b2-*` LB stack was fully deleted + verified this session** (was billing ~3 days).
+- ADC for Terraform needs `gcloud auth application-default login` (separate from the CLI login; expires ~periodically).
+- **MANDATORY teardown reminder** tracked: when benchmarks finish, remind the founder to `cd infra/benchmark && terraform destroy` + verify zero residue.
+
+### Resume order when the founder says go
+1. Collect + triage the 5 remaining subagent reports; fix real defects serially (restart backend → live-verify → regression test → commit/push), surface founder-decision items (don't guess). Update the Phase-6 report + this tracker.
+2. Finish Phase 6 (independent output-quality QA-07; deployed-candidate persona journeys; execute the Codex-switcher e2e acceptance suite `backend/qa/adversarial-codex-switcher-e2e-testplan-2026-07-17.md`).
+3. Benchmarks: restart VM (arm 24h auto-stop), deploy the then-current build, run TB v2.1 then SWE-bench Lite; add a leaderboard-compliant profile if publishing. Track via `/benchmark`. Then remind + teardown.
+
+**Constraint at pause:** do NOT triage/fix/restart/commit-code until the founder resumes. Doc updates (like this one) are allowed.
