@@ -35,6 +35,10 @@ public interface CodeReviewScanRepository extends JpaRepository<CodeReviewScan, 
   Optional<CodeReviewScan> findFirstByProjectIdAndRepoFullNameOrderByStartedAtDesc(
       String projectId, String repoFullName);
 
+  /** Immutable admission tuple used by V299 background-job idempotency. */
+  Optional<CodeReviewScan> findByProjectIdAndRepoIdAndScannedSha(
+      String projectId, UUID repoId, String scannedSha);
+
   /**
    * Per-month count for a given user — used by the tier-quota gate to enforce per-tier monthly caps
    * (PRO: 4/month, TEAM/MAX/ENTERPRISE: unlimited).

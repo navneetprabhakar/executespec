@@ -130,6 +130,36 @@ public class CodeReviewController {
         .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
+  @PostMapping("/api/code-reviews/{id}/cancel")
+  public ResponseEntity<Void> cancel(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    CodeReviewScan scan = requireWritableScan(id, userDetails);
+    if (!service.requestCancellation(scan.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "scan is not cancellable");
+    }
+    return ResponseEntity.accepted().build();
+  }
+
+  @PostMapping("/api/code-reviews/{id}/retry")
+  public ResponseEntity<CodeReviewScanDto> retry(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    CodeReviewScan scan = requireWritableScan(id, userDetails);
+    if (!service.retryScan(scan.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "scan is not retryable");
+    }
+    return ResponseEntity.accepted().body(CodeReviewScanDto.from(service.findScan(id)));
+  }
+
+  private CodeReviewScan requireWritableScan(UUID id, AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    CodeReviewScan scan = service.findScan(id);
+    if (scan == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
+    projectAccessGuard.assertCanWrite(scan.getProjectId(), userDetails);
+    return scan;
+  }
+
   /** Get a single scan by id (with issues inlined for convenience). */
   @GetMapping("/api/code-reviews/{id}")
   public ResponseEntity<CodeReviewScanWithIssues> get(

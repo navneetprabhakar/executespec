@@ -64,10 +64,14 @@ public class Metrics {
 
   private final MeterRegistry registry;
   private final AtomicLong staleLlmUsageIntents = new AtomicLong();
+  private final AtomicLong pendingLlmUsageRecovery = new AtomicLong();
+  private final AtomicLong deadLlmUsageRecovery = new AtomicLong();
 
   public Metrics(MeterRegistry registry) {
     this.registry = registry;
     registry.gauge(NS + "llm.usage.stale_intents", staleLlmUsageIntents);
+    registry.gauge(NS + "llm.usage.recovery.pending", pendingLlmUsageRecovery);
+    registry.gauge(NS + "llm.usage.recovery.dead", deadLlmUsageRecovery);
   }
 
   public void recordRunOutcome(String overall) {
@@ -190,6 +194,12 @@ public class Metrics {
   /** Current count of write-ahead intents whose terminal fact has not arrived before the SLA. */
   public void recordStaleLlmUsageIntents(long count) {
     staleLlmUsageIntents.set(Math.max(0, count));
+  }
+
+  /** Current V298 terminal-outbox backlog, split into retryable and operator-action states. */
+  public void recordLlmUsageRecoveryBacklog(long pending, long dead) {
+    pendingLlmUsageRecovery.set(Math.max(0, pending));
+    deadLlmUsageRecovery.set(Math.max(0, dead));
   }
 
   /**

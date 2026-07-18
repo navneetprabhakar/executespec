@@ -613,15 +613,25 @@ provider spend without a canonical tenant-attributed ledger row:
 1. Pause new LLM submissions for the affected environment; do not silence while dispatch continues.
 2. Capture the deployment SHA, failure interval, provider/model route and affected run/session ids
    from secret-free application logs and traces.
-3. Restore database write health/schema compatibility, then compare provider-side usage, run totals
-   and managed-AI events for that interval. V283 cannot reconstruct an attempt without provider
-   evidence, so retain `UNKNOWN` instead of inventing a zero-cost row.
-4. Record every unrecovered attempt and cost uncertainty in the incident. Resume only after a
-   synthetic fixture write increments the `result="ok"` series and no new failure fires.
+3. Inspect `llm_usage_terminal_outbox` by status. `PENDING`/`PROCESSING` rows are exact bounded
+   terminal facts awaiting materialization; `DEAD` is a checksum, identity-conflict or exhausted
+   retry incident. Never repair either table by inventing tokens or cost.
+4. Restore database write health/schema compatibility. Let the V298 scheduler reclaim expired
+   leases and confirm each physical attempt reaches exactly one `run_step_usage` row with the same
+   `terminal_payload_sha256`; then compare provider-side usage, run totals and managed-AI events.
+5. If PostgreSQL could not accept the outbox stage, inspect the configured local recovery directory.
+   It is safe only when backed by a persistent/shared volume. The immutable V293 intent remains the
+   cross-JVM missing-terminal truth if that last-resort payload is unavailable; retain `UNKNOWN`
+   instead of inventing a zero-cost row.
+6. Resume only after pending/dead gauges return to zero, a synthetic fixture increments the
+   `result="ok"` series, and no new persistence alert fires.
 
-Test only in an isolated environment: temporarily deny `INSERT` on `run_step_usage`, dispatch a
-non-paid fixture path, verify the platform pager receives the alert, then restore the grant. Silence
-is allowed only for a recorded database-maintenance window with submissions paused.
+Test only in an isolated environment. First deny `INSERT` on `run_step_usage` while allowing the
+outbox table, dispatch a non-paid fixture, verify the exact fact queues, restore the grant, terminate
+the first JVM and prove another JVM materializes it once. Separately simulate total PostgreSQL
+unavailability and prove the local fallback plus stale-intent alert. Verify pager delivery for
+persistence, pending-backlog and dead-letter alerts. Silence is allowed only for a recorded
+database-maintenance window with submissions paused.
 
 Every alert needs severity, owner, runbook URL, notification channel, test procedure and silence
 policy. Send a synthetic alert and acknowledge it before go-live.

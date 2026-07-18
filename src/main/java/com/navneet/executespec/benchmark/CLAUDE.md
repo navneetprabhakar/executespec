@@ -212,11 +212,20 @@ and detail endpoints because EventSource cannot send the bearer token. Current i
 scope: k=1, no submission, DeepSeek V4 native Pro/Flash, Sonnet 5, Sonnet 4.6, GLM 5.2 via
 OpenRouter.
 
+SWE generation now accepts an optional absolute deadline and shutdown reserve. The controller
+passes them into `BenchmarkGenerationService`, which tightens the caller deadline to the configured
+task-wall ceiling, reserves at least 120 seconds for cleanup/response publication, and rejects an
+unusable deadline before container or provider work. `EngineBudget` then carries the same values to
+`WorkerTaskRequest`; the worker/provider and remote-tool deadline checks remain the execution
+chokepoints. `infra/benchmark/scripts/k-eval.py` mints the deadline immediately before dispatch and
+keeps its HTTP timeout 60 seconds beyond the task deadline so it can receive the controlled result.
+
 ### 2026-07-18 local verification boundary
 
-- Full backend `mvn -q verify`: 3,243/3,243, zero failures/errors/skips.
+- Full backend `mvn -q verify`: 3,255/3,255, zero failures/errors/skips.
 - Trajectory store/controller focused tests: 10/10.
-- `infra/benchmark/scripts/test_k_eval.py`: 39/39; runner and Harbor adapter bytecode compile.
+- `infra/benchmark/scripts/test_k_eval.py`: 41/41; frozen Lite-10 dataset/manifest plus live registry
+  digest validation PASS; runner and Harbor adapter bytecode compile.
 - Web benchmark projection: 61 files/269 tests plus production build/format/lint.
 - V296→V297 Testcontainers upgrade and clean-install/Hibernate validation pass.
 

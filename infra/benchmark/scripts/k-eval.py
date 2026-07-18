@@ -533,6 +533,15 @@ def estimate_eta_seconds(durations, remaining, concurrency):
 
 # ---------- generate ----------
 
+def benchmark_deadline_fields(task_timeout_seconds, shutdown_reserve_seconds, now_seconds=None):
+    """Build the shared absolute-deadline contract immediately before HTTP dispatch."""
+    now = time.time() if now_seconds is None else float(now_seconds)
+    return {
+        "absoluteDeadlineEpochMs": int(now * 1000) + int(task_timeout_seconds) * 1000,
+        "shutdownReserveMs": int(shutdown_reserve_seconds) * 1000,
+    }
+
+
 def cmd_generate(a):
     if a.k <= 0:
         sys.exit("--k must be positive")
@@ -540,6 +549,14 @@ def cmd_generate(a):
         sys.exit("--concurrency must be positive")
     if a.expected_total <= 0:
         sys.exit("--expected-total must be positive")
+    task_timeout_seconds = int(getattr(a, "task_timeout_seconds", 3600))
+    shutdown_reserve_seconds = int(getattr(a, "shutdown_reserve_seconds", 120))
+    if task_timeout_seconds <= 0:
+        sys.exit("--task-timeout-seconds must be positive")
+    if shutdown_reserve_seconds < 0:
+        sys.exit("--shutdown-reserve-seconds must be non-negative")
+    if task_timeout_seconds <= shutdown_reserve_seconds:
+        sys.exit("--task-timeout-seconds must exceed --shutdown-reserve-seconds")
     submission_required = bool(getattr(a, "submission_required", False))
     if submission_required and a.k != 1:
         sys.exit("--submission-required is valid only for a frozen pass@1 run (--k 1)")
@@ -670,12 +687,16 @@ def cmd_generate(a):
                     },
                 )
                 provider_dispatched = True
+                deadline_fields = benchmark_deadline_fields(
+                    task_timeout_seconds, shutdown_reserve_seconds)
                 st, d = post_authenticated(
                     "/api/admin/benchmark/generate",
                     {"instanceId": iid, "aiProvider": a.provider, "modelName": a.model,
-                     "hardCapUsd": float(a.per_task_cap_usd)},
+                     "hardCapUsd": float(a.per_task_cap_usd),
+                     **deadline_fields},
                     token_box,
                     refresh_lock,
+                    timeout=task_timeout_seconds + 60,
                 )
                 # EXACT artifact paths from the response — never glob (attribution bug).
                 row.update(
@@ -1114,6 +1135,12 @@ def main():
                    help="aggregate reservation ceiling across this pass")
     g.add_argument("--opening-balance-usd", type=Decimal, required=True,
                    help="operator-recorded provider balance; must cover the campaign reservation")
+    g.add_argument(
+        "--task-timeout-seconds", type=int, default=3600,
+        help="absolute per-task deadline sent to the server (default: 3600)")
+    g.add_argument(
+        "--shutdown-reserve-seconds", type=int, default=120,
+        help="time reserved before the task deadline for cleanup/response delivery (default: 120)")
     g.add_argument(
         "--submission-required", action="store_true",
         help="mark this frozen pass@1 as a leaderboard-submission candidate; requires --k 1")

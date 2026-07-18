@@ -20,12 +20,14 @@ class LlmUsageIntegrityMonitorTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     Metrics metrics = mock(Metrics.class);
     when(jdbc.queryForObject(anyString(), eq(Long.class), any())).thenReturn(3L);
+    when(jdbc.queryForMap(anyString())).thenReturn(java.util.Map.of("pending", 2L, "dead", 1L));
     LlmUsageIntegrityMonitor monitor = new LlmUsageIntegrityMonitor(jdbc, metrics);
     ReflectionTestUtils.setField(monitor, "staleAfterSeconds", 300L);
 
     monitor.measureStaleIntents();
 
     verify(metrics).recordStaleLlmUsageIntents(3L);
+    verify(metrics).recordLlmUsageRecoveryBacklog(2L, 1L);
   }
 
   @Test

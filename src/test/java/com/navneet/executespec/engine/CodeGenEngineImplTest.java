@@ -210,6 +210,31 @@ class CodeGenEngineImplTest {
   }
 
   @Test
+  void solvePropagatesAbsoluteDeadlineBudgetToWorker(@TempDir Path workspace) {
+    stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    EngineRequest request =
+        EngineRequest.builder()
+            .taskSpec("x")
+            .workspace(workspace)
+            .provider("deepseek")
+            .model("deepseek-v4-pro-native")
+            .runId("run-1")
+            .taskId("task-1")
+            .budget(new EngineBudget(220, 600, 2.0, 1_900_000L, 120_000L))
+            .build();
+
+    engine.solve(request);
+
+    ArgumentCaptor<WorkerTaskRequest> captured = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(captured.capture());
+    assertThat(captured.getValue().wallClockSeconds()).isEqualTo(600);
+    assertThat(captured.getValue().absoluteDeadlineEpochMs()).isEqualTo(1_900_000L);
+    assertThat(captured.getValue().shutdownReserveMs()).isEqualTo(120_000L);
+  }
+
+  @Test
   void solveFramesPatchTaskAsUntrustedEvidence(@TempDir Path workspace) {
     stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
     when(costTracker.snapshot(anyString()))

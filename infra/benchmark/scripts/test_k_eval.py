@@ -53,7 +53,28 @@ def generate_args(tmp_path, dataset, expected_total):
         per_task_cap_usd=k_eval.Decimal("2"),
         campaign_cap_usd=k_eval.Decimal("20"),
         opening_balance_usd=k_eval.Decimal("25"),
+        task_timeout_seconds=3600,
+        shutdown_reserve_seconds=120,
     )
+
+
+def test_benchmark_deadline_fields_share_absolute_epoch_and_reserve():
+    assert k_eval.benchmark_deadline_fields(3600, 120, now_seconds=1000.25) == {
+        "absoluteDeadlineEpochMs": 4_600_250,
+        "shutdownReserveMs": 120_000,
+    }
+
+
+def test_generate_rejects_timeout_without_cleanup_reserve_before_login(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "a"}]))
+    args = generate_args(tmp_path, dataset, 1)
+    args.task_timeout_seconds = 120
+    args.shutdown_reserve_seconds = 120
+    monkeypatch.setattr(
+        k_eval, "login", lambda: pytest.fail("login must not occur before timeout validation"))
+    with pytest.raises(SystemExit, match="must exceed"):
+        k_eval.cmd_generate(args)
 
 
 def test_generate_rejects_wrong_cardinality_before_login(tmp_path, monkeypatch):

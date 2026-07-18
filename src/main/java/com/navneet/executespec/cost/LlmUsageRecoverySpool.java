@@ -29,18 +29,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class LlmUsageRecoverySpool {
 
-  private final RunStepUsageRepository repository;
+  private final LlmUsageTerminalOutbox terminalOutbox;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
   private final Path directory;
 
   public LlmUsageRecoverySpool(
-      RunStepUsageRepository repository,
+      LlmUsageTerminalOutbox terminalOutbox,
       ObjectMapper objectMapper,
       Metrics metrics,
       @Value("${executespec.usage-recovery-dir:${agent.workspace:workspace}/usage-recovery}")
           String directory) {
-    this.repository = repository;
+    this.terminalOutbox = terminalOutbox;
     this.objectMapper = objectMapper;
     this.metrics = metrics;
     this.directory = Path.of(directory).toAbsolutePath().normalize();
@@ -96,7 +96,7 @@ public class LlmUsageRecoverySpool {
   private void replayOne(Path path) {
     try {
       RunStepUsage row = objectMapper.readValue(path.toFile(), RunStepUsage.class);
-      repository.save(row);
+      terminalOutbox.persist(row);
       Files.delete(path);
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "replayed");
       log.info("Replayed canonical LLM terminal usage attemptId={}", row.getPhysicalAttemptId());
