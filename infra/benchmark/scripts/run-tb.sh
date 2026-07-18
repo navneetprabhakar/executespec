@@ -129,6 +129,10 @@ curl -s --max-time 5 localhost:8080/actuator/health 2>/dev/null | grep -q UP || 
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
 export ES_ADMIN_EMAIL="${ES_ADMIN_EMAIL:-${ESPEC_ADMIN_EMAIL:-}}"
 export ES_ADMIN_PW="${ES_ADMIN_PW:-${ESPEC_ADMIN_PW:-}}"
+# Accept both historical ESPEC_* and the current ES_* names used by the VM
+# credentials file.  Keep one canonical pair for all subsequent requests.
+ESPEC_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-$ES_ADMIN_EMAIL}"
+ESPEC_ADMIN_PW="${ESPEC_ADMIN_PW:-$ES_ADMIN_PW}"
 TK=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
