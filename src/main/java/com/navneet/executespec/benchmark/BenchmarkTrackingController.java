@@ -137,6 +137,17 @@ public class BenchmarkTrackingController {
     }
   }
 
+  /** Rebuild missing/stale task usage from the canonical server-side provider-attempt ledger. */
+  @PostMapping("/{id}/reconcile-usage")
+  public BenchmarkTrackingService.UsageReconciliation reconcileUsage(
+      @AuthenticationPrincipal AppUserDetails user, @PathVariable String id) {
+    try {
+      return service.reconcileUsage(id);
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+  }
+
   // ── Reads ───────────────────────────────────────────────────────────────
 
   /** Most-recent 50 tracked runs (newest first). */

@@ -9,6 +9,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.cost.RunStepUsage;
+import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -48,6 +50,7 @@ public class BenchmarkTrackingService {
   private final BenchmarkEventRepository events;
   private final SseBroadcaster sse;
   private final ObjectMapper mapper;
+  private final RunStepUsageRepository usage;
 
   // ── Create ──────────────────────────────────────────────────────────────
 
@@ -196,6 +199,75 @@ public class BenchmarkTrackingService {
     return run;
   }
 
+  /**
+   * Rebuild task and run token/cost projections from the canonical physical-attempt ledger.
+   *
+   * <p>Harness publishers normally include usage in {@code TASK_SCORED}. This repair path exists
+   * for interrupted or historical publishers whose task result reached the tracker without usage.
+   * The client cannot supply replacement numbers: every value is derived server-side from the
+   * task's linked ExecuteSpec run. Reward, verifier outcome, and linkage remain immutable.
+   */
+  @Transactional
+  public UsageReconciliation reconcileUsage(String runId) {
+    BenchmarkRun run =
+        runs.findByIdForUpdate(runId)
+            .orElseThrow(() -> new IllegalArgumentException("benchmark run not found: " + runId));
+    List<BenchmarkTaskResult> results =
+        taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(runId);
+    int updated = 0;
+    long calls = 0;
+    for (BenchmarkTaskResult result : results) {
+      if (result.getEsRunId() == null || result.getEsRunId().isBlank()) {
+        continue;
+      }
+      List<RunStepUsage> rows = usage.findByRunIdOrderByCreatedAtAsc(result.getEsRunId());
+      if (rows.isEmpty()) {
+        continue;
+      }
+      long input = rows.stream().mapToLong(RunStepUsage::getInputTokens).sum();
+      long output = rows.stream().mapToLong(RunStepUsage::getOutputTokens).sum();
+      BigDecimal cost =
+          rows.stream()
+              .map(r -> BigDecimal.valueOf(r.getCostUsd()))
+              .reduce(BigDecimal.ZERO, BigDecimal::add);
+      boolean changed =
+          result.getInputTokens() != input
+              || result.getOutputTokens() != output
+              || result.getCostUsd() == null
+              || result.getCostUsd().compareTo(cost) != 0;
+      if (changed) {
+        result.setInputTokens(input);
+        result.setOutputTokens(output);
+        result.setCostUsd(cost);
+        taskResults.save(result);
+        updated++;
+      }
+      calls += rows.size();
+    }
+    recompute(run);
+    runs.save(run);
+    if (updated > 0) {
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("source", "run_step_usage");
+      payload.put("updatedTasks", updated);
+      payload.put("providerCalls", calls);
+      payload.put("inputTokens", run.getInputTokens());
+      payload.put("outputTokens", run.getOutputTokens());
+      payload.put("costUsd", run.getCostUsd());
+      record(
+          runId,
+          "USAGE_RECONCILED",
+          "Rebuilt benchmark usage from canonical provider-attempt ledger",
+          json(payload),
+          null,
+          null);
+    }
+    return new UsageReconciliation(run, results.size(), updated, calls);
+  }
+
+  public record UsageReconciliation(
+      BenchmarkRun run, int taskResults, int updatedTasks, long providerCalls) {}
+
   /** Idempotent on (run, task, attempt) — a re-published score for the same attempt is a no-op. */
   private void upsertTaskResult(
       String runId,
@@ -310,6 +382,15 @@ public class BenchmarkTrackingService {
       return mapper.writeValueAsString(m);
     } catch (Exception e) {
       return message == null ? "" : message;
+    }
+  }
+
+  private String json(Object value) {
+    try {
+      return mapper.writeValueAsString(value);
+    } catch (Exception e) {
+      log.warn("benchmark audit payload serialization failed: {}", e.getMessage());
+      return "{}";
     }
   }
 

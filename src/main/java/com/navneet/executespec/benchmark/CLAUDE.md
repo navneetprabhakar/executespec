@@ -7,6 +7,12 @@
 > `k-eval.py generate` copies them into each manifest row and `publish` forwards them as
 > `inputTokens`/`outputTokens` on `TASK_SCORED`; tracking persists per-attempt values and
 > recomputes the run totals shown in `/benchmark`. Never infer tokens from patch size or wall time.
+> Historical/interrupted publishers can be repaired with the SUPER_ADMIN-only
+> `POST /api/v2/test/benchmark/{id}/reconcile-usage` endpoint. It ignores client-supplied numbers,
+> follows each immutable `benchmark_task_result.es_run_id`, and rebuilds only token/cost projections
+> from canonical `run_step_usage` physical-attempt rows. Reward, outcome, task identity and run
+> linkage are never changed. A changed reconciliation appends one `USAGE_RECONCILED` audit event;
+> an exact replay is a no-op.
 
 > **This package now holds TWO distinct concerns** — keep them straight:
 >
@@ -155,8 +161,8 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
 
 | File | Purpose |
 |------|---------|
-| `BenchmarkTrackingController.java` | `@RequestMapping("/api/v2/test/benchmark")` + `@Profile({"local","dev","benchmark"})` + `@PreAuthorize("hasRole('SUPER_ADMIN')")` (the `/api/v2/test/**` matcher is also SUPER_ADMIN-gated — same operator-only surface as `terminalbench/`). `POST /start` (register a tracked run → `BenchmarkRun`), `POST /{id}/event` (ingest one published event), `GET` (list 50), `GET /{id}` (run + task results + events), `GET /{id}/events` (live SSE). DTOs are inline records. **Named distinctly from the SWE-bench `BenchmarkController`** (concern 1) to avoid a class/path collision. |
-| `BenchmarkTrackingService.java` | `start` / `ingest` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt), including optional `outcome` / `outcome_reason` and `inputTokens` / `outputTokens` from the bridge, then recomputes `resolved_tasks` (distinct tasks with ≥1 passing attempt), `cost_usd`, and run token totals; `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). Unknown types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
+| `BenchmarkTrackingController.java` | `@RequestMapping("/api/v2/test/benchmark")` + `@Profile({"local","dev","benchmark"})` + `@PreAuthorize("hasRole('SUPER_ADMIN')")` (the `/api/v2/test/**` matcher is also SUPER_ADMIN-gated — same operator-only surface as `terminalbench/`). `POST /start` (register a tracked run → `BenchmarkRun`), `POST /{id}/event` (ingest one published event), `POST /{id}/reconcile-usage` (server-side usage repair), `GET` (list 50), `GET /{id}` (run + task results + events), `GET /{id}/events` (live SSE). DTOs are inline records. **Named distinctly from the SWE-bench `BenchmarkController`** (concern 1) to avoid a class/path collision. |
+| `BenchmarkTrackingService.java` | `start` / `ingest` / `reconcileUsage` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt), including optional `outcome` / `outcome_reason` and `inputTokens` / `outputTokens` from the bridge, then recomputes `resolved_tasks` (distinct tasks with ≥1 passing attempt), `cost_usd`, and run token totals; `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). `reconcileUsage` locks the tracked run, follows task `esRunId` links and replaces usage projections from canonical `run_step_usage` rows without changing verifier evidence. Unknown event types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
 | `BenchmarkRun` / `BenchmarkTaskResult` / `BenchmarkEvent` | Entities (`@Data @Builder`, app-set `String id`). See **V236**. |
 | `BenchmarkSuite` | The suite discriminator enum + `isKnown(String)`. |
 | `Benchmark{Run,TaskResult,Event}Repository` | `JpaRepository<X, String>` finders. |

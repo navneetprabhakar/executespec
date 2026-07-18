@@ -15,6 +15,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.cost.RunStepUsage;
+import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +29,7 @@ class BenchmarkTrackingServiceTest {
       mock(BenchmarkTaskResultRepository.class);
   private final BenchmarkEventRepository events = mock(BenchmarkEventRepository.class);
   private final SseBroadcaster sse = mock(SseBroadcaster.class);
+  private final RunStepUsageRepository usage = mock(RunStepUsageRepository.class);
   private final Map<String, BenchmarkRun> runStore = new HashMap<>();
   private final List<BenchmarkTaskResult> taskStore = new ArrayList<>();
   private final List<BenchmarkEvent> eventStore = new ArrayList<>();
@@ -35,7 +38,8 @@ class BenchmarkTrackingServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new BenchmarkTrackingService(runs, taskResults, events, sse, new ObjectMapper());
+    service =
+        new BenchmarkTrackingService(runs, taskResults, events, sse, new ObjectMapper(), usage);
 
     doAnswer(
             inv -> {
@@ -53,6 +57,7 @@ class BenchmarkTrackingServiceTest {
     doAnswer(
             inv -> {
               BenchmarkTaskResult result = inv.getArgument(0);
+              taskStore.removeIf(existing -> existing.getId().equals(result.getId()));
               taskStore.add(result);
               return result;
             })
@@ -84,6 +89,46 @@ class BenchmarkTrackingServiceTest {
               String runId = inv.getArgument(0);
               return eventStore.stream().filter(e -> runId.equals(e.getBenchmarkRunId())).count();
             });
+  }
+
+  @Test
+  void reconcilesTrackedUsageFromCanonicalRunStepLedgerWithoutChangingScore() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 1, null, "u1");
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        1,
+        "es-1",
+        new BigDecimal("0.010000"),
+        0L,
+        0L,
+        null,
+        null);
+    when(usage.findByRunIdOrderByCreatedAtAsc("es-1"))
+        .thenReturn(
+            List.of(
+                RunStepUsage.builder().inputTokens(120).outputTokens(8).costUsd(0.0123456).build(),
+                RunStepUsage.builder().inputTokens(80).outputTokens(4).costUsd(0.0012345).build()));
+
+    BenchmarkTrackingService.UsageReconciliation reconciled = service.reconcileUsage(run.getId());
+
+    assertThat(reconciled.updatedTasks()).isEqualTo(1);
+    assertThat(reconciled.providerCalls()).isEqualTo(2);
+    assertThat(reconciled.run().getResolvedTasks()).isEqualTo(1);
+    assertThat(reconciled.run().getInputTokens()).isEqualTo(200);
+    assertThat(reconciled.run().getOutputTokens()).isEqualTo(12);
+    assertThat(reconciled.run().getCostUsd()).isEqualByComparingTo("0.0135801");
+    assertThat(taskStore).hasSize(1);
+    assertThat(taskStore.getFirst().getReward()).isEqualTo(1);
+    assertThat(eventStore).extracting(BenchmarkEvent::getType).contains("USAGE_RECONCILED");
+
+    BenchmarkTrackingService.UsageReconciliation replay = service.reconcileUsage(run.getId());
+    assertThat(replay.updatedTasks()).isZero();
+    assertThat(eventStore).extracting(BenchmarkEvent::getType).containsOnlyOnce("USAGE_RECONCILED");
   }
 
   @Test
