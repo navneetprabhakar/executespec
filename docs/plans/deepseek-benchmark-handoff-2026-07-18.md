@@ -34,9 +34,11 @@ Current job name:
 
 `tb21-deepseek-v4-pro-native-k1-full89-20260718`
 
-Live ExecuteSpec benchmark run: `06079ef7-a7ca-4e44-ae85-351bd3e3b75c`.
-It is currently `RUNNING`; Harbor has passed the 89-image preflight and started
-with zero completed tasks at the first operator poll.
+The first live run `06079ef7-a7ca-4e44-ae85-351bd3e3b75c` was stopped as invalid:
+25 zero-cost trials failed before provider dispatch because the durable internal
+execution context was missing. Its trajectories and scores must not be used. A
+replacement run will be launched only after the fix is deployed and a one-task
+provider smoke passes.
 
 Pinned route:
 

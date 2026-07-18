@@ -16,6 +16,8 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.RunMode;
@@ -56,6 +58,7 @@ public class TerminalBenchRunService {
   private final SseBroadcaster broadcaster;
   private final JwtUtil jwtUtil;
   private final FeatureFlagService featureFlagService;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /**
    * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
@@ -242,6 +245,12 @@ iterating needlessly.
             requestedAbsoluteDeadlineEpochMs, now, workerWallClockSeconds, shutdownReserveSeconds);
     String userId = String.valueOf(userDetails.getUser().getId());
     String orgId = userDetails.getUser().getOrgId();
+    // Operator benchmark work is platform-owned, but it still must use the same durable
+    // execution-context contract as customer calls. Without this explicit internal reference the
+    // dispatch guard correctly rejects the first provider call before any tool work occurs.
+    LlmExecutionReference executionReference =
+        executionPolicyFactory.platformInternal(
+            "terminal-bench", "TERMINAL_BENCH_RUN", runId, runId);
 
     // 1) Persist the run row synchronously with ownership stamped BEFORE the async thread starts
     //    (CLAUDE.md race-condition rule). harnessVersion="v2" so GET /api/runs/{id}/cost reads the
@@ -293,7 +302,8 @@ iterating needlessly.
                         provider,
                         model,
                         maxIterations,
-                        absoluteDeadlineEpochMs)));
+                        absoluteDeadlineEpochMs,
+                        executionReference)));
 
     String sseToken = jwtUtil.generateSseToken(userId, runId);
     return new StartResult(
@@ -317,7 +327,8 @@ iterating needlessly.
       String provider,
       String model,
       Integer maxIterations,
-      long absoluteDeadlineEpochMs) {
+      long absoluteDeadlineEpochMs,
+      LlmExecutionReference executionReference) {
     Path workspace = null;
     String finalStatus = "FAILED";
     String reason = null;
@@ -326,7 +337,8 @@ iterating needlessly.
       // Remote mode never touches this dir (tools dispatch before tool.execute), but
       // ExecutionContext requires an absolute path.
       workspace = Files.createTempDirectory("tb-remote-");
-      ExecutionContext ctx = new ExecutionContext(runId, "tb-task", workspace.toRealPath());
+      ExecutionContext ctx =
+          new ExecutionContext(runId, "tb-task", workspace.toRealPath(), executionReference);
       WorkerResult result =
           worker.run(
               WorkerTaskRequest.builder()

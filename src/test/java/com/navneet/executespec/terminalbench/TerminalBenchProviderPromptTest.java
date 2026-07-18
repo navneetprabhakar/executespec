@@ -56,6 +56,7 @@ class TerminalBenchProviderPromptTest {
         mock(com.navneet.executespec.cost.RunCostTracker.class),
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         mock(com.navneet.executespec.auth.security.JwtUtil.class),
-        flags);
+        flags,
+        mock(com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory.class));
   }
 }
