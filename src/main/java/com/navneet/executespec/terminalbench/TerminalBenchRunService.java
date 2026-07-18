@@ -396,10 +396,23 @@ iterating needlessly.
 
   private void finalizeTerminal(String runId, String status, String reason) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+    boolean[] finalized = {false};
     stateStore
         .findRun(runId)
         .ifPresent(
             r -> {
+              // Harbor may abort the adapter and DELETE the remote run while the worker is
+              // unwinding.  Cancellation is terminal and must not be overwritten by this finally
+              // block's late COMPLETE/FAILED write.
+              if (!shouldFinalize(r.getStatus())) {
+                log.info(
+                    "[TB] preserving terminal run={} status={} over late status={}",
+                    runId,
+                    r.getStatus(),
+                    status);
+                return;
+              }
+              finalized[0] = true;
               r.setStatus(status);
               r.setCompletedAt(Instant.now());
               r.setStatusReason(reason);
@@ -419,10 +432,26 @@ iterating needlessly.
               }
               stateStore.saveRun(r);
             });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, status));
-    broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
-    broadcaster.emit(runId, RunEvent.complete(runId, status, reason)); // the adapter's stop signal
-    broadcaster.complete(runId);
+    if (finalized[0]) {
+      stateStore
+          .findRun(runId)
+          .filter(r -> status.equals(r.getStatus()))
+          .ifPresent(
+              ignored -> {
+                broadcaster.emit(runId, RunEvent.runStatus(runId, status));
+                broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
+                broadcaster.emit(runId, RunEvent.complete(runId, status, reason));
+                broadcaster.complete(runId);
+              });
+    }
+  }
+
+  static boolean shouldFinalize(String currentStatus) {
+    return currentStatus == null
+        || !("COMPLETE".equals(currentStatus)
+            || "FAILED".equals(currentStatus)
+            || "CANCELLED".equals(currentStatus)
+            || "PAUSED".equals(currentStatus));
   }
 
   private static void deleteTree(Path root) {

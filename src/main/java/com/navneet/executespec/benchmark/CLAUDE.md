@@ -2,6 +2,8 @@
 
 > Added 2026-05-24 (RL-2026-05-028). Branch `feature/swebench-harness` (not yet merged).
 
+> **V296 (2026-07-18):** tracking ingestion locks the parent run while allocating event sequence numbers and upserting task attempts; `benchmark_event(benchmark_run_id, seq)` has a database uniqueness backstop. The `k-eval.py publish` command closes the generate→official-score→RUN_DONE loop.
+
 > **This package now holds TWO distinct concerns** — keep them straight:
 >
 > 1. **SWE-bench _execution_ harness** — `BenchmarkController` (`/api/admin/benchmark`)
@@ -164,6 +166,11 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
 - **V254** `V254__benchmark_task_outcome_reason.sql` — adds `benchmark_task_result.outcome` and
   `outcome_reason` so `/benchmark` can distinguish agent/model failures from infra/verifier/timeouts
   while keeping resolved% reward-based.
+- **V296** `V296__benchmark_event_sequence_unique.sql` — serializes parallel event/task ingestion
+  on the parent run row and adds a database uniqueness backstop for `(benchmark_run_id, seq)`. The
+  migration fails with a diagnostic if historical duplicate sequences exist; it never silently
+  rewrites audit history. `scripts/k-eval.py publish` emits scored task events plus `RUN_DONE` after
+  an external scorer completes, while `generate` remains explicitly open/UNSCORED.
 
 ### Status
 

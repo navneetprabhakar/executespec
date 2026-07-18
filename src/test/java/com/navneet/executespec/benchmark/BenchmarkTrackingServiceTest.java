@@ -47,6 +47,8 @@ class BenchmarkTrackingServiceTest {
         .save(any(BenchmarkRun.class));
     when(runs.findById(any(String.class)))
         .thenAnswer(inv -> Optional.ofNullable(runStore.get(inv.getArgument(0))));
+    when(runs.findByIdForUpdate(any(String.class)))
+        .thenAnswer(inv -> Optional.ofNullable(runStore.get(inv.getArgument(0))));
 
     doAnswer(
             inv -> {

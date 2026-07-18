@@ -78,7 +78,7 @@ def _classify_trial(result, reward, exception_text=None):
         return "TIMEOUT", reason or status or "Harbor trial timed out or was cancelled"
     if reward > 0:
         return "PASSED", None
-    setup_failure = _setup_failure_reason(result)
+    setup_failure = _setup_failure_reason(result, exception_text)
     if setup_failure:
         return "INFRA_SETUP_FAILED", setup_failure
     if any(w in hay for w in ("container", "docker", "harbor", "bridge", "tool")):
@@ -90,11 +90,16 @@ def _classify_trial(result, reward, exception_text=None):
     return "FAILED", reason or status
 
 
-def _setup_failure_reason(result):
+def _setup_failure_reason(result, exception_text=None):
     """Detect Harbor failures before the ExecuteSpec agent/verifier ran."""
     if result.get("agent_result") is not None or result.get("verifier_result") is not None:
         return None
-    exc = result.get("exception_info") or result.get("exception") or result.get("error")
+    exc = (
+        result.get("exception_info")
+        or result.get("exception")
+        or result.get("error")
+        or exception_text
+    )
     env = result.get("environment_setup") or {}
     execution = result.get("agent_execution")
     verifier = result.get("verifier")
@@ -341,16 +346,25 @@ def main():
 
     final = _scan(a.job_dir)
     resolved = len({final[t]["task"] for t in posted if t in final and final[t]["reward"] > 0})
+    complete = len(posted) >= expected_trials
     try:
-        _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", {"type": "RUN_DONE"})
+        if complete:
+            _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", {"type": "RUN_DONE"})
+        else:
+            message = (
+                f"INCOMPLETE BENCHMARK RUN: posted {len(posted)}/{expected_trials} trials "
+                f"before the bridge deadline"
+            )
+            _fail_run(base, token, rid, message, a.fail_marker)
+            print(f"bridge: {message}", flush=True)
     except Exception as e:  # noqa: BLE001
-        print("bridge: RUN_DONE post failed", e, flush=True)
+        print("bridge: terminal status post failed", e, flush=True)
     print(
         f"bridge: done — posted {len(posted)}/{expected_trials} trials, "
         f"{resolved} tasks resolved. run={rid}",
         flush=True,
     )
-    return 0
+    return 0 if complete else 2
 
 
 if __name__ == "__main__":
