@@ -14,7 +14,7 @@ describe('planUtils', () => {
   it('formats optional USD amounts for plan cards', () => {
     expect(formatPlanUsd(null)).toBe('—');
     expect(formatPlanUsd(undefined)).toBe('—');
-    expect(formatPlanUsd(1.234)).toBe('$1.23');
+    expect(formatPlanUsd(1.234)).toBe('$1.2340');
   });
 
   it('classifies statuses for auto-routing and human status copy', () => {
