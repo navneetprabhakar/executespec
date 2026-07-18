@@ -28,10 +28,10 @@ import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -56,7 +56,6 @@ import lombok.extern.slf4j.Slf4j;
  * endpoint subscribes to this channel for live progress.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PrReviewService {
 
@@ -74,6 +73,38 @@ public class PrReviewService {
   private final ModelResolver modelResolver;
   private final ProjectRepository projectRepository;
   private final ObjectMapper objectMapper;
+
+  @Autowired
+  public PrReviewService(
+      PrReviewRepository reviewRepo,
+      PrReviewCommentRepository commentRepo,
+      PrReviewAgent agent,
+      GitHubRepoService github,
+      RunCostTracker costTracker,
+      SseBroadcaster broadcaster,
+      AppUserRepository userRepo,
+      TierConfigRepository tierConfigRepo,
+      ProjectProviderResolver projectProviderResolver,
+      ReviewBackgroundJobStore reviewJobStore,
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      ModelResolver modelResolver,
+      ProjectRepository projectRepository,
+      ObjectMapper objectMapper) {
+    this.reviewRepo = reviewRepo;
+    this.commentRepo = commentRepo;
+    this.agent = agent;
+    this.github = github;
+    this.costTracker = costTracker;
+    this.broadcaster = broadcaster;
+    this.userRepo = userRepo;
+    this.tierConfigRepo = tierConfigRepo;
+    this.projectProviderResolver = projectProviderResolver;
+    this.reviewJobStore = reviewJobStore;
+    this.executionPolicyFactory = executionPolicyFactory;
+    this.modelResolver = modelResolver;
+    this.projectRepository = projectRepository;
+    this.objectMapper = objectMapper;
+  }
 
   /** Source-compatible constructor retained for narrow legacy unit tests. */
   PrReviewService(

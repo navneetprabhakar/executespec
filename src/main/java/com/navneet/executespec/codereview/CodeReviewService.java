@@ -43,10 +43,10 @@ import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -71,7 +71,6 @@ import lombok.extern.slf4j.Slf4j;
  * controller returns 202 immediately. Pool drains on {@code @PreDestroy}.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class CodeReviewService {
 
@@ -104,6 +103,44 @@ public class CodeReviewService {
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
   private final ObjectMapper objectMapper;
+
+  @Autowired
+  public CodeReviewService(
+      CodeReviewScanRepository scanRepo,
+      CodeReviewIssueRepository issueRepo,
+      SemgrepRunner semgrep,
+      CodeReviewAgent agent,
+      WorkspaceInitService workspaceInitService,
+      RunCostTracker costTracker,
+      SseBroadcaster broadcaster,
+      ProjectRepoRepository projectRepoRepo,
+      GitHubRepoService github,
+      TierConfigRepository tierConfigRepo,
+      ProjectProviderResolver projectProviderResolver,
+      ReviewBackgroundJobStore reviewJobStore,
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      ModelResolver modelResolver,
+      ProjectRepository projectRepository,
+      AppUserRepository appUserRepository,
+      ObjectMapper objectMapper) {
+    this.scanRepo = scanRepo;
+    this.issueRepo = issueRepo;
+    this.semgrep = semgrep;
+    this.agent = agent;
+    this.workspaceInitService = workspaceInitService;
+    this.costTracker = costTracker;
+    this.broadcaster = broadcaster;
+    this.projectRepoRepo = projectRepoRepo;
+    this.github = github;
+    this.tierConfigRepo = tierConfigRepo;
+    this.projectProviderResolver = projectProviderResolver;
+    this.reviewJobStore = reviewJobStore;
+    this.executionPolicyFactory = executionPolicyFactory;
+    this.modelResolver = modelResolver;
+    this.projectRepository = projectRepository;
+    this.appUserRepository = appUserRepository;
+    this.objectMapper = objectMapper;
+  }
 
   /**
    * Source-compatible constructor retained for focused tests that exercise only tier/provider

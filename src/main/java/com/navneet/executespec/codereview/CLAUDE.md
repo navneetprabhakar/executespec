@@ -110,6 +110,11 @@ the scan instead.
 
 ## Outstanding (post-PR follow-ups)
 
+`CodeReviewService` has an explicit Spring-selected production constructor in addition to its
+package-private compatibility constructor. Keep the production constructor explicit whenever the
+dependency list changes; Lombok does not generate `@RequiredArgsConstructor` when another
+constructor already exists. The benchmark-profile boot gate caught this contract on 2026-07-18.
+
 - semgrep auto-installation in the prod GCE container (today: graceful fallback to
   LLM-only when not on PATH).
 - Scheduled cron / post-merge auto-trigger (today: MANUAL only — the controller

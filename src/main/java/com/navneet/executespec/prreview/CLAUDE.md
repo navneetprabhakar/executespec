@@ -75,6 +75,11 @@ lookups.
 
 ## Outstanding (slice 3+)
 
+`PrReviewService` has an explicit Spring-selected production constructor in addition to its
+package-private compatibility constructor. Keep the production constructor explicit whenever the
+dependency list changes; Lombok does not generate `@RequiredArgsConstructor` when another
+constructor already exists. The benchmark-profile boot gate caught this contract on 2026-07-18.
+
 - GitHub Reviews API mirroring — push the verdict + comments back to the PR via
   `POST /repos/{o}/{r}/pulls/{n}/reviews` so they show up inline. Both `posted_to_github_at`
   + `github_review_id` columns are already on the entity for this.
