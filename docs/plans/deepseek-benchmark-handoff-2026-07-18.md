@@ -186,3 +186,30 @@ This closes the provider-dispatch + terminal-result + trajectory smoke gate. It
 does not prove the full 89-task timeout acceptance; the full campaign remains
 subject to the documented deadline/trajectory monitoring and must not reuse the
 cancelled `write-compressor` result.
+
+## Full TB K=5 campaign (started 2026-07-18 19:14 UTC)
+
+The previous accidental K=1 partial campaign was stopped at 10/89 and its
+tracker row deleted; its artifacts remain under the VM job directory for audit
+only. The approved campaign is now correctly configured:
+
+| Field | Value |
+|---|---|
+| Job | `tb21-deepseek-v4-pro-native-k5-full89-20260719` |
+| ExecuteSpec tracker | `0e3829dd-9b89-4d35-9142-babae2f890c9` |
+| Harbor trials | 445 (`n_attempts=5`, 89 tasks) |
+| Concurrency | 4 |
+| Provider/model | native DeepSeek V4 Pro |
+| Submission | internal only (`SUBMIT_TB=off`) |
+| Artifacts | local persistent job directory plus 30-minute GCS rsync watcher |
+| GCS prefix | `gs://executespec-swebench-lite-20260718-results/tb21-deepseek-v4-pro-native-k5-full89-20260719/` |
+
+The watcher was started after confirming bucket write access and uploads the
+entire job directory every 30 minutes and once more after Harbor exits. The
+current run must be monitored at 30-minute intervals only; intervene for bulk
+failures, rate limits, resource exhaustion, or non-recoverable infrastructure.
+
+This is not yet leaderboard-submission compliant: the internal runner uses
+ExecuteSpec/Harbor timeout overrides and does not pass `--upload`. Harbor auth
+and GCS access are now configured on the VM, so a separate default-timeout,
+public-upload run can be prepared after this measurement is reconciled.
