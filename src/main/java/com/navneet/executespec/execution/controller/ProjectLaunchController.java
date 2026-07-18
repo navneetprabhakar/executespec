@@ -321,7 +321,7 @@ public class ProjectLaunchController {
         tierConfigRepo.findById(tier).map(TierConfig::isExecutionViewEnabled).orElse(false);
     if (!allowed) {
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project Shell requires an eligible tier (ENTERPRISE or MAX)");
+          HttpStatus.FORBIDDEN, "Project Shell requires a Team, BYOK, or Enterprise plan");
     }
     return user;
   }
