@@ -46,7 +46,7 @@ export function CostProgressBar({
       >
         <span>{label}</span>
         <span>
-          ${spent.toFixed(2)} / ${cap.toFixed(2)} · {Math.round(pct)}%
+          ${spent.toFixed(4)} / ${cap.toFixed(4)} · {Math.round(pct)}%
         </span>
       </div>
       <div

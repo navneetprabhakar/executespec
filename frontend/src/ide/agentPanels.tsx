@@ -454,7 +454,7 @@ function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
           </div>
           {isSuperAdmin && (
             <small>
-              Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
+              Raw spend ${balance.rawCogsUsedUsd.toFixed(4)} of ${balance.rawCogsCapUsd.toFixed(4)}{' '}
               monthly cap.
             </small>
           )}
@@ -962,8 +962,8 @@ function SandboxRunCard({
           {isSuperAdmin && (
             <>
               {' · $'}
-              {cost.toFixed(2)}
-              {est ? ` / ~$${est.toFixed(2)}` : ''}
+              {cost.toFixed(4)}
+              {est ? ` / ~$${est.toFixed(4)}` : ''}
             </>
           )}
         </span>

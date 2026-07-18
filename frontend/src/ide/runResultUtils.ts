@@ -29,7 +29,7 @@ export const confidenceColor = (confidence?: string) =>
       ? 'var(--ide-red)'
       : 'var(--ide-yellow)';
 
-export const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
+export const usd = (n?: number | null) => (n == null ? '—' : `$${n.toFixed(4)}`);
 export const num = (n?: number | null) => (n == null ? '—' : n.toLocaleString());
 
 export const TABS = [

@@ -9,7 +9,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 export function formatPlanUsd(value?: number | null): string {
-  return value == null ? '—' : `$${value.toFixed(2)}`;
+  return value == null ? '—' : `$${value.toFixed(4)}`;
 }
 
 export function managedAiBadgeKind(state?: string | null): 'ok' | 'warn' | 'bad' {

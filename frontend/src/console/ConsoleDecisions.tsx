@@ -6,6 +6,7 @@ import {ScoreBadge} from '@/ide/ScoreBadge';
 import {StatusDot} from '@/ide/IdeIcons';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {fmtCost} from '@/lib/utils';
 
 const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'];
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
@@ -44,7 +45,7 @@ function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}
         <span className='con-runrow-meta'>
           {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
           {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
-            ? ` · $${r.actualCostUsd.toFixed(2)}`
+            ? ` · ${fmtCost(r.actualCostUsd)}`
             : ''}
         </span>
       </span>

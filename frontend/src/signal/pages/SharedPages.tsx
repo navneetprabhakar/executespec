@@ -316,7 +316,7 @@ export function SharedPage() {
                   : '—',
                 l: 'Tests',
               },
-              {v: cost != null ? `$${cost.toFixed(2)}` : '—', l: 'Cost'},
+              {v: cost != null ? `$${cost.toFixed(4)}` : '—', l: 'Cost'},
               {v: prUrl ? 'open' : '—', l: 'PR'},
             ]}
           />

@@ -26,6 +26,7 @@ import {
 } from '@/ide/planUtils';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting';
+import {fmtCost} from '@/lib/utils';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -214,7 +215,7 @@ export function IdeWelcome() {
             {isSuperAdmin && (
               <>
                 <span>·</span>
-                <span>${liveSpent.toFixed(2)}</span>
+                <span>{fmtCost(liveSpent)}</span>
               </>
             )}
           </div>
@@ -290,7 +291,7 @@ export function IdeWelcome() {
                 {typeof r.verifiedScore === 'number' && <ScoreBadge score={r.verifiedScore} />}
                 {isSuperAdmin && typeof r.actualCostUsd === 'number' && (
                   <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
-                    ${r.actualCostUsd.toFixed(2)}
+                    {fmtCost(r.actualCostUsd)}
                   </span>
                 )}
                 {r.aiProvider && <span>{providerLabel(r.aiProvider)}</span>}
@@ -1185,7 +1186,7 @@ export function IdeCompose() {
                 <div className='ide-kv'>
                   <span>Cost</span>
                   <span>
-                    ${estimate.estimatedCostLow.toFixed(2)}-${estimate.estimatedCostHigh.toFixed(2)}
+                    ${estimate.estimatedCostLow.toFixed(4)}-${estimate.estimatedCostHigh.toFixed(4)}
                   </span>
                 </div>
                 {estimate.basis && (
@@ -1236,7 +1237,7 @@ export function IdeCompose() {
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>
-                <span>${costCap.toFixed(2)}</span>
+                <span>${costCap.toFixed(4)}</span>
               </div>
             </div>
           </section>
@@ -1443,7 +1444,7 @@ export function IdeLive() {
               ? `${completed}/${tasks.length} steps`
               : (run?.status || '').toLowerCase() || 'running'}{' '}
             · {elapsed}
-            {isSuperAdmin && ` · $${spent.toFixed(2)}`}
+            {isSuperAdmin && ` · $${spent.toFixed(4)}`}
             {tokIn + tokOut > 0 && ` · ${(tokIn + tokOut).toLocaleString()} tok`}
           </div>
         </div>

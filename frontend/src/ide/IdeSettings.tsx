@@ -890,7 +890,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
               ['Partial', String(usage.partialRuns)],
-              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(2)}`],
+              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='ide-card' style={{flex: 1, minWidth: 110}}>
                 <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
@@ -919,7 +919,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
                 <span className='ide-mono' style={{flex: 1}}>
                   {model}
                 </span>
-                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(2)}</span>
+                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(4)}</span>
               </div>
             ))}
           </AdminList>

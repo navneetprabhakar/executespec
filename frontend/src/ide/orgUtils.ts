@@ -36,7 +36,7 @@ export const KEY_PLACEHOLDER: Record<UserKeyProvider, string> = {
 const CONSUMER_EMAIL_DOMAINS = new Set(['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com']);
 
 export function formatUsd(n?: number | null): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`;
+  return n == null ? '—' : `$${n.toFixed(4)}`;
 }
 
 export function domainListFromEmail(email?: string | null): string[] {
