@@ -254,7 +254,7 @@ public class ProjectChatController {
       // R4 (2026-05-01 follow-up Task 7) — V165 retired MAX; gating
       // copy now names the post-V165 ladder.
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project chat requires Team or Enterprise tier");
+          HttpStatus.FORBIDDEN, "Project chat requires a Team, BYOK, or Enterprise plan");
     }
     return user;
   }
