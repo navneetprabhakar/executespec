@@ -121,7 +121,7 @@ class BenchmarkTrackingServiceTest {
     assertThat(reconciled.run().getResolvedTasks()).isEqualTo(1);
     assertThat(reconciled.run().getInputTokens()).isEqualTo(200);
     assertThat(reconciled.run().getOutputTokens()).isEqualTo(12);
-    assertThat(reconciled.run().getCostUsd()).isEqualByComparingTo("0.0135801");
+    assertThat(reconciled.run().getCostUsd()).isEqualByComparingTo("0.013580");
     assertThat(taskStore).hasSize(1);
     assertThat(taskStore.getFirst().getReward()).isEqualTo(1);
     assertThat(eventStore).extracting(BenchmarkEvent::getType).contains("USAGE_RECONCILED");

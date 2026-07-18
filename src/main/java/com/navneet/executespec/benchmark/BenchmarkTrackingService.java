@@ -1,6 +1,7 @@
 package com.navneet.executespec.benchmark;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -229,7 +230,10 @@ public class BenchmarkTrackingService {
       BigDecimal cost =
           rows.stream()
               .map(r -> BigDecimal.valueOf(r.getCostUsd()))
-              .reduce(BigDecimal.ZERO, BigDecimal::add);
+              .reduce(BigDecimal.ZERO, BigDecimal::add)
+              // benchmark_task_result.cost_usd is NUMERIC(12,6). Compare and aggregate the exact
+              // persisted projection so a replay cannot oscillate on discarded sub-microdollars.
+              .setScale(6, RoundingMode.HALF_UP);
       boolean changed =
           result.getInputTokens() != input
               || result.getOutputTokens() != output
