@@ -409,3 +409,16 @@ Full findings, RCAs, patches and evidence for F7–F19 are in the Phase-6 report
 - Still open: deployed process-kill/cancel/retry and provider-ledger reconciliation. Result staging
   prevents repeat provider work after staging, but cannot prove absolute exactly-once across a crash
   after provider response and before the result is durably staged.
+
+### Benchmark tracker cleanup (2026-07-18)
+
+- Direct PostgreSQL verification found no `FAILED`, `STOPPED`, or `CANCELLED`
+  `benchmark_run` rows.
+- Removed the known invalid zero-evidence SWE-bench row
+  `86b1eed7-35d5-4daf-8266-997e268a0730` (`DONE`, 0/10, zero tokens/cost),
+  which otherwise appeared misleadingly in the Historical UI section.
+- Valid rows retained: DeepSeek corrected 6/10, GLM 5.2 7/10, and the active
+  one-task DeepSeek TB smoke.
+- Remaining UI/contract gap: active benchmark usage remains zero until the
+  bridge posts a terminal `TASK_SCORED`; live provider usage exists in the
+  linked ExecuteSpec run ledger but is not yet projected into `RUN_PROGRESS`.
