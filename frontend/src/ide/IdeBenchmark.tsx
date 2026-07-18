@@ -271,11 +271,69 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
   );
 }
 
+/** Compact phone representation of a run. The desktop table stays intact so
+ * wide screens retain the comparison density; phones get a readable card with
+ * the same run-level affordance and metrics. */
+function RunCard({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
+  const status = effectiveStatus(r);
+  const scored = r.totalTasks > 0 ? `${r.resolvedTasks}/${r.totalTasks}` : String(r.resolvedTasks);
+  return (
+    <article className='ide-benchmark-mobile-card'>
+      <div className='ide-benchmark-mobile-card-head'>
+        <div style={{minWidth: 0}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+            <SuiteChip suite={r.suite} />
+            <strong className='ide-benchmark-mobile-model'>{r.model}</strong>
+          </div>
+          <div className='ide-benchmark-mobile-provider'>{r.provider}</div>
+        </div>
+        <button
+          type='button'
+          className='ide-benchmark-mobile-open'
+          onClick={onOpen}
+          aria-label={`Open ${r.model} ${r.suite} benchmark`}
+          title='Open benchmark details'
+        >
+          <ExternalLink size={16} aria-hidden='true' />
+        </button>
+      </div>
+      <div className='ide-benchmark-mobile-dataset'>
+        <span>{shortDataset(r.dataset)}</span>
+        <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
+      </div>
+      <div className='ide-benchmark-mobile-progress'>
+        <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
+        <span style={{whiteSpace: 'nowrap'}}>
+          <strong>{scored}</strong> ({pct(r.resolvedTasks, r.totalTasks)}%)
+        </span>
+      </div>
+      {r.submissionStatus && (
+        <div className='ide-benchmark-mobile-submission'>
+          <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />
+        </div>
+      )}
+      <div className='ide-benchmark-mobile-metrics'>
+        <KV k='Cost'>{fmtCost(r.costUsd)}</KV>
+        <KV k='Tokens'>
+          {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
+        </KV>
+        <KV k='Attempts'>k={r.k}</KV>
+        <KV k='Time'>{dateTime(r.createdAt)}</KV>
+      </div>
+    </article>
+  );
+}
+
 function RunTable({runs, empty}: {runs: api.BenchmarkRun[]; empty: string}) {
   const navigate = useNavigate();
   if (!runs.length) return <EmptyCard>{empty}</EmptyCard>;
   return (
     <div className='ide-card ide-benchmark-table-card'>
+      <div className='ide-benchmark-mobile-list' aria-label='Benchmark runs'>
+        {runs.map((r) => (
+          <RunCard key={r.id} r={r} onOpen={() => navigate(`/benchmark/${r.id}`)} />
+        ))}
+      </div>
       <table className='ide-benchmark-table'>
         <thead>
           <tr>
