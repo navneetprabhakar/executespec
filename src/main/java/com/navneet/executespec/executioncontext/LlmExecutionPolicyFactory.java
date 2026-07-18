@@ -69,8 +69,23 @@ public class LlmExecutionPolicyFactory {
     String userId = require(run.getCreatedByUserId(), "run owner");
     String orgId = require(run.getOrgId(), "run org");
     LlmExecutionScope scope = LlmExecutionScope.customer(orgId);
+    java.util.Optional<LlmExecutionReference> ownKeysContext =
+        contextService.findReference(
+            scope, "pipeline", "PIPELINE_RUN", runId, "route-v2-own-keys-provider-lock");
+    if (ownKeysContext.isPresent()) {
+      return ownKeysContext.get();
+    }
+    Org org =
+        orgRepository
+            .findById(orgId)
+            .orElseThrow(() -> new IllegalArgumentException("customer org not found"));
+    boolean ownKeysProviderLock = isOwnKeys(keySourceMode(org.getKeySourceMode()));
+    String routePolicyKey = ownKeysProviderLock ? "route-v2-own-keys-provider-lock" : "route-v1";
     java.util.Optional<LlmExecutionReference> existing =
-        contextService.findReference(scope, "pipeline", "PIPELINE_RUN", runId, "route-v1");
+        ownKeysProviderLock
+            ? java.util.Optional.empty()
+            : contextService.findReference(
+                scope, "pipeline", "PIPELINE_RUN", runId, routePolicyKey);
     if (existing.isPresent()) {
       return existing.get();
     }
@@ -95,7 +110,7 @@ public class LlmExecutionPolicyFactory {
         requestedModel,
         pinned,
         new LlmExecutionBudget(null, null, null, costCap, null),
-        "route-v1",
+        routePolicyKey,
         null);
   }
 
@@ -478,6 +493,12 @@ public class LlmExecutionPolicyFactory {
       throw new IllegalStateException(
           "Requested provider is not allowed or credentialed: " + provider);
     }
+    boolean ownKeysProviderLock = isOwnKeys(mode);
+    if (ownKeysProviderLock) {
+      LlmPolicySnapshot.CredentialSource selectedSource = sources.get(provider);
+      allowed = new LinkedHashSet<>(Set.of(provider));
+      sources = new LinkedHashMap<>(Map.of(provider, selectedSource));
+    }
     String model = requestedModel == null ? null : modelRegistry.canonicalize(requestedModel);
     if (model != null) validateModel(provider, model);
     LlmPolicySnapshot policy =
@@ -494,8 +515,8 @@ public class LlmExecutionPolicyFactory {
                 ? LlmPolicySnapshot.RoutingMode.EXACT
                 : LlmPolicySnapshot.RoutingMode.PROVIDER_PREFERRED,
             exact,
-            !exact,
-            1);
+            !exact && !ownKeysProviderLock,
+            ownKeysProviderLock ? 2 : 1);
     LlmExecutionScope scope = LlmExecutionScope.customer(orgId);
     LlmExecutionContext context =
         contextService.create(
@@ -571,6 +592,10 @@ public class LlmExecutionPolicyFactory {
     } catch (IllegalArgumentException ignored) {
       throw new IllegalStateException("Invalid org key source mode");
     }
+  }
+
+  private static boolean isOwnKeys(LlmPolicySnapshot.KeySourceMode keySourceMode) {
+    return keySourceMode == LlmPolicySnapshot.KeySourceMode.OWN_KEYS;
   }
 
   private static Set<String> parseProviders(String csv) {

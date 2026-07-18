@@ -190,4 +190,30 @@ Do not rewrite the baseline requirements to fit implementation. If official rule
 
 ## Amendments
 
-None at baseline.
+### A1 — 2026-07-18 IST: benchmark order, full Pro scope and model-gate waiver
+
+**Approved by:** Navneet Prabhakar in the active goal conversation.
+
+**Affected IDs:** MODEL-01, CANARY-01..03, DS-01..06, GLM-01..04, DS-04/05, TB-01..04.
+
+- The working-model downgrade to GPT-5.6 Luna is waived for this session. Benchmark provider/model
+  identity is still fixed independently and does not inherit the Codex working model.
+- Paid benchmark order is now:
+  1. deterministic GLM 5.2 through OpenRouter on the exact SWE-bench Lite 10-case set;
+  2. full SWE-bench Lite 300 with native DeepSeek V4 Pro;
+  3. full public SWE-bench Pro 731 with native DeepSeek V4 Pro.
+- The original conditional full Terminal-Bench 2.1 requirement is retained behind its timeout,
+  trajectory, official-rule and written budget gates. It was reordered, not deleted.
+- The original focused GLM Terminal-Bench subset is also retained as a conditional 10-case
+  experiment after TB controls pass; expansion to 20 remains evidence/budget gated.
+- The corrected native-DeepSeek Lite-10 canary remains immutable evidence. It scored 6/10 under the
+  official v4.1 scorer after zero-spend patch recovery, but it did not retain a complete frozen
+  reproduction manifest. Therefore the GLM-10 run must prove the stricter tracker, trajectory,
+  budget, deadline and manifest controls before the full suites.
+- Cost impact: OpenRouter remains capped at $25 for the account and requires a lower fail-closed
+  campaign cap before dispatch. DeepSeek full-suite spend must be forecast and tracked separately.
+- Compatibility impact: no product/API compatibility waiver. All P0/P1 product gates, independent
+  output review, persona QA, final documentation and infrastructure/DNS teardown remain mandatory.
+
+The live tracker owns the exact status and evidence for these added rows. This amendment does not
+authorize provider spend by itself.
