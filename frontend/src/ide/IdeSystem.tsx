@@ -19,6 +19,7 @@ import {
   auditTarget,
   auditTimestamp,
   buildSearchHits,
+  customerSafeNotificationText,
   filterAuditLogs,
   filterNotifications,
   isNotificationUnread,
@@ -79,6 +80,7 @@ function ErrCard({msg, onRetry}: {msg: string; onRetry?: () => void}) {
 
 export default function IdeNotifications() {
   const navigate = useNavigate();
+  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [items, setItems] = useState<api.NotificationItem[] | null>(null);
   const [filter, setFilter] = useState<NotifFilter>('all');
   const [markBusy, setMarkBusy] = useState(false);
@@ -236,7 +238,10 @@ export default function IdeNotifications() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {nAny.description || nAny.body || ''}
+                    {customerSafeNotificationText(
+                      nAny.description || nAny.body || '',
+                      Boolean(isSuperAdmin),
+                    )}
                   </span>
                 </span>
                 {ts && (

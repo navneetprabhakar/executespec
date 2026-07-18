@@ -23,7 +23,6 @@ import com.navneet.executespec.cost.LlmUsageReconciliation.UsageSide;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -121,7 +120,7 @@ WITH resolved AS (
 
   private final JdbcTemplate jdbc;
 
-  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+  @Transactional(readOnly = true)
   public LlmUsageAuditReport report(LlmUsageAuditQuery query) {
     Object[] range = range(query);
     long totalRows =
@@ -158,7 +157,7 @@ WITH resolved AS (
         reconcile(query));
   }
 
-  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+  @Transactional(readOnly = true)
   public CsvExport csv(LlmUsageAuditQuery query) {
     List<UsageAttempt> rows = attempts(query, LlmUsageAuditQuery.CSV_ROW_LIMIT + 1, 0);
     boolean truncated = rows.size() > LlmUsageAuditQuery.CSV_ROW_LIMIT;

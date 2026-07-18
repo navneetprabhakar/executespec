@@ -59,6 +59,29 @@ public class LlmExecutionContextService {
     }
   }
 
+  /**
+   * Recovers the immutable context created for an idempotent operation without rebuilding its
+   * policy or budget from mutable source rows. This is the only safe recovery path after a run has
+   * persisted derived values such as its estimated hard cost cap.
+   */
+  @Transactional(readOnly = true)
+  public Optional<LlmExecutionReference> findReference(
+      LlmExecutionScope scope,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String idempotencyKey) {
+    if (scope == null) throw new IllegalArgumentException("scope required");
+    return repository
+        .findByIsolationKeyAndFeatureAndSourceTypeAndSourceIdAndIdempotencyKey(
+            scope.isolationKey(),
+            requireText(feature, "feature"),
+            requireText(sourceType, "sourceType"),
+            requireText(sourceId, "sourceId"),
+            requireText(idempotencyKey, "idempotencyKey"))
+        .map(context -> new LlmExecutionReference(context.getId(), scope));
+  }
+
   /** Tenant-scoped lookup. A different org receives the same empty result as an unknown id. */
   @Transactional(readOnly = true)
   public Optional<LlmExecutionContext> load(LlmExecutionScope scope, String contextId) {

@@ -13,6 +13,7 @@ import {
   providerReadinessLabel,
 } from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
+import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 
 type Repo = Record<string, unknown>;
 // Relative timestamps everywhere (review/11 #8) — absolute locale strings were
@@ -32,6 +33,7 @@ export default function IdeProject() {
   // so the composer stays reachable on projects with work history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
   const providerReadiness = useProviderReadiness();
+  const tier = useAuthStore(selectNormalizedTier);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -43,6 +45,7 @@ export default function IdeProject() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<'not-found' | 'forbidden' | 'error' | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -50,9 +53,13 @@ export default function IdeProject() {
       .getProject(projectId)
       .then((loadedProject) => {
         setProject(loadedProject);
-        if (loadedProject.aiProvider) setProvider(loadedProject.aiProvider.toUpperCase());
+        if (tier === 'FREE') setProvider('DEEPSEEK');
+        else if (loadedProject.aiProvider) setProvider(loadedProject.aiProvider.toUpperCase());
       })
-      .catch(() => {})
+      .catch((e: unknown) => {
+        const status = typeof e === 'object' && e ? Number((e as {status?: number}).status) : 0;
+        setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
+      })
       .finally(() => setLoading(false));
     api
       .getProjectRepos(projectId)
@@ -76,6 +83,10 @@ export default function IdeProject() {
       .finally(() => setRunsLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    if (tier === 'FREE') setProvider('DEEPSEEK');
+  }, [tier]);
 
   async function submit() {
     if (!spec.trim()) {
@@ -128,6 +139,32 @@ export default function IdeProject() {
     );
   }
 
+  if (loadError || !project) {
+    const forbidden = loadError === 'forbidden';
+    const unavailable = loadError === 'error';
+    return (
+      <div className='ide-pane'>
+        <div className='ide-empty' role='alert'>
+          <strong>
+            {forbidden
+              ? 'Project access denied'
+              : unavailable
+                ? 'Project unavailable'
+                : 'Project not found'}
+          </strong>
+          <div>
+            {forbidden
+              ? 'You do not have access to this project.'
+              : unavailable
+                ? 'The project could not be loaded. Try again shortly.'
+                : 'This project does not exist or was removed.'}
+          </div>
+          <Link to='/projects'>Back to projects</Link>
+        </div>
+      </div>
+    );
+  }
+
   // §3.4 (P1 IA) — most arrivals at /projects/:id are status checks: land on
   // Overview once the project has work history. Brand-new projects keep
   // the compose-first landing.
@@ -148,7 +185,10 @@ export default function IdeProject() {
   const lastRun = runs[0];
   const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
   const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
-  const projectProviderOptions = PRODUCT_PROVIDER_OPTIONS;
+  const projectProviderOptions =
+    tier === 'FREE'
+      ? PRODUCT_PROVIDER_OPTIONS.filter((p) => p.id === 'DEEPSEEK')
+      : PRODUCT_PROVIDER_OPTIONS;
 
   return (
     <div className='ide-pane'>
@@ -212,7 +252,10 @@ export default function IdeProject() {
         rows={8}
         placeholder='Describe what you want, in plain English. Reference repos or files to keep the agent inside specific boundaries.'
         value={spec}
-        onChange={(e) => setSpec(e.target.value)}
+        onChange={(e) => {
+          setSpec(e.target.value);
+          if (err === 'Describe what to build first.') setErr('');
+        }}
       />
       <div style={{marginTop: 10}}>
         <SpecChat projectId={projectId} draftSpec={spec} onApply={setSpec} />

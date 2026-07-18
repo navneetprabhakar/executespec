@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.Project;
 
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -88,5 +91,18 @@ class ProjectExportServiceTest {
 
     assertThat(service.request(project, "user-1", null)).isSameAs(created);
     verify(store).createOrGet(any(), eq("project-1"), eq("org-1"), eq("user-1"), any(), any());
+  }
+
+  @Test
+  void missingExportIsAStableNotFoundResponse() {
+    UUID missing = UUID.randomUUID();
+    when(store.getScoped(missing, "project-1", "org-1")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.get(project, missing))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.NOT_FOUND));
   }
 }

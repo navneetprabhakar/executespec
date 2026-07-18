@@ -17,6 +17,9 @@ only owner of project-export status, archive composition, publication, expiry an
   cross-tenant identifiers cannot export project governance data.
 - Controller errors are fixed messages/codes. Raw storage, SQL or archive exceptions never enter
   an HTTP response or persisted `error_code`.
+- Missing scoped export jobs throw `ResponseStatusException(404)` directly. Do not rely on
+  `@ResponseStatus` on a nested service exception: the controller advice path previously converted
+  that case to a generic 500 (Phase-6 F15, fixed 2026-07-18).
 
 ## State and recovery
 

@@ -69,6 +69,22 @@ class LlmExecutionContextServiceTest {
   }
 
   @Test
+  void immutableReferenceRecoveryUsesTheOriginalTenantScopedTuple() {
+    LlmExecutionContextCreateRequest request = request(2, LlmExecutionBudget.UNBOUNDED);
+    LlmExecutionContext context = create(request);
+    whenIdempotencyLookup(request).thenReturn(Optional.of(context));
+
+    assertThat(
+            service.findReference(
+                ORG_A,
+                request.feature(),
+                request.sourceType(),
+                request.sourceId(),
+                request.idempotencyKey()))
+        .contains(new LlmExecutionReference(context.getId(), ORG_A));
+  }
+
+  @Test
   void activeLeaseCannotBeStolenButExpiredLeaseCanBeClaimedByANewOwner() {
     LlmExecutionContext context = create(request(3, LlmExecutionBudget.UNBOUNDED));
     lock(context, ORG_A);
