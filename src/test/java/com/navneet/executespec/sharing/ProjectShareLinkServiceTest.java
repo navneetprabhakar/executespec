@@ -94,6 +94,41 @@ class ProjectShareLinkServiceTest {
   }
 
   @Test
+  void createLink_returns_plaintext_token_even_when_persistence_merge_drops_the_transient() {
+    // F3 (2026-07-18): the entity's pre-assigned UUID id makes Spring Data treat it as non-new, so
+    // the real saveAndFlush performs a JPA merge that returns a COPY WITHOUT the @Transient
+    // one-time
+    // plaintext token. createLink must still deliver the bearer once. The default mock (returns the
+    // same instance) can't reproduce this; simulate the merge explicitly.
+    AppUser pro = userOnTier("u-pro", "PRO");
+    lenient().when(tierRepo.findById("PRO")).thenReturn(Optional.of(tier("PRO", 25)));
+    when(linkRepo.saveAndFlush(any()))
+        .thenAnswer(
+            inv -> {
+              ProjectShareLink in = inv.getArgument(0);
+              return ProjectShareLink.builder()
+                  .id(in.getId())
+                  .projectId(in.getProjectId())
+                  .tokenHash(in.getTokenHash())
+                  .tokenPrefix(in.getTokenPrefix())
+                  .surface(in.getSurface())
+                  .scopeId(in.getScopeId())
+                  .label(in.getLabel())
+                  .createdByUserId(in.getCreatedByUserId())
+                  .expiresAt(in.getExpiresAt())
+                  .createdAt(in.getCreatedAt())
+                  .build(); // no .token(...) — the merge drops the transient plaintext
+            });
+    ProjectShareLink link =
+        service.createLink(
+            "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", expiry(), pro);
+    assertNotNull(
+        link.getToken(),
+        "plaintext bearer must survive the merge for the one-time create response");
+    assertEquals(link.getTokenPrefix(), link.getToken().substring(0, 8));
+  }
+
+  @Test
   void surface_requiring_scope_id_rejects_when_blank() {
     AppUser pro = userOnTier("u-pro", "PRO");
     lenient().when(tierRepo.findById("PRO")).thenReturn(Optional.of(tier("PRO", 25)));

@@ -126,6 +126,11 @@ public class ProjectShareLinkService {
     // Flush the owning row before the audit insert; the audit FK is intentionally RESTRICT and
     // Hibernate is otherwise free to reorder unrelated entity inserts at transaction flush.
     ProjectShareLink saved = linkRepo.saveAndFlush(link);
+    // F3 (2026-07-18): the entity carries a pre-assigned UUID id, so Spring Data treats it as
+    // non-new and saveAndFlush performs a JPA merge that returns a copy WITHOUT the @Transient
+    // one-time plaintext token. Re-attach it to the returned instance so the create response can
+    // deliver the shareable bearer exactly once — otherwise every share link is unusable.
+    saved.setToken(plaintextToken);
     auditService.record(
         saved,
         "CREATE",
