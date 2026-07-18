@@ -40,14 +40,20 @@ state_lock = threading.Lock()
 
 
 def login() -> str:
-    env: dict[str, str] = {}
-    for line in (BENCH / ".espec-admin.env").read_text().splitlines():
-        if "=" in line and not line.lstrip().startswith("#"):
-            k, v = line.split("=", 1)
-            env[k.strip()] = v.strip().strip('"').strip("'")
+    override_email = os.environ.get("ES_ADMIN_EMAIL")
+    override_password = os.environ.get("ES_ADMIN_PW")
+    if override_email and override_password:
+        email, password = override_email, override_password
+    else:
+        env: dict[str, str] = {}
+        for line in (BENCH / ".espec-admin.env").read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('\"').strip("'")
+        email, password = env["ES_ADMIN_EMAIL"], env["ES_ADMIN_PW"]
     req = urllib.request.Request(
         BASE + "/api/auth/login",
-        data=json.dumps({"email": env["ES_ADMIN_EMAIL"], "password": env["ES_ADMIN_PW"]}).encode(),
+        data=json.dumps({"email": email, "password": password}).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
