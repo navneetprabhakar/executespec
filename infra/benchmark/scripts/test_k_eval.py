@@ -269,6 +269,15 @@ def test_campaign_budget_rejects_task_cost_above_hard_cap(tmp_path):
         budget.settle("a", "2.000001")
 
 
+def test_campaign_only_mode_allows_task_above_legacy_amount_within_campaign(tmp_path):
+    budget = k_eval.CampaignBudget(tmp_path / "budget.json", None, "20", "25", 10)
+    assert budget.reserve("a")
+    budget.settle("a", "2.005480")
+    state = json.loads((tmp_path / "budget.json").read_text())
+    assert state["reservationMode"] == "CAMPAIGN_REMAINING_SERIAL"
+    assert state["tasks"]["a"]["costUsd"] == "2.005480"
+
+
 def test_campaign_budget_resume_fails_on_unresolved_reservation(tmp_path):
     path = tmp_path / "budget.json"
     budget = k_eval.CampaignBudget(path, "2", "20", "25", 10)

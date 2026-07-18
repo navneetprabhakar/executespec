@@ -53,10 +53,13 @@ worker needs, call `CodeGenEngine.solve(...)`, then capture the official patch a
 `BenchmarkRunService` BUILD-stop-at-worker implementation was deleted so it cannot drift into a
 second benchmark generation path.
 
-The admin request's optional `hardCapUsd` is tighten-only: the effective worker cap is
-`min(swebench.hard-cap-usd, request.hardCapUsd)`, and a non-finite/non-positive request is rejected
-before worker dispatch. `k-eval.py generate` always supplies this field from its required
-`--per-task-cap-usd` and separately reserves the required aggregate campaign cap in one atomic,
+The admin request's optional `hardCapUsd` is tighten-only when `enforceHardCap` is omitted or true:
+the effective worker cap is `min(swebench.hard-cap-usd, request.hardCapUsd)`, and a
+non-finite/non-positive request is rejected. Benchmark operators may explicitly send
+`enforceHardCap=false` to omit the per-task dollar cap; campaign-level accounting remains the
+operator's responsibility before worker dispatch. `k-eval.py generate` supplies the field only
+when the legacy optional `--per-task-cap-usd` is present and separately reserves the aggregate
+campaign cap in one atomic,
 OS-file-locked ledger spanning every requested `k` pass. A stale in-flight reservation fails closed
 on resume rather than risking a second provider dispatch.
 
