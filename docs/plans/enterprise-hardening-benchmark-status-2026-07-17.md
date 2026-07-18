@@ -4,7 +4,7 @@
 
 **Tracker state:** LIVE — update after every material implementation, verification, spend, commit, PR, deployment, benchmark, blocker or contradiction
 
-**Last updated:** 2026-07-18 IST — Phases 1–6 complete and pushed. Synchronized implementation/evidence heads are backend/Web `051d0ffed`, CLI `bbbbb9ed`, and docs `c6662b7`; GitHub PR checks passed on all three heads (backend Java + Web, CLI Windows/macOS/Linux Node matrix, docs release gate). Migration head remains **V295**. The local backend was stopped cleanly after browser/API/CLI evidence. Benchmark VM remains **stopped/parked** (`TERMINATED`, zero compute); no Phase-7 infrastructure, DNS, or provider benchmark action was taken. See **§7 Session resume state** at the bottom for the cold-resume picture.
+**Last updated:** 2026-07-18 IST — Phases 1–6 complete and pushed. Phase-7 harness hardening is now locally implemented and verified; the synchronized implementation/evidence heads remain backend/Web `051d0ffed`, CLI `bbbbb9ed`, and docs `c6662b7` until this checkpoint is committed. Migration head is **V296**. The local backend is stopped; benchmark VM remains **stopped/parked** (`TERMINATED`, zero compute); no Phase-7 provider spend or VM/DNS mutation has occurred.
 
 **Owner/session:** Codex / active persistent goal session
 
@@ -258,6 +258,12 @@ F1 run-chat 500 (V282 idempotency collision) · F2 FREE→DeepSeek lock · F3 sh
 `infra/benchmark/PHASE7-BENCHMARK-RULES-DIGEST-2026-07-18.md`. Key compliance gaps to fix BEFORE a leaderboard submission (internal validation runs are unaffected):
 - **TB 2.1 leaderboard:** needs ≥5 trials/task, DEFAULT timeouts (no agent/verifier/resource overrides), public `harbor run --upload` with ATIF trajectories. Our `run-tb.sh` is k=1 + Harbor-timeout-override + private → validation-only. A submittable profile must be added.
 - **SWE-bench Lite:** full `evaluation/lite/<date>_<model>/` bundle (all_preds+metadata+per-instance trajs+logs), pass@1 blind; confirm Lite is still an accepting split (else self-host).
+
+### Phase 7 harness hardening — local checkpoint (2026-07-18, no spend)
+- **Tracking closure:** `k-eval.py generate` now persists a tracking sidecar and its `publish` command posts official `TASK_SCORED` events followed by `RUN_DONE`; this closes the prior stale-RUNNING gap.
+- **Cross-JVM ordering:** tracking ingestion locks the parent benchmark row while allocating event sequence/task-attempt state; V296 adds a unique `(benchmark_run_id, seq)` constraint and fails closed if historical duplicates exist. Isolated PostgreSQL clean-install and V294→V296 upgrade rehearsals both passed.
+- **TB safety:** setup `exception.txt` is classified as infrastructure failure; incomplete trial sets become `RUN_FAILED` and return non-zero; late worker finally blocks preserve terminal/cancelled states.
+- **Verification:** focused Java tests, Python bridge tests (2/2), Python syntax checks, and backend compile passed. Full `mvn verify` is running next; no VM/DNS/provider action has occurred.
 
 ### Parallel adversarial Phase-6 remainder — closed locally
 Full findings, RCAs, patches and evidence for F7–F19 are in the Phase-6 report `../../executespec-docs/backend/qa/phase6-enterprise-qa-report-2026-07-18.md`.

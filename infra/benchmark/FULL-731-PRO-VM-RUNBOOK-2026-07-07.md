@@ -37,6 +37,10 @@ Companion: local sample-20 already scored **12/20 = 60%** on this harness (§res
 
 Local `infra/benchmark/scripts/`:
 - `k-eval.py generate --provider deepseek --model deepseek-v4-pro-native --dataset <batch.json> --k 1 --concurrency N --out <dir>` — parallel generate, exact-path manifest, publishes to `/benchmark`.
+- After the external official scorer finishes, publish the exact per-instance results and close the
+  corresponding `/benchmark` row with `k-eval.py publish --tracking-file <out>/pass1.tracking.json
+  --manifest <out>/pass1.manifest.jsonl --results <eval_results.json>`. Generation emits only
+  `RUN_PROGRESS`; the publish step is the authoritative `TASK_SCORED` + `RUN_DONE` handoff.
 - `score-watcher.py <manifest> <out>` — pipelined official scoring per instance, posts verifier rewards.
 
 **For 731, wrap in a batch loop** (formalize as `run-full731-batched.py`):

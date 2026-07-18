@@ -25,6 +25,12 @@ canary     From the same k results (or more runs across models), emit canary tas
            always-pass (regression tripwire — a flip here is signal even at k=1) and
            always-fail (the ceiling — do not tune against the noisy middle).
 
+publish    Publish one official scorer result to the benchmark API/UI.  `generate` writes a
+           `passN.tracking.json` sidecar; after scoring, run:
+             ./k-eval.py publish --tracking-file out/pass1.tracking.json \
+                 --manifest out/pass1.manifest.jsonl --results eval_results.json
+           This emits one TASK_SCORED per instance followed by RUN_DONE.
+
 Env: ES_BASE (default http://localhost:8080); admin creds ~/swebench-bench/.espec-admin.env.
 """
 
@@ -124,6 +130,20 @@ def cmd_generate(a):
 
     for k in range(1, a.k + 1):
         bench_id = tracking_start(token, a.provider, a.model, a.k, len(instances), f"{dataset_label} pass{k}")
+        if bench_id:
+            (out_root / f"pass{k}.tracking.json").write_text(
+                json.dumps(
+                    {
+                        "benchmarkId": bench_id,
+                        "provider": a.provider,
+                        "model": a.model,
+                        "attempt": k,
+                        "totalTasks": len(instances),
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
         manifest = out_root / f"pass{k}.manifest.jsonl"
         done = set()
         if manifest.exists():  # resumable per pass
@@ -188,6 +208,58 @@ def cmd_generate(a):
                                          "message": f"pass {k}/{a.k} generation complete — score externally, then post rewards"})
         print(f"== pass {k} manifest: {manifest}")
     print("\ngenerate done. Score each pass with the Scale harness, then: k-eval.py aggregate <k eval_results.json>")
+
+
+def cmd_publish(a):
+    """Publish official per-instance scores to an existing /benchmark run."""
+    token = login()
+    benchmark_id = a.benchmark_id
+    if a.tracking_file:
+        metadata = json.loads(pathlib.Path(a.tracking_file).expanduser().read_text())
+        benchmark_id = benchmark_id or metadata.get("benchmarkId")
+        attempt = a.attempt or int(metadata.get("attempt", 1))
+    else:
+        attempt = a.attempt or 1
+    if not benchmark_id:
+        sys.exit("publish requires --benchmark-id or --tracking-file from generate")
+    scores = load_results(a.results)
+    manifest_rows = {}
+    if a.manifest:
+        for line in pathlib.Path(a.manifest).expanduser().read_text().splitlines():
+            try:
+                row = json.loads(line)
+                manifest_rows[row["instance_id"]] = row
+            except (ValueError, KeyError):
+                continue
+    posted = 0
+    for instance_id in sorted(scores):
+        row = manifest_rows.get(instance_id, {})
+        body = {
+            "type": "TASK_SCORED",
+            "taskName": instance_id,
+            "attempt": attempt,
+            "reward": int(scores[instance_id]),
+        }
+        if row.get("runId"):
+            body["esRunId"] = row["runId"]
+        if row.get("costUsd") is not None:
+            body["costUsd"] = row["costUsd"]
+        if row.get("inputTokens") is not None:
+            body["inputTokens"] = int(row["inputTokens"])
+        if row.get("outputTokens") is not None:
+            body["outputTokens"] = int(row["outputTokens"])
+        try:
+            post(f"/api/v2/test/benchmark/{benchmark_id}/event", body, token, timeout=60)
+            posted += 1
+        except Exception as exc:
+            sys.exit(f"publish failed for {instance_id}: {exc}")
+    post(
+        f"/api/v2/test/benchmark/{benchmark_id}/event",
+        {"type": "RUN_DONE", "message": f"official scoring published: {posted} tasks"},
+        token,
+        timeout=60,
+    )
+    print(f"published {posted} TASK_SCORED events + RUN_DONE to benchmark {benchmark_id}")
 
 
 # ---------- result parsing (tolerant) ----------
@@ -295,6 +367,13 @@ def main():
     g.add_argument("--out", required=True)
     g.add_argument("--concurrency", type=int, default=1, help="parallel generate requests (server cap is max-concurrent-runs; watch RAM)")
 
+    p = sub.add_parser("publish")
+    p.add_argument("--results", required=True, help="official scorer eval_results.json")
+    p.add_argument("--benchmark-id", help="existing /benchmark run id")
+    p.add_argument("--tracking-file", help="passN.tracking.json emitted by generate")
+    p.add_argument("--manifest", help="generation manifest for esRunId/cost attribution")
+    p.add_argument("--attempt", type=int, default=0)
+
     for name in ("aggregate", "canary"):
         s = sub.add_parser(name)
         s.add_argument("results", nargs="+", help="k eval_results.json paths (one per pass)")
@@ -304,7 +383,7 @@ def main():
             s.add_argument("--out", default="infra/benchmark/canary")
 
     a = ap.parse_args()
-    {"generate": cmd_generate, "aggregate": cmd_aggregate, "canary": cmd_canary}[a.cmd](a)
+    {"generate": cmd_generate, "publish": cmd_publish, "aggregate": cmd_aggregate, "canary": cmd_canary}[a.cmd](a)
 
 
 if __name__ == "__main__":

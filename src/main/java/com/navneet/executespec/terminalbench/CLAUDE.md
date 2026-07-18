@@ -4,6 +4,8 @@
 > Terminal-Bench 2.0 via the "remote brain / local hands" model — the proof that the local-hands
 > story works end-to-end (docs/pending.md §J3).
 
+> **2026-07-18 harness hardening:** the bridge classifies sibling `exception.txt` setup failures as infrastructure failures, refuses `RUN_DONE` when trials are missing, and returns non-zero for incomplete runs. Late worker finalization preserves an already terminal/cancelled run.
+
 ## What this is
 
 A standalone path that runs the V2 `WorkerAgent` in **REMOTE-tool mode** as a real persisted run,
@@ -159,3 +161,6 @@ DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, and GLM 5.2 via OpenRouter. Use
 - `unregister` MUST run on every terminal/exception path (it's in `finally`) — else a dangling session
   leaks + `isRemote` stays true for that runId.
 - No `RunOrchestrator` / pipeline coupling — this is a direct `WorkerAgent.run` invocation.
+- A Harbor abort may cancel the persisted remote run while its worker finally block is unwinding;
+  `TerminalBenchRunService` preserves `COMPLETE`, `FAILED`, `CANCELLED`, and `PAUSED` rows and does
+  not overwrite a terminal status with a late worker result.

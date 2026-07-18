@@ -126,6 +126,7 @@ public class BenchmarkTrackingService {
         null);
   }
 
+  @Transactional
   public BenchmarkRun ingest(
       String runId,
       String type,
@@ -140,8 +141,11 @@ public class BenchmarkTrackingService {
       String payloadJson,
       String outcome,
       String reason) {
+    // Lock the parent row before allocating the per-run event sequence and checking the
+    // task-attempt idempotency key.  Harbor publishes results concurrently; without this lock two
+    // JVMs can both allocate the same seq or race the unique task-attempt insert.
     BenchmarkRun run =
-        runs.findById(runId)
+        runs.findByIdForUpdate(runId)
             .orElseThrow(() -> new IllegalArgumentException("benchmark run not found: " + runId));
 
     switch (type == null ? "" : type) {
