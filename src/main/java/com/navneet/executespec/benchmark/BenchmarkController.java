@@ -46,6 +46,7 @@ public class BenchmarkController {
       String projectId,
       java.util.List<String> selectedRepoIds,
       Double hardCapUsd,
+      Boolean enforceHardCap,
       Long absoluteDeadlineEpochMs,
       Long shutdownReserveMs) {}
 
@@ -81,6 +82,7 @@ public class BenchmarkController {
             req.aiProvider(),
             req.modelName(),
             req.hardCapUsd(),
+            req.enforceHardCap(),
             req.absoluteDeadlineEpochMs(),
             req.shutdownReserveMs()));
   }

@@ -50,7 +50,7 @@ import lombok.extern.slf4j.Slf4j;
  * instance) and hands back the diff — no polling, no harvesting.
  *
  * <p>It still creates ONE minimal {@link PipelineRun} row, because the worker reads two things from
- * it: {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code sourceType}
+ * it: optional {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code sourceType}
  * (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"} ⇒ gate OFF
  * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
  * lifecycle.
@@ -114,6 +114,24 @@ public class BenchmarkGenerationService {
       Double requestedHardCapUsd,
       Long requestedDeadlineEpochMs,
       Long requestedShutdownReserveMs) {
+    return generate(
+        instanceId,
+        aiProvider,
+        modelName,
+        requestedHardCapUsd,
+        true,
+        requestedDeadlineEpochMs,
+        requestedShutdownReserveMs);
+  }
+
+  public GenerateResult generate(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      Double requestedHardCapUsd,
+      Boolean enforceHardCap,
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs) {
     if (!props.isEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "swebench is disabled (set swebench.enabled=true)");
@@ -134,7 +152,9 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
-    double hardCapUsd = validatedHardCapUsd(requestedHardCapUsd);
+    Double hardCapUsd = Boolean.FALSE.equals(enforceHardCap)
+        ? null
+        : validatedHardCapUsd(requestedHardCapUsd);
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);

@@ -275,37 +275,48 @@ def atomic_jsonl_append(path, value):
 
 
 class CampaignBudget:
-    """Persistent reservation ledger; concurrent dispatch cannot oversubscribe the cap."""
+    """Persistent campaign ledger; per-task caps are optional legacy metadata."""
 
     def __init__(self, path, per_task_cap, campaign_cap, opening_balance, expected_total):
         self.path = path
-        self.per_task_cap = money(per_task_cap, "per-task cap")
+        self.per_task_cap = None if per_task_cap is None else money(per_task_cap, "per-task cap")
         self.campaign_cap = money(campaign_cap, "campaign cap")
         self.opening_balance = money(opening_balance, "opening balance")
         self.expected_total = int(expected_total)
         self.lock = threading.Lock()
         self.lock_path = path.with_suffix(path.suffix + ".lock")
-        if self.per_task_cap <= 0 or self.campaign_cap <= 0:
-            raise ValueError("per-task and campaign caps must be positive")
+        if self.per_task_cap is not None and self.per_task_cap <= 0:
+            raise ValueError("per-task cap must be positive when supplied")
+        if self.campaign_cap <= 0:
+            raise ValueError("campaign cap must be positive")
         if self.opening_balance < self.campaign_cap:
             raise ValueError("opening provider balance is below the campaign reservation")
-        if self.per_task_cap * self.expected_total > self.campaign_cap:
+        if self.per_task_cap is not None and self.per_task_cap * self.expected_total > self.campaign_cap:
             raise ValueError("campaign cap cannot reserve the per-task cap for every expected task")
         with self._exclusive_file_lock():
             if path.exists():
                 self._reload()
                 expected = {
-                    "perTaskCapUsd": str(self.per_task_cap),
+                    "perTaskCapUsd": None if self.per_task_cap is None else str(self.per_task_cap),
                     "campaignCapUsd": str(self.campaign_cap),
                     "openingBalanceUsd": str(self.opening_balance),
                     "expectedTotal": self.expected_total,
                 }
                 for key, value in expected.items():
+                    if key == "perTaskCapUsd" and self.per_task_cap is None:
+                        if self.state.get(key) not in (None, value):
+                            if any(t.get("status") == "RESERVED" for t in self.state.get("tasks", {}).values()):
+                                raise ValueError("legacy task reservation must be reconciled before campaign-only mode")
+                            self.state[key] = None
+                            self.state["reservationMode"] = "CAMPAIGN_REMAINING_SERIAL"
+                            self._save()
+                        continue
                     if self.state.get(key) != value:
                         raise ValueError(f"campaign ledger mismatch for {key}")
             else:
                 self.state = {
-                    "perTaskCapUsd": str(self.per_task_cap),
+                    "perTaskCapUsd": None if self.per_task_cap is None else str(self.per_task_cap),
+                    "reservationMode": "CAMPAIGN_REMAINING_SERIAL" if self.per_task_cap is None else "LEGACY_TASK_CAP",
                     "campaignCapUsd": str(self.campaign_cap),
                     "openingBalanceUsd": str(self.opening_balance),
                     "expectedTotal": self.expected_total,
@@ -335,8 +346,8 @@ class CampaignBudget:
             Decimal("0"),
         )
         reserved = sum(
-            (self.per_task_cap for task in self.state["tasks"].values()
-             if task.get("status") == "RESERVED"),
+            (money(task.get("reservedUsd", "0"), "reserved task amount")
+             for task in self.state["tasks"].values() if task.get("status") == "RESERVED"),
             Decimal("0"),
         )
         return spent, reserved
@@ -353,20 +364,23 @@ class CampaignBudget:
                         f"task {instance_id} has an unresolved reservation; reconcile the "
                         "in-flight provider request before resuming")
                 spent, reserved = self._totals()
-                if spent + reserved + self.per_task_cap > self.campaign_cap:
+                reservation = (self.campaign_cap - spent - reserved
+                               if self.per_task_cap is None else self.per_task_cap)
+                if reservation <= 0 or spent + reserved + reservation > self.campaign_cap:
                     raise RuntimeError(
                         f"campaign cap exhausted: spent={spent} reserved={reserved} "
-                        f"next={self.per_task_cap} cap={self.campaign_cap}")
-                self.state["tasks"][instance_id] = {"status": "RESERVED"}
+                        f"next={reservation} cap={self.campaign_cap}")
+                self.state["tasks"][instance_id] = {
+                    "status": "RESERVED", "reservedUsd": str(reservation)}
                 self._save()
                 return True
 
-    def settle(self, instance_id, actual_cost):
+    def settle(self, instance_id, actual_cost, enforce_task_cap=True):
         cost = money(actual_cost, f"cost for {instance_id}")
         with self.lock:
             with self._exclusive_file_lock():
                 self._reload()
-                if cost > self.per_task_cap:
+                if enforce_task_cap and self.per_task_cap is not None and cost > self.per_task_cap:
                     raise RuntimeError(
                         f"task {instance_id} cost {cost} exceeded hard cap {self.per_task_cap}")
                 current = self.state["tasks"].get(instance_id)
@@ -377,6 +391,15 @@ class CampaignBudget:
                             f"task {instance_id} is already settled at {existing}; "
                             f"refusing replacement cost {cost}")
                     return
+                spent_before = sum(
+                    (money(task.get("costUsd", "0"), "settled task cost")
+                     for key, task in self.state["tasks"].items()
+                     if key != instance_id and task.get("status") == "SETTLED"),
+                    Decimal("0"),
+                )
+                if spent_before + cost > self.campaign_cap:
+                    raise RuntimeError(
+                        f"settled spend {spent_before + cost} exceeded campaign cap {self.campaign_cap}")
                 self.state["tasks"][instance_id] = {"status": "SETTLED", "costUsd": str(cost)}
                 spent, _reserved = self._totals()
                 if spent > self.campaign_cap:
@@ -653,8 +676,8 @@ def validate_recovery_evidence(evidence, args, dataset_sha, base_commit, traject
     if not all(isinstance(usage.get(key), int) and usage[key] >= 0 for key in token_fields):
         raise ValueError("recovery usage token facts are incomplete")
     cost = money(usage.get("costUsd"), "recovery canonical cost")
-    if cost <= 0 or cost > money(args.per_task_cap_usd, "per-task cap"):
-        raise ValueError("recovery canonical cost is outside the reserved task cap")
+    if cost <= 0:
+        raise ValueError("recovery canonical cost must be positive")
     trajectory = evidence.get("trajectory") or {}
     if trajectory.get("sha256") != trajectory_sha or trajectory.get("eventCount") != event_count:
         raise ValueError("recovery trajectory evidence does not match the durable artifact")
@@ -1165,6 +1188,8 @@ def cmd_generate(a):
         sys.exit("--k must be positive")
     if a.concurrency <= 0:
         sys.exit("--concurrency must be positive")
+    if a.per_task_cap_usd is None and a.concurrency != 1:
+        sys.exit("campaign-only mode requires --concurrency 1; no per-task cap can safely reserve parallel spend")
     if a.expected_total <= 0:
         sys.exit("--expected-total must be positive")
     requested_max_new_tasks = getattr(a, "max_new_tasks", None)
@@ -1317,11 +1342,18 @@ def cmd_generate(a):
                 request_started = True
                 deadline_fields = benchmark_deadline_fields(
                     task_timeout_seconds, shutdown_reserve_seconds)
+                request_body = {
+                    "instanceId": iid,
+                    "aiProvider": a.provider,
+                    "modelName": a.model,
+                    "enforceHardCap": a.per_task_cap_usd is not None,
+                    **deadline_fields,
+                }
+                if a.per_task_cap_usd is not None:
+                    request_body["hardCapUsd"] = float(a.per_task_cap_usd)
                 st, d = post_authenticated(
                     "/api/admin/benchmark/generate",
-                    {"instanceId": iid, "aiProvider": a.provider, "modelName": a.model,
-                     "hardCapUsd": float(a.per_task_cap_usd),
-                     **deadline_fields},
+                    request_body,
                     token_box,
                     refresh_lock,
                     timeout=task_timeout_seconds + 60,
@@ -1338,9 +1370,6 @@ def cmd_generate(a):
                 if st != 200:
                     raise RuntimeError(f"generation returned HTTP {st}")
                 actual_cost = money(row.get("costUsd"), f"cost for {iid}")
-                if actual_cost > budget.per_task_cap:
-                    raise RuntimeError(
-                        f"task {iid} cost {actual_cost} exceeded hard cap {budget.per_task_cap}")
                 try:
                     trajectory_location, trajectory_sha256 = durable_trajectory_artifact(
                         out_root, k, iid, row["runId"], token_box, refresh_lock)
@@ -1819,8 +1848,8 @@ def main():
         help="launch at most the next N unfinished tasks, then exit RUN_PROGRESS for safe resume")
     g.add_argument("--expected-total", type=int, required=True,
                    help="exact frozen dataset cardinality; mismatch stops before provider dispatch")
-    g.add_argument("--per-task-cap-usd", type=Decimal, required=True,
-                   help="hard cap sent to the benchmark worker for every task")
+    g.add_argument("--per-task-cap-usd", type=Decimal,
+                   help="legacy optional task cap; omit for campaign-only spend control")
     g.add_argument("--campaign-cap-usd", type=Decimal, required=True,
                    help="aggregate reservation ceiling across this pass")
     g.add_argument("--opening-balance-usd", type=Decimal, required=True,
