@@ -434,3 +434,19 @@ Full findings, RCAs, patches and evidence for F7–F19 are in the Phase-6 report
 - `run-tb.sh` now supports `TASK_NAMES` for deterministic smoke selection; full
   runs leave it unset. The canary proves dispatch, Harbor completion, official
   verifier reward and trajectory capture, but not full-suite timeout SLOs.
+
+### Full TB K=5 campaign (started 2026-07-18 19:14 UTC)
+
+- Correct live configuration verified: `n_attempts=5`, `n_total_trials=445`,
+  concurrency 4, native DeepSeek V4 Pro, tracker
+  `0e3829dd-9b89-4d35-9142-babae2f890c9`.
+- All 89 Docker images passed preflight. Harbor and bridge are healthy.
+- Artifact retention is protected by a 30-minute `gsutil rsync` watcher to the
+  run-specific GCS prefix plus the runner's final sync. The first sync copied
+  36 objects / 759.9 KiB successfully.
+- Harbor credentials are present (`adminspec`) and the VM service account now
+  has bucket object-admin access. No public upload or leaderboard submission is
+  being attempted during this internal run.
+- After completion: freeze local/GCS artifacts, validate every trajectory,
+  reconcile all 445 trial outcomes and costs, then decide separately whether a
+  default-timeout public submission run is authorized.
