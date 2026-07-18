@@ -31,6 +31,11 @@ publish    Publish one official scorer result to the benchmark API/UI.  `generat
                  --manifest out/pass1.manifest.jsonl --results eval_results.json
            This emits one TASK_SCORED per instance followed by RUN_DONE.
 
+recover-capture
+           Recover only a proved post-provider diff-capture failure from preserved local
+           evidence.  This path never authenticates or dispatches a provider request, preserves
+           the failed tracker, and emits a distinct recovered manifest status.
+
 Env: ES_BASE (default http://localhost:8080); admin creds ~/swebench-bench/.espec-admin.env.
 """
 
@@ -43,11 +48,14 @@ import hashlib
 import json
 import math
 import re
+import shlex
+import subprocess
 import threading
 import os
 import pathlib
 import statistics
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -89,6 +97,9 @@ PRE_PROVIDER_CONCURRENCY_429 = "PRE_PROVIDER_CONCURRENCY_429"
 AMBIGUOUS_PRESSURE = "AMBIGUOUS_PRESSURE"
 ABORT_AMBIGUOUS = "ABORT_AMBIGUOUS"
 SERVER_CONCURRENCY_MESSAGE = "benchmark generation concurrency exhausted"
+RECOVERED_CAPTURE_STATUS = "RECOVERED_PROVIDER_FREE"
+RECOVERY_KIND = "POST_PROVIDER_CAPTURE_ONLY"
+CAPTURE_FAILURE_PREFIX = "BENCH_GEN_FAILED:benchmark patch capture failed"
 
 
 # ---------- shared ----------
@@ -249,6 +260,20 @@ def atomic_json_write(path, value):
     temporary.replace(path)
 
 
+def atomic_bytes_write(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(value)
+    temporary.replace(path)
+
+
+def atomic_jsonl_append(path, value):
+    """Append one audit row without exposing a partially-written JSONL file."""
+    existing = path.read_bytes() if path.exists() else b""
+    encoded = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    atomic_bytes_write(path, existing + encoded)
+
+
 class CampaignBudget:
     """Persistent reservation ledger; concurrent dispatch cannot oversubscribe the cap."""
 
@@ -367,6 +392,12 @@ class CampaignBudget:
                     del self.state["tasks"][instance_id]
                     self._save()
 
+    def task_status(self, instance_id):
+        with self.lock:
+            with self._exclusive_file_lock():
+                self._reload()
+                return self.state.get("tasks", {}).get(instance_id, {}).get("status")
+
 
 def load_generation_manifest(path):
     """Return successful terminal rows; failed rows never count as resume completion."""
@@ -383,7 +414,8 @@ def load_generation_manifest(path):
         instance_id = row.get("instance_id")
         if not isinstance(instance_id, str) or not instance_id:
             raise SystemExit(f"malformed manifest row {line_number}: instance_id missing")
-        if row.get("status") != 200:
+        recovered = row.get("status") == RECOVERED_CAPTURE_STATUS
+        if row.get("status") != 200 and not recovered:
             continue
         # proPatchJson is SWE-bench Pro-only; Lite generation correctly returns null for it.
         required = ("outcome", "runId", "costUsd", "submissionPatch", "predsJson")
@@ -397,6 +429,33 @@ def load_generation_manifest(path):
             raise SystemExit(
                 f"malformed terminal manifest row {line_number} for {instance_id}: "
                 f"non-string {invalid_text}")
+        if recovered:
+            recovery_required = (
+                "originalHttpStatus", "recoveryKind", "recoveryEvidenceSha256",
+                "workspaceEvidenceSha256", "trajectoryLocation", "trajectorySha256",
+                "patchSha256", "predsSha256",
+            )
+            recovery_missing = [key for key in recovery_required if row.get(key) is None]
+            if recovery_missing:
+                raise SystemExit(
+                    f"malformed recovered manifest row {line_number} for {instance_id}: "
+                    f"missing {recovery_missing}")
+            if row.get("originalHttpStatus") != 500 or row.get("recoveryKind") != RECOVERY_KIND:
+                raise SystemExit(
+                    f"malformed recovered manifest row {line_number} for {instance_id}: "
+                    "invalid recovery provenance")
+            for key in (
+                    "recoveryEvidenceSha256", "workspaceEvidenceSha256", "trajectorySha256",
+                    "patchSha256", "predsSha256"):
+                if (not isinstance(row.get(key), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", row[key])):
+                    raise SystemExit(
+                        f"malformed recovered manifest row {line_number} for {instance_id}: "
+                        f"invalid {key}")
+            if not isinstance(row.get("trajectoryLocation"), str) or not row["trajectoryLocation"]:
+                raise SystemExit(
+                    f"malformed recovered manifest row {line_number} for {instance_id}: "
+                    "invalid trajectoryLocation")
         try:
             money(row["costUsd"], f"manifest cost for {instance_id}")
         except ValueError as exc:
@@ -412,6 +471,444 @@ def write_generation_manifest(path, completed, ordered_ids):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text("".join(json.dumps(row) + "\n" for row in rows))
     temporary.replace(path)
+
+
+CLASSIC_DIFF_EXCLUDES = (
+    ":(exclude).agent-context", ":(exclude)__pycache__", ":(exclude).pytest_cache",
+    ":(exclude)*.egg-info", ":(exclude,glob)appendonlydir/**",
+    ":(exclude,glob)**/test_*.py", ":(exclude,glob)**/*_test.py",
+    ":(exclude,glob)**/tests/**", ":(exclude,glob)**/conftest.py",
+    ":(exclude,glob)**/repro*", ":(exclude,glob)**/*_repro*",
+    ":(exclude,glob)tmp/**", ":(exclude,glob)**/tmp_*",
+    ":(exclude,glob)**/scratch*", ":(exclude)Dockerfile",
+    ":(exclude).dockerignore", ":(exclude)README.md",
+    ":(exclude,glob)**/pyproject.toml", ":(exclude,glob)**/setup.py",
+    ":(exclude,glob)**/setup.cfg", ":(exclude,glob)**/tox.ini",
+    ":(exclude,glob)**/MANIFEST.in", ":(exclude,glob)**/requirements*.txt",
+    ":(exclude,glob)**/.github/**", ":(exclude,glob)**/testing/**",
+)
+PRO_DIFF_EXCLUDES = CLASSIC_DIFF_EXCLUDES[:14]
+
+
+def sha256_bytes(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def sha256_file(path):
+    return sha256_bytes(path.read_bytes())
+
+
+def canonical_json_sha256(value):
+    return sha256_bytes(json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def run_local(args, cwd=None, env=None):
+    result = subprocess.run(
+        [str(value) for value in args], cwd=cwd, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, check=False, env=env)
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip().replace("\n", " ")[:600]
+        raise RuntimeError(f"command failed ({result.returncode}): {detail}")
+    return result.stdout
+
+
+def benchmark_diff_args(workspace, base_commit, pro):
+    return [
+        "git", "-C", str(workspace),
+        "diff", base_commit, "--", ".", *(PRO_DIFF_EXCLUDES if pro else CLASSIC_DIFF_EXCLUDES),
+    ]
+
+
+def inspect_recovery_workspace(workspace, base_commit, pro):
+    workspace = workspace.resolve(strict=True)
+    if not workspace.is_dir() or not (workspace / ".git").exists():
+        raise ValueError("recovery workspace must be an existing git worktree")
+    if not re.fullmatch(r"[0-9a-f]{40}", base_commit or ""):
+        raise ValueError("recovery base commit must be an exact 40-character SHA-1")
+    with tempfile.TemporaryDirectory(prefix="recovery-git-config-") as temporary:
+        protected_config = pathlib.Path(temporary) / "gitconfig"
+        git_env = dict(os.environ)
+        git_env.update({
+            "GIT_CONFIG_GLOBAL": str(protected_config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+        })
+        run_local([
+            "git", "config", "--global", "--replace-all", "safe.directory", workspace,
+        ], env=git_env)
+        git = ["git", "-C", str(workspace)]
+        head = run_local([*git, "rev-parse", "HEAD"], env=git_env).decode().strip()
+        if run_local(
+                [*git, "cat-file", "-t", base_commit], env=git_env).decode().strip() != "commit":
+            raise ValueError("recovery base object is not a commit")
+        untracked = run_local(
+            [*git, "ls-files", "--others", "--exclude-standard"], env=git_env)
+        if untracked.strip():
+            raise ValueError(
+                "recovery workspace has untracked files; provider-free capture cannot prove their "
+                "origin without mutating the evidence index")
+        patch = run_local(benchmark_diff_args(workspace, base_commit, pro), env=git_env)
+    evidence = b"workspace-v1\0" + head.encode() + b"\0" + base_commit.encode() + b"\0" + patch
+    return {
+        "head": head,
+        "patch": patch,
+        "patchBytes": len(patch),
+        "patchSha256": sha256_bytes(patch),
+        "workspaceEvidenceSha256": sha256_bytes(evidence),
+    }
+
+
+def capture_recovered_diff(workspace, out_root, image, workdir, base_commit, pro):
+    if workdir not in ("/testbed", "/app"):
+        raise ValueError("recovery workdir must be /testbed or /app")
+    if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image or ""):
+        raise ValueError("recovery image must be pinned by sha256 digest")
+    recovery_parent = out_root / ".recovery-workspaces"
+    recovery_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="capture-", dir=recovery_parent) as temporary:
+        evidence_copy = pathlib.Path(temporary) / "workspace"
+        evidence_copy.mkdir()
+        run_local(["cp", "-a", "--reflink=auto", str(workspace) + "/.", evidence_copy])
+        before = inspect_recovery_workspace(evidence_copy, base_commit, pro)
+        excludes = PRO_DIFF_EXCLUDES if pro else CLASSIC_DIFF_EXCLUDES
+        script = (
+            f"set -e; cd {workdir}; "
+            f"git config --global --replace-all safe.directory {workdir}; "
+            "git add -N --all >/dev/null; "
+            + shlex.join(["git", "diff", base_commit, "--", ".", *excludes])
+        )
+        patch = run_local([
+            "docker", "run", "--rm", "--pull=never", "--network", "none",
+            "-v", f"{evidence_copy}:{workdir}", "-w", workdir,
+            "--entrypoint", "/bin/sh", image, "-c", script,
+        ])
+        after = inspect_recovery_workspace(evidence_copy, base_commit, pro)
+        if before["workspaceEvidenceSha256"] != after["workspaceEvidenceSha256"]:
+            raise RuntimeError("capture changed the evidence-copy workspace")
+        if patch != before["patch"]:
+            raise RuntimeError("container capture differs from the pre-capture workspace diff")
+        return patch
+
+
+def recovery_attempt(attempts_path, instance_id, pass_number):
+    matches = []
+    if not attempts_path.exists():
+        raise ValueError("recovery attempts audit does not exist")
+    for line_number, line in enumerate(attempts_path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError as exc:
+            raise ValueError(f"malformed recovery attempt row {line_number}") from exc
+        if row.get("instance_id") == instance_id and row.get("pass") == pass_number:
+            matches.append(row)
+    preserved = [
+        row for row in matches
+        if row.get("status") == 500
+        and row.get("dispatchClassification") == ABORT_AMBIGUOUS
+        and row.get("reservationState") == "PRESERVED_INDETERMINATE"
+        and "benchmark patch capture failed" in str(row.get("error") or "")
+    ]
+    if len(preserved) != 1:
+        raise ValueError("recovery requires exactly one preserved-indeterminate capture failure")
+    return preserved[0]
+
+
+def validate_recovery_evidence(evidence, args, dataset_sha, base_commit, trajectory_sha, event_count):
+    if evidence.get("schemaVersion") != 1:
+        raise ValueError("recovery server evidence must use schemaVersion 1")
+    exact = {
+        "instanceId": args.instance_id,
+        "runId": args.run_id,
+        "provider": args.provider,
+        "model": args.model,
+        "datasetSha256": dataset_sha,
+        "baseCommit": base_commit,
+        "image": args.image,
+        "workspace": str(args.workspace.resolve()),
+        "outputDir": str(args.output_dir.resolve()),
+    }
+    mismatched = [key for key, value in exact.items() if evidence.get(key) != value]
+    if mismatched:
+        raise ValueError(f"recovery server evidence mismatch: {mismatched}")
+    pipeline = evidence.get("pipeline") or {}
+    if (pipeline.get("status") != "FAILED"
+            or pipeline.get("originalHttpStatus") != 500
+            or not str(pipeline.get("statusReason") or "").startswith(CAPTURE_FAILURE_PREFIX)):
+        raise ValueError("recovery requires an exact post-provider capture-failure pipeline proof")
+    engine = evidence.get("engine") or {}
+    if (engine.get("outcome") != "COMPLETED"
+            or not isinstance(engine.get("iterations"), int) or engine["iterations"] <= 0
+            or not isinstance(engine.get("toolCalls"), int) or engine["toolCalls"] <= 0):
+        raise ValueError("recovery requires a completed engine proof with positive counters")
+    usage = evidence.get("usage") or {}
+    count_fields = ("calls", "intents", "terminalUsage", "outboxCompleted")
+    if (not all(isinstance(usage.get(key), int) and usage[key] > 0 for key in count_fields)
+            or len({usage[key] for key in count_fields}) != 1
+            or usage.get("unmatchedIntents") != 0):
+        raise ValueError("recovery usage intents/terminal rows are incomplete")
+    token_fields = (
+        "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens")
+    if not all(isinstance(usage.get(key), int) and usage[key] >= 0 for key in token_fields):
+        raise ValueError("recovery usage token facts are incomplete")
+    cost = money(usage.get("costUsd"), "recovery canonical cost")
+    if cost <= 0 or cost > money(args.per_task_cap_usd, "per-task cap"):
+        raise ValueError("recovery canonical cost is outside the reserved task cap")
+    trajectory = evidence.get("trajectory") or {}
+    if trajectory.get("sha256") != trajectory_sha or trajectory.get("eventCount") != event_count:
+        raise ValueError("recovery trajectory evidence does not match the durable artifact")
+    failed_tracker = evidence.get("failedBenchmarkId")
+    if not isinstance(failed_tracker, str) or not failed_tracker:
+        raise ValueError("recovery evidence must identify the failed tracker")
+    return engine, usage, cost, failed_tracker
+
+
+def write_recovery_lineage(out_root, pass_number, tracking, new_tracker_id, failed_tracker,
+                           run_id, evidence_sha):
+    if not new_tracker_id:
+        return
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,100}", new_tracker_id):
+        raise ValueError("invalid --new-tracker-id")
+    if new_tracker_id == failed_tracker:
+        raise ValueError("recovery tracker must differ from the failed tracker")
+    lineage = dict(tracking)
+    lineage.update({
+        "benchmarkId": new_tracker_id,
+        "previousFailedBenchmarkId": failed_tracker,
+        "recoveredRunId": run_id,
+        "recoveryEvidenceSha256": evidence_sha,
+    })
+    atomic_json_write(out_root / f"pass{pass_number}.recovery-tracking.json", lineage)
+
+
+def select_tracking_sidecar(out_root, pass_number):
+    """Prefer validated recovery lineage without modifying the immutable failed sidecar."""
+    original_path = out_root / f"pass{pass_number}.tracking.json"
+    recovery_path = out_root / f"pass{pass_number}.recovery-tracking.json"
+    if not recovery_path.exists():
+        return original_path
+    if not original_path.exists():
+        raise ValueError("recovery tracking exists without the preserved failed sidecar")
+    original = json.loads(original_path.read_text())
+    recovery = json.loads(recovery_path.read_text())
+    failed_id = original.get("benchmarkId")
+    recovered_id = recovery.get("benchmarkId")
+    if (not isinstance(failed_id, str) or not failed_id
+            or not isinstance(recovered_id, str) or not recovered_id
+            or recovered_id == failed_id
+            or recovery.get("previousFailedBenchmarkId") != failed_id
+            or not isinstance(recovery.get("recoveredRunId"), str)
+            or not recovery["recoveredRunId"]
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(recovery.get("recoveryEvidenceSha256") or ""))):
+        raise ValueError("recovery tracking lineage is malformed or does not match failed tracker")
+    return recovery_path
+
+
+def cmd_recover_capture(a):
+    """Recover only post-provider diff capture; this command has no HTTP/provider code path."""
+    pass_number = int(a.pass_number)
+    if pass_number < 1:
+        sys.exit("--pass-number must be positive")
+    out_root = pathlib.Path(a.out).expanduser().resolve(strict=True)
+    dataset_path = pathlib.Path(a.dataset).expanduser().resolve(strict=True)
+    workspace = pathlib.Path(a.workspace).expanduser().resolve(strict=True)
+    output_dir = pathlib.Path(a.output_dir).expanduser().resolve(strict=True)
+    trajectory_path = pathlib.Path(a.trajectory).expanduser().resolve(strict=True)
+    evidence_path = pathlib.Path(a.server_evidence).expanduser().resolve(strict=True)
+    a.workspace = workspace
+    a.output_dir = output_dir
+    try:
+        for flag, value in (
+                ("--trajectory-sha256", a.trajectory_sha256),
+                ("--workspace-evidence-sha256", a.workspace_evidence_sha256),
+                ("--expected-patch-sha256", a.expected_patch_sha256)):
+            if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
+                raise ValueError(f"{flag} must be an exact lowercase SHA-256")
+        if not isinstance(a.expected_patch_bytes, int) or a.expected_patch_bytes <= 0:
+            raise ValueError("--expected-patch-bytes must be positive")
+        if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", a.image or ""):
+            raise ValueError("recovery image must be pinned by sha256 digest")
+        try:
+            trajectory_relative = trajectory_path.relative_to(out_root).as_posix()
+        except ValueError as exc:
+            raise ValueError("recovery trajectory must be inside the campaign output root") from exc
+        rows = json.loads(dataset_path.read_text())
+        if not isinstance(rows, list) or len(rows) != a.expected_total:
+            raise ValueError("recovery dataset cardinality does not match --expected-total")
+        matches = [row for row in rows if row.get("instance_id") == a.instance_id]
+        if len(matches) != 1:
+            raise ValueError("recovery instance must occur exactly once in the frozen dataset")
+        base_commit = matches[0].get("base_commit")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(base_commit or "")):
+            raise ValueError("frozen recovery row has no exact base commit")
+        if a.workdir == "/app" and not a.pro:
+            raise ValueError("/app recovery requires --pro")
+        if a.workdir == "/testbed" and a.pro:
+            raise ValueError("Lite /testbed recovery cannot use --pro exclusions")
+        dataset_sha = sha256_file(dataset_path)
+        trajectory_sha = sha256_file(trajectory_path)
+        event_count = trajectory_path.read_bytes().count(b"\n")
+        if trajectory_sha != a.trajectory_sha256 or event_count <= 0:
+            raise ValueError("durable trajectory hash/count verification failed")
+        evidence = json.loads(evidence_path.read_text())
+        engine, usage, cost, failed_tracker = validate_recovery_evidence(
+            evidence, a, dataset_sha, base_commit, trajectory_sha, event_count)
+        evidence_sha = canonical_json_sha256(evidence)
+        workspace_state = inspect_recovery_workspace(workspace, base_commit, a.pro)
+        if workspace_state["workspaceEvidenceSha256"] != a.workspace_evidence_sha256:
+            raise ValueError("workspace evidence SHA-256 mismatch")
+        if (workspace_state["patchSha256"] != a.expected_patch_sha256
+                or workspace_state["patchBytes"] != a.expected_patch_bytes
+                or workspace_state["patchBytes"] <= 0):
+            raise ValueError("workspace patch bytes/hash do not match explicit recovery proof")
+
+        attempts = out_root / f"pass{pass_number}.attempts.jsonl"
+        recovery_attempt(attempts, a.instance_id, pass_number)
+        tracking_file = out_root / f"pass{pass_number}.tracking.json"
+        tracking = json.loads(tracking_file.read_text())
+        if tracking.get("benchmarkId") != failed_tracker:
+            raise ValueError("failed tracker sidecar does not match recovery evidence")
+        ledger = CampaignBudget(
+            out_root / "campaign.budget.json", a.per_task_cap_usd, a.campaign_cap_usd,
+            a.opening_balance_usd, a.expected_total)
+        reservation_key = f"pass{pass_number}:{a.instance_id}"
+        if ledger.task_status(reservation_key) not in ("RESERVED", "SETTLED"):
+            raise ValueError("recovery requires the exact preserved campaign reservation")
+
+        manifest_path = out_root / f"pass{pass_number}.manifest.jsonl"
+        completed = load_generation_manifest(manifest_path)
+        if a.instance_id in completed:
+            existing = completed[a.instance_id]
+            if (existing.get("status") != RECOVERED_CAPTURE_STATUS
+                    or existing.get("recoveryEvidenceSha256") != evidence_sha
+                    or money(existing.get("costUsd"), "existing recovery cost") != cost):
+                raise ValueError("existing terminal manifest row is not this exact recovery")
+            expected_submission = (output_dir / "submission.patch").resolve()
+            expected_preds_path = (output_dir / "preds.json").resolve()
+            if (pathlib.Path(existing["submissionPatch"]).resolve() != expected_submission
+                    or pathlib.Path(existing["predsJson"]).resolve() != expected_preds_path
+                    or existing.get("trajectoryLocation") != trajectory_relative):
+                raise ValueError("existing recovered artifact locations do not match frozen inputs")
+            for path_key, hash_key, expected_hash in (
+                    ("submissionPatch", "patch", a.expected_patch_sha256),
+                    ("trajectoryLocation", "trajectory", trajectory_sha)):
+                artifact = (out_root / existing[path_key]).resolve() if path_key == "trajectoryLocation" \
+                    else pathlib.Path(existing[path_key]).resolve()
+                if not artifact.is_file() or sha256_file(artifact) != expected_hash:
+                    raise ValueError(f"existing recovered {hash_key} artifact failed verification")
+            preds = pathlib.Path(existing["predsJson"]).resolve()
+            if not preds.is_file():
+                raise ValueError("existing recovered preds artifact is missing")
+            expected_preds = {
+                a.instance_id: {
+                    "model_name_or_path": "executespec-benchmark/" + a.model,
+                    "instance_id": a.instance_id,
+                    "model_patch": pathlib.Path(existing["submissionPatch"]).read_text(),
+                },
+            }
+            if (sha256_file(preds) != existing.get("predsSha256")
+                    or json.loads(preds.read_text()) != expected_preds):
+                raise ValueError("existing recovered preds artifact failed verification")
+            ledger.settle(reservation_key, cost)
+            write_recovery_lineage(
+                out_root, pass_number, tracking, a.new_tracker_id, failed_tracker,
+                a.run_id, evidence_sha)
+            print(f"capture recovery already complete for {a.instance_id}; ledger reconciled")
+            return
+
+        patch = capture_recovered_diff(
+            workspace, out_root, a.image, a.workdir, base_commit, a.pro)
+        if len(patch) != a.expected_patch_bytes or sha256_bytes(patch) != a.expected_patch_sha256:
+            raise ValueError("container recovery capture differs from explicit patch proof")
+        submission = output_dir / "submission.patch"
+        preds = output_dir / "preds.json"
+        if submission.exists() or preds.exists():
+            raise ValueError("recovery refuses to overwrite existing generation artifacts")
+        atomic_bytes_write(submission, patch)
+        atomic_json_write(preds, {
+            a.instance_id: {
+                "model_name_or_path": "executespec-benchmark/" + a.model,
+                "instance_id": a.instance_id,
+                "model_patch": patch.decode(),
+            },
+        })
+        preds_sha = sha256_file(preds)
+        recovery_id = sha256_bytes(
+            (a.run_id + "\0" + evidence_sha + "\0" + a.expected_patch_sha256).encode())
+        audit = {
+            "type": "CAPTURE_RECOVERED_PROVIDER_FREE",
+            "recoveryId": recovery_id,
+            "instance_id": a.instance_id,
+            "pass": pass_number,
+            "runId": a.run_id,
+            "originalHttpStatus": 500,
+            "failedBenchmarkId": failed_tracker,
+            "recoveryEvidenceSha256": evidence_sha,
+            "workspaceEvidenceSha256": workspace_state["workspaceEvidenceSha256"],
+            "patchSha256": a.expected_patch_sha256,
+            "predsSha256": preds_sha,
+            "trajectorySha256": trajectory_sha,
+            "providerDispatch": False,
+        }
+        existing_audits = attempts.read_text()
+        if recovery_id not in existing_audits:
+            atomic_jsonl_append(attempts, audit)
+        row = {
+            "instance_id": a.instance_id,
+            "pass": pass_number,
+            "model": a.model,
+            "status": RECOVERED_CAPTURE_STATUS,
+            "originalHttpStatus": 500,
+            "recoveryKind": RECOVERY_KIND,
+            "outcome": engine["outcome"],
+            "runId": a.run_id,
+            "iterations": engine["iterations"],
+            "toolCalls": engine["toolCalls"],
+            "patchBytes": len(patch),
+            "costUsd": str(cost),
+            "usageCalls": usage["calls"],
+            "usageIntents": usage["intents"],
+            "terminalUsageRows": usage["terminalUsage"],
+            "outboxCompletedRows": usage["outboxCompleted"],
+            "unmatchedUsageIntents": usage["unmatchedIntents"],
+            "inputTokens": usage["inputTokens"],
+            "outputTokens": usage["outputTokens"],
+            "cacheReadTokens": usage["cacheReadTokens"],
+            "cacheWriteTokens": usage["cacheWriteTokens"],
+            "reasoningTokens": usage["reasoningTokens"],
+            "submissionPatch": str(submission),
+            "predsJson": str(preds),
+            "proPatchJson": None,
+            "trajectoryLocation": trajectory_relative,
+            "trajectorySha256": trajectory_sha,
+            "recoveryEvidenceSha256": evidence_sha,
+            "workspaceEvidenceSha256": workspace_state["workspaceEvidenceSha256"],
+            "patchSha256": a.expected_patch_sha256,
+            "predsSha256": preds_sha,
+            "failedBenchmarkId": failed_tracker,
+            "providerDispatch": False,
+        }
+        completed[a.instance_id] = row
+        write_generation_manifest(
+            manifest_path, completed, [row["instance_id"] for row in rows])
+        # Manifest-first is deliberate: a crash before this line leaves a resumable terminal row;
+        # settle is immutable/idempotent and can be replayed without another provider request.
+        ledger.settle(reservation_key, cost)
+        write_recovery_lineage(
+            out_root, pass_number, tracking, a.new_tracker_id, failed_tracker,
+            a.run_id, evidence_sha)
+        print(json.dumps({
+            "status": RECOVERED_CAPTURE_STATUS,
+            "instanceId": a.instance_id,
+            "runId": a.run_id,
+            "patchBytes": len(patch),
+            "costUsd": str(cost),
+            "providerDispatch": False,
+        }, sort_keys=True))
+    except (ValueError, RuntimeError, OSError, json.JSONDecodeError) as exc:
+        sys.exit(f"capture recovery refused: {exc}")
 
 
 def trajectory_artifact(out_root, pass_number, instance_id, run_id, replay):
@@ -723,11 +1220,15 @@ def cmd_generate(a):
 
     for k in range(1, a.k + 1):
         tracking_file = out_root / f"pass{k}.tracking.json"
-        if tracking_file.exists():
-            tracking_metadata = json.loads(tracking_file.read_text())
+        try:
+            active_tracking_file = select_tracking_sidecar(out_root, k)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            sys.exit(f"tracking lineage validation failed: {exc}")
+        if active_tracking_file.exists():
+            tracking_metadata = json.loads(active_tracking_file.read_text())
             bench_id = tracking_metadata.get("benchmarkId")
             if not bench_id:
-                sys.exit(f"tracking sidecar has no benchmarkId: {tracking_file}")
+                sys.exit(f"tracking sidecar has no benchmarkId: {active_tracking_file}")
             expected_tracking = {
                 "provider": a.provider,
                 "model": a.model,
@@ -1342,6 +1843,35 @@ def main():
     p.add_argument("--expected-total", type=int, help="expected result count when no manifest is available")
     p.add_argument("--attempt", type=int, default=0)
 
+    r = sub.add_parser(
+        "recover-capture",
+        help="provider-free recovery for a proved post-provider diff-capture failure")
+    r.add_argument("--dataset", required=True)
+    r.add_argument("--expected-total", type=int, required=True)
+    r.add_argument("--out", required=True, help="existing campaign output root")
+    r.add_argument("--pass-number", type=int, default=1)
+    r.add_argument("--instance-id", required=True)
+    r.add_argument("--run-id", required=True)
+    r.add_argument("--provider", required=True)
+    r.add_argument("--model", required=True)
+    r.add_argument("--workspace", required=True)
+    r.add_argument("--output-dir", required=True)
+    r.add_argument("--image", required=True, help="immutable image@sha256:... reference")
+    r.add_argument("--workdir", choices=("/testbed", "/app"), required=True)
+    r.add_argument("--pro", action="store_true")
+    r.add_argument("--server-evidence", required=True, help="verified canonical evidence JSON")
+    r.add_argument("--trajectory", required=True)
+    r.add_argument("--trajectory-sha256", required=True)
+    r.add_argument("--workspace-evidence-sha256", required=True)
+    r.add_argument("--expected-patch-sha256", required=True)
+    r.add_argument("--expected-patch-bytes", type=int, required=True)
+    r.add_argument("--per-task-cap-usd", type=Decimal, required=True)
+    r.add_argument("--campaign-cap-usd", type=Decimal, required=True)
+    r.add_argument("--opening-balance-usd", type=Decimal, required=True)
+    r.add_argument(
+        "--new-tracker-id",
+        help="optional separately-created tracker id; the failed tracker is never reused")
+
     for name in ("aggregate", "canary"):
         s = sub.add_parser(name)
         s.add_argument("results", nargs="+", help="k eval_results.json paths (one per pass)")
@@ -1351,7 +1881,13 @@ def main():
             s.add_argument("--out", default="infra/benchmark/canary")
 
     a = ap.parse_args()
-    {"generate": cmd_generate, "publish": cmd_publish, "aggregate": cmd_aggregate, "canary": cmd_canary}[a.cmd](a)
+    {
+        "generate": cmd_generate,
+        "recover-capture": cmd_recover_capture,
+        "publish": cmd_publish,
+        "aggregate": cmd_aggregate,
+        "canary": cmd_canary,
+    }[a.cmd](a)
 
 
 if __name__ == "__main__":
