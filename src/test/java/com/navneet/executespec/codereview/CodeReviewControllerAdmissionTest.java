@@ -18,6 +18,7 @@ import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,8 @@ class CodeReviewControllerAdmissionTest {
   private final ProjectRepoService projectRepoService = mock(ProjectRepoService.class);
   private final CodeReviewAutofixService autofixService = mock(CodeReviewAutofixService.class);
   private final CodeReviewController controller =
-      new CodeReviewController(service, guard, projectRepoService, autofixService);
+      new CodeReviewController(
+          service, guard, projectRepoService, autofixService, new GeneratedSecretScanner());
   private final UUID repoId = UUID.randomUUID();
   private final AppUserDetails principal = principal();
 
@@ -128,6 +130,27 @@ class CodeReviewControllerAdmissionTest {
         .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "cross-org"));
 
     assertThrows(ResponseStatusException.class, () -> controller.downloadReport(scanId, principal));
+  }
+
+  @Test
+  void directReportRejectsCredentialMaterialWithoutEchoingIt() {
+    UUID scanId = UUID.randomUUID();
+    String secret = "github_pat_" + "A1".repeat(25);
+    when(service.findScan(scanId))
+        .thenReturn(
+            CodeReviewScan.builder()
+                .id(scanId)
+                .projectId("project-1")
+                .repoFullName("owner/repo")
+                .reportMarkdown("evidence=" + secret)
+                .build());
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class, () -> controller.downloadReport(scanId, principal));
+
+    assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.getStatusCode());
+    org.junit.jupiter.api.Assertions.assertFalse(error.getReason().contains(secret));
   }
 
   @Test

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
@@ -75,6 +76,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class WorkerAgent {
+
+  /** 120s finalizer LLM turn + up to 60s for its single closing tool before shutdown reserve. */
+  private static final int TERMINAL_FINALIZER_LEAD_SECONDS = 180;
 
   /**
    * Default iteration cap (per V2 plan P3.1 — was 28 in V1 MEDIUM, raised to compensate for
@@ -500,6 +504,11 @@ public class WorkerAgent {
         req.wallClockSeconds() != null && req.wallClockSeconds() > 0
             ? req.wallClockSeconds() * 1000L
             : 0L;
+    // Phase-12 benchmark contract: an absolute deadline includes time spent before this worker
+    // thread started. The reserve is never offered to provider/tool work; it is kept for terminal
+    // persistence, cost/SSE completion, and the adapter's ATIF trajectory flush.
+    final boolean absoluteDeadline =
+        req.absoluteDeadlineEpochMs() != null && req.absoluteDeadlineEpochMs() > 0;
 
     if (!isResume) {
       log.info(
@@ -547,6 +556,27 @@ public class WorkerAgent {
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
+      }
+      if (absoluteDeadline) {
+        long usableMillis =
+            AbsoluteDeadlineBudget.usableMillis(
+                req.absoluteDeadlineEpochMs(), req.shutdownReserveMs(), System.currentTimeMillis());
+        // Enter the one-shot finalizer while a normal provider call can still fit. If it cannot
+        // produce a closing tool call, stop immediately instead of spending the shutdown reserve.
+        if (terminalTaskMode
+            && !terminalForcedFinalizerAttempted
+            && usableMillis <= TERMINAL_FINALIZER_LEAD_SECONDS * 1000L) {
+          terminalForcedFinalizerAttempted = true;
+          WorkerResult finalized =
+              runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, false);
+          if (finalized != null) return finalized;
+          return deadlineExceededResult(
+              req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+        }
+        if (usableMillis < 1000L) {
+          return deadlineExceededResult(
+              req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+        }
       }
       // 2026-05-10 — wall-clock cap check. Top-of-iter so we never start a new LLM call once
       // we've blown past the budget. In-flight LLM calls are not interrupted (the stop happens
@@ -678,6 +708,11 @@ public class WorkerAgent {
       final boolean forcedThisCall = progressV2 && forceToolChoiceNextCall;
       forceToolChoiceNextCall = false;
       ChatResponse resp;
+      java.util.OptionalInt iterationTimeout = deadlineTimeoutSeconds(req);
+      if (iterationTimeout.isEmpty()) {
+        return deadlineExceededResult(
+            req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+      }
       try {
         resp =
             router.call(
@@ -703,7 +738,7 @@ public class WorkerAgent {
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
                     // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
                     // their HTTP timeouts).
-                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                    .readTimeoutSeconds(iterationTimeout.getAsInt())
                     .build());
       } catch (Exception e) {
         if (forcedThisCall) {
@@ -1722,6 +1757,11 @@ public class WorkerAgent {
       long start,
       List<ToolCallback> tools,
       String toolChoice) {
+    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+    if (callTimeout.isEmpty()) {
+      log.info("WorkerAgent SALVAGE refused: absolute deadline shutdown reserve reached");
+      return null;
+    }
     ChatResponse resp;
     try {
       resp =
@@ -1739,7 +1779,7 @@ public class WorkerAgent {
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .build());
     } catch (Exception e) {
       log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
@@ -1896,6 +1936,11 @@ public class WorkerAgent {
       int iter,
       List<ToolCallback> tools,
       String toolChoice) {
+    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+    if (callTimeout.isEmpty()) {
+      log.info("WorkerAgent TERMINAL_FINALIZER refused: shutdown reserve reached");
+      return null;
+    }
     ChatResponse resp;
     try {
       resp =
@@ -1915,7 +1960,7 @@ public class WorkerAgent {
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .build());
     } catch (Exception e) {
       log.warn(
@@ -2177,6 +2222,41 @@ public class WorkerAgent {
     return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
+  static java.util.OptionalInt deadlineTimeoutSeconds(WorkerTaskRequest req) {
+    return AbsoluteDeadlineBudget.timeoutSeconds(
+        req.absoluteDeadlineEpochMs(),
+        req.shutdownReserveMs(),
+        System.currentTimeMillis(),
+        WORKER_HTTP_READ_TIMEOUT_SECONDS);
+  }
+
+  private WorkerResult deadlineExceededResult(
+      WorkerTaskRequest req,
+      int iter,
+      int toolsDispatched,
+      String lastText,
+      int repeatedAssistantTextCount,
+      List<String> toolLog,
+      long start) {
+    log.warn(
+        "WorkerAgent ABSOLUTE_DEADLINE run={} task={} iter={} deadline={} reserveMs={}",
+        req.context().runId(),
+        req.context().taskId(),
+        iter,
+        req.absoluteDeadlineEpochMs(),
+        req.shutdownReserveMs());
+    recordTerminal(WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED, req, iter);
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED)
+        .iterations(iter)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText(lastText)
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
+  }
+
   private String dispatchOne(
       AssistantMessage.ToolCall tc, WorkerTaskRequest req, boolean isImmediatelyPriorToolCall) {
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
@@ -2202,7 +2282,12 @@ public class WorkerAgent {
     // is skipped in remote mode (the compactor flag is OFF by default; the envelope is byte-shaped
     // identically to the local okEnvelope/errEnvelope path).
     if (toolRegistry.isRemoteRun(req.context())) {
-      return toolRegistry.dispatchRemote(req.context(), tc.name(), tc.arguments());
+      return toolRegistry.dispatchRemote(
+          req.context(),
+          tc.name(),
+          tc.arguments(),
+          req.absoluteDeadlineEpochMs(),
+          req.shutdownReserveMs());
     }
     JsonNode args;
     try {
@@ -3061,8 +3146,13 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
    */
   private String runCriticPass(WorkerTaskRequest req, List<String> paths) {
     try {
+      java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+      if (callTimeout.isEmpty()) return null;
       String deliverable = readDeliverableContext(req.context(), paths);
-      String userMsg = "TASK:\n" + req.userPrompt() + "\n\nCANDIDATE DELIVERABLE:\n" + deliverable;
+      String userMsg =
+          PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
+              + "\n\n"
+              + PromptTrustBoundary.wrap("CANDIDATE_DELIVERABLE", deliverable);
       ChatResponse resp =
           router.call(
               LlmRequest.builder()
@@ -3075,6 +3165,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   .stepId("worker.critic-pass")
                   .temperature(0.0)
                   .maxTokens(1500)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(List.of()) // no tools — a plain completion
                   .build());

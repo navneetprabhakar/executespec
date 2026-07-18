@@ -1,5 +1,14 @@
 # `agent/` — LLM agents + routing
 
+## Prompt authority boundary (2026-07-18)
+
+`PromptTrustBoundary` is the shared repository/project evidence wrapper. It normalizes Unicode
+compatibility forms, removes zero-width delimiter tricks, strips cross-label delimiters, and
+neutralizes Base64-encoded boundary closers. Repository, document, memory, report, build, diff,
+tool-derived, and user-controlled payloads must remain `UserMessage`/tool evidence; only static
+role/tool/output policy belongs in `SystemMessage`. Legacy post-run conversation and suggestion-plan
+paths now follow that separation as well.
+
 > Last reviewed: 2026-07-13 (ExecuteSpec 2.0 release track).
 
 All LLM-calling agents + the routing infrastructure for the V2 pipeline.

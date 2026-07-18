@@ -56,6 +56,8 @@ public record WorkerResult(
      * against expensive long-tail tasks where a slow model burns through the iter budget very fast,
      * AND against tasks where a verbose model uses too many "thin" iterations per write.
      */
-    WALL_CLOCK_EXCEEDED
+    WALL_CLOCK_EXCEEDED,
+    /** Shared benchmark absolute deadline reached; distinct from a relative per-task cap. */
+    ABSOLUTE_DEADLINE_EXCEEDED
   }
 }

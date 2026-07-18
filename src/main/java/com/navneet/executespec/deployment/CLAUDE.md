@@ -35,7 +35,13 @@ Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for 
   keys are environment-prefixed; project exports must separately opt in through
   `project.exports.gcs-enabled=true`, so configuring workspace archival alone cannot redirect
   export bytes to GCS.
-- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end) instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
+- `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
+  included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
+  the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). It applies the
+  same final `ArtifactPublicationGuard` before creating a remote repository or pushing to an
+  existing one. Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end)
+  instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
 
 ### `preview/verify/` — verifyBoot (RL-2026-05-066, preview Phase 1)
 

@@ -162,11 +162,43 @@ def test_authenticated_post_fails_after_refreshed_401(monkeypatch):
         k_eval.post_authenticated("/x", {}, {"t": "expired"}, threading.Lock())
 
 
+def test_authenticated_get_refreshes_401_once(monkeypatch):
+    calls = []
+
+    def fake_get(path, token, timeout):
+        calls.append(token)
+        if token == "expired":
+            raise urllib.error.HTTPError(path, 401, "expired", {}, None)
+        return 200, []
+
+    monkeypatch.setattr(k_eval, "get", fake_get)
+    monkeypatch.setattr(k_eval, "login", lambda: "fresh")
+    token_box = {"t": "expired"}
+    assert k_eval.get_authenticated(
+        "/api/runs/run-1/event-log", token_box, threading.Lock()) == (200, [])
+    assert calls == ["expired", "fresh"]
+
+
 def test_tracking_start_requires_server_id(monkeypatch):
     monkeypatch.setattr(k_eval, "post_authenticated", lambda *args, **kwargs: (200, {}))
     with pytest.raises(RuntimeError, match="no benchmark id"):
         k_eval.tracking_start(
             {"t": "token"}, threading.Lock(), "openrouter", "glm-5.2", 1, 10, "lite10")
+
+
+def test_tracking_start_publishes_explicit_submission_contract(monkeypatch):
+    captured = {}
+
+    def fake_post(path, body, *args, **kwargs):
+        captured.update(body)
+        return 200, {"id": "benchmark-id"}
+
+    monkeypatch.setattr(k_eval, "post_authenticated", fake_post)
+    assert k_eval.tracking_start(
+        {"t": "token"}, threading.Lock(), "deepseek", "deepseek-v4-pro-native",
+        1, 731, "pro731", True) == "benchmark-id"
+    assert captured["submissionRequired"] is True
+    assert captured["k"] == 1
 
 
 def test_tracking_event_failure_is_not_swallowed(monkeypatch):
@@ -229,6 +261,281 @@ def test_campaign_budget_settlement_is_immutable(tmp_path):
     budget.settle("pass1:a", "0.25")
     with pytest.raises(RuntimeError, match="already settled"):
         budget.settle("pass1:a", "0.24")
+
+
+def test_lite_manifest_accepts_null_pro_patch_artifact(tmp_path):
+    manifest = tmp_path / "manifest.jsonl"
+    row = terminal_row()
+    row["proPatchJson"] = None
+    write_jsonl(manifest, [row])
+    assert set(k_eval.load_generation_manifest(manifest)) == {"a"}
+
+
+def test_trajectory_artifact_is_relative_and_hashed(tmp_path):
+    events = [{"type": "TOOL_CALL", "payload": "readFile"}]
+    replay = {
+        "available": True, "truncated": False, "events": events, "lastEventId": "7",
+    }
+    location, digest = k_eval.trajectory_artifact(
+        tmp_path, 1, "django__django-1", "run-1", replay)
+    assert location.startswith("pass1.trajectories/")
+    assert len(digest) == 64
+    artifact = tmp_path / location
+    assert k_eval.hashlib.sha256(artifact.read_bytes()).hexdigest() == digest
+    content = json.loads(artifact.read_text())
+    assert content["runId"] == "run-1"
+    assert content["events"] == events
+    assert "/Users/" not in location
+
+
+def test_trajectory_artifact_rejects_non_array_event_log(tmp_path):
+    with pytest.raises(ValueError, match="JSON object"):
+        k_eval.trajectory_artifact(tmp_path, 1, "a", "run-1", [])
+    with pytest.raises(ValueError, match="unavailable"):
+        k_eval.trajectory_artifact(
+            tmp_path, 1, "a", "run-1",
+            {"available": False, "reason": "EXPIRED", "events": []})
+    with pytest.raises(ValueError, match="empty"):
+        k_eval.trajectory_artifact(
+            tmp_path, 1, "a", "run-1",
+            {"available": True, "truncated": False, "events": []})
+    with pytest.raises(ValueError, match="truncated"):
+        k_eval.trajectory_artifact(
+            tmp_path, 1, "a", "run-1",
+            {"available": True, "truncated": True, "events": [{"type": "LOG"}]})
+
+
+def test_trajectory_artifact_recursively_redacts_credentials_and_paths(tmp_path):
+    replay = {
+        "available": True,
+        "truncated": False,
+        "lastEventId": "9",
+        "events": [{
+            "authorization": "Bearer header-secret-value",
+            "nested": {
+                "apiKey": "sk-abcdefghijklmnopqrstuvwxyz",
+                "password": "Admin@123",
+                "message": (
+                    "use Bearer abc.def.ghi and es_pat_abcdefghijklmnopqrstuvwxyz "
+                    "with api_key=plain-text-provider-key and password=hunter2 "
+                    "and PAT=bitbucket-plain-pat from "
+                    "/Users/operator/Desktop/key_rotation.txt"
+                ),
+            },
+        }],
+    }
+    location, _digest = k_eval.trajectory_artifact(
+        tmp_path, 1, "a", "run-1", replay)
+    serialized = (tmp_path / location).read_text()
+    assert "header-secret-value" not in serialized
+    assert "Admin@123" not in serialized
+    assert "plain-text-provider-key" not in serialized
+    assert "hunter2" not in serialized
+    assert "bitbucket-plain-pat" not in serialized
+    assert "es_pat_" not in serialized
+    assert "key_rotation.txt" not in serialized
+    assert "[REDACTED]" in serialized
+    assert "[REDACTED_PATH]" in serialized
+
+
+def test_durable_trajectory_artifact_verifies_complete_checksum_contract(tmp_path, monkeypatch):
+    encoded = b'{"type":"LOG","payload":"safe"}\n'
+    digest = k_eval.hashlib.sha256(encoded).hexdigest()
+    requested = []
+
+    def fake_download(path, *_args, **_kwargs):
+        requested.append(path)
+        return (
+            200,
+            encoded,
+            {
+                "x-trajectory-truncated": "false",
+                "x-trajectory-sha256": digest,
+                "x-trajectory-event-count": "1",
+            },
+        )
+
+    monkeypatch.setattr(
+        k_eval,
+        "get_bytes_authenticated",
+        fake_download,
+    )
+    location, actual = k_eval.durable_trajectory_artifact(
+        tmp_path, 1, "django__django-1", "run-1", {"t": "token"}, threading.Lock())
+    assert location.endswith(".ndjson")
+    assert actual == digest
+    assert (tmp_path / location).read_bytes() == encoded
+    assert requested == ["/api/v2/test/benchmark/runs/run-1/trajectory"]
+
+
+@pytest.mark.parametrize(
+    "headers,body,error",
+    [
+        ({"x-trajectory-truncated": "true", "x-trajectory-sha256": "a" * 64,
+          "x-trajectory-event-count": "1"}, b"{}\n", "truncated"),
+        ({"x-trajectory-truncated": "false", "x-trajectory-sha256": "0" * 64,
+          "x-trajectory-event-count": "1"}, b"{}\n", "checksum"),
+        ({"x-trajectory-truncated": "false", "x-trajectory-sha256":
+          k_eval.hashlib.sha256(b"").hexdigest(), "x-trajectory-event-count": "0"},
+         b"", "empty"),
+    ],
+)
+def test_durable_trajectory_artifact_fails_closed(tmp_path, monkeypatch, headers, body, error):
+    monkeypatch.setattr(
+        k_eval,
+        "get_bytes_authenticated",
+        lambda *args, **kwargs: (200, body, headers),
+    )
+    with pytest.raises(ValueError, match=error):
+        k_eval.durable_trajectory_artifact(
+            tmp_path, 1, "a", "run-1", {"t": "token"}, threading.Lock())
+
+
+def test_eta_uses_parallel_waves_and_is_unknown_before_first_completion():
+    assert k_eval.estimate_eta_seconds([], 10, 4) is None
+    assert k_eval.estimate_eta_seconds([10, 20], 5, 2) == 45
+    assert k_eval.estimate_eta_seconds([10], 0, 4) == 0
+
+
+def test_generate_emits_durable_started_progress_and_trajectory(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "django__django-1"}]))
+    args = generate_args(tmp_path, dataset, 1)
+    args.concurrency = 1
+    args.per_task_cap_usd = k_eval.Decimal("2")
+    args.campaign_cap_usd = k_eval.Decimal("2")
+    args.opening_balance_usd = k_eval.Decimal("2")
+    events = []
+    starts = []
+    monkeypatch.setattr(k_eval, "login", lambda: "token")
+    monkeypatch.setattr(
+        k_eval,
+        "tracking_start",
+        lambda *values: starts.append(values) or "benchmark-id",
+    )
+    monkeypatch.setattr(
+        k_eval,
+        "tracking_event",
+        lambda _token, _lock, _bench, body: events.append(body.copy()),
+    )
+    monkeypatch.setattr(
+        k_eval,
+        "post_authenticated",
+        lambda *args, **kwargs: (
+            200,
+            {
+                "outcome": "COMPLETED",
+                "patchBytes": 42,
+                "runId": "run-1",
+                "iterations": 7,
+                "proPatchJson": None,
+                "predsJson": "/var/private/preds.json",
+                "submissionPatch": "/var/private/submission.patch",
+                "costUsd": "0.25",
+                "inputTokens": 100,
+                "outputTokens": 20,
+            },
+        ),
+    )
+    trajectory = b'{"type":"RUN_COMPLETED"}\n'
+    monkeypatch.setattr(
+        k_eval,
+        "get_bytes_authenticated",
+        lambda *args, **kwargs: (
+            200,
+            trajectory,
+            {"x-trajectory-truncated": "false",
+             "x-trajectory-sha256": k_eval.hashlib.sha256(trajectory).hexdigest(),
+             "x-trajectory-event-count": "1"},
+        ),
+    )
+
+    k_eval.cmd_generate(args)
+
+    tracking = json.loads((tmp_path / "out" / "pass1.tracking.json").read_text())
+    manifest = k_eval.load_generation_manifest(tmp_path / "out" / "pass1.manifest.jsonl")
+    row = manifest["django__django-1"]
+    assert tracking["submissionRequired"] is False
+    assert starts[0][-1] is False
+    assert any(event["type"] == "TASK_STARTED" and event["attempt"] == 1 for event in events)
+    progress = next(event for event in events if event["type"] == "RUN_PROGRESS"
+                    and event.get("taskName") == "django__django-1")
+    assert progress["attempt"] == 1
+    assert progress["etaSeconds"] == 0
+    assert (tmp_path / "out" / row["trajectoryLocation"]).is_file()
+    assert len(row["trajectorySha256"]) == 64
+
+
+def test_submission_required_rejects_k_greater_than_one_before_login(
+        tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([{"instance_id": "a"}]))
+    args = generate_args(tmp_path, dataset, 1)
+    args.k = 2
+    args.submission_required = True
+    monkeypatch.setattr(
+        k_eval, "login", lambda: pytest.fail("login must not occur before submission validation"))
+    with pytest.raises(SystemExit, match="pass@1"):
+        k_eval.cmd_generate(args)
+
+
+def test_publish_carries_scorer_classification_and_trajectory(monkeypatch, tmp_path):
+    tracking = tmp_path / "pass1.tracking.json"
+    tracking.write_text(json.dumps({
+        "benchmarkId": "benchmark-id", "attempt": 1, "totalTasks": 2,
+        "submissionRequired": True,
+    }))
+    manifest = tmp_path / "pass1.manifest.jsonl"
+    first = terminal_row("passed") | {
+        "trajectoryLocation": "pass1.trajectories/passed.json",
+        "trajectorySha256": "a" * 64,
+    }
+    second = terminal_row("timed-out") | {
+        "trajectoryLocation": "pass1.trajectories/timed-out.json",
+        "trajectorySha256": "b" * 64,
+    }
+    write_jsonl(manifest, [first, second])
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({
+        "submitted_ids": ["passed", "timed-out"],
+        "resolved_ids": ["passed"],
+        "unresolved_ids": ["timed-out"],
+        "empty_patch_ids": [],
+        "error_ids": [],
+    }))
+    posted = []
+    monkeypatch.setattr(k_eval, "login", lambda: "token")
+    monkeypatch.setattr(
+        k_eval, "post_authenticated",
+        lambda path, body, *args, **kwargs: posted.append((path, body.copy())) or (200, {}),
+    )
+    args = argparse.Namespace(
+        tracking_file=str(tracking), benchmark_id=None, attempt=0,
+        results=str(results), manifest=str(manifest), expected_total=None,
+    )
+
+    k_eval.cmd_publish(args)
+
+    scored = [body for _path, body in posted if body["type"] == "TASK_SCORED"]
+    assert len(scored) == 2
+    assert next(row for row in scored if row["taskName"] == "passed")[
+        "failureClassification"] == "NONE"
+    failed = next(row for row in scored if row["taskName"] == "timed-out")
+    assert failed["failureClassification"] == "AGENT_OR_TEST_FAILURE"
+    assert failed["trajectoryLocation"] == "pass1.trajectories/timed-out.json"
+    assert failed["trajectorySha256"] == "b" * 64
+
+
+def test_result_evidence_classifies_explicit_timeout_without_guessing(tmp_path):
+    result = tmp_path / "results.json"
+    result.write_text(json.dumps([
+        {"instance_id": "timeout", "reward": 0, "outcome": "TIMEOUT",
+         "reason": "agent timed out"},
+        {"instance_id": "ambiguous", "reward": 0},
+    ]))
+    evidence = k_eval.load_result_evidence(result)
+    assert evidence["timeout"]["failureClassification"] == "TIMEOUT"
+    assert evidence["ambiguous"]["failureClassification"] == "UNKNOWN"
 
 
 def test_official_result_rejects_duplicate_terminal_ids(tmp_path):

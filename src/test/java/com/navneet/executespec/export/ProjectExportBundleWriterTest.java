@@ -24,10 +24,13 @@ import com.navneet.executespec.activity.ActivityFeedEntryRepository;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.contracts.ContractRegistryRepository;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +58,8 @@ class ProjectExportBundleWriterTest {
   @BeforeEach
   void setUp() {
     properties = new ProjectExportProperties();
+    AgentProperties agentProperties = new AgentProperties();
+    agentProperties.setWorkspace(temp.toString());
     writer =
         new ProjectExportBundleWriter(
             projectRepo,
@@ -65,6 +70,7 @@ class ProjectExportBundleWriterTest {
             feedRepo,
             new ObjectMapper(),
             new ContextSanitizer(),
+            new ArtifactPublicationGuard(agentProperties, new GeneratedSecretScanner()),
             properties);
     projectId = UUID.randomUUID().toString();
     Project project =

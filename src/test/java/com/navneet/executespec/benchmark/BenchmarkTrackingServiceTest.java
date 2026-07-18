@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -17,29 +19,35 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.cost.RunStepUsage;
 import com.navneet.executespec.cost.RunStepUsageRepository;
+import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class BenchmarkTrackingServiceTest {
 
   private final BenchmarkRunRepository runs = mock(BenchmarkRunRepository.class);
   private final BenchmarkTaskResultRepository taskResults =
       mock(BenchmarkTaskResultRepository.class);
+  private final BenchmarkActiveAttemptRepository activeAttempts =
+      mock(BenchmarkActiveAttemptRepository.class);
   private final BenchmarkEventRepository events = mock(BenchmarkEventRepository.class);
   private final SseBroadcaster sse = mock(SseBroadcaster.class);
   private final RunStepUsageRepository usage = mock(RunStepUsageRepository.class);
   private final Map<String, BenchmarkRun> runStore = new HashMap<>();
   private final List<BenchmarkTaskResult> taskStore = new ArrayList<>();
   private final List<BenchmarkEvent> eventStore = new ArrayList<>();
+  private final List<BenchmarkActiveAttempt> activeStore = new ArrayList<>();
 
   private BenchmarkTrackingService service;
 
   @BeforeEach
   void setUp() {
     service =
-        new BenchmarkTrackingService(runs, taskResults, events, sse, new ObjectMapper(), usage);
+        new BenchmarkTrackingService(
+            runs, taskResults, activeAttempts, events, sse, new ObjectMapper(), usage);
 
     doAnswer(
             inv -> {
@@ -77,6 +85,59 @@ class BenchmarkTrackingServiceTest {
 
     doAnswer(
             inv -> {
+              BenchmarkActiveAttempt active = inv.getArgument(0);
+              activeStore.removeIf(existing -> existing.getId().equals(active.getId()));
+              activeStore.add(active);
+              return active;
+            })
+        .when(activeAttempts)
+        .save(any(BenchmarkActiveAttempt.class));
+    when(activeAttempts.findByBenchmarkRunIdAndTaskNameAndAttempt(
+            any(String.class), any(String.class), any(Integer.class)))
+        .thenAnswer(
+            inv ->
+                activeStore.stream()
+                    .filter(
+                        a ->
+                            a.getBenchmarkRunId().equals(inv.getArgument(0))
+                                && a.getTaskName().equals(inv.getArgument(1))
+                                && a.getAttempt() == (int) inv.getArgument(2))
+                    .findFirst());
+    when(activeAttempts.findByBenchmarkRunIdOrderByStartedAtAsc(any(String.class)))
+        .thenAnswer(
+            inv ->
+                activeStore.stream()
+                    .filter(a -> a.getBenchmarkRunId().equals(inv.getArgument(0)))
+                    .sorted(Comparator.comparing(BenchmarkActiveAttempt::getStartedAt))
+                    .toList());
+    when(activeAttempts.countByBenchmarkRunId(any(String.class)))
+        .thenAnswer(
+            inv ->
+                activeStore.stream()
+                    .filter(a -> a.getBenchmarkRunId().equals(inv.getArgument(0)))
+                    .count());
+    doAnswer(
+            inv -> {
+              activeStore.removeIf(
+                  a ->
+                      a.getBenchmarkRunId().equals(inv.getArgument(0))
+                          && a.getTaskName().equals(inv.getArgument(1))
+                          && a.getAttempt() == (int) inv.getArgument(2));
+              return null;
+            })
+        .when(activeAttempts)
+        .deleteByBenchmarkRunIdAndTaskNameAndAttempt(
+            any(String.class), any(String.class), any(Integer.class));
+    doAnswer(
+            inv -> {
+              activeStore.removeIf(a -> a.getBenchmarkRunId().equals(inv.getArgument(0)));
+              return null;
+            })
+        .when(activeAttempts)
+        .deleteByBenchmarkRunId(any(String.class));
+
+    doAnswer(
+            inv -> {
               BenchmarkEvent event = inv.getArgument(0);
               eventStore.add(event);
               return event;
@@ -89,6 +150,179 @@ class BenchmarkTrackingServiceTest {
               String runId = inv.getArgument(0);
               return eventStore.stream().filter(e -> runId.equals(e.getBenchmarkRunId())).count();
             });
+  }
+
+  @Test
+  void persistsConcurrentActiveAttemptsAndReloadsThemAfterServiceRecreation() {
+    BenchmarkRun run =
+        service.start("SWE_BENCH", "lite-10", "openrouter", "glm-5.2", 1, 10, null, "u1", false);
+
+    service.ingest(
+        run.getId(),
+        "TASK_STARTED",
+        "django__django-1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "started",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        120L);
+    BenchmarkRun afterSecond =
+        service.ingest(
+            run.getId(),
+            "TASK_STARTED",
+            "django__django-2",
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "started",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            90L);
+
+    assertThat(afterSecond.getActiveAttemptCount()).isEqualTo(2);
+    assertThat(service.activeAttempts(run.getId()))
+        .extracting(BenchmarkActiveAttempt::getTaskName)
+        .containsExactly("django__django-1", "django__django-2");
+
+    BenchmarkTrackingService afterRestart =
+        new BenchmarkTrackingService(
+            runs, taskResults, activeAttempts, events, sse, new ObjectMapper(), usage);
+    assertThat(afterRestart.get(run.getId()).getStartedAt()).isEqualTo(run.getStartedAt());
+    assertThat(afterRestart.activeAttempts(run.getId())).hasSize(2);
+    activeStore.getFirst().setStaleAfter(Instant.EPOCH);
+    assertThat(afterRestart.activeAttempts(run.getId()).getFirst().isStale()).isTrue();
+  }
+
+  @Test
+  void exposesProgressProjectionInSseAndMakesSubmissionReadinessDeterministic() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "lite-one", "deepseek", "deepseek-v4-pro", 1, 1, null, "u1", true);
+    String sha = "a".repeat(64);
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        0,
+        "es-1",
+        new BigDecimal("0.000100"),
+        10L,
+        1L,
+        "timed out",
+        null,
+        "TIMEOUT",
+        "agent timed out",
+        null,
+        "gs://bucket/run/task.json",
+        sha,
+        0L);
+    BenchmarkRun done =
+        service.ingest(
+            run.getId(), "RUN_DONE", null, null, null, null, null, null, null, null, null);
+
+    assertThat(done.getSubmissionReadiness()).isEqualTo("READY");
+    assertThat(done.getCompletedAttempts()).isEqualTo(1);
+    assertThat(taskStore.getFirst().getFailureClassification()).isEqualTo("TIMEOUT");
+    assertThat(taskStore.getFirst().getTrajectorySha256()).isEqualTo(sha);
+    var eventCaptor = org.mockito.ArgumentCaptor.forClass(RunEvent.class);
+    verify(sse, org.mockito.Mockito.atLeastOnce()).emit(any(String.class), eventCaptor.capture());
+    assertThat(eventCaptor.getAllValues())
+        .anySatisfy(
+            event -> {
+              assertThat(event.payload()).contains("\"completedAttempts\":1");
+              assertThat(event.payload()).contains("\"submissionReadiness\":\"READY\"");
+            });
+  }
+
+  @Test
+  void blocksSubmissionWhenTerminalTrajectoryEvidenceIsMissing() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "lite-one", "deepseek", "deepseek-v4-pro", 1, 1, null, "u1", true);
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        1,
+        "es-1",
+        BigDecimal.ZERO,
+        1L,
+        1L,
+        null,
+        null);
+    BenchmarkRun done =
+        service.ingest(
+            run.getId(), "RUN_DONE", null, null, null, null, null, null, null, null, null);
+
+    assertThat(done.getSubmissionReadiness()).isEqualTo("BLOCKED");
+    assertThat(done.getSubmissionReadinessReason()).contains("lack trajectory");
+  }
+
+  @Test
+  void rejectsTrajectoryLocationsThatCouldPersistCredentials() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "lite-one", "deepseek", "deepseek-v4-pro", 1, 1, null, "u1", true);
+
+    for (String unsafeLocation :
+        List.of(
+            "https://storage.example/trajectory?token=plaintext",
+            "https://user:pass@storage.example/trajectory",
+            "s3://user:pass@bucket/trajectory.json",
+            "gs://credential@bucket/trajectory.json",
+            "/tmp/trajectory.json",
+            "../trajectory.json",
+            "raw\ntrajectory")) {
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () ->
+                  service.ingest(
+                      run.getId(),
+                      "TASK_SCORED",
+                      "django__django-1",
+                      1,
+                      1,
+                      "es-1",
+                      BigDecimal.ZERO,
+                      1L,
+                      1L,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      unsafeLocation,
+                      "a".repeat(64),
+                      null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("secret-free path");
+    }
+  }
+
+  @Test
+  void reconnectForwardsTheLastEventIdToTheReplayCapableBroadcaster() {
+    SseEmitter emitter = mock(SseEmitter.class);
+    when(sse.subscribe("benchmark-1", "17")).thenReturn(emitter);
+
+    assertThat(service.subscribe("benchmark-1", "17")).isSameAs(emitter);
+    verify(sse).subscribe("benchmark-1", "17");
   }
 
   @Test

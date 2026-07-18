@@ -8,12 +8,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.report.model.ValidationReportShareDTO;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -32,7 +38,43 @@ class ValidationReportControllerShareTest {
   private final ProjectShareLinkService shareLinkService = mock(ProjectShareLinkService.class);
   private final ValidationReportController controller =
       new ValidationReportController(
-          reportService, pdfService, accessGuard, runRepository, shareLinkService);
+          reportService,
+          pdfService,
+          accessGuard,
+          runRepository,
+          shareLinkService,
+          new GeneratedSecretScanner(),
+          new ObjectMapper().findAndRegisterModules());
+
+  @Test
+  void legacyPublicReportRejectsSerializedCredentialMaterialWithoutEchoingIt() {
+    String secret = "sk-ant-" + "A1".repeat(20);
+    ValidationReportShareDTO report =
+        new ValidationReportShareDTO(
+            1,
+            List.of("Java"),
+            PipelineResult.PASSED,
+            List.of(),
+            List.of(),
+            "evidence contained " + secret,
+            Instant.now(),
+            100,
+            100,
+            true,
+            1,
+            1,
+            "CLEAN",
+            List.of());
+    when(reportService.getByShareToken("shared-token")).thenReturn(Optional.of(report));
+
+    assertThatThrownBy(() -> controller.getSharedReport("shared-token"))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+              assertThat(error.getReason()).doesNotContain(secret);
+            });
+  }
 
   @Test
   void createsGovernedProjectShareLinkInsteadOfLegacyReportBearer() {

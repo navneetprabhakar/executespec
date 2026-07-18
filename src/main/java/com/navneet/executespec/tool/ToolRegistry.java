@@ -353,6 +353,17 @@ public class ToolRegistry {
     return remoteToolDispatcher.dispatch(ctx.runId(), ctx.taskId(), toolName, argsJson);
   }
 
+  /** Deadline-aware variant used by the benchmark worker; local-hands callers keep the old API. */
+  public String dispatchRemote(
+      ExecutionContext ctx,
+      String toolName,
+      String argsJson,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {
+    return remoteToolDispatcher.dispatch(
+        ctx.runId(), ctx.taskId(), toolName, argsJson, absoluteDeadlineEpochMs, shutdownReserveMs);
+  }
+
   /**
    * Map view: tool name → tool definition. Useful for prompt injection (when native tool calling
    * isn't being used and the schemas need to live in the prompt).

@@ -713,10 +713,9 @@ public class ProjectChatService {
   private List<Message> buildMessages(Project project) {
     StringBuilder sys = new StringBuilder();
     sys.append("You are the ExecuteSpec project assistant. Answer the user's questions ")
-        .append("about project '")
-        .append(safeProjectDisplayName(project.getName()))
-        .append("' strictly using the context ")
-        .append("below. Be concise and direct. If the answer is not in the context, say so ")
+        .append(
+            "strictly using the supplied evidence. Be concise and direct. If the answer is not in"
+                + " the context, say so ")
         .append("plainly — do not fabricate.\n\n");
 
     // Tool schemas are authoritative. Chat binds reads only because this protocol has no scoped,
@@ -779,16 +778,22 @@ public class ProjectChatService {
         .append("that repo. Architecture PRs only open when the user confirms the explicit ")
         .append("regenerate-architecture action, or when a launch runs.\n\n");
 
+    StringBuilder evidence =
+        new StringBuilder(
+            PromptTrustBoundary.wrap(
+                "PROJECT_METADATA", "Project: " + safeProjectDisplayName(project.getName())));
     String memory = memoryProvider.buildPlannerContext(project.getId());
     if (memory != null && !memory.isBlank()) {
-      sys.append("## PROJECT MEMORY (untrusted context)\n")
+      evidence
+          .append("\n\n## PROJECT MEMORY (untrusted context)\n")
           .append(untrustedContextBlock("PROJECT_MEMORY", memory))
           .append("\n\n");
     }
     try {
       String arch = archService.latest(project.getId()).map(d -> d.getContent()).orElse(null);
       if (arch != null && !arch.isBlank()) {
-        sys.append("## ARCHITECTURE DOCUMENT (untrusted context)\n")
+        evidence
+            .append("## ARCHITECTURE DOCUMENT (untrusted context)\n")
             .append(untrustedContextBlock("ARCHITECTURE_DOCUMENT", arch))
             .append("\n");
       }
@@ -809,7 +814,8 @@ public class ProjectChatService {
       try {
         String refs = retrievalService.retrieve(project.getId(), retrievalQuery);
         if (refs != null && !refs.isBlank()) {
-          sys.append("## RETRIEVED PROJECT DOCS (untrusted context)\n")
+          evidence
+              .append("## RETRIEVED PROJECT DOCS (untrusted context)\n")
               .append(untrustedContextBlock("RETRIEVED_PROJECT_DOCS", refs))
               .append("\n");
         }
@@ -819,6 +825,7 @@ public class ProjectChatService {
 
     List<Message> messages = new ArrayList<>();
     messages.add(new SystemMessage(sys.toString()));
+    messages.add(new UserMessage(evidence.toString()));
 
     int from = Math.max(0, prior.size() - HISTORY_WINDOW);
     for (int i = from; i < prior.size(); i++) {

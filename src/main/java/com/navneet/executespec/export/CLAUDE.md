@@ -3,6 +3,17 @@
 V289 replaces the request-thread `byte[]` export with a persisted job protocol. This package is the
 only owner of project-export status, archive composition, publication, expiry and download audit.
 
+`ProjectExportBundleWriter` applies `ArtifactPublicationGuard` to every generated JSON/Markdown
+member and every spooled contract/activity member immediately before it enters the tarball. Field
+omission and `ContextSanitizer` remain defense in depth; a detected credential blocks the job and
+there is no request-controlled bypass.
+
+`ProjectExportObjectStore` validates the bounded USTAR+gzip structure and rescans every member both
+before publish and before download. This includes historical local/GCS objects: traversal, links,
+unsupported tar extensions, malformed headers/checksums, oversized archives, and credential-like
+content fail closed until the customer regenerates a clean export. Historical well-formed schema-v2
+exports remain compatible.
+
 ## API and authorization
 
 - `POST /api/projects/{projectId}/export` returns `202` plus a job DTO. `Idempotency-Key` is

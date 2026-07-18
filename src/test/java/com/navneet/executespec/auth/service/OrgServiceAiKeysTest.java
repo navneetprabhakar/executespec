@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
@@ -17,6 +19,7 @@ import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -35,18 +38,20 @@ import org.springframework.web.server.ResponseStatusException;
 class OrgServiceAiKeysTest {
 
   private OrgRepository orgRepo;
+  private ActivityAuditService auditService;
   private OrgService svc;
 
   @BeforeEach
   void setUp() {
     orgRepo = mock(OrgRepository.class);
+    auditService = mock(ActivityAuditService.class);
     svc =
         new OrgService(
             orgRepo,
             mock(OrgMemberRepository.class),
             mock(AppUserRepository.class),
             mock(PaymentAuditService.class),
-            mock(ActivityAuditService.class),
+            auditService,
             mock(MailService.class),
             mock(BillingSubscriptionRepository.class),
             mock(StripePaymentGateway.class));
@@ -150,5 +155,31 @@ class OrgServiceAiKeysTest {
     svc.updateAiKeySettings("org-1", "  sk-ant-spaced  ", "", "", "", "actor");
 
     assertThat(org.getAnthropicApiKey()).isEqualTo("sk-ant-spaced");
+  }
+
+  @Test
+  void explicitRevokeClearsOnlySelectedProviderAndAudits() {
+    Org org = seedOrg("ENTERPRISE", "sk-ant", "sk-oa", "sk-gem", "sk-or");
+    org.setDeepSeekApiKey("sk-ds");
+
+    svc.revokeAiKey("org-1", "deepseek", "actor");
+
+    assertThat(org.getDeepSeekApiKey()).isNull();
+    assertThat(org.getAnthropicApiKey()).isEqualTo("sk-ant");
+    assertThat(org.getOpenRouterApiKey()).isEqualTo("sk-or");
+    var audit = ArgumentCaptor.forClass(ActivityAudit.class);
+    verify(auditService).record(audit.capture());
+    assertThat(audit.getValue().getEventType()).isEqualTo("ORG_AI_KEY_REVOKED");
+    assertThat(audit.getValue().getNewValue()).contains("deepseek").doesNotContain("sk-ds");
+  }
+
+  @Test
+  void explicitRevokeRejectsUnknownProviderWithoutMutation() {
+    Org org = seedOrg("ENTERPRISE", "sk-ant", null, null, null);
+
+    assertThatThrownBy(() -> svc.revokeAiKey("org-1", "unknown", "actor"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Unsupported provider");
+    assertThat(org.getAnthropicApiKey()).isEqualTo("sk-ant");
   }
 }

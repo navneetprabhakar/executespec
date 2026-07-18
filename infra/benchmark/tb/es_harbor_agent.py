@@ -22,6 +22,7 @@ Config (env vars):
     ES_MAX_ITERS     worker iteration cap (default 50)
     ES_PAT           es_pat_... bearer (preferred); else ES_ADMIN_EMAIL/ES_ADMIN_PW login
     ES_TOOL_TIMEOUT  per-tool command timeout sec in the container (default 300)
+    ES_AGENT_BUDGET_SECONDS internal absolute agent budget (default 1410; does not alter Harbor)
     ES_CANCEL_ON_ABORT cancel the ExecuteSpec run if Harbor aborts the adapter (default true)
 """
 import asyncio
@@ -31,6 +32,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import time
 import uuid
 
 import httpx
@@ -92,6 +94,7 @@ class ExecuteSpecAgent(BaseAgent):
         self.admin_email = os.environ.get("ES_ADMIN_EMAIL")
         self.admin_pw = os.environ.get("ES_ADMIN_PW")
         self.tool_timeout = int(os.environ.get("ES_TOOL_TIMEOUT", "300"))
+        self.agent_budget_seconds = int(os.environ.get("ES_AGENT_BUDGET_SECONDS", "1410"))
         self.cancel_on_abort = os.environ.get("ES_CANCEL_ON_ABORT", "true").lower() != "false"
         self._trajectory_steps = []
         if not self.provider or not self.model:
@@ -113,13 +116,21 @@ class ExecuteSpecAgent(BaseAgent):
         run_id = None
         tools = 0
         final = None
+        # Mint the one end-to-end deadline before auth/network setup so setup/queue time counts.
+        absolute_deadline_epoch_ms = int(
+            os.environ.get(
+                "ES_ABSOLUTE_DEADLINE_EPOCH_MS",
+                str(int(time.time() * 1000) + max(1, self.agent_budget_seconds) * 1000),
+            )
+        )
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=None)) as client:
             try:
                 token = await self._auth(client)
                 started = await self._post(
                     client, "/api/v2/test/terminal-bench/start", token,
                     {"instruction": instruction, "provider": self.provider,
-                     "model": self.model, "maxIterations": self.max_iters},
+                     "model": self.model, "maxIterations": self.max_iters,
+                     "absoluteDeadlineEpochMs": absolute_deadline_epoch_ms},
                 )
                 run_id, sse_token = started["runId"], started["sseToken"]
                 self.logger.info(f"[es] run={run_id} provider={self.provider} model={self.model}")
@@ -146,7 +157,13 @@ class ExecuteSpecAgent(BaseAgent):
                                         targs = {}
                                 tools += 1
                                 step = self._add_tool_call_step(call_id, tname, targs)
-                                env_result = await self._exec_tool(tname, targs, environment)
+                                env_result = await self._exec_tool(
+                                    tname,
+                                    targs,
+                                    environment,
+                                    frame.get("absoluteDeadlineEpochMs"),
+                                    frame.get("shutdownReserveMs", 0),
+                                )
                                 self._attach_tool_result(step, call_id, env_result)
                                 await self._post(client, f"/api/runs/{run_id}/tool-results", token,
                                                  {"callId": call_id, "result": env_result})
@@ -186,16 +203,25 @@ class ExecuteSpecAgent(BaseAgent):
                 raise
 
     # ---------------- tool execution in the TB container ----------------
-    async def _exec_tool(self, name: str, args: dict, env: BaseEnvironment) -> dict:
+    async def _exec_tool(
+        self,
+        name: str,
+        args: dict,
+        env: BaseEnvironment,
+        absolute_deadline_epoch_ms=None,
+        shutdown_reserve_ms=0,
+    ) -> dict:
         try:
             name, args = self._normalize_tool_call(name, args)
+            timeout = self._bounded_timeout(
+                self.tool_timeout, absolute_deadline_epoch_ms, shutdown_reserve_ms)
             if name in ("shell", "buildProject", "runTests"):
                 cmd = args.get("command")
                 if not cmd:
                     return _err("INVALID_ARGS", f"{name}: no command")
-                r = await env.exec(cmd, timeout_sec=self.tool_timeout)
+                r = await env.exec(cmd, timeout_sec=timeout)
                 out = (r.stdout or "") + (r.stderr or "")
-                body = await self._bounded_shell_output(env, name, out)
+                body = await self._bounded_shell_output(env, name, out, timeout)
                 if r.return_code != 0:
                     return _err(
                         "COMMAND_FAILED",
@@ -203,12 +229,12 @@ class ExecuteSpecAgent(BaseAgent):
                     )
                 return _ok(body)
             if name == "readFile":
-                return await self._read(env, args)
+                return await self._read(env, args, timeout)
             if name == "writeFile":
-                return await self._write(env, args["path"], args.get("content", ""))
+                return await self._write(env, args["path"], args.get("content", ""), timeout)
             if name == "editFile":
                 path = args["path"]
-                r = await env.exec(f"cat -- {shlex.quote(path)}", timeout_sec=30)
+                r = await env.exec(f"cat -- {shlex.quote(path)}", timeout_sec=min(30, timeout))
                 if r.return_code != 0:
                     return _err("NOT_FOUND", f"cannot read {path}")
                 txt = r.stdout or ""
@@ -219,11 +245,11 @@ class ExecuteSpecAgent(BaseAgent):
                 if not args.get("replaceAll") and cnt > 1:
                     return _err("INVALID_ARGS", f"oldString not unique in {path} ({cnt}); pass replaceAll")
                 updated = txt.replace(old, new) if args.get("replaceAll") else txt.replace(old, new, 1)
-                w = await self._write(env, path, updated)
+                w = await self._write(env, path, updated, timeout)
                 return _ok(f"edited {path}") if w["ok"] else w
             if name == "listFiles":
                 path = args.get("path", ".")
-                r = await env.exec(f"ls -la {shlex.quote(path)}", timeout_sec=30)
+                r = await env.exec(f"ls -la {shlex.quote(path)}", timeout_sec=min(30, timeout))
                 return _ok(_trunc(r.stdout or "(empty)", READ_LIMIT))
             if name == "searchFiles":
                 q = args.get("query") or args.get("pattern") or args.get("regex")
@@ -232,19 +258,36 @@ class ExecuteSpecAgent(BaseAgent):
                 path = args.get("path", ".")
                 r = await env.exec(
                     f"grep -rnI -- {shlex.quote(q)} {shlex.quote(path)} 2>/dev/null | head -100",
-                    timeout_sec=60)
+                    timeout_sec=min(60, timeout))
                 return _ok(_trunc(r.stdout or "no matches", READ_LIMIT))
             if name == "gitStatus":
-                r = await env.exec("git status --porcelain=v1 -b 2>/dev/null", timeout_sec=30)
+                r = await env.exec(
+                    "git status --porcelain=v1 -b 2>/dev/null", timeout_sec=min(30, timeout))
                 return _ok(_trunc((r.stdout or "").strip() or "(clean)", READ_LIMIT))
             if name == "gitDiff":
-                r = await env.exec("git diff 2>/dev/null", timeout_sec=30)
+                r = await env.exec("git diff 2>/dev/null", timeout_sec=min(30, timeout))
                 return _ok(_trunc((r.stdout or "").strip() or "(no changes)", DIFF_LIMIT))
             if name == "completeTask":
                 return _ok(args.get("summary", "task marked complete"))
             return _err("INVALID_ARGS", f"unknown tool: {name}")
+        except TimeoutError as e:
+            return _err("DEADLINE_EXCEEDED", str(e))
         except Exception as e:
             return _err("INTERNAL", f"{type(e).__name__}: {e}")
+
+    @staticmethod
+    def _bounded_timeout(configured_seconds, absolute_deadline_epoch_ms, shutdown_reserve_ms):
+        """Never let a container command consume the terminal evidence-flush reserve."""
+        if not absolute_deadline_epoch_ms:
+            return max(1, int(configured_seconds))
+        usable_ms = (
+            int(absolute_deadline_epoch_ms)
+            - int(time.time() * 1000)
+            - max(0, int(shutdown_reserve_ms or 0))
+        )
+        if usable_ms < 1000:
+            raise TimeoutError("tool refused to preserve terminal shutdown reserve")
+        return max(1, min(int(configured_seconds), usable_ms // 1000))
 
     def _normalize_tool_call(self, name: str, args: dict) -> tuple[str, dict]:
         """Accept common Claude-Code-style aliases advertised by server-side worker bindings."""
@@ -270,11 +313,13 @@ class ExecuteSpecAgent(BaseAgent):
                 args = {**args, "query": query}
         return normalized, args
 
-    async def _bounded_shell_output(self, env: BaseEnvironment, tool_name: str, out: str) -> str:
+    async def _bounded_shell_output(
+        self, env: BaseEnvironment, tool_name: str, out: str, timeout: int
+    ) -> str:
         if len(out) <= SHELL_LIMIT:
             return out
         spill = f"{TOOL_OUTPUT_DIR}/{tool_name}-{uuid.uuid4().hex}.txt"
-        written = await self._write(env, spill, out)
+        written = await self._write(env, spill, out, timeout)
         note = (
             f"\n[full output saved at {spill}; use readFile with startLine/endLine to inspect it]"
             if written.get("ok")
@@ -282,7 +327,7 @@ class ExecuteSpecAgent(BaseAgent):
         )
         return _trunc_head_tail(out, SHELL_LIMIT) + note
 
-    async def _read(self, env: BaseEnvironment, args: dict) -> dict:
+    async def _read(self, env: BaseEnvironment, args: dict, timeout: int) -> dict:
         path = args["path"]
         start = args.get("startLine")
         end = args.get("endLine")
@@ -303,18 +348,18 @@ class ExecuteSpecAgent(BaseAgent):
             lo = start or 1
             hi = str(end) if end is not None else "$"
             cmd = f"sed -n {shlex.quote(f'{lo},{hi}p')} {quoted}"
-            r = await env.exec(cmd, timeout_sec=30)
+            r = await env.exec(cmd, timeout_sec=min(30, timeout))
             if r.return_code != 0:
                 return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
             return _ok(r.stdout or "")
 
-        r = await env.exec(f"cat -- {quoted}", timeout_sec=30)
+        r = await env.exec(f"cat -- {quoted}", timeout_sec=min(30, timeout))
         if r.return_code != 0:
             return _err("NOT_FOUND", f"cannot read {path}: {(r.stderr or '').strip()}")
         content = r.stdout or ""
         if len(content) <= READ_LIMIT:
             return _ok(content)
-        lc = await env.exec(f"wc -l < {quoted}", timeout_sec=30)
+        lc = await env.exec(f"wc -l < {quoted}", timeout_sec=min(30, timeout))
         line_count = (lc.stdout or "").strip() if lc.return_code == 0 else "unknown"
         return _ok(
             _trunc(content, READ_LIMIT)
@@ -322,14 +367,14 @@ class ExecuteSpecAgent(BaseAgent):
             + "use startLine/endLine to read later ranges]"
         )
 
-    async def _write(self, env: BaseEnvironment, path: str, content: str) -> dict:
+    async def _write(self, env: BaseEnvironment, path: str, content: str, timeout: int) -> dict:
         """Write arbitrary content to a container path via base64 (newline/quote-safe)."""
         b64 = base64.b64encode(content.encode()).decode()
         cmd = (
             f"mkdir -p \"$(dirname {shlex.quote(path)})\" 2>/dev/null; "
             f"printf %s {shlex.quote(b64)} | base64 -d > {shlex.quote(path)}"
         )
-        r = await env.exec(cmd, timeout_sec=60)
+        r = await env.exec(cmd, timeout_sec=min(60, timeout))
         if r.return_code != 0:
             return _err("INTERNAL", f"write {path} failed: {(r.stderr or '').strip()}")
         return _ok(f"wrote {len(content.encode())} bytes to {path}")

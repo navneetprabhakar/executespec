@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
@@ -215,7 +216,8 @@ SCORE COMPUTATION GUIDANCE:
 
       List<Message> messages = new ArrayList<>();
       messages.add(new SystemMessage(SYSTEM_PROMPT));
-      messages.add(new UserMessage(userMessage));
+      messages.add(
+          new UserMessage(PromptTrustBoundary.wrap("ACCURACY_ASSESSMENT_EVIDENCE", userMessage)));
 
       ChatResponse response =
           llmRouter.callText(

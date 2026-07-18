@@ -19,6 +19,7 @@ import com.navneet.executespec.engine.EngineOutcome;
 import com.navneet.executespec.engine.EngineRequest;
 import com.navneet.executespec.engine.EngineResult;
 import com.navneet.executespec.engine.VerifyMode;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -68,6 +69,7 @@ public class BenchmarkGenerationService {
   private final CodeGenEngine codeGenEngine;
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
+  private final SseBroadcaster broadcaster;
 
   private final Object generationSlotsLock = new Object();
   private Semaphore generationSlots;
@@ -153,6 +155,7 @@ public class BenchmarkGenerationService {
               .hardCapUsd(hardCapUsd)
               .build();
       runRepo.save(row);
+      broadcaster.registerBenchmarkTrajectory(runId);
 
       log.info(
           "benchmark-gen START run={} instance={} provider={} model={}",

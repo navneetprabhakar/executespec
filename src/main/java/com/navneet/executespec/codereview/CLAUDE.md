@@ -1,5 +1,8 @@
 # `codereview/` — Whole-repo Code Review agent
 
+The authenticated Markdown report download is a publication boundary: high-confidence credential
+material fails closed with 422 and the matched value is never returned.
+
 > Last reviewed: 2026-07-17. **Current worktree contract; not yet released.**
 >
 > Paid-tier feature (FREE → 403; PRO=4/month, TEAM/ENTERPRISE=unlimited). Schema in V172.

@@ -28,6 +28,7 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.security.ContextSanitizer;
 
 import org.springframework.data.domain.PageRequest;
@@ -55,6 +56,7 @@ public class ProjectExportBundleWriter {
   private final ActivityFeedEntryRepository feedRepo;
   private final ObjectMapper mapper;
   private final ContextSanitizer sanitizer;
+  private final ArtifactPublicationGuard publicationGuard;
   private final ProjectExportProperties properties;
 
   @FunctionalInterface
@@ -92,7 +94,8 @@ public class ProjectExportBundleWriter {
       try (OutputStream file = new BufferedOutputStream(Files.newOutputStream(output));
           GZIPOutputStream gzip = new GZIPOutputStream(file);
           TarOutputStream tar = new TarOutputStream(gzip, properties.getMaxUncompressedBytes())) {
-        tar.putBytes(
+        putBytesChecked(
+            tar,
             "manifest.json",
             json(
                 Map.ofEntries(
@@ -107,12 +110,13 @@ public class ProjectExportBundleWriter {
                     Map.entry("contractsTruncated", contractStats.contractsTruncated()),
                     Map.entry("activityTruncated", activityStats.truncated()))));
 
-        tar.putBytes("project.json", projectJson(project));
-        tar.putBytes("members.json", membersJson(job.projectId()));
-        tar.putPath("contracts/index.json", contractStats.path());
-        tar.putPath("activity/events-recent.ndjson", activityStats.path());
-        tar.putBytes("redaction.json", redactionJson());
-        tar.putBytes(
+        putBytesChecked(tar, "project.json", projectJson(project));
+        putBytesChecked(tar, "members.json", membersJson(job.projectId()));
+        putPathChecked(tar, "contracts/index.json", spool, contractStats.path());
+        putPathChecked(tar, "activity/events-recent.ndjson", spool, activityStats.path());
+        putBytesChecked(tar, "redaction.json", redactionJson());
+        putBytesChecked(
+            tar,
             "README.md",
             readme(project, contractStats, activityStats).getBytes(StandardCharsets.UTF_8));
         uncompressed = tar.uncompressedBytes();
@@ -345,6 +349,18 @@ public class ProjectExportBundleWriter {
 
   private byte[] json(Object value) throws IOException {
     return mapper.writeValueAsBytes(value);
+  }
+
+  private void putBytesChecked(TarOutputStream tar, String name, byte[] content)
+      throws IOException {
+    publicationGuard.assertContentSafe(name, content);
+    tar.putBytes(name, content);
+  }
+
+  private void putPathChecked(TarOutputStream tar, String name, Path root, Path content)
+      throws IOException {
+    publicationGuard.assertFileSafe(root, content);
+    tar.putPath(name, content);
   }
 
   private String safe(String value) {

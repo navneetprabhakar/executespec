@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PostConstruct;
 
 import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
@@ -136,12 +137,15 @@ public class CodeGenEngineImpl implements CodeGenEngine {
    * warm-start block for existing-repo work. Fail-open — empty block appends nothing.
    */
   private String withOrientation(String taskSpec, ExecutionContext ctx) {
+    String taskEvidence = PromptTrustBoundary.wrap("PATCH_TASK", taskSpec);
     if (repoOrientationService == null
         || !featureFlagService.isEnabled("worker.localization.enabled")) {
-      return taskSpec;
+      return taskEvidence;
     }
     String orientation = repoOrientationService.orient(ctx.workspaceRoot(), taskSpec);
-    return orientation.isBlank() ? taskSpec : taskSpec + "\n\n" + orientation;
+    return orientation.isBlank()
+        ? taskEvidence
+        : taskEvidence + "\n\n" + PromptTrustBoundary.wrap("REPOSITORY_ORIENTATION", orientation);
   }
 
   private boolean requireTestVerification(EngineRequest request) {
@@ -237,7 +241,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
       case COMPLETED_BY_STAGNATION -> EngineOutcome.STAGNATED;
       case ITERATION_LIMIT_EXCEEDED -> EngineOutcome.ITER_LIMIT;
       case BUDGET_EXCEEDED -> EngineOutcome.BUDGET;
-      case WALL_CLOCK_EXCEEDED -> EngineOutcome.WALL_CLOCK;
+      case WALL_CLOCK_EXCEEDED, ABSOLUTE_DEADLINE_EXCEEDED -> EngineOutcome.WALL_CLOCK;
       case STOPPED_WITHOUT_COMPLETE -> EngineOutcome.STOPPED;
       case ERROR -> EngineOutcome.ERROR;
     };

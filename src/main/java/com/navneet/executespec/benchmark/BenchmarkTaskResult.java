@@ -61,6 +61,19 @@ public class BenchmarkTaskResult {
   @Column(name = "outcome_reason", length = 500)
   private String reason;
 
+  /** NONE / TIMEOUT / INFRASTRUCTURE / VERIFIER / AGENT_OR_TEST_FAILURE / UNKNOWN. */
+  @Column(name = "failure_classification", nullable = false, length = 40)
+  @Builder.Default
+  private String failureClassification = "UNKNOWN";
+
+  /** Stable operator-visible location of the attempt trajectory artifact. */
+  @Column(name = "trajectory_location", length = 1000)
+  private String trajectoryLocation;
+
+  /** SHA-256 of the exact trajectory bytes at {@link #trajectoryLocation}. */
+  @Column(name = "trajectory_sha256", length = 64)
+  private String trajectorySha256;
+
   @Column(name = "cost_usd", nullable = false, precision = 12, scale = 6)
   @Builder.Default
   private BigDecimal costUsd = BigDecimal.ZERO;

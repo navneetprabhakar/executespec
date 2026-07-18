@@ -16,6 +16,7 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelResolver;
@@ -121,7 +122,11 @@ public class ContextAgent {
     ResolvedModel resolved = modelResolver.resolve("ContextAgent", run.getAiProviderEnum());
 
     Prompt prompt =
-        new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userMessage)));
+        new Prompt(
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage(
+                    PromptTrustBoundary.wrap("CONTEXT_DOCUMENT_EVIDENCE", userMessage))));
 
     var response =
         llmRouter.callText(

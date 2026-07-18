@@ -1,5 +1,12 @@
 # `engine/` — the code-gen engine seam
 
+## PATCH/critic prompt authority (2026-07-18)
+
+`CodeGenEngineImpl` frames the PATCH task and deterministic repository orientation independently as
+untrusted user evidence. `WorkerAgent`'s optional critic pass likewise frames the task and candidate
+deliverable independently; neither repository text nor generated/tool-derived content is appended to
+the critic system policy. `ApplyService` frames post-run apply suggestions before worker dispatch.
+
 > Added 2026-05-27 (RL-2026-05-052). Design + migration plan:
 > [`docs/plans/codegen-engine-extraction.md`](../../../../../../../docs/plans/codegen-engine-extraction.md).
 

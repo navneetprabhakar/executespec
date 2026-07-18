@@ -13,6 +13,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
@@ -538,7 +539,7 @@ public class ReviewerAgent {
 
            --- BUILD ERROR (verbatim, captured before this review pass) ---
            """
-        + truncateBuildError(preBuildError)
+        + PromptTrustBoundary.wrap("BUILD_ERROR", truncateBuildError(preBuildError))
         + """
 
 --- END BUILD ERROR ---

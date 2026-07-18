@@ -10,6 +10,7 @@ import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -51,6 +52,7 @@ public class CodeReviewController {
   private final ProjectAccessGuard projectAccessGuard;
   private final ProjectRepoService projectRepoService;
   private final CodeReviewAutofixService autofixService;
+  private final GeneratedSecretScanner secretScanner;
 
   public record SubmitCodeReviewRequest(String projectId, UUID repoId, String repoFullName) {}
 
@@ -218,6 +220,11 @@ public class CodeReviewController {
     String md = row.getReportMarkdown();
     if (md == null || md.isBlank()) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "scan has no report yet");
+    }
+    if (secretScanner.scan(md).isPresent()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Code review contains credential-like material and cannot be downloaded");
     }
     String filename =
         "code-review-"

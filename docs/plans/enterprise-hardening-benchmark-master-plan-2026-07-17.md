@@ -188,6 +188,13 @@ Every row carries the required handoff fields. “Evidence pending” means no c
 
 Do not rewrite the baseline requirements to fit implementation. If official rules, product decisions, or discovered dependencies require a change, append an amendment containing date/time, affected IDs, old contract, new contract, reason, approver, cost impact and compatibility impact. Status and evidence continue to change only in the live tracker.
 
+**Evidence authority:** the requirement rows above are the immutable creation-time baseline and
+deliberately retain their original statuses. They are not a current progress report. The live tracker
+is authoritative for local verification, deployed/runtime gates, spend and blockers. As of the
+2026-07-18 local checkpoint, the tracker records `mvn -q verify` 3,243/3,243, Web 61 files/269 tests
+plus build/format/lint, Python 39/39 plus bytecode compilation, V297 upgrade/clean-install validation,
+and the 116-requirement crosswalk; none of that substitutes for the still-open deployed/live gates.
+
 ## Amendments
 
 ### A1 — 2026-07-18 IST: benchmark order, full Pro scope and model-gate waiver
@@ -217,3 +224,18 @@ Do not rewrite the baseline requirements to fit implementation. If official rule
 
 The live tracker owns the exact status and evidence for these added rows. This amendment does not
 authorize provider spend by itself.
+
+### A2 — 2026-07-18 IST: deterministic zero-omission checkpoint gate
+
+**Approved by:** Navneet Prabhakar's explicit instruction that no goal-list item may be missed.
+
+**Affected IDs:** CTRL-01, CTRL-02 and every immutable/amended requirement ID.
+
+- `scripts/verify-enterprise-goal-crosswalk.py` encodes the complete canonical range of **116**
+  gates: 113 immutable baseline rows plus `CTRL-02`, `DS-06` and `GLM-04` introduced through
+  additive scope control/amendment A1.
+- The command fails on a missing, extra or duplicate requirement; master-plan drift; tracker drift;
+  or a requirement row missing any of its 13 mandatory evidence columns.
+- An incomplete or blocked row remains valid scope. The control prevents deletion; it does not turn
+  missing evidence into completion.
+- Run the gate before every synchronized checkpoint and again during the final completion audit.

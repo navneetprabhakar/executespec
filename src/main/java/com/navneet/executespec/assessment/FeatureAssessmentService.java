@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
@@ -157,7 +158,9 @@ public class FeatureAssessmentService {
         llmRouter.callText(
             route.providerName(),
             route.getModel(),
-            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            java.util.List.of(
+                new SystemMessage(system),
+                new UserMessage(PromptTrustBoundary.wrap("FEATURE_ASSESSMENT_EVIDENCE", user))),
             runId,
             "FeatureAssessmentService",
             "assessment.llm",

@@ -7,6 +7,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -101,6 +102,45 @@ public class BenchmarkRun {
   @Column(name = "finished_at")
   private Instant finishedAt;
 
+  /** Number of attempts currently executing, rebuilt from benchmark_active_attempt on ingest. */
+  @Column(name = "active_attempt_count", nullable = false)
+  @Builder.Default
+  private int activeAttemptCount = 0;
+
+  /** Number of immutable terminal attempt rows received from the official scorer. */
+  @Column(name = "completed_attempts", nullable = false)
+  @Builder.Default
+  private int completedAttempts = 0;
+
+  /** Last durable progress heartbeat, independent of the SSE connection. */
+  @Column(name = "last_progress_at")
+  private Instant lastProgressAt;
+
+  /** Harness-supplied or server-estimated seconds remaining. */
+  @Column(name = "eta_seconds")
+  private Long etaSeconds;
+
+  /** Whether this tracked run is intended to produce a leaderboard submission bundle. */
+  @Column(name = "submission_required", nullable = false)
+  @Builder.Default
+  private boolean submissionRequired = false;
+
+  /** NOT_REQUIRED / IN_PROGRESS / BLOCKED / READY / SUBMITTED. */
+  @Column(name = "submission_readiness", nullable = false, length = 20)
+  @Builder.Default
+  private String submissionReadiness = "NOT_REQUIRED";
+
+  @Column(name = "submission_readiness_reason", length = 500)
+  private String submissionReadinessReason;
+
   @Column(columnDefinition = "text")
   private String error;
+
+  /** Derived from durable timestamps, so restart/reload never resets elapsed time. */
+  @Transient
+  public long getElapsedSeconds() {
+    if (startedAt == null) return 0L;
+    Instant end = finishedAt == null ? Instant.now() : finishedAt;
+    return Math.max(0L, java.time.Duration.between(startedAt, end).getSeconds());
+  }
 }

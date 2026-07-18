@@ -6,6 +6,17 @@
 
 > **2026-07-18 harness hardening:** the bridge classifies sibling `exception.txt` setup failures as infrastructure failures, refuses `RUN_DONE` when trials are missing, and returns non-zero for incomplete runs. Late worker finalization preserves an already terminal/cancelled run.
 
+> **2026-07-18 absolute-deadline contract:** the Harbor adapter mints one epoch deadline before
+> authentication/setup (Harbor does not inject its runner deadline into `AgentContext`), and the
+> server tightens it to its configured maximum. It is propagated through worker provider calls,
+> remote-tool waits, emitted tool frames and Harbor container commands. New work receives only
+> `deadline - now - shutdown reserve`; impossible calls are refused and reconnect cannot extend the
+> absolute deadline. The default 45-second reserve is kept for terminal DB/cost/SSE persistence and
+> ATIF trajectory flush. Agent expiry persists as `ABSOLUTE_DEADLINE_EXCEEDED`; remote refusal is
+> `DEADLINE_EXCEEDED`; the legacy relative cap remains `WALL_CLOCK_EXCEEDED`. Verifier/upload
+> timeouts are Harbor-owned classifications outside this worker path. Official leaderboard timeout
+> settings are unchanged.
+
 ## What this is
 
 A standalone path that runs the V2 `WorkerAgent` in **REMOTE-tool mode** as a real persisted run,

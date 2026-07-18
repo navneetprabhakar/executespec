@@ -14,7 +14,10 @@ import jakarta.annotation.PostConstruct;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.benchmark.BenchmarkTrajectoryStore;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
@@ -83,8 +86,26 @@ public class SseBroadcaster {
   private final MeterRegistry meterRegistry;
   private final StringRedisTemplate redis;
   private final RedisMessageListenerContainer listenerContainer;
+  private final BenchmarkTrajectoryStore benchmarkTrajectoryStore;
 
+  @Autowired
   public SseBroadcaster(
+      ObjectMapper mapper,
+      ApplicationEventPublisher eventPublisher,
+      MeterRegistry meterRegistry,
+      StringRedisTemplate redis,
+      RedisMessageListenerContainer listenerContainer,
+      ObjectProvider<BenchmarkTrajectoryStore> benchmarkTrajectoryStore) {
+    this.mapper = mapper;
+    this.eventPublisher = eventPublisher;
+    this.meterRegistry = meterRegistry;
+    this.redis = redis;
+    this.listenerContainer = listenerContainer;
+    this.benchmarkTrajectoryStore = benchmarkTrajectoryStore.getIfAvailable();
+  }
+
+  /** Provider-free constructor retained for narrow unit tests outside the benchmark profile. */
+  SseBroadcaster(
       ObjectMapper mapper,
       ApplicationEventPublisher eventPublisher,
       MeterRegistry meterRegistry,
@@ -95,6 +116,7 @@ public class SseBroadcaster {
     this.meterRegistry = meterRegistry;
     this.redis = redis;
     this.listenerContainer = listenerContainer;
+    this.benchmarkTrajectoryStore = null;
   }
 
   @PostConstruct
@@ -210,6 +232,8 @@ public class SseBroadcaster {
     String json = serialize(event);
     if (json == null) return;
 
+    appendBenchmarkTrajectory(runId, event);
+
     // Persist to replay log (before local delivery so reconnecting clients see it)
     long seqNum = appendToReplayLog(runId, json);
 
@@ -234,9 +258,29 @@ public class SseBroadcaster {
   public void emitDirect(String runId, RunEvent event) {
     String json = serialize(event);
     if (json == null) return;
+    appendBenchmarkTrajectory(runId, event);
     long seqNum = appendToReplayLog(runId, json);
     deliverLocal(runId, json, seqNum);
     publishToRedis(runId, json, seqNum);
+  }
+
+  private void appendBenchmarkTrajectory(String runId, RunEvent event) {
+    if (benchmarkTrajectoryStore == null) return;
+    try {
+      benchmarkTrajectoryStore.append(runId, event);
+    } catch (RuntimeException e) {
+      // Optional benchmark evidence must never break the product event path. Benchmark submission
+      // still fails closed because no complete export will be available.
+      log.error(
+          "Benchmark trajectory eligibility/append failed for run {}: {}",
+          runId,
+          e.getClass().getName());
+    }
+  }
+
+  /** Explicitly register a benchmark run before its first event; a DB fallback covers restarts. */
+  public void registerBenchmarkTrajectory(String runId) {
+    if (benchmarkTrajectoryStore != null) benchmarkTrajectoryStore.registerBenchmarkRun(runId);
   }
 
   /** Complete the SSE stream for a run (run finished or validation complete). */

@@ -15,6 +15,7 @@ import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.BitbucketRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -89,6 +90,7 @@ public class ScmPushService {
   private final PullRequestRecordRepository pullRequestRecordRepository;
   private final ProjectRepoRepository projectRepoRepository;
   private final ObjectMapper objectMapper;
+  private final ArtifactPublicationGuard publicationGuard;
   // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
   private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
 
@@ -148,6 +150,7 @@ public class ScmPushService {
       String branchName = resolveBranchName(project, run);
       String cloneUrl = "https://bitbucket.org/" + workspace + "/" + repoSlug + ".git";
 
+      publicationGuard.assertGitWorkspaceSafe(run.getRunId());
       gitTool.pushToBranchBitbucket(run.getRunId(), cloneUrl, username, appPassword, branchName);
 
       String title =
@@ -203,6 +206,13 @@ public class ScmPushService {
     if (pat == null || pat.isBlank()) {
       log.warn("GitHub PAT not configured — skipping push for run {}", run.getRunId());
       return PushResult.noConfiguration("GITHUB", "GitHub PAT is not configured");
+    }
+
+    try {
+      publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+    } catch (Exception unsafe) {
+      log.warn("[{}] SCM publication rejected: {}", run.getRunId(), unsafe.getMessage());
+      return PushResult.failed(unsafe.getMessage(), "GITHUB");
     }
 
     String remote = repoUrl;
@@ -425,6 +435,24 @@ public class ScmPushService {
       // the previous behaviour where every repo got the same generic "ExecuteSpec changes" /
       // run-title message regardless of what actually changed in that repo.
       String commitMsg = buildPerRepoCommitMessage(run, runTitle, repo, subPath);
+
+      try {
+        publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
+      } catch (Exception unsafe) {
+        log.warn(
+            "[{}] SCM publication rejected for {}: {}",
+            run.getRunId(),
+            repo.getGithubRepoFullName(),
+            unsafe.getMessage());
+        broadcaster.emit(
+            run.getRunId(),
+            RunEvent.log(
+                run.getRunId(),
+                "scm",
+                "Push blocked for " + repo.getGithubRepoFullName() + ": " + unsafe.getMessage()));
+        failed++;
+        continue;
+      }
 
       var pushResult =
           gitTool.commitAndPushSubdir(run.getRunId(), subPath, remote, pat, branchName, commitMsg);
@@ -795,6 +823,14 @@ public class ScmPushService {
         String remote = "https://github.com/" + repoFullName;
         String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
 
+        try {
+          publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
+        } catch (Exception unsafe) {
+          outcomes.add(
+              new ApplyRepoOutcome(repoFullName, branchName, false, false, unsafe.getMessage()));
+          continue;
+        }
+
         GitToolResult res =
             gitTool.pushToExistingBranch(
                 run.getRunId(), subPath, remote, pat, branchName, commitMessage);
@@ -825,6 +861,13 @@ public class ScmPushService {
           branch = rec.getHeadBranch();
           break;
         }
+      }
+      try {
+        publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+      } catch (Exception unsafe) {
+        return ApplyPushResult.singleRepo(
+            new ApplyRepoOutcome(
+                repoFullNameFromUrl(run.getRepoUrl()), branch, false, false, unsafe.getMessage()));
       }
       GitToolResult res =
           gitTool.pushToExistingBranch(

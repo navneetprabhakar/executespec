@@ -1959,7 +1959,7 @@ to boot — skip it for those.""";
           case COMPLETED -> "✅";
           case COMPLETED_BY_STAGNATION -> "⏱️ ";
           case ITERATION_LIMIT_EXCEEDED -> "⚠️ ";
-          case WALL_CLOCK_EXCEEDED -> "⏰";
+          case WALL_CLOCK_EXCEEDED, ABSOLUTE_DEADLINE_EXCEEDED -> "⏰";
           case STOPPED_WITHOUT_COMPLETE -> "⚠️ ";
           case BUDGET_EXCEEDED -> "💸";
           case ERROR -> "❌";
@@ -2249,7 +2249,9 @@ to boot — skip it for those.""";
         req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter;
     int retryWallClock = cfg.wallClockSeconds;
     boolean primaryHitIterCap = primary.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED;
-    boolean primaryHitWallClock = primary.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+    boolean primaryHitWallClock =
+        primary.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED
+            || primary.outcome() == WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED;
     if (primaryHitIterCap) {
       retryMaxIter = Math.max(retryMaxIter, (int) Math.ceil(cfg.maxIter * 1.5));
       log.info(
@@ -3907,7 +3909,8 @@ to boot — skip it for those.""";
     return outcome == WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE
         || outcome == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
         || outcome == WorkerResult.Outcome.COMPLETED_BY_STAGNATION
-        || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+        || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED
+        || outcome == WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED;
   }
 
   private static String mutationPathSignature(String entry) {
@@ -4023,7 +4026,8 @@ to boot — skip it for those.""";
     }
     return workerResult.outcome() == WorkerResult.Outcome.BUDGET_EXCEEDED
         || workerResult.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
-        || workerResult.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+        || workerResult.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED
+        || workerResult.outcome() == WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED;
   }
 
   private RunCostTracker.Snapshot costSnapshot(String runId) {
@@ -4562,6 +4566,12 @@ to boot — skip it for those.""";
               + " tool calls, "
               + (r.totalLatencyMs() / 1000)
               + "s elapsed). Worker did not call completeTask.";
+      case ABSOLUTE_DEADLINE_EXCEEDED ->
+          "Absolute execution deadline exceeded; shutdown reserve was preserved ("
+              + r.iterations()
+              + " iters, "
+              + r.toolCallsDispatched()
+              + " tool calls).";
       case ERROR ->
           "Worker threw unrecoverable exception"
               + (tail != null && !tail.isBlank() ? ": " + tail : "");
