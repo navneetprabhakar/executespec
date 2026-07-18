@@ -34,6 +34,10 @@ Current job name:
 
 `tb21-deepseek-v4-pro-native-k1-full89-20260718`
 
+Live ExecuteSpec benchmark run: `06079ef7-a7ca-4e44-ae85-351bd3e3b75c`.
+It is currently `RUNNING`; Harbor has passed the 89-image preflight and started
+with zero completed tasks at the first operator poll.
+
 Pinned route:
 
 ```text
