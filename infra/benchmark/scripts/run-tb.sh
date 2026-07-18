@@ -8,7 +8,7 @@
 #   • no leaderboard submission; use submit-tb.sh manually if a future run is explicitly approved
 # Env overrides (all optional): ES_PROVIDER ES_MODEL HARBOR_MODEL TB_DATASET BENCHMARK_DATASET
 #                               K CONCURRENCY HARBOR_AGENT_TIMEOUT_SEC COMPACTION TASK_LIMIT
-#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES ES_PROFILE
+#                               JOB_NAME GCS_BUCKET TB_DIR REPO JOBS_DIR TB_PREFLIGHT_IMAGES ES_PROFILE TASK_NAMES
 set -uo pipefail
 
 TB_DIR="${TB_DIR:-$HOME/tbench}"                       # harbor venv + es_harbor_agent + dataset cache
@@ -21,6 +21,7 @@ TB_DATASET="${TB_DATASET:-terminal-bench/terminal-bench-2-1}"
 BENCHMARK_DATASET="${BENCHMARK_DATASET:-${TB_DATASET##*/}}"
 K="${K:-1}"                                            # internal benchmark: exactly one attempt/task
 TASK_LIMIT="${TASK_LIMIT:-}"                           # optional sanity subset; full TB leaves empty
+TASK_NAMES="${TASK_NAMES:-}"                           # optional exact Harbor task filter for canaries
 TOTAL_TASKS="${TOTAL_TASKS:-${TASK_LIMIT:-89}}"
 CONCURRENCY="${CONCURRENCY:-4}"                        # bump to 8-16 on a big VM
 HARBOR_AGENT_TIMEOUT_SEC="${HARBOR_AGENT_TIMEOUT_SEC:-1500}" # higher than ES TB wall-clock; preserves finalizer buffer
@@ -93,6 +94,14 @@ EOF
 if [ -n "$TASK_LIMIT" ]; then
   cat >> "$CFG" <<EOF
     n_tasks: $TASK_LIMIT
+EOF
+fi
+if [ -n "$TASK_NAMES" ]; then
+  # Comma-separated fully-qualified Harbor names, e.g. terminal-bench/fix-git.
+  # Quote each value so task names remain YAML strings and cannot alter the config.
+  TASK_NAMES_YAML=$(printf '%s' "$TASK_NAMES" | awk -F',' '{ for (i=1; i<=NF; i++) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i); if (i > 1) printf ", "; printf "\"%s\"", $i } }')
+  cat >> "$CFG" <<EOF
+    task_names: [$TASK_NAMES_YAML]
 EOF
 fi
 LOG "config: $CFG (dataset=$TB_DATASET, jobs_dir=$JOBS_DIR, k=$K, conc=$CONCURRENCY, agent_timeout=${HARBOR_AGENT_TIMEOUT_SEC}s, internal-only=true)"
