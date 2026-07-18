@@ -592,7 +592,7 @@ public class BenchmarkTrackingService {
               "(?i)^(gs|s3|artifact)://[A-Za-z0-9][A-Za-z0-9._-]{0,254}/[A-Za-z0-9._/@+:-]+$");
       boolean looksLikeAnotherUri = value.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*$");
       boolean safeRelativePath =
-          value.matches("^[A-Za-z0-9][A-Za-z0-9._/@+-]*\\.(json|jsonl|atif|gz|zst|zip)$");
+          value.matches("^[A-Za-z0-9][A-Za-z0-9._/@+-]*\\.(json|jsonl|ndjson|atif|gz|zst|zip)$");
       boolean unsafe =
           value.length() > 1000
               || value.matches(".*[\\r\\n\\u0000].*")
