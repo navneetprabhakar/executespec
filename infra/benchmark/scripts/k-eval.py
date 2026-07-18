@@ -178,6 +178,7 @@ def cmd_generate(a):
                     runId=d.get("runId"), iterations=d.get("iterations"),
                     proPatchJson=d.get("proPatchJson"), predsJson=d.get("predsJson"),
                     submissionPatch=d.get("submissionPatch"), costUsd=d.get("costUsd"),
+                    inputTokens=d.get("inputTokens"), outputTokens=d.get("outputTokens"),
                     seconds=round(time.time() - t0, 1),
                 )
                 if st == 401:
@@ -235,13 +236,26 @@ def cmd_publish(a):
         sys.exit("publish requires --benchmark-id or --tracking-file from generate")
     scores = load_results(a.results)
     manifest_rows = {}
+    manifest_ids = []
     if a.manifest:
-        for line in pathlib.Path(a.manifest).expanduser().read_text().splitlines():
+        for line_number, line in enumerate(
+            pathlib.Path(a.manifest).expanduser().read_text().splitlines(), start=1
+        ):
+            if not line.strip():
+                continue
             try:
                 row = json.loads(line)
-                manifest_rows[row["instance_id"]] = row
-            except (ValueError, KeyError):
-                continue
+                instance_id = row["instance_id"]
+                if instance_id in manifest_rows:
+                    sys.exit(f"publish refused: duplicate instance_id in manifest: {instance_id}")
+                manifest_rows[instance_id] = row
+                manifest_ids.append(instance_id)
+            except (ValueError, KeyError) as exc:
+                sys.exit(f"publish refused: malformed manifest row {line_number}: {exc}")
+    expected_total = a.expected_total
+    if expected_total is None and a.tracking_file:
+        expected_total = metadata.get("totalTasks")
+    validate_publish_coverage(scores, manifest_ids, expected_total)
     posted = 0
     for instance_id in sorted(scores):
         row = manifest_rows.get(instance_id, {})
@@ -273,6 +287,29 @@ def cmd_publish(a):
     print(f"published {posted} TASK_SCORED events + RUN_DONE to benchmark {benchmark_id}")
 
 
+def validate_publish_coverage(scores, manifest_ids, expected_total=None):
+    """Fail closed unless the official report covers the intended submission set."""
+    score_ids = set(scores)
+    if manifest_ids:
+        expected_ids = set(manifest_ids)
+        missing = sorted(expected_ids - score_ids)
+        extra = sorted(score_ids - expected_ids)
+        if missing or extra:
+            details = []
+            if missing:
+                details.append(f"missing results for {len(missing)} manifest instance(s): {', '.join(missing[:5])}")
+            if extra:
+                details.append(f"results contain {len(extra)} instance(s) absent from manifest: {', '.join(extra[:5])}")
+            raise SystemExit("publish refused: incomplete result coverage; " + "; ".join(details))
+        return
+    if expected_total is None:
+        raise SystemExit("publish requires --manifest or --expected-total to prove exact result coverage")
+    if len(score_ids) != int(expected_total):
+        raise SystemExit(
+            f"publish refused: official result count {len(score_ids)} != expected total {int(expected_total)}"
+        )
+
+
 # ---------- result parsing (tolerant) ----------
 
 def load_results(path):
@@ -280,6 +317,21 @@ def load_results(path):
     d = json.load(open(path))
     out = {}
     if isinstance(d, dict):
+        # Official SWE-bench harness report schema. Empty patches are verifier-truth
+        # unresolved submissions; harness errors likewise remain in the denominator.
+        # `submitted_ids` is authoritative, so a report for a dataset subset cannot
+        # accidentally pull the full split's `incomplete_ids` into this run.
+        if "submitted_ids" in d and isinstance(d["submitted_ids"], list):
+            resolved = set(d.get("resolved_ids", []))
+            unresolved = set(d.get("unresolved_ids", []))
+            empty = set(d.get("empty_patch_ids", []))
+            errors = set(d.get("error_ids", []))
+            classified = resolved | unresolved | empty | errors
+            for iid in d["submitted_ids"]:
+                if iid in classified:
+                    out[iid] = 1 if iid in resolved else 0
+            if out:
+                return out
         if "resolved" in d and isinstance(d["resolved"], list):
             for iid in d["resolved"]:
                 out[iid] = 1
@@ -383,6 +435,7 @@ def main():
     p.add_argument("--benchmark-id", help="existing /benchmark run id")
     p.add_argument("--tracking-file", help="passN.tracking.json emitted by generate")
     p.add_argument("--manifest", help="generation manifest for esRunId/cost attribution")
+    p.add_argument("--expected-total", type=int, help="expected result count when no manifest is available")
     p.add_argument("--attempt", type=int, default=0)
 
     for name in ("aggregate", "canary"):

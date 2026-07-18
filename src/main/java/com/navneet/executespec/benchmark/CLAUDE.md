@@ -3,6 +3,10 @@
 > Added 2026-05-24 (RL-2026-05-028). Branch `feature/swebench-harness` (not yet merged).
 
 > **V296 (2026-07-18):** tracking ingestion locks the parent run while allocating event sequence numbers and upserting task attempts; `benchmark_event(benchmark_run_id, seq)` has a database uniqueness backstop. The `k-eval.py publish` command closes the generate→official-score→RUN_DONE loop.
+> Benchmark generation exposes post-run `RunCostTracker` input/output totals in `GenerateResult`.
+> `k-eval.py generate` copies them into each manifest row and `publish` forwards them as
+> `inputTokens`/`outputTokens` on `TASK_SCORED`; tracking persists per-attempt values and
+> recomputes the run totals shown in `/benchmark`. Never infer tokens from patch size or wall time.
 
 > **This package now holds TWO distinct concerns** — keep them straight:
 >
@@ -50,7 +54,7 @@ classifier/planner/reviewer; product PATCH/autofix and benchmark generation shar
 
 | File | Purpose |
 |------|---------|
-| `BenchmarkGenerationService.java` | **The active benchmark code-gen API.** `generate()` enforces the shared `swebench.max-concurrent-runs` semaphore before setup/codegen, sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the shared code-gen engine synchronously, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, …}`. Workspace under the non-Documents output base by design. |
+| `BenchmarkGenerationService.java` | **The active benchmark code-gen API.** `generate()` enforces the shared `swebench.max-concurrent-runs` semaphore before setup/codegen, sets up the cleanroom (timed `docker pull`, skip-if-present), creates ONE minimal `PipelineRun` row (only for the worker's `hardCapUsd` + `sourceType="benchmark"` gate-off), builds an `ExecutionContext`, calls the shared code-gen engine synchronously, captures the diff → `submission.patch` + `preds.json`, and for SWE-bench Pro also `swebench_pro_patches.json`; returns `{runId, outcome, patchBytes, costUsd, inputTokens, outputTokens, …}`. Workspace under the non-Documents output base by design. |
 | `LowCodingFixtureHarness.java` | Operator/test-only fixed-repo LOW fixture. Creates a tiny deterministic Python addition task, requires a non-blank external ledger reservation id before dispatch, runs the canonical `WorkerAgent` with LOW caps, and emits provider/model/tier/flag/prompt/tool/harness fingerprints plus a deterministic evaluator result. The test response also carries the transient final source so an independent held-out evaluator can hash and execute the patch before the disposable workspace is removed. No production route is added. |
 | `ProviderHandoffFixtureHarness.java` | Versioned (`v1`) operator-only paired fixture harness for repository localization, edit/test/repair, and deliberate stuck/handoff cases. It requires exactly two allow-listed providers, distinct per-pass ledger reservations, an explicit handoff trigger, and sets `WorkerTaskRequest.strictProvider=true`; only an explicit second pass may use the fallback. It emits final-artifact, evaluator, and harness fingerprints. |
 | `ProviderHandoffFixtureController.java` | `POST /api/v2/test/provider-handoff`, local/dev/benchmark profile + `SUPER_ADMIN`; complete JSON route contract, no default fixture/fallback/reservation, disposable workspace. |
@@ -142,7 +146,7 @@ re-broadcasts (SSE) → shows**. No in-app Harbor subprocess — Harbor still ow
 `harbor upload`.
 
 **Suite-agnostic by construction.** Every suite's harness POSTs the *same* event shapes (`TASK_SCORED`
-`{task, attempt, reward, esRunId?, cost}` / `RUN_PROGRESS` / `RUN_DONE` / `SUBMISSION_*`) to the *same*
+`{task, attempt, reward, esRunId?, cost, inputTokens?, outputTokens?}` / `RUN_PROGRESS` / `RUN_DONE` / `SUBMISSION_*`) to the *same*
 ingest endpoint; `benchmark_run.suite` (`BenchmarkSuite`: TERMINAL_BENCH / SWE_BENCH / PROGRAM_BENCH —
 stored as a String, not a JPA enum, so a new suite needs no migration) is the only discriminator. TB is the
 first consumer; SWE-bench + ProgramBench plug in with no schema change.
@@ -152,7 +156,7 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
 | File | Purpose |
 |------|---------|
 | `BenchmarkTrackingController.java` | `@RequestMapping("/api/v2/test/benchmark")` + `@Profile({"local","dev","benchmark"})` + `@PreAuthorize("hasRole('SUPER_ADMIN')")` (the `/api/v2/test/**` matcher is also SUPER_ADMIN-gated — same operator-only surface as `terminalbench/`). `POST /start` (register a tracked run → `BenchmarkRun`), `POST /{id}/event` (ingest one published event), `GET` (list 50), `GET /{id}` (run + task results + events), `GET /{id}/events` (live SSE). DTOs are inline records. **Named distinctly from the SWE-bench `BenchmarkController`** (concern 1) to avoid a class/path collision. |
-| `BenchmarkTrackingService.java` | `start` / `ingest` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt), including optional `outcome` / `outcome_reason` from the bridge, then recomputes `resolved_tasks` (distinct tasks with ≥1 passing attempt) + `cost_usd` (sum of attempt costs); `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). Unknown types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
+| `BenchmarkTrackingService.java` | `start` / `ingest` / reads + `subscribe`. `ingest` is event-typed: `TASK_SCORED` → idempotent upsert of `benchmark_task_result` on (run, task, attempt), including optional `outcome` / `outcome_reason` and `inputTokens` / `outputTokens` from the bridge, then recomputes `resolved_tasks` (distinct tasks with ≥1 passing attempt), `cost_usd`, and run token totals; `RUN_DONE`/`RUN_FAILED` → finalize; `SUBMISSION_*` → `submission_status` + `leaderboard_url` (from the event payload JSON). Unknown types are persisted + broadcast verbatim (forward-compatible). Each event is persisted with a per-run `seq` and re-broadcast via `sse/SseBroadcaster` (keyed by the benchmark-run id, so Redis pub/sub + replay come for free); `RUN_DONE`/`RUN_FAILED` also `complete()` the stream. SSE is best-effort (the event is already persisted + replayable). |
 | `BenchmarkRun` / `BenchmarkTaskResult` / `BenchmarkEvent` | Entities (`@Data @Builder`, app-set `String id`). See **V236**. |
 | `BenchmarkSuite` | The suite discriminator enum + `isKnown(String)`. |
 | `Benchmark{Run,TaskResult,Event}Repository` | `JpaRepository<X, String>` finders. |

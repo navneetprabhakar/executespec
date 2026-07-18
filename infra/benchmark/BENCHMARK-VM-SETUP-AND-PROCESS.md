@@ -138,17 +138,43 @@ already-healthy `:8080` backend instead of starting its own.
   **leaderboard submission** needs `k≥5`, DEFAULT timeouts (no overrides), and `harbor run --upload`
   with public ATIF trajectories — see `PHASE7-BENCHMARK-RULES-DIGEST-2026-07-18.md`.
 
-**SWE-bench Lite:** batched driver over `k-eval.py generate` + `score-watcher.py` (see
-`FULL-731-PRO-VM-RUNBOOK-2026-07-07.md` for the batching pattern; Lite is 300 instances, so much
-smaller than the 731 Pro run). Rebuild the dataset from HF; clone the official scorer.
+**SWE-bench Lite:** run `k-eval.py generate` first, then score the resulting non-empty patches
+with the official SWE-bench v4.1 standard harness. `score-watcher.py` is **Pro-only** (it invokes
+`SWE-bench_Pro-os/swe_bench_pro_eval.py` against the Pro dataset) and must not be used for Lite.
+Rebuild the Lite dataset from HF and use the pinned benchmark virtualenv on the VM:
+
+```bash
+SCORE_WORKERS=4
+PREDS=/path/to/lite-preds.jsonl
+RUN_ID=executespec-lite-$(date +%Y%m%d-%H%M%S)
+~/swebench-bench/.venv/bin/python -m swebench.harness.run_evaluation \
+  --dataset_name SWE-bench/SWE-bench_Lite --split test \
+  --predictions_path "$PREDS" --max_workers "$SCORE_WORKERS" \
+  --timeout 1800 --run_id "$RUN_ID" --cache_level instance
+```
 
 Generation and scoring are separate concurrency controls. `k-eval.py generate --concurrency N`
-limits in-flight ExecuteSpec runs; the official scorer must use the bounded watcher
-`infra/benchmark/scripts/score-watcher.py` with `SCORE_WORKERS=N` (default `2` on the canary VM).
-Each scorer worker gets an isolated output directory and emits its reward only after the official
-verifier returns. Keep the score worker count below the VM's container/memory budget; parallel
-scoring is safe, but unbounded Docker fan-out can make results less reliable. The Pro driver uses
-the same rule through `swe-pro-iteration.py --score-workers N` → `swe_bench_pro_eval.py --num_workers N`.
+limits in-flight ExecuteSpec runs; `--max_workers M` limits concurrent official verifier
+containers. Set `M` to the smaller of the VM-safe bound and the number of non-empty patches;
+when fewer than `M` patches exist, the harness starts only that many workers (it does not create
+idle containers). Empty patches are still part of the submission denominator and must be carried
+as explicit unresolved/empty results by the scorer rather than silently omitted.
+
+After the official harness finishes, publish only its complete report to the existing `/benchmark`
+run. The publish command is fail-closed: with a manifest it requires an exact result for every
+manifest instance (including explicit unresolved/error classifications) before emitting
+`TASK_SCORED` events and `RUN_DONE`:
+
+```bash
+python3 infra/benchmark/scripts/k-eval.py publish \
+  --tracking-file out/pass1.tracking.json \
+  --manifest out/pass1.manifest.jsonl \
+  --results /path/to/<official-run-report>.json
+```
+
+If no manifest is available, pass `--expected-total` explicitly; a partial report is rejected.
+Keep verifier concurrency below the VM's container/memory budget. The Pro driver remains separate:
+`swe-pro-iteration.py --score-workers N` → `swe_bench_pro_eval.py --num_workers N`.
 
 ---
 

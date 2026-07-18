@@ -84,6 +84,8 @@ public class BenchmarkGenerationService {
       int toolCalls,
       long patchBytes,
       double costUsd,
+      long inputTokens,
+      long outputTokens,
       String submissionPatch,
       String predsJson,
       String proPatchJson) {}
@@ -184,7 +186,8 @@ public class BenchmarkGenerationService {
         proPatches = writeSweBenchProPatches(outputDir, instanceId, model, patch);
       }
 
-      double cost = costTracker.snapshot(runId).costUsd();
+      RunCostTracker.Snapshot usage = costTracker.snapshot(runId);
+      double cost = usage.costUsd();
       markTerminal(runId, er.outcome(), patch.length());
 
       log.info(
@@ -206,12 +209,16 @@ public class BenchmarkGenerationService {
           er.toolCalls(),
           patch.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
           cost,
+          usage.inputTokens(),
+          usage.outputTokens(),
           submission.toString(),
           preds.toString(),
           proPatches == null ? null : proPatches.toString());
     } catch (ResponseStatusException rse) {
+      markFailed(runId, rse);
       throw rse;
     } catch (Exception e) {
+      markFailed(runId, e);
       log.error("benchmark-gen FAILED run={} instance={}", runId, instanceId, e);
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "generation failed: " + e.getMessage(), e);
@@ -364,22 +371,49 @@ public class BenchmarkGenerationService {
 
   private String captureDiff(
       String containerName, String baseCommit, String workdir, boolean proExcludes) {
-    String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
+    String diffTarget = validatedDiffTarget(baseCommit);
     String excludes = diffExcludes(proExcludes);
     String cmd =
         "docker exec "
             + containerName
             + " sh -c '"
-            + "cd "
+            + "set -e; cd "
             + workdir
-            + " && "
-            + "git ls-files --others --exclude-standard | xargs -r git add -N >/dev/null 2>&1; "
-            + "git diff "
+            + "; git -c safe.directory="
+            + workdir
+            + " add -N --all >/dev/null; git -c safe.directory="
+            + workdir
+            + " diff "
             + diffTarget
             + excludes
             + "'";
     ShellResult diff = run(cmd, 120);
-    return diff.exit() == 0 ? diff.output() : "";
+    return captureDiffOutput(diff);
+  }
+
+  static String captureDiffOutput(ShellResult diff) {
+    if (diff.exit() == 0) {
+      return diff.output() == null ? "" : diff.output();
+    }
+    String detail = diff.output() == null ? "" : diff.output().trim().replaceAll("\\s+", " ");
+    if (detail.length() > 600) {
+      detail = detail.substring(0, 600) + "…";
+    }
+    throw new IllegalStateException(
+        "benchmark patch capture failed (exit="
+            + diff.exit()
+            + ")"
+            + (detail.isBlank() ? "" : ": " + detail));
+  }
+
+  static String validatedDiffTarget(String baseCommit) {
+    if (baseCommit == null || baseCommit.isBlank()) {
+      return "HEAD";
+    }
+    if (!baseCommit.matches("[0-9a-fA-F]{7,64}")) {
+      throw new IllegalArgumentException("invalid benchmark base commit");
+    }
+    return baseCommit;
   }
 
   /**
@@ -462,6 +496,27 @@ public class BenchmarkGenerationService {
               });
     } catch (Exception e) {
       log.warn("benchmark-gen: failed to mark run {} terminal: {}", runId, e.getMessage());
+    }
+  }
+
+  private void markFailed(String runId, Exception failure) {
+    try {
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              pr -> {
+                pr.setStatus("FAILED");
+                String message =
+                    failure.getMessage() == null
+                        ? failure.getClass().getSimpleName()
+                        : failure.getMessage();
+                String reason = "BENCH_GEN_FAILED:" + message.replaceAll("\\s+", " ");
+                pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
+                pr.setCompletedAt(Instant.now());
+                runRepo.save(pr);
+              });
+    } catch (Exception e) {
+      log.warn("benchmark-gen: failed to mark run {} failed: {}", runId, e.getMessage());
     }
   }
 
