@@ -83,18 +83,6 @@ function managedKind(state?: string | null): 'ok' | 'warn' | 'bad' {
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
 }
-// C6 (review/11) — quota subtitle segment shared by IdeWelcome + IdeCompose.
-// Never emits a leading separator; unlimited tiers say so in words instead of
-// the "0 / ∞ runs" jargon, and "this cycle" became "this month".
-function quotaSubtitle(
-  tier: string,
-  _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
-): string {
-  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed AI
-  // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
-  // The subtitle stays at the tier so it never shows a stale run cap.
-  return tier;
-}
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
   const s = (status || '').toUpperCase();
@@ -114,7 +102,6 @@ function phaseLabel(status?: string | null): string {
 export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const tier = useAuthStore(selectNormalizedTier);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
@@ -188,8 +175,6 @@ export function IdeWelcome() {
     navigate('/compose');
   }
 
-  const runCap = quotaSubtitle(tier, permissions);
-
   const liveTasks = liveRun?.tasks ?? [];
   const liveDone = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
   const liveSpent = liveRun?.actualCostUsd ?? 0;
@@ -199,7 +184,7 @@ export function IdeWelcome() {
       <h1 className='ide-h1'>Workspace</h1>
       <div className='ide-sub'>
         {/* ⌘K hint suppressed on touch layouts (review/11 #9). */}
-        Spec-driven runs across your repos. {runCap}.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
+        Spec-driven runs across your repos.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
       </div>
 
       {liveRun && (
@@ -460,14 +445,17 @@ export function IdeCompose() {
   }, [provider]);
 
   useEffect(() => {
-    if (user?.preferredAiProvider && isProductProvider(user.preferredAiProvider)) {
+    if (tier === 'FREE') {
+      setModelName('');
+      setProvider('DEEPSEEK');
+    } else if (user?.preferredAiProvider && isProductProvider(user.preferredAiProvider)) {
       setModelName('');
       setProvider(user.preferredAiProvider.toUpperCase());
     }
-  }, [user?.preferredAiProvider]);
+  }, [tier, user?.preferredAiProvider]);
 
   function chooseProvider(next: string) {
-    const normalized = next.toUpperCase();
+    const normalized = tier === 'FREE' ? 'DEEPSEEK' : next.toUpperCase();
     // Clear synchronously with the provider selection. Waiting for the effect leaves a render in
     // which a fast submit can pair the new provider with the previous provider's exact model.
     setModelName('');
@@ -592,6 +580,7 @@ export function IdeCompose() {
   const selectableProviders = useMemo(() => {
     const options = providerOptions.length > 0 ? providerOptions : FALLBACK_PROVIDER_OPTIONS;
     return options
+      .filter((p) => tier !== 'FREE' || p.id.toUpperCase() === 'DEEPSEEK')
       .filter((p) => tier === 'ENTERPRISE' || !ENTERPRISE_PROVIDER_IDS.has(p.id.toUpperCase()))
       .map((p) => ({...p, id: p.id.toUpperCase()}));
   }, [providerOptions, tier]);
@@ -704,7 +693,7 @@ export function IdeCompose() {
       <h1 className='ide-h1'>Start work</h1>
       <div className='ide-sub'>
         Describe the change. We will ask before coding and keep the technical defaults out of the
-        way. {quotaSubtitle(tier, permissions)}
+        way.
       </div>
 
       <div className='ide-compose-steps' aria-label='New work steps'>
@@ -739,7 +728,10 @@ export function IdeCompose() {
                 rows={8}
                 placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
                 value={spec}
-                onChange={(e) => setSpec(e.target.value)}
+                onChange={(e) => {
+                  setSpec(e.target.value);
+                  if (err === 'Describe what to build first.') setErr('');
+                }}
               />
               <div style={{marginTop: 10}}>
                 <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />

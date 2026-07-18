@@ -469,6 +469,7 @@ export function IdeAdmin() {
 function AdminOverview() {
   const [funnel, setFunnel] = useState<api.ActivationFunnelReport | null>(null);
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
+  const [tiersError, setTiersError] = useState('');
 
   useEffect(() => {
     api
@@ -479,7 +480,9 @@ function AdminOverview() {
     api
       .fetchTiersLifecycle()
       .then(setTiers)
-      .catch(() => {});
+      .catch((e: unknown) =>
+        setTiersError(e instanceof Error ? e.message : 'Failed to load tier configuration.'),
+      );
   }, []);
 
   const stage = (k: string) => {
@@ -510,6 +513,11 @@ function AdminOverview() {
       </div>
 
       <div className='ide-h2'>Tiers</div>
+      {tiersError && (
+        <div className='ide-card' role='alert' style={{color: 'var(--ide-red)', marginBottom: 10}}>
+          Tier configuration could not be loaded. {tiersError}
+        </div>
+      )}
       <AdminList>
         {tiers.map((t, i) => (
           <div key={t.tier} style={rowStyle(i === tiers.length - 1)}>

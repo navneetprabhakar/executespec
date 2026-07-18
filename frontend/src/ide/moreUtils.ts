@@ -121,10 +121,13 @@ export function accountEmail(user: api.AuthUser | null | undefined): string {
 
 export function usageLabel(permissions: TierPermissions | null): string {
   if (!permissions) return '- / -';
+  if ((permissions.quotaModel || '').toUpperCase() === 'MANAGED_AI_CREDITS') {
+    return 'Managed AI credits';
+  }
   return `${permissions.currentRunCount} / ${workCapLabel(permissions)}`;
 }
 
-export function limitRows(permissions: TierPermissions | null): LabelRow[] {
+export function limitRows(permissions: TierPermissions | null, tier?: string): LabelRow[] {
   return [
     {
       k: 'Monthly work cap',
@@ -135,7 +138,9 @@ export function limitRows(permissions: TierPermissions | null): LabelRow[] {
       k: 'Max org seats',
       v: permissions
         ? permissions.maxOrgMembers === -1
-          ? 'Unlimited'
+          ? tier === 'PRO'
+            ? 'Personal workspace'
+            : 'Unlimited'
           : String(permissions.maxOrgMembers)
         : '-',
     },

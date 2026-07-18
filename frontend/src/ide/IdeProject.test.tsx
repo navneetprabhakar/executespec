@@ -20,6 +20,10 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/api', () => api);
+vi.mock('@/stores/useAuthStore', () => ({
+  selectNormalizedTier: (state: {tier: string}) => state.tier,
+  useAuthStore: (selector: (state: {tier: string}) => unknown) => selector({tier: 'PRO'}),
+}));
 vi.mock('@/ide/IdeProjectTabs', () => ({ProjectTabs: () => <div>Project navigation</div>}));
 vi.mock('@/signal/components/SpecChat', () => ({SpecChat: () => <div>Spec chat</div>}));
 
@@ -109,5 +113,12 @@ describe('IdeProject brownfield compose contract', () => {
       }),
     );
     expect(host.textContent).toContain('Live run');
+  });
+
+  it('shows a non-actionable not-found state when the project cannot be loaded', async () => {
+    api.getProject.mockRejectedValue({status: 404});
+    await renderProject();
+    expect(host.textContent).toContain('Project not found');
+    expect(host.textContent).not.toContain('Start work in this project');
   });
 });

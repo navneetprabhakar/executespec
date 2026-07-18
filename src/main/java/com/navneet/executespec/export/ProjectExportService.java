@@ -10,7 +10,7 @@ import com.navneet.executespec.auth.entity.Project;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -102,8 +102,11 @@ public class ProjectExportService {
 
   public static class ExportQuotaExceededException extends RuntimeException {}
 
-  @ResponseStatus(value = HttpStatus.NOT_FOUND, reason = "project export not found")
-  public static class ProjectExportNotFoundException extends RuntimeException {}
+  public static class ProjectExportNotFoundException extends ResponseStatusException {
+    public ProjectExportNotFoundException() {
+      super(HttpStatus.NOT_FOUND, "project export not found");
+    }
+  }
 
   public static class InvalidIdempotencyKeyException extends RuntimeException {}
 }

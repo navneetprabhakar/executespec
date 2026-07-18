@@ -34,8 +34,9 @@ is own-org ORG_ADMIN or SUPER_ADMIN only. BILLING_ADMIN is deliberately excluded
 attempt details; the aggregate billing/cost-breakdown endpoints remain available to that role.
 Dates are inclusive tenant-calendar dates converted to a half-open instant interval. The range is
 capped at 366 days, page size at 500 and combined roll-ups at 500 rows. Multi-query JSON assembly
-runs in a read-only PostgreSQL REPEATABLE READ transaction so totals, pagination and reconciliation
-refer to one database snapshot.
+runs in Spring's read-only default transaction isolation. The previous per-request REPEATABLE READ
+override exhausted the local PostgreSQL transaction contract on authenticated JSON/CSV audit reads;
+the database/environment default now owns snapshot semantics (Phase-6 F14, fixed 2026-07-18).
 
 The JSON report includes a paginated intent-first attempt list and a combined user x provider x model x agent
 role x feature x project x run/session x key-source x status roll-up. Run and agent-session ids are

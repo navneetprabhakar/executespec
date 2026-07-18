@@ -68,6 +68,12 @@ public class LlmExecutionPolicyFactory {
             .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
     String userId = require(run.getCreatedByUserId(), "run owner");
     String orgId = require(run.getOrgId(), "run org");
+    LlmExecutionScope scope = LlmExecutionScope.customer(orgId);
+    java.util.Optional<LlmExecutionReference> existing =
+        contextService.findReference(scope, "pipeline", "PIPELINE_RUN", runId, "route-v1");
+    if (existing.isPresent()) {
+      return existing.get();
+    }
     String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
     boolean pinned = run.isRoutePinned();
     String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;

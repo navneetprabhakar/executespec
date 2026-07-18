@@ -24,6 +24,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -115,7 +116,9 @@ class ChatServiceRouteTest {
                 .generations(List.of(new Generation(new AssistantMessage("answer"))))
                 .build());
 
-    ChatService svc = new ChatService(runs, router, resolver, props, reports, tools, factory);
+    ChatService svc =
+        new ChatService(
+            runs, router, resolver, props, reports, tools, factory, new ContextSanitizer());
     svc.send("run-1", "first question");
     svc.send("run-1", "second question");
 
@@ -123,5 +126,46 @@ class ChatServiceRouteTest {
     verify(factory, times(2)).forRunChatTurn(eq("run-1"), turnIds.capture());
     assertThat(turnIds.getAllValues()).doesNotHaveDuplicates();
     verify(factory, never()).forRun(any());
+  }
+
+  @Test
+  void redactsSecretPatternsBeforePersistingOrReturningTheReply() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    LlmRouter router = mock(LlmRouter.class);
+    ModelResolver resolver = mock(ModelResolver.class);
+    AgentProperties props = new AgentProperties();
+    props.setWorkspace(System.getProperty("java.io.tmpdir"));
+    ValidationReportRepository reports = mock(ValidationReportRepository.class);
+    RunChatTools tools = mock(RunChatTools.class);
+    PipelineRun run =
+        PipelineRun.builder().runId("run-1").status("COMPLETE").aiProvider("DEEPSEEK").build();
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(reports.findByRunId("run-1")).thenReturn(Optional.empty());
+    when(tools.bind(any())).thenReturn(List.of());
+    when(resolver.resolve("ChatService", LlmProvider.DEEPSEEK, AgentTier.LIGHTWEIGHT))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.DEEPSEEK)
+                .actualProvider(LlmProvider.DEEPSEEK)
+                .model("deepseek-v4-flash-native")
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .fallback(false)
+                .build());
+    when(router.call(any()))
+        .thenReturn(
+            ChatResponse.builder()
+                .generations(
+                    List.of(
+                        new Generation(new AssistantMessage("Example key AKIA1234567890123456"))))
+                .build());
+
+    ChatService.SendResult result =
+        new ChatService(runs, router, resolver, props, reports, tools)
+            .send("run-1", "inspect AKIA1111111111111111");
+
+    assertThat(result.reply()).isEqualTo("Example key [REDACTED]");
+    assertThat(run.getChatHistoryJson())
+        .contains("[REDACTED]")
+        .doesNotContain("AKIA1111111111111111", "AKIA1234567890123456");
   }
 }

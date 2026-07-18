@@ -157,6 +157,11 @@ appends with a PostgreSQL transaction advisory lock.
 
 ### Enterprise LLM usage audit
 
+Managed FREE accounts expose and persist only the configured native DeepSeek Flash route. A
+premium provider/model submitted by an older client is normalized before the run record, plan
+gate, or UI summary is created; dispatch still reauthorizes the same lock. BYOK, TEAM, and
+ENTERPRISE routing remains governed by the customer's key-source and model-matrix policy.
+
 V293 records an immutable write-ahead intent before each known physical provider operation and an
 append-only terminal fact afterward. Retries, failovers, Gemini cache operations, Anthropic forced
 tool fallbacks, token/cache/reasoning usage, actual key source, actor, role, feature, project and run

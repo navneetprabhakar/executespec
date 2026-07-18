@@ -20,6 +20,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -73,6 +74,7 @@ public class ChatService {
   private final ValidationReportRepository validationReportRepo;
   private final RunChatTools runChatTools;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final ContextSanitizer contextSanitizer;
   private final ObjectMapper mapper = new ObjectMapper();
 
   @Autowired
@@ -83,7 +85,8 @@ public class ChatService {
       AgentProperties agentProps,
       ValidationReportRepository validationReportRepo,
       RunChatTools runChatTools,
-      LlmExecutionPolicyFactory executionPolicyFactory) {
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      ContextSanitizer contextSanitizer) {
     this.runRepo = runRepo;
     this.router = router;
     this.modelResolver = modelResolver;
@@ -91,6 +94,7 @@ public class ChatService {
     this.validationReportRepo = validationReportRepo;
     this.runChatTools = runChatTools;
     this.executionPolicyFactory = executionPolicyFactory;
+    this.contextSanitizer = contextSanitizer;
   }
 
   /** Compatibility constructor for deterministic unit callers. */
@@ -101,7 +105,15 @@ public class ChatService {
       AgentProperties agentProps,
       ValidationReportRepository validationReportRepo,
       RunChatTools runChatTools) {
-    this(runRepo, router, modelResolver, agentProps, validationReportRepo, runChatTools, null);
+    this(
+        runRepo,
+        router,
+        modelResolver,
+        agentProps,
+        validationReportRepo,
+        runChatTools,
+        null,
+        new ContextSanitizer());
   }
 
   public record ChatMessage(String role, String content) {}
@@ -125,6 +137,7 @@ public class ChatService {
     if (userMessage == null || userMessage.isBlank()) {
       throw new IllegalArgumentException("message is required");
     }
+    String safeUserMessage = contextSanitizer.sanitizeOutput(userMessage);
     PipelineRun run =
         runRepo
             .findById(runId)
@@ -182,7 +195,7 @@ public class ChatService {
               ? new UserMessage(m.content())
               : new AssistantMessage(m.content()));
     }
-    messages.add(new UserMessage(userMessage));
+    messages.add(new UserMessage(safeUserMessage));
 
     // Read-only run tools (list_run_files / read_run_file) let the copilot drill into the
     // actual generated code to ground a suggestion. ExecutionContext is run-scoped so
@@ -200,13 +213,14 @@ public class ChatService {
       reply = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
       if (reply.isBlank())
         reply = "(The model returned an empty response. Try rephrasing the question.)";
+      reply = contextSanitizer.sanitizeOutput(reply);
     } catch (Exception e) {
       log.error("ChatService send failed for run={}: {}", runId, e.getMessage(), e);
       throw new RuntimeException("Chat failed: " + e.getMessage(), e);
     }
 
     // Persist: append both messages + bump counter.
-    history.add(new ChatMessage("user", userMessage));
+    history.add(new ChatMessage("user", safeUserMessage));
     history.add(new ChatMessage("assistant", reply));
     run.setChatHistoryJson(serialize(history));
     run.setChatMessageCount(history.size());

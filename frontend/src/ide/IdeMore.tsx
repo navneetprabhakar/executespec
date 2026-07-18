@@ -411,7 +411,7 @@ export function IdeAccount() {
   const email = accountEmail(user);
   const name = accountDisplayName(user);
   const usage = usageLabel(permissions);
-  const limits = limitRows(permissions);
+  const limits = limitRows(permissions, tier);
 
   function Seg({
     on,
@@ -446,7 +446,10 @@ export function IdeAccount() {
         <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
         <div style={{display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap'}}>
           <IdeBadge kind='ok'>{tier} tier</IdeBadge>
-          <IdeBadge kind='warn'>{usage} work items</IdeBadge>
+          <IdeBadge kind='warn'>
+            {usage}
+            {usage === 'Managed AI credits' ? '' : ' work items'}
+          </IdeBadge>
           {user?.globalRole === 'SUPER_ADMIN' && <IdeBadge kind='bad'>SUPER_ADMIN</IdeBadge>}
         </div>
       </div>

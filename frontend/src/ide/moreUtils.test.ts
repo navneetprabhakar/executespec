@@ -100,7 +100,7 @@ describe('moreUtils', () => {
           unlimitedAiCredits: false,
         }),
       ),
-    ).toBe('4 / AI credits');
+    ).toBe('Managed AI credits');
     expect(
       limitRows(permissions({maxOrgMembers: -1, canDeploy: true, maxDeployments: -1})),
     ).toEqual(
@@ -110,6 +110,10 @@ describe('moreUtils', () => {
         {k: 'Deploy engine', v: 'Up to ∞'},
       ]),
     );
+    expect(limitRows(permissions({maxOrgMembers: -1}), 'PRO')).toContainEqual({
+      k: 'Max org seats',
+      v: 'Personal workspace',
+    });
     expect(
       limitRows(
         permissions({

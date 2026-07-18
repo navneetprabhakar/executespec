@@ -48,6 +48,10 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 ## Adopted customer surfaces
 
 - Pipeline planning, worker, reviewer and child compaction calls inherit one run context.
+- `LlmExecutionPolicyFactory.forRun` first recovers the original tenant-scoped idempotent
+  `pipeline/PIPELINE_RUN/{runId}/route-v1` reference. It must not rebuild the context from mutable
+  run rows after planning persists derived budget fields; doing so changes the fingerprint and
+  breaks approval-stage recovery (Phase-6 F7, fixed 2026-07-18).
 - Run report, test generation, prompt optimisation, code-map/assessment and run ledger text calls
   recover the same context from the persisted run primary key. The post-run chat copilot instead
   mints a dedicated per-turn context via `forRunChatTurn(runId, turnId)` — identical

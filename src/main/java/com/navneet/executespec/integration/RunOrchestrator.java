@@ -36,6 +36,7 @@ import com.navneet.executespec.agent.PlannerRequest;
 import com.navneet.executespec.agent.SpecClassifier;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
@@ -181,6 +182,7 @@ public class RunOrchestrator implements RunControlPort {
   private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
+  private final ManagedAiProperties managedAiProperties;
   private final com.navneet.executespec.smoketest.CliSmokeRunner cliSmokeRunner;
   private final ProjectRepoService projectRepoService;
   private final FeatureAssessmentService featureAssessmentService;
@@ -824,6 +826,18 @@ public class RunOrchestrator implements RunControlPort {
             ? appUserRepository.findById(createdByUserId).map(u -> u.getTier()).orElse(null)
             : null;
     boolean enterpriseSubmit = "ENTERPRISE".equalsIgnoreCase(ownerTierAtSubmit);
+    ManagedAiProperties.TierPolicy managedTierPolicy =
+        managedAiProperties.policyFor(ownerTierAtSubmit);
+    boolean managedTierRouteLocked =
+        ownerTierAtSubmit != null
+            && !ownerTierAtSubmit.isBlank()
+            && managedTierPolicy.getLockedProvider() != null
+            && !managedTierPolicy.getLockedProvider().isBlank()
+            && managedTierPolicy.getLockedModel() != null
+            && !managedTierPolicy.getLockedModel().isBlank();
+    if (managedTierRouteLocked) {
+      provider = managedTierPolicy.getLockedProvider().trim().toLowerCase(Locale.ROOT);
+    }
     boolean hasPin = modelName != null && !modelName.isBlank();
     if (hasPin && !enterpriseSubmit) {
       throw new org.springframework.web.server.ResponseStatusException(
@@ -846,7 +860,12 @@ public class RunOrchestrator implements RunControlPort {
     // the YAML workhorse default (= the model the worker will actually route to). This keeps the
     // pipeline's `model` value, the persisted workerModel column, and the tierConfigFor fallback
     // all consistent with the overlay-driven routing.
-    String model = canonicalPin != null ? canonicalPin : contextComposer.defaultModelFor(provider);
+    String model =
+        canonicalPin != null
+            ? canonicalPin
+            : managedTierRouteLocked
+                ? modelRegistry.canonicalize(managedTierPolicy.getLockedModel().trim())
+                : contextComposer.defaultModelFor(provider);
 
     // 2026-05-06 — defaultModelFor was a hardcoded provider→model fallback that drifted from
     // the YAML matrix (returned Haiku/flash/mini when YAML PLANNING wanted Sonnet/Pro/gpt-5.4).
@@ -866,7 +885,7 @@ public class RunOrchestrator implements RunControlPort {
     String plannerDbModel = model;
     String reviewerDbModel = model;
     boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
-    if (!hasPin || isPatch || !enterpriseSubmit) {
+    if (!managedTierRouteLocked && (!hasPin || isPatch || !enterpriseSubmit)) {
       try {
         com.navneet.executespec.router.LlmProvider p =
             com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());

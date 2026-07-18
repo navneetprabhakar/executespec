@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {useNavigate, useParams} from 'react-router-dom';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
@@ -21,7 +21,7 @@ import {streamWebAgentChatReply} from '@/ide/agentChatStream';
 import {costReconciliation, phaseCostRows} from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
-import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
 import {
   IdeBadge,
   IdeCodeViewer,
@@ -90,6 +90,7 @@ export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const viewerTier = useAuthStore(selectNormalizedTier);
   const providerReadiness = useProviderReadiness();
   const runId = params.runId || params.runShort || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
@@ -110,6 +111,7 @@ export default function IdeRunResult() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<'not-found' | 'forbidden' | 'error' | null>(null);
   // Single confirm-modal slot — multiple destructive actions on this page
   // (delete run / deploy / stop preview / mark-test-invalid) drive it via a
   // discriminated payload that carries the action to run on confirm.
@@ -148,7 +150,10 @@ export default function IdeRunResult() {
     api
       .getRun(runId)
       .then(setRun)
-      .catch(() => {})
+      .catch((e: unknown) => {
+        const status = typeof e === 'object' && e ? Number((e as {status?: number}).status) : 0;
+        setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
+      })
       .finally(() => setLoading(false));
     api
       .getValidationReport(runId)
@@ -692,6 +697,28 @@ export default function IdeRunResult() {
     );
   }
 
+  if (loadError || !run) {
+    const forbidden = loadError === 'forbidden';
+    const unavailable = loadError === 'error';
+    return (
+      <div className='ide-pane' role='alert'>
+        <div className='ide-empty'>
+          <strong>
+            {forbidden ? 'Run access denied' : unavailable ? 'Run unavailable' : 'Run not found'}
+          </strong>
+          <div>
+            {forbidden
+              ? 'You do not have access to this run.'
+              : unavailable
+                ? 'The run could not be loaded. Try again shortly.'
+                : 'This run does not exist or was removed.'}
+          </div>
+          <Link to='/runs'>Back to work</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}>
       {/* tab strip */}
@@ -967,7 +994,14 @@ export default function IdeRunResult() {
                   Execution details
                 </div>
                 <Kv k='Status' v={run?.status ?? '—'} />
-                <Kv k='Provider' v={(run?.aiProvider || '—').toLowerCase()} />
+                <Kv
+                  k='Provider'
+                  v={
+                    viewerTier === 'FREE'
+                      ? 'deepseek (managed tier lock)'
+                      : (run?.aiProvider || '—').toLowerCase()
+                  }
+                />
                 <Kv
                   k='Requested route'
                   v={
@@ -988,7 +1022,7 @@ export default function IdeRunResult() {
                   k='Worker'
                   v={
                     <span className='ide-mono' style={{fontSize: 11}}>
-                      {run?.workerModel || '—'}
+                      {viewerTier === 'FREE' ? 'deepseek-v4-flash-native' : run?.workerModel || '—'}
                     </span>
                   }
                 />
