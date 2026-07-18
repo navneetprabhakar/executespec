@@ -101,10 +101,14 @@ public class ProjectExportController {
   }
 
   @GetMapping("/{jobId}/download")
-  public ResponseEntity<?> download(
+  public ResponseEntity<StreamingResponseBody> download(
       @PathVariable String projectId,
       @PathVariable String jobId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
+    // F4 (2026-07-18): the return type MUST be the concrete ResponseEntity<StreamingResponseBody>.
+    // With a ResponseEntity<?> wildcard, Spring's StreamingResponseBodyReturnValueHandler does not
+    // recognize the body and falls through to a message converter, which cannot serialize the
+    // streaming lambda -> HttpMessageNotWritableException / HTTP 500. The download never worked.
     Project project = projectAccessGuard.assertCanRead(projectId, userDetails);
     UUID id = parseJobId(jobId);
     ProjectExportJobStore.Job job = exportService.get(project, id);

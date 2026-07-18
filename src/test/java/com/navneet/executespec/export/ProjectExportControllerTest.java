@@ -126,4 +126,20 @@ class ProjectExportControllerTest {
     verify(service).recordDownload(project, job.id(), "user-1");
     verify(objectStore).copyTo(eq(job.objectKey()), any());
   }
+
+  @Test
+  void downloadDeclaredReturnTypeIsConcreteStreamingResponseBody() throws Exception {
+    // F4 (2026-07-18) regression guard: a ResponseEntity<?> wildcard return type makes Spring's
+    // StreamingResponseBodyReturnValueHandler skip it and fall through to a message converter,
+    // yielding HttpMessageNotWritableException / HTTP 500 at runtime (a direct-call unit test
+    // cannot
+    // see this). The declared return type must name StreamingResponseBody concretely.
+    var method =
+        ProjectExportController.class.getDeclaredMethod(
+            "download",
+            String.class,
+            String.class,
+            com.navneet.executespec.auth.security.AppUserDetails.class);
+    assertThat(method.getGenericReturnType().getTypeName()).contains("StreamingResponseBody");
+  }
 }
