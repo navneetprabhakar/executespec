@@ -422,3 +422,15 @@ Full findings, RCAs, patches and evidence for F7–F19 are in the Phase-6 report
 - Remaining UI/contract gap: active benchmark usage remains zero until the
   bridge posts a terminal `TASK_SCORED`; live provider usage exists in the
   linked ExecuteSpec run ledger but is not yet projected into `RUN_PROGRESS`.
+
+### TB smoke gate (2026-07-19 UTC)
+
+- The initial `write-compressor` smoke was stopped at the configured deadline;
+  its ATIF trajectory and `CancelledError` are retained as timeout/remediation
+  evidence only.
+- A simpler exact-filter canary (`terminal-bench/fix-git`) completed successfully:
+  tracker `75475a74-4d20-4e43-8b75-9740063bff49`, 1/1 resolved, `$0.008120`,
+  103,245 input and 4,230 output tokens, 34,856-byte ATIF trajectory.
+- `run-tb.sh` now supports `TASK_NAMES` for deterministic smoke selection; full
+  runs leave it unset. The canary proves dispatch, Harbor completion, official
+  verifier reward and trajectory capture, but not full-suite timeout SLOs.

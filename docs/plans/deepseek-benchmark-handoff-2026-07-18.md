@@ -160,3 +160,29 @@ The active smoke row currently shows zero tracker tokens/cost until its trial
 publishes `TASK_SCORED`; the bridge publishes terminal usage today, while the
 server-side worker ledger already contains live usage. This is a live-progress
 tracking gap to fix or explicitly document before a long campaign.
+
+## Smoke rerun evidence (2026-07-19 UTC)
+
+The first smoke used `write-compressor` and was intentionally stopped after the
+1,410-second internal deadline. It produced a valid ATIF trajectory, but Harbor
+had no verifier result because the selected task was too long for a canary. The
+adapter recorded the expected cancellation (`CancelledError` while consuming the
+remote SSE stream); this is invalid quality evidence, not a model score.
+
+The runner now accepts an exact comma-separated `TASK_NAMES` filter. A replacement
+smoke used the officially tagged easy task `terminal-bench/fix-git`:
+
+| Field | Evidence |
+|---|---|
+| Job | `tb21-deepseek-v4-pro-native-smoke-fixgit-20260719` |
+| Tracker | `75475a74-4d20-4e43-8b75-9740063bff49` |
+| Result | DONE, 1/1 resolved |
+| Usage | 103,245 input / 4,230 output tokens; `$0.008120` |
+| Trajectory | Harbor ATIF trajectory present, 34,856 bytes |
+| Verifier | `reward.txt=1` |
+| Config | native DeepSeek V4 Pro, k=1, concurrency=1, Harbor timeout 1500s |
+
+This closes the provider-dispatch + terminal-result + trajectory smoke gate. It
+does not prove the full 89-task timeout acceptance; the full campaign remains
+subject to the documented deadline/trajectory monitoring and must not reuse the
+cancelled `write-compressor` result.
