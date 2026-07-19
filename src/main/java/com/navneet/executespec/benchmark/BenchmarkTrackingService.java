@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunStepUsage;
 import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.sse.RunEvent;
@@ -353,15 +354,20 @@ public class BenchmarkTrackingService {
               // benchmark_task_result.cost_usd is NUMERIC(12,6). Compare and aggregate the exact
               // persisted projection so a replay cannot oscillate on discarded sub-microdollars.
               .setScale(6, RoundingMode.HALF_UP);
+      EffectiveRouteProjection route = EffectiveRouteProjection.from(rows);
       boolean changed =
           result.getInputTokens() != input
               || result.getOutputTokens() != output
               || result.getCostUsd() == null
-              || result.getCostUsd().compareTo(cost) != 0;
+              || result.getCostUsd().compareTo(cost) != 0
+              || !Objects.equals(result.getRouteAttribution(), route.attribution().name())
+              || !Objects.equals(result.getProvider(), route.provider())
+              || !Objects.equals(result.getModel(), route.model());
       if (changed) {
         result.setInputTokens(input);
         result.setOutputTokens(output);
         result.setCostUsd(cost);
+        applyRoute(result, route);
         taskResults.save(result);
         updated++;
       }
@@ -414,7 +420,7 @@ public class BenchmarkTrackingService {
     if (exists) {
       return;
     }
-    taskResults.save(
+    BenchmarkTaskResult row =
         BenchmarkTaskResult.builder()
             .id(UUID.randomUUID().toString())
             .benchmarkRunId(runId)
@@ -431,7 +437,25 @@ public class BenchmarkTrackingService {
             .inputTokens(inputTokens == null ? 0L : Math.max(0L, inputTokens))
             .outputTokens(outputTokens == null ? 0L : Math.max(0L, outputTokens))
             .createdAt(Instant.now())
-            .build());
+            .build();
+    // Derive the physical route from this attempt's own ExecuteSpec run so a fresh campaign is
+    // truthful without needing a later repair pass. Never read a route off the client event.
+    applyRoute(row, routeFor(esRunId));
+    taskResults.save(row);
+  }
+
+  /** Server-side route projection for one attempt; empty/unknown links stay UNATTRIBUTED. */
+  private EffectiveRouteProjection routeFor(String esRunId) {
+    if (esRunId == null || esRunId.isBlank()) {
+      return EffectiveRouteProjection.UNATTRIBUTED;
+    }
+    return EffectiveRouteProjection.from(usage.findByRunIdOrderByCreatedAtAsc(esRunId));
+  }
+
+  private static void applyRoute(BenchmarkTaskResult result, EffectiveRouteProjection route) {
+    result.setProvider(route.provider());
+    result.setModel(route.model());
+    result.setRouteAttribution(route.attribution().name());
   }
 
   /** Headline resolved% = distinct tasks with ≥1 passing attempt; cost = sum of attempt costs. */

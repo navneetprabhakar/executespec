@@ -32,6 +32,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class LlmExecutionPolicyFactory {
 
+  /**
+   * Distinct route-policy generation for controlled benchmark/SWE-bench workers. It MUST differ
+   * from {@code route-v1}: durable contexts are recovered by this key, so reusing the old one would
+   * let in-flight and resumed benchmark runs keep serving the previous permissive policy and the
+   * failover suppression would silently do nothing.
+   */
+  static final String CONTROLLED_WORKER_ROUTE_POLICY_KEY = "route-v3-controlled-worker";
+
   private static final List<String> PROVIDERS =
       List.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
 
@@ -80,7 +88,11 @@ public class LlmExecutionPolicyFactory {
             .findById(orgId)
             .orElseThrow(() -> new IllegalArgumentException("customer org not found"));
     boolean ownKeysProviderLock = isOwnKeys(keySourceMode(org.getKeySourceMode()));
-    String routePolicyKey = ownKeysProviderLock ? "route-v2-own-keys-provider-lock" : "route-v1";
+    boolean controlledWorker = isControlledWorkerRun(run.getSourceType());
+    String routePolicyKey =
+        ownKeysProviderLock
+            ? "route-v2-own-keys-provider-lock"
+            : controlledWorker ? CONTROLLED_WORKER_ROUTE_POLICY_KEY : "route-v1";
     java.util.Optional<LlmExecutionReference> existing =
         ownKeysProviderLock
             ? java.util.Optional.empty()
@@ -109,9 +121,26 @@ public class LlmExecutionPolicyFactory {
         requestedProvider,
         requestedModel,
         pinned,
+        controlledWorker,
         new LlmExecutionBudget(null, null, null, costCap, null),
         routePolicyKey,
         null);
+  }
+
+  /**
+   * True for operator-controlled benchmark/SWE-bench workers, whose entire purpose is a fixed-route
+   * measurement. Cross-provider failover is suppressed for these runs because a silently
+   * re-provisioned attempt would still be reported under the requested route by the campaign
+   * artifacts, invalidating any cross-provider comparison built on them.
+   *
+   * <p>Uses the same {@code pipeline_run.sourceType} discriminator as {@code
+   * CodeGenEngineImpl.requireTestVerification}, so the two controlled-worker behaviours cannot
+   * drift apart.
+   */
+  static boolean isControlledWorkerRun(String sourceType) {
+    if (sourceType == null || sourceType.isBlank()) return false;
+    String normalized = sourceType.trim().toLowerCase(Locale.ROOT);
+    return normalized.startsWith("benchmark") || normalized.startsWith("swebench");
   }
 
   /** Returns empty for a non-run identifier; malformed customer policy still fails closed. */
@@ -448,6 +477,42 @@ public class LlmExecutionPolicyFactory {
       LlmExecutionBudget budget,
       String idempotencyKey,
       java.time.Instant expiresAt) {
+    return createCustomer(
+        contextType,
+        feature,
+        sourceType,
+        sourceId,
+        correlationId,
+        userId,
+        keySubjectUserId,
+        orgId,
+        projectId,
+        requestedProvider,
+        requestedModel,
+        exact,
+        false,
+        budget,
+        idempotencyKey,
+        expiresAt);
+  }
+
+  private LlmExecutionReference createCustomer(
+      LlmExecutionContext.ContextType contextType,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String correlationId,
+      String userId,
+      String keySubjectUserId,
+      String orgId,
+      String projectId,
+      String requestedProvider,
+      String requestedModel,
+      boolean exact,
+      boolean controlledWorker,
+      LlmExecutionBudget budget,
+      String idempotencyKey,
+      java.time.Instant expiresAt) {
     require(userId, "userId");
     require(keySubjectUserId, "keySubjectUserId");
     require(orgId, "orgId");
@@ -515,7 +580,11 @@ public class LlmExecutionPolicyFactory {
                 ? LlmPolicySnapshot.RoutingMode.EXACT
                 : LlmPolicySnapshot.RoutingMode.PROVIDER_PREFERRED,
             exact,
-            !exact && !ownKeysProviderLock,
+            // Leading BYOK term is deliberately separate and must not be reordered or
+            // short-circuited: if an OWN_KEYS run regained failover eligibility, the only remaining
+            // defence would be ByokContextUnavailableException, which fires on key source, not on
+            // provider policy.
+            !exact && !ownKeysProviderLock && !controlledWorker,
             ownKeysProviderLock ? 2 : 1);
     LlmExecutionScope scope = LlmExecutionScope.customer(orgId);
     LlmExecutionContext context =

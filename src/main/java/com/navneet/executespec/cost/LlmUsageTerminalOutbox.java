@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.observability.Metrics;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -28,17 +29,27 @@ public class LlmUsageTerminalOutbox {
   private final String owner;
   private final int batchSize;
   private final Duration leaseDuration;
+  private final int maxAttempts;
 
+  @Autowired
   public LlmUsageTerminalOutbox(
       LlmUsageTerminalOutboxStore store,
       Metrics metrics,
       @Value("${executespec.usage-terminal-outbox.batch-size:20}") int batchSize,
-      @Value("${executespec.usage-terminal-outbox.lease-seconds:120}") long leaseSeconds) {
+      @Value("${executespec.usage-terminal-outbox.lease-seconds:120}") long leaseSeconds,
+      @Value("${executespec.usage-terminal-outbox.max-attempts:8}") int maxAttempts) {
     this.store = store;
     this.metrics = metrics;
     this.batchSize = Math.max(1, Math.min(batchSize, 100));
     this.leaseDuration = Duration.ofSeconds(Math.max(30, Math.min(leaseSeconds, 3600)));
+    this.maxAttempts = Math.max(1, Math.min(maxAttempts, 100));
     this.owner = nodeIdentity() + ":" + UUID.randomUUID();
+  }
+
+  /** Test/backward-compatible constructor retaining the production default retry ceiling. */
+  LlmUsageTerminalOutbox(
+      LlmUsageTerminalOutboxStore store, Metrics metrics, int batchSize, long leaseSeconds) {
+    this(store, metrics, batchSize, leaseSeconds, 8);
   }
 
   /** Stage before materialization; returning QUEUED still means the exact payload is DB durable. */
@@ -64,14 +75,16 @@ public class LlmUsageTerminalOutbox {
           store.deadLetter(lease, poisonPayload);
           metrics.recordLlmUsagePersistence("RECOVERY", "dead_letter");
           log.error(
-              "Terminal usage outbox payload rejected attemptId={}",
+              "Terminal usage outbox payload rejected attemptId={} errorClass={}",
               lease.physicalAttemptId(),
-              poisonPayload);
+              poisonPayload.getClass().getSimpleName());
         }
       }
     } catch (RuntimeException claimFailure) {
       metrics.recordLlmUsagePersistence("RECOVERY", "claim_failed");
-      log.error("Unable to claim terminal usage recovery work", claimFailure);
+      log.error(
+          "Unable to claim terminal usage recovery work errorClass={}",
+          claimFailure.getClass().getSimpleName());
     }
   }
 
@@ -86,17 +99,28 @@ public class LlmUsageTerminalOutbox {
       store.deadLetter(lease, conflict);
       metrics.recordLlmUsagePersistence("RECOVERY", "dead_letter");
       log.error(
-          "Terminal usage evidence conflict retained attemptId={}",
+          "Terminal usage evidence conflict retained attemptId={} errorClass={}",
           lease.physicalAttemptId(),
-          conflict);
+          conflict.getClass().getSimpleName());
       return PersistResult.DURABLY_QUEUED;
     } catch (RuntimeException materializationFailure) {
+      if (lease.attempt() >= maxAttempts) {
+        store.deadLetter(lease, materializationFailure);
+        metrics.recordLlmUsagePersistence("RECOVERY", "dead_letter");
+        log.error(
+            "Canonical terminal usage exhausted recovery attempts attemptId={} attempts={}"
+                + " errorClass={}",
+            lease.physicalAttemptId(),
+            lease.attempt(),
+            materializationFailure.getClass().getSimpleName());
+        return PersistResult.DURABLY_QUEUED;
+      }
       store.retry(lease, materializationFailure, retryDelay(lease.attempt()));
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "outbox_retry");
       log.error(
-          "Canonical terminal usage remains durably queued attemptId={}",
+          "Canonical terminal usage remains durably queued attemptId={} errorClass={}",
           lease.physicalAttemptId(),
-          materializationFailure);
+          materializationFailure.getClass().getSimpleName());
       return PersistResult.DURABLY_QUEUED;
     }
   }

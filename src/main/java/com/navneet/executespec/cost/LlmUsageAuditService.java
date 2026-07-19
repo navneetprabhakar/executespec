@@ -79,6 +79,7 @@ WITH resolved AS (
            ELSE 'UNRECONCILED'
          END AS managed_ai_projection_status,
          a.email AS user_email,
+         i.human_role_snapshot AS user_role,
          p.name AS project_name,
          COALESCE(run_direct.run_id, run_source.run_id, turn_run.run_id,
                   session_direct.run_id, session_source.run_id) AS resolved_run_id,
@@ -135,7 +136,7 @@ WITH resolved AS (
     List<UsageAttempt> attempts = attempts(query, query.size(), query.offset());
     long pages = totalRows == 0 ? 0 : (totalRows + query.size() - 1) / query.size();
     return new LlmUsageAuditReport(
-        3,
+        4,
         "canonical_llm_usage_event",
         query.orgId(),
         new Window(
@@ -170,6 +171,7 @@ WITH resolved AS (
         text("execution_context_id"),
         text("user_id"),
         text("user_email"),
+        text("user_role"),
         text("project_id"),
         text("project_name"),
         text("run_id"),
@@ -211,6 +213,7 @@ WITH resolved AS (
           text(row.llmExecutionContextId()),
           text(row.userId()),
           text(row.userEmail()),
+          text(row.userRole()),
           text(row.projectId()),
           text(row.projectName()),
           text(row.runId()),
@@ -293,7 +296,7 @@ FROM resolved
         jdbc.queryForList(
             RESOLVED_CTE
                 + """
-SELECT user_id, COALESCE(user_email, 'Unknown') AS user_email,
+SELECT user_id, COALESCE(user_email, 'Unknown') AS user_email, user_role,
        provider, model, agent_role, feature, project_id,
        COALESCE(project_name, 'No project') AS project_name,
        resolved_run_id, resolved_session_id, source_type, source_id,
@@ -307,7 +310,7 @@ SELECT user_id, COALESCE(user_email, 'Unknown') AS user_email,
        COALESCE(SUM(known_cost_usd), 0) AS known_cost_usd,
        COUNT(*) FILTER (WHERE known_cost_usd IS NULL) AS unknown_cost_attempts
 FROM resolved
-GROUP BY user_id, user_email, provider, model, agent_role, feature, project_id,
+GROUP BY user_id, user_email, user_role, provider, model, agent_role, feature, project_id,
          project_name, resolved_run_id, resolved_session_id, source_type, source_id,
          key_source, attempt_status
 ORDER BY known_cost_usd DESC, attempts DESC, user_id, provider, model
@@ -325,6 +328,7 @@ LIMIT ?
                 + """
 SELECT id, created_at, llm_execution_context_id, user_id,
        COALESCE(user_email, 'Unknown') AS user_email,
+       user_role,
        project_id, COALESCE(project_name, 'No project') AS project_name,
        resolved_run_id, resolved_session_id, source_type, source_id, task_id,
        agent_role, feature, step_id, retry_of, correlation_id, model_tier, logical_call_id,
@@ -410,11 +414,18 @@ WITH ledger AS (
   FROM run_step_usage u
   WHERE u.org_id = ? AND u.created_at >= ? AND u.created_at < ?
     AND u.attempt_status = 'SUCCESS' AND u.key_source = 'PLATFORM'
-), managed AS (
-  SELECT usage_event_id, input_tokens, output_tokens, reasoning_tokens,
+), managed_all AS (
+  SELECT id AS managed_event_id, usage_event_id, input_tokens, output_tokens, reasoning_tokens,
          cache_read_tokens, cache_write_tokens, raw_cost_usd::numeric AS cost_usd
   FROM managed_ai_usage_event
-  WHERE org_id = ? AND created_at >= ? AND created_at < ?
+  WHERE org_id = ? AND source_type = 'PLATFORM'
+), managed_window AS (
+  SELECT *
+  FROM managed_all
+  WHERE managed_event_id IN (
+    SELECT id FROM managed_ai_usage_event
+    WHERE org_id = ? AND created_at >= ? AND created_at < ? AND source_type = 'PLATFORM'
+  )
 ), paired AS (
   SELECT l.*, m.usage_event_id,
          m.input_tokens AS managed_input_tokens,
@@ -424,9 +435,29 @@ WITH ledger AS (
          m.cache_write_tokens AS managed_cache_write_tokens,
          m.cost_usd AS managed_cost_usd,
          (m.usage_event_id IS NULL) AS ledger_only,
-         (l.id IS NULL) AS managed_only
+         FALSE AS managed_only
   FROM ledger l
-  FULL OUTER JOIN managed m ON m.usage_event_id = l.id
+  LEFT JOIN managed_all m ON m.usage_event_id = l.id
+  UNION ALL
+  SELECT NULL AS id,
+         NULL AS input_tokens,
+         NULL AS output_tokens,
+         NULL AS reasoning_tokens,
+         NULL AS cache_read_tokens,
+         NULL AS cache_write_tokens,
+         NULL AS cost_usd,
+         m.usage_event_id,
+         m.input_tokens AS managed_input_tokens,
+         m.output_tokens AS managed_output_tokens,
+         m.reasoning_tokens AS managed_reasoning_tokens,
+         m.cache_read_tokens AS managed_cache_read_tokens,
+         m.cache_write_tokens AS managed_cache_write_tokens,
+         m.cost_usd AS managed_cost_usd,
+         FALSE AS ledger_only,
+         TRUE AS managed_only
+  FROM managed_window m
+  LEFT JOIN run_step_usage u ON u.id = m.usage_event_id
+  WHERE u.id IS NULL
 )
 SELECT COALESCE(SUM(p.cost_usd), 0) AS ledger_cost,
        COALESCE(SUM(p.managed_cost_usd), 0) AS managed_cost,
@@ -448,6 +479,7 @@ FROM paired p
             query.orgId(),
             Timestamp.from(query.fromInclusive()),
             Timestamp.from(query.toExclusive()),
+            query.orgId(),
             query.orgId(),
             Timestamp.from(query.fromInclusive()),
             Timestamp.from(query.toExclusive()));
@@ -487,6 +519,7 @@ FROM paired p
     return new UsageRollup(
         string(row, "user_id"),
         string(row, "user_email"),
+        string(row, "user_role"),
         string(row, "provider"),
         string(row, "model"),
         string(row, "agent_role"),
@@ -516,6 +549,7 @@ FROM paired p
         string(row, "llm_execution_context_id"),
         string(row, "user_id"),
         string(row, "user_email"),
+        string(row, "user_role"),
         string(row, "project_id"),
         string(row, "project_name"),
         string(row, "resolved_run_id"),

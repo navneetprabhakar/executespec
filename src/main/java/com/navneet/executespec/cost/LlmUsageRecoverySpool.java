@@ -6,7 +6,11 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Instant;
 import java.util.Comparator;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -28,6 +32,11 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class LlmUsageRecoverySpool {
+
+  private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS =
+      PosixFilePermissions.fromString("rwx------");
+  private static final Set<PosixFilePermission> FILE_PERMISSIONS =
+      PosixFilePermissions.fromString("rw-------");
 
   private final LlmUsageTerminalOutbox terminalOutbox;
   private final ObjectMapper objectMapper;
@@ -51,28 +60,32 @@ public class LlmUsageRecoverySpool {
     if (row == null || row.getId() == null || row.getId().isBlank()) return false;
     try {
       Files.createDirectories(directory);
+      setPermissions(directory, DIRECTORY_PERMISSIONS);
       String basename =
           UUID.nameUUIDFromBytes(row.getId().getBytes(StandardCharsets.UTF_8)).toString();
       Path target = directory.resolve(basename + ".json");
       Path temporary = Files.createTempFile(directory, basename + "-", ".tmp");
       try {
+        setPermissions(temporary, FILE_PERMISSIONS);
         objectMapper.writeValue(temporary.toFile(), row);
         moveAtomically(temporary, target);
+        setPermissions(target, FILE_PERMISSIONS);
       } finally {
         Files.deleteIfExists(temporary);
       }
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "spooled");
       log.error(
-          "Canonical LLM terminal usage spooled for recovery attemptId={} path={}",
+          "Canonical LLM terminal usage spooled for recovery attemptId={} artifact={}",
           row.getPhysicalAttemptId(),
-          target);
+          target.getFileName());
+      recordSpoolState();
       return true;
     } catch (Exception spoolFailure) {
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "spool_failed");
       log.error(
-          "Canonical LLM terminal usage recovery spool FAILED attemptId={}",
+          "Canonical LLM terminal usage recovery spool FAILED attemptId={} errorClass={}",
           row.getPhysicalAttemptId(),
-          spoolFailure);
+          spoolFailure.getClass().getSimpleName());
       return false;
     }
   }
@@ -87,9 +100,12 @@ public class LlmUsageRecoverySpool {
           .filter(path -> path.getFileName().toString().endsWith(".json"))
           .sorted(Comparator.comparing(Path::toString))
           .forEach(this::replayOne);
+      recordSpoolState();
     } catch (IOException listingFailure) {
       metrics.recordLlmUsagePersistence("RECOVERY", "list_failed");
-      log.error("Unable to list LLM usage recovery spool {}", directory, listingFailure);
+      log.error(
+          "Unable to list LLM usage recovery spool errorClass={}",
+          listingFailure.getClass().getSimpleName());
     }
   }
 
@@ -100,12 +116,72 @@ public class LlmUsageRecoverySpool {
       Files.delete(path);
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "replayed");
       log.info("Replayed canonical LLM terminal usage attemptId={}", row.getPhysicalAttemptId());
+    } catch (com.fasterxml.jackson.core.JsonProcessingException invalidPayload) {
+      deadLetter(path, invalidPayload);
     } catch (Exception replayFailure) {
       metrics.recordLlmUsagePersistence("RECOVERY", "retry_failed");
       log.warn(
           "LLM usage recovery replay remains pending file={}: {}",
           path.getFileName(),
           replayFailure.getClass().getSimpleName());
+    }
+  }
+
+  private void deadLetter(Path path, Exception failure) {
+    try {
+      Path dead =
+          path.resolveSibling(path.getFileName().toString().replaceFirst("\\.json$", ".dead"));
+      moveAtomically(path, dead);
+      setPermissions(dead, FILE_PERMISSIONS);
+      metrics.recordLlmUsagePersistence("RECOVERY", "dead_letter");
+      log.error(
+          "LLM usage local recovery payload dead-lettered file={} errorClass={}",
+          dead.getFileName(),
+          failure.getClass().getSimpleName());
+    } catch (IOException moveFailure) {
+      metrics.recordLlmUsagePersistence("RECOVERY", "dead_letter_failed");
+      log.error(
+          "Unable to dead-letter LLM usage local recovery payload errorClass={}",
+          moveFailure.getClass().getSimpleName());
+    }
+  }
+
+  private void recordSpoolState() {
+    if (!Files.isDirectory(directory)) {
+      metrics.recordLlmUsageLocalRecovery(0, 0, 0);
+      return;
+    }
+    try (Stream<Path> paths = Files.list(directory)) {
+      var files = paths.toList();
+      long pending = files.stream().filter(path -> path.toString().endsWith(".json")).count();
+      long dead = files.stream().filter(path -> path.toString().endsWith(".dead")).count();
+      long oldestEpochMillis =
+          files.stream()
+              .filter(path -> path.toString().endsWith(".json"))
+              .mapToLong(
+                  path -> {
+                    try {
+                      return Files.getLastModifiedTime(path).toMillis();
+                    } catch (IOException ignored) {
+                      return System.currentTimeMillis();
+                    }
+                  })
+              .min()
+              .orElse(System.currentTimeMillis());
+      long oldestSeconds =
+          pending == 0 ? 0 : Math.max(0, Instant.now().getEpochSecond() - oldestEpochMillis / 1000);
+      metrics.recordLlmUsageLocalRecovery(pending, dead, oldestSeconds);
+    } catch (IOException ignored) {
+      metrics.recordLlmUsagePersistence("RECOVERY", "local_state_failed");
+    }
+  }
+
+  private static void setPermissions(Path path, Set<PosixFilePermission> permissions)
+      throws IOException {
+    try {
+      Files.setPosixFilePermissions(path, permissions);
+    } catch (UnsupportedOperationException ignored) {
+      // Windows/non-POSIX filesystems do not expose mode bits; platform ACLs remain authoritative.
     }
   }
 

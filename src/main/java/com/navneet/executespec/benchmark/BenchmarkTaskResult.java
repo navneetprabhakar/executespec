@@ -88,6 +88,28 @@ public class BenchmarkTaskResult {
   @Builder.Default
   private long outputTokens = 0;
 
+  /**
+   * Physical provider that actually served this attempt, derived server-side from {@code
+   * run_step_usage} via {@link #esRunId} (V304). Null for historical rows and for MIXED attempts.
+   * Never populated from a client-supplied event field.
+   */
+  @Column(name = "provider", length = 40)
+  private String provider;
+
+  /**
+   * Physical model that actually served this attempt. Same derivation rules as {@link #provider}.
+   */
+  @Column(name = "model", length = 120)
+  private String model;
+
+  /**
+   * LEDGER / MIXED / UNATTRIBUTED (V304). MIXED means several distinct routes served one attempt
+   * and must never be collapsed to a single provider — that collapse is exactly what this field
+   * exists to prevent.
+   */
+  @Column(name = "route_attribution", length = 24)
+  private String routeAttribution;
+
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();

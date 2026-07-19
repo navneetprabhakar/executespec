@@ -5,8 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +17,10 @@ import com.navneet.executespec.observability.Metrics;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
 
 class LlmUsageRecoverySpoolTest {
 
@@ -73,6 +79,75 @@ class LlmUsageRecoverySpoolTest {
 
     assertThat(jsonFileCount()).isEqualTo(1);
     verify(metrics).recordLlmUsagePersistence("RECOVERY", "retry_failed");
+  }
+
+  @Test
+  void spoolUsesOwnerOnlyModesAndInvalidPayloadMovesToDeadLetter() throws Exception {
+    LlmUsageTerminalOutbox terminalOutbox = org.mockito.Mockito.mock(LlmUsageTerminalOutbox.class);
+    Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
+    LlmUsageRecoverySpool spool =
+        new LlmUsageRecoverySpool(
+            terminalOutbox,
+            new ObjectMapper().findAndRegisterModules(),
+            metrics,
+            temporaryDirectory.toString());
+
+    assertThat(spool.enqueue(usage())).isTrue();
+    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+      assertThat(Files.getPosixFilePermissions(temporaryDirectory))
+          .isEqualTo(PosixFilePermissions.fromString("rwx------"));
+      Path payload;
+      try (var files = Files.list(temporaryDirectory)) {
+        payload = files.filter(path -> path.toString().endsWith(".json")).findFirst().orElseThrow();
+      }
+      assertThat(Files.getPosixFilePermissions(payload))
+          .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+      Files.writeString(payload, "{invalid-json", java.nio.charset.StandardCharsets.UTF_8);
+    } else {
+      Path payload;
+      try (var files = Files.list(temporaryDirectory)) {
+        payload = files.filter(path -> path.toString().endsWith(".json")).findFirst().orElseThrow();
+      }
+      Files.writeString(payload, "{invalid-json", java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    spool.replayPending();
+
+    assertThat(jsonFileCount()).isZero();
+    try (var files = Files.list(temporaryDirectory)) {
+      assertThat(files.filter(path -> path.toString().endsWith(".dead")).count()).isEqualTo(1);
+    }
+    verify(metrics).recordLlmUsagePersistence("RECOVERY", "dead_letter");
+  }
+
+  @Test
+  void spoolLogsDoNotExposeAbsoluteWorkspacePathsOrExceptionStacks() {
+    LlmUsageTerminalOutbox terminalOutbox = org.mockito.Mockito.mock(LlmUsageTerminalOutbox.class);
+    Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
+    LlmUsageRecoverySpool spool =
+        new LlmUsageRecoverySpool(
+            terminalOutbox,
+            new ObjectMapper().findAndRegisterModules(),
+            metrics,
+            temporaryDirectory.toString());
+    Logger logger = (Logger) LoggerFactory.getLogger(LlmUsageRecoverySpool.class);
+    ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+    try {
+      assertThat(spool.enqueue(usage())).isTrue();
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
+
+    assertThat(appender.list)
+        .allSatisfy(
+            event -> {
+              assertThat(event.getFormattedMessage())
+                  .doesNotContain(temporaryDirectory.toString(), "usage-recovery/");
+              assertThat(event.getThrowableProxy()).isNull();
+            });
   }
 
   private long jsonFileCount() throws Exception {

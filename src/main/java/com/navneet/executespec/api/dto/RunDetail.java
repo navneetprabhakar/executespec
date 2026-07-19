@@ -181,6 +181,28 @@ public class RunDetail {
   /** True when every run-scoped LLM dispatch must use requestedProvider/requestedModel. */
   Boolean routePinned;
 
+  /**
+   * C1 (2026-07-19) — DERIVED, not a column. The physical provider that actually served this run,
+   * projected from the {@code run_step_usage} attempt ledger. Null when the run was served by more
+   * than one route ({@code effectiveRouteAttribution=MIXED}) or by none yet ({@code UNATTRIBUTED});
+   * a mixed-route run is deliberately not collapsed to one of its providers.
+   */
+  String effectiveProvider;
+
+  /** C1 — DERIVED physical model that actually served this run. Null when MIXED/UNATTRIBUTED. */
+  String effectiveModel;
+
+  /** C1 — {@code LEDGER} | {@code MIXED} | {@code UNATTRIBUTED}. */
+  String effectiveRouteAttribution;
+
+  /**
+   * C1 — true when the ledger proves the served route is not the requested one (failover,
+   * managed-AI tier lock or model step-down), or when the run was served by multiple routes. Blank
+   * requested fields are treated as "not requested", so an AUTO-routed run is not reported as
+   * diverged merely for having no pinned model.
+   */
+  Boolean routeDiverged;
+
   /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
   String harnessVersion;
 

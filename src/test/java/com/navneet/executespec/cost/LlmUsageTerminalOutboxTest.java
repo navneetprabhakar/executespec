@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,10 @@ import java.util.Optional;
 import com.navneet.executespec.observability.Metrics;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
 
 class LlmUsageTerminalOutboxTest {
 
@@ -53,6 +58,61 @@ class LlmUsageTerminalOutboxTest {
 
     verify(store).retry(eq(lease), any(IllegalStateException.class), any(Duration.class));
     verify(metrics).recordLlmUsagePersistence("SUCCESS", "outbox_retry");
+  }
+
+  @Test
+  void repeatedNonInvalidFailureIsDeadLetteredAtConfiguredCeiling() {
+    RunStepUsage row = usage("attempt-poison");
+    var lease =
+        new LlmUsageTerminalOutboxStore.Lease(
+            row.getPhysicalAttemptId(),
+            "{}",
+            "a".repeat(64),
+            2,
+            "node-a",
+            2,
+            Instant.now().plusSeconds(120));
+    when(store.stage(row)).thenReturn(LlmUsageTerminalOutboxStore.StageResult.STAGED);
+    when(store.claimOne(eq("attempt-poison"), anyString(), any(Duration.class)))
+        .thenReturn(Optional.of(lease));
+    when(store.materialize(lease, row)).thenThrow(new IllegalStateException("repeatable poison"));
+    LlmUsageTerminalOutbox bounded = new LlmUsageTerminalOutbox(store, metrics, 20, 120, 2);
+
+    assertThat(bounded.persist(row)).isEqualTo(LlmUsageTerminalOutbox.PersistResult.DURABLY_QUEUED);
+
+    verify(store).deadLetter(eq(lease), any(IllegalStateException.class));
+    verify(store, never()).retry(eq(lease), any(), any(Duration.class));
+    verify(metrics).recordLlmUsagePersistence("RECOVERY", "dead_letter");
+  }
+
+  @Test
+  void recoveryLogsNeverExposeExceptionMessagesOrStacks() {
+    RunStepUsage row = usage("attempt-secret-log");
+    var lease = lease(row);
+    when(store.stage(row)).thenReturn(LlmUsageTerminalOutboxStore.StageResult.STAGED);
+    when(store.claimOne(eq("attempt-secret-log"), anyString(), any(Duration.class)))
+        .thenReturn(Optional.of(lease));
+    when(store.materialize(lease, row))
+        .thenThrow(new IllegalStateException("SECRET_CANARY_PROVIDER_OR_SQL_PAYLOAD"));
+    when(store.retry(eq(lease), any(), any(Duration.class))).thenReturn(true);
+    Logger logger = (Logger) LoggerFactory.getLogger(LlmUsageTerminalOutbox.class);
+    ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+    try {
+      outbox.persist(row);
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
+
+    assertThat(appender.list)
+        .allSatisfy(
+            event -> {
+              assertThat(event.getFormattedMessage())
+                  .doesNotContain("SECRET_CANARY_PROVIDER_OR_SQL_PAYLOAD");
+              assertThat(event.getThrowableProxy()).isNull();
+            });
   }
 
   @Test

@@ -9,6 +9,13 @@ import org.springframework.data.repository.query.Param;
 public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, String> {
   List<RunStepUsage> findByRunIdOrderByCreatedAtAsc(String runId);
 
+  /**
+   * Physical attempts scoped to one plan task. Backs the per-task effective-route projection; the
+   * SUCCESS filter lives in {@link EffectiveRouteProjection} so exactly one place decides what
+   * "served the task" means.
+   */
+  List<RunStepUsage> findByRunIdAndTaskIdOrderByCreatedAtAsc(String runId, String taskId);
+
   long countByLlmExecutionContextId(String llmExecutionContextId);
 
   @Query(

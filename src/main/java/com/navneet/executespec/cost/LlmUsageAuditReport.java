@@ -53,6 +53,7 @@ public record LlmUsageAuditReport(
   public record UsageRollup(
       String userId,
       String userEmail,
+      String userRole,
       String provider,
       String model,
       String agentRole,
@@ -80,6 +81,7 @@ public record LlmUsageAuditReport(
       String llmExecutionContextId,
       String userId,
       String userEmail,
+      String userRole,
       String projectId,
       String projectName,
       String runId,
