@@ -93,13 +93,21 @@ public class SimpleKeyEncryptionService {
     // Priority 2: GCP Secret Manager (prod)
     String gcpSecretName = cryptoProperties.getGcpSecretName();
     if (gcpSecretName != null && !gcpSecretName.isBlank()) {
+      if (cryptoProperties.isRequireEncryption()
+          && !gcpSecretName.matches("^projects/[^/]+/secrets/[^/]+/versions/[0-9]+$")) {
+        throw new IllegalStateException(
+            "[Crypto] Shared profiles require an immutable numeric Secret Manager version;"
+                + " configure CRYPTO_GCP_SECRET_RESOURCE with /versions/<number>, never an alias");
+      }
       try {
         this.secretKey = toAesKey(fetchFromSecretManager(gcpSecretName));
         registerDecryptKeys();
         log.info("[Crypto] Encryption key loaded from GCP Secret Manager");
         return;
       } catch (Exception e) {
-        log.error("[Crypto] Failed to fetch key from GCP Secret Manager: {}", e.getMessage());
+        log.error(
+            "[Crypto] Failed to fetch key from GCP Secret Manager errorClass={}",
+            e.getClass().getSimpleName());
         // Fall through to passthrough
       }
     }
@@ -109,9 +117,8 @@ public class SimpleKeyEncryptionService {
     if (cryptoProperties.isRequireEncryption()) {
       throw new IllegalStateException(
           "[Crypto] executespec.crypto.require-encryption=true but no encryption key could be"
-              + " loaded. Set executespec.crypto.local-key (dev) or"
-              + " executespec.crypto.gcp-secret-name (prod) — passthrough mode is forbidden in this"
-              + " profile.");
+              + " loaded. Set executespec.crypto.local-key (dev) or CRYPTO_GCP_SECRET_RESOURCE"
+              + " (shared profiles) — passthrough mode is forbidden in this profile.");
     }
     log.warn(
         "[Crypto] No encryption key configured — running in passthrough mode (no encryption). Set"
@@ -138,7 +145,10 @@ public class SimpleKeyEncryptionService {
       } catch (Exception e) {
         // A broken retired key must not take the service down; envelopes written under it will
         // fail closed at decrypt time with a precise error instead.
-        log.error("[Crypto] Failed to load retired key version '{}': {}", version, e.getMessage());
+        log.error(
+            "[Crypto] Failed to load retired key version '{}' errorClass={}",
+            version,
+            e.getClass().getSimpleName());
       }
     }
   }
@@ -195,8 +205,9 @@ public class SimpleKeyEncryptionService {
     } catch (Exception e) {
       // Legacy path only: might be plaintext that happens to be valid Base64.
       log.debug(
-          "[Crypto] Legacy decryption failed, returning value as-is (likely legacy plaintext): {}",
-          e.getMessage());
+          "[Crypto] Legacy decryption failed, returning value as-is (likely legacy plaintext)"
+              + " errorClass={}",
+          e.getClass().getSimpleName());
       return encrypted;
     }
   }
@@ -259,9 +270,14 @@ public class SimpleKeyEncryptionService {
     return !passthrough;
   }
 
-  /** True when the value is already a self-describing envelope (never re-encrypt these). */
+  /** True when the value is already a self-describing envelope. */
   public boolean isEnveloped(String value) {
     return value != null && value.startsWith(ENVELOPE_PREFIX);
+  }
+
+  /** True only when an envelope is already written under the active primary key version. */
+  public boolean isCurrentEnvelope(String value) {
+    return value != null && value.startsWith(ENVELOPE_V1 + keyVersion + ":");
   }
 
   private byte[] fetchFromSecretManager(String resourceName) throws Exception {

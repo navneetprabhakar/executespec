@@ -24,7 +24,8 @@ public class CryptoProperties {
 
   /**
    * Full GCP Secret Manager resource name, e.g. {@code
-   * projects/my-project/secrets/executespec-crypto-key/versions/latest}
+   * projects/my-project/secrets/executespec-crypto-key/versions/7}. Shared profiles require an
+   * immutable numeric version and reject aliases such as {@code latest}.
    */
   private String gcpSecretName;
 

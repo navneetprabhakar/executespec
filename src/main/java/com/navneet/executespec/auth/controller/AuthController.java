@@ -259,7 +259,17 @@ public class AuthController {
     recordSettingsAudit(
         userDetails.getUser(),
         "USER_PAT_CREATED",
-        "{\"tokenId\":\"" + created.token().getId() + "\"}");
+        "{\"tokenId\":\""
+            + created.token().getId()
+            + "\",\"scopes\":\""
+            + created.token().getScopes()
+            + "\"}");
+    for (String revokedTokenId : created.autoRevokedTokenIds()) {
+      recordSettingsAudit(
+          userDetails.getUser(),
+          "USER_PAT_AUTO_REVOKED",
+          "{\"tokenId\":\"" + revokedTokenId + "\",\"reason\":\"DEVICE_CAP_LRU\"}");
+    }
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(new CreatePatResponse(created.plaintext(), PatDto.from(created.token())));
   }
@@ -369,7 +379,7 @@ public class AuthController {
     user.setBitbucketRepoSlug(blankToNull(req.bitbucketRepoSlug()));
     userRepo.save(user);
     log.info(
-        "User {} updated Bitbucket settings — workspace={}, hasAppPassword={}",
+        "User {} updated Bitbucket settings — workspace={}, hasApiToken={}",
         user.getId(),
         user.getBitbucketWorkspace(),
         user.getBitbucketAppPassword() != null);
@@ -578,7 +588,8 @@ public class AuthController {
 
   /**
    * Phase 1.2 #24 — BYOK Test buttons. Pings the named provider with the supplied key and surfaces
-   * the provider's verbatim error if the key is invalid. Mirrors the GitHub PAT validate pattern.
+   * a bounded status-only result if the key is invalid. Provider credentials and raw errors never
+   * enter the URL or response.
    *
    * <p>Provider → endpoint:
    *
@@ -586,7 +597,8 @@ public class AuthController {
    *   <li>OPENAI → {@code GET https://api.openai.com/v1/models}
    *   <li>ANTHROPIC → {@code GET https://api.anthropic.com/v1/models} (requires {@code
    *       anthropic-version} header)
-   *   <li>GEMINI → {@code GET https://generativelanguage.googleapis.com/v1beta/models?key=...}
+   *   <li>GEMINI → {@code GET https://generativelanguage.googleapis.com/v1beta/models} with {@code
+   *       x-goog-api-key}
    * </ul>
    */
   @PostMapping("/settings/ai-keys/validate")
@@ -616,8 +628,8 @@ public class AuthController {
                   + " model access");
       case "GEMINI", "GOOGLE" ->
           validateExternalConnection(
-              "https://generativelanguage.googleapis.com/v1beta/models?key=" + key,
-              Map.of(),
+              "https://generativelanguage.googleapis.com/v1beta/models",
+              Map.of("x-goog-api-key", key),
               "Gemini key is valid",
               "Gemini rejected the key (status %d) — check it's an active AI Studio key");
       case "OPENROUTER" ->
@@ -671,7 +683,7 @@ public class AuthController {
         || req.appPassword() == null
         || req.appPassword().isBlank()) {
       return ResponseEntity.ok(
-          new ValidationResult(false, "Username and app password are required"));
+          new ValidationResult(false, "Atlassian account email and API token are required"));
     }
     if (req.workspace() == null
         || req.workspace().isBlank()
@@ -792,7 +804,9 @@ public class AuthController {
       return ResponseEntity.ok(
           new ValidationResult(false, String.format(failureMessageTemplate, resp.statusCode())));
     } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
+      return ResponseEntity.ok(
+          new ValidationResult(
+              false, "Connection failed; verify the key and provider availability"));
     }
   }
 

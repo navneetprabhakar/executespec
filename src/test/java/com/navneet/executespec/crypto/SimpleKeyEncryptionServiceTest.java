@@ -115,6 +115,19 @@ class SimpleKeyEncryptionServiceTest {
   }
 
   @Test
+  void sharedProfileRejectsMutableSecretManagerAliasBeforeNetworkAccess() {
+    CryptoProperties props = new CryptoProperties();
+    props.setEnabled(true);
+    props.setRequireEncryption(true);
+    props.setGcpSecretName("projects/p/secrets/crypto/versions/latest");
+    SimpleKeyEncryptionService service = new SimpleKeyEncryptionService(props);
+
+    assertThatThrownBy(service::init)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("immutable numeric Secret Manager version");
+  }
+
+  @Test
   void malformedAndUnsupportedEnvelopesFailClosed() {
     var service = service(KEY_A, "1", Map.of(), true);
 

@@ -9,6 +9,7 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class TierPermissionService {
   private final TierConfigRepository tierConfigRepo;
   private final TierEnforcementService tierEnforcementService;
   private final ManagedAiProperties managedAiProperties;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   public record TierPermissions(
       boolean canManageAiKeys,
@@ -83,12 +85,12 @@ public class TierPermissionService {
 
     // SUPER_ADMIN — unrestricted
     if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
-      return superAdminPermissions(user);
+      return applyOperationalReleasePolicy(superAdminPermissions(user));
     }
 
     // FINANCE role — read-only access to invoices, accounting, audit
     if ("FINANCE".equals(user.getGlobalRole())) {
-      return financePermissions(user);
+      return applyOperationalReleasePolicy(financePermissions(user));
     }
 
     // User with org membership
@@ -111,16 +113,53 @@ public class TierPermissionService {
       // (ORG_ADMIN vs DEVELOPER), not tier-driven.
       Org org = orgRepo.findById(user.getOrgId()).orElse(null);
       if (org != null && org.isPersonal()) {
-        return freeUserPermissions(user);
+        return applyOperationalReleasePolicy(freeUserPermissions(user));
       }
-      return orgMemberPermissions(user);
+      return applyOperationalReleasePolicy(orgMemberPermissions(user));
     }
 
     // Solo user (no org — only possible for users registered before
     // V162's personal-org bootstrap shipped + not yet backfilled by
     // V163. Should be rare on prod after V163; freshux-* test users
     // are the typical case in dev).
-    return freeUserPermissions(user);
+    return applyOperationalReleasePolicy(freeUserPermissions(user));
+  }
+
+  private TierPermissions applyOperationalReleasePolicy(TierPermissions permissions) {
+    if (operationalReleasePolicy == null || operationalReleasePolicy.deploymentCreationEnabled()) {
+      return permissions;
+    }
+    return new TierPermissions(
+        permissions.canManageAiKeys(),
+        permissions.canViewPricing(),
+        permissions.canManageIntegrations(),
+        permissions.canViewMetrics(),
+        permissions.canViewCostBreakdown(),
+        permissions.canViewTokenUsage(),
+        permissions.canUseChat(),
+        permissions.canCreateOrg(),
+        permissions.canInviteMembers(),
+        permissions.canViewOrgMembers(),
+        permissions.canViewAudit(),
+        permissions.canViewLiveLog(),
+        permissions.canViewInvoices(),
+        permissions.canViewAccounting(),
+        permissions.canManageCreditNotes(),
+        permissions.canExportGstr(),
+        permissions.canManageSellerConfig(),
+        permissions.canManageBillingProfile(),
+        permissions.monthlyRunLimit(),
+        permissions.currentRunCount(),
+        permissions.maxOrgMembers(),
+        permissions.currentOrgMembers(),
+        permissions.maxApplySuggestions(),
+        permissions.maxPreviewStarts(),
+        false,
+        0,
+        permissions.quotaModel(),
+        permissions.includedAiCredits(),
+        permissions.unlimitedAiCredits(),
+        permissions.quotaDescription());
   }
 
   private TierPermissions superAdminPermissions(AppUser user) {

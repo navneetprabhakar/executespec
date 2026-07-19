@@ -23,6 +23,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class KeyMigrationRunnerTest {
 
   private static final String KEY = Base64.getEncoder().encodeToString(new byte[32]);
+  private static final String ROTATED_KEY =
+      Base64.getEncoder()
+          .encodeToString(
+              new byte[] {
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+              });
 
   private static SimpleKeyEncryptionService liveService() {
     CryptoProperties props = new CryptoProperties();
@@ -93,6 +100,29 @@ class KeyMigrationRunnerTest {
   }
 
   @Test
+  void retiredKeyEnvelopeIsRewrappedSoPreviousKeyCanBeRemoved() {
+    SimpleKeyEncryptionService oldService = service(KEY, "old", Map.of());
+    String oldEnvelope = oldService.encrypt("rotate-and-retire");
+    SimpleKeyEncryptionService rotatedService = service(ROTATED_KEY, "current", Map.of("old", KEY));
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString())).thenReturn(List.of());
+    when(jdbc.queryForList(contains("org_slack_integration")))
+        .thenReturn(List.of(Map.of("id", 7L, "bot_token", oldEnvelope)));
+
+    new KeyMigrationRunner(rotatedService, jdbc, properties(true)).migrateExistingKeys();
+
+    ArgumentCaptor<Object> rewrapped = ArgumentCaptor.forClass(Object.class);
+    verify(jdbc).update(contains("org_slack_integration"), rewrapped.capture(), eq(7L));
+    String currentEnvelope = rewrapped.getValue().toString();
+    assertThat(currentEnvelope).startsWith("enc:v1:current:");
+    SimpleKeyEncryptionService afterRetirement = service(ROTATED_KEY, "current", Map.of());
+    assertThat(afterRetirement.decrypt(currentEnvelope)).isEqualTo("rotate-and-retire");
+    assertThatThrownBy(() -> afterRetirement.decrypt(oldEnvelope))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("No key registered");
+  }
+
+  @Test
   void pipelineRunCredentialsUseRunIdAsTheMigrationKey() {
     SimpleKeyEncryptionService service = liveService();
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
@@ -136,7 +166,9 @@ class KeyMigrationRunnerTest {
     assertThatThrownBy(runner::migrateExistingKeys)
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("app_user.openai_api_key")
-        .hasRootCauseMessage("database unavailable");
+        .hasMessageContaining("IllegalStateException")
+        .hasMessageNotContaining("database unavailable")
+        .hasNoCause();
   }
 
   @Test
@@ -154,5 +186,18 @@ class KeyMigrationRunnerTest {
     CryptoProperties properties = new CryptoProperties();
     properties.setRequireEncryption(required);
     return properties;
+  }
+
+  private static SimpleKeyEncryptionService service(
+      String key, String version, Map<String, String> previous) {
+    CryptoProperties properties = new CryptoProperties();
+    properties.setEnabled(true);
+    properties.setLocalKey(key);
+    properties.setRequireEncryption(true);
+    properties.setKeyVersion(version);
+    properties.setPreviousKeys(previous);
+    SimpleKeyEncryptionService service = new SimpleKeyEncryptionService(properties);
+    service.init();
+    return service;
   }
 }
