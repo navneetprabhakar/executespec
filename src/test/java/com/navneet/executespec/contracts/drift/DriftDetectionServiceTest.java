@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -131,6 +132,40 @@ class DriftDetectionServiceTest {
             eq(contractId.toString()),
             anyString(),
             anyMap());
+  }
+
+  @Test
+  void runCheck_sameUnresolvedDiff_reusesEventWithoutDuplicateWriteOrActivity() {
+    String snapshotContent = "openapi: 3.0\ninfo:\n  version: 1.0.0\n";
+    String snapshotHash = DetectorUtils.sha256(snapshotContent);
+    String sourceContent = "openapi: 3.0\ninfo:\n  version: 2.0.0\n";
+    String sourceHash = DetectorUtils.sha256(sourceContent);
+    UUID existingId = UUID.randomUUID();
+    ContractDriftEvent existing =
+        ContractDriftEvent.builder()
+            .id(existingId)
+            .contractId(contractId)
+            .sourceDiff(
+                "content hash differs: snapshot="
+                    + snapshotHash.substring(0, 12)
+                    + " vs source="
+                    + sourceHash.substring(0, 12))
+            .build();
+    when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(folderWriter.readFile(eq(repo), anyString(), any()))
+        .thenReturn(
+            Optional.of(
+                new ExecutespecFolderWriter.FileSnapshot(
+                    snapshotContent, "blob-sha", snapshotHash)));
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(sourceContent);
+    when(driftRepo.findUnresolvedByContractId(contractId)).thenReturn(List.of(existing));
+
+    DriftDetectionService.DriftCheckResult result = service.runCheck(contract, projectId, "ghp_x");
+
+    assertThat(result.hasDrift()).isTrue();
+    assertThat(result.eventId()).isEqualTo(existingId);
+    verify(driftRepo, never()).save(any());
+    verifyNoInteractions(emitter);
   }
 
   @Test

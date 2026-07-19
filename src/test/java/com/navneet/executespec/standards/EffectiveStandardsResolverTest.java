@@ -1,6 +1,7 @@
 package com.navneet.executespec.standards;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 import java.util.List;
@@ -190,6 +191,35 @@ class EffectiveStandardsResolverTest {
         resolver.resolve(orgId, projectId, projectYaml);
     assertThat(effective).hasSize(1);
     assertThat(effective.get(0).source()).isEqualTo(EffectiveStandardsResolver.Source.PROJECT);
+  }
+
+  @Test
+  void multipleCheckedInSourcesAreMergedAndMalformedSourceFailsClosed() {
+    when(orgStandardRepo.findByOrgId(orgId)).thenReturn(List.of());
+    when(overrideRepo.findByProjectId(projectId)).thenReturn(List.of());
+    String one =
+        "- id: one\n  severity: advisory\n  description: one\n"
+            + "  enforcement: { type: lint, tool: eslint }\n";
+    String two =
+        "- id: two\n  severity: warning\n  description: two\n"
+            + "  enforcement: { type: lint, tool: eslint }\n";
+
+    assertThat(resolver.resolveProjectSourcesStrict(orgId, projectId, List.of(one, two)))
+        .extracting(e -> e.standard().id())
+        .containsExactlyInAnyOrder("one", "two");
+    assertThatThrownBy(
+            () ->
+                resolver.resolveProjectSourcesStrict(
+                    orgId, projectId, List.of(one, "not-a-list: true")))
+        .isInstanceOf(EffectiveStandardsResolver.ProjectStandardsInvalidException.class);
+
+    assertThatThrownBy(
+            () ->
+                resolver.resolveProjectSourcesStrict(
+                    orgId,
+                    projectId,
+                    List.of(one, one.replace("description: one", "description: conflict"))))
+        .isInstanceOf(EffectiveStandardsResolver.ProjectStandardsInvalidException.class);
   }
 
   @Test

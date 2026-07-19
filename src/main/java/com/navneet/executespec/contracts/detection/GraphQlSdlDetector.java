@@ -56,7 +56,9 @@ public class GraphQlSdlDetector implements FileBasedContractDetector {
                 DetectorUtils.sha256(content),
                 null));
       } catch (Exception ex) {
-        log.warn("[GraphQlSdlDetector] failed to read {}: {}", path, ex.getMessage());
+        log.warn(
+            "[GraphQlSdlDetector] candidate read failed errorClass={}",
+            ex.getClass().getSimpleName());
       }
     }
     return out;

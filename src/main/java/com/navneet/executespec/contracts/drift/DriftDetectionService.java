@@ -145,6 +145,14 @@ public class DriftDetectionService {
             + truncateHash(folderHash)
             + " vs source="
             + truncateHash(sourceHash);
+    Optional<ContractDriftEvent> existingOpenEvent =
+        driftRepo.findUnresolvedByContractId(contract.getId()).stream()
+            .filter(event -> diffSummary.equals(event.getSourceDiff()))
+            .findFirst();
+    if (existingOpenEvent.isPresent()) {
+      return new DriftCheckResult(
+          contract.getId(), true, diffSummary, existingOpenEvent.get().getId());
+    }
     ContractDriftEvent event =
         ContractDriftEvent.builder()
             .id(UUID.randomUUID())

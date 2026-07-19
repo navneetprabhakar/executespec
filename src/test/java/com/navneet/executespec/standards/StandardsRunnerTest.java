@@ -105,7 +105,7 @@ class StandardsRunnerTest {
   }
 
   @Test
-  void lintStandard_unknownToolSkipped_noViolation() {
+  void lintStandard_unknownToolIsReportedAsUnavailable() {
     Standard s =
         new Standard(
             "ruff-rules",
@@ -124,6 +124,7 @@ class StandardsRunnerTest {
     StandardsRunner.RunReport r =
         runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
     assertThat(r.violations()).isEmpty();
+    assertThat(r.lintResults().get("ruff-rules").status()).isEqualTo(LintResult.Status.UNAVAILABLE);
   }
 
   @Test

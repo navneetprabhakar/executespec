@@ -110,7 +110,8 @@ public class AstCheckEnforcer {
     try {
       namePattern = Pattern.compile(regex);
     } catch (Exception ex) {
-      log.warn("[AstCheckEnforcer] naming-pattern: invalid regex '{}': {}", regex, ex.getMessage());
+      log.warn(
+          "[AstCheckEnforcer] naming-pattern invalid errorClass={}", ex.getClass().getSimpleName());
       return List.of();
     }
     DeclarationKind decl = DeclarationKind.parse(declarationKindRaw);

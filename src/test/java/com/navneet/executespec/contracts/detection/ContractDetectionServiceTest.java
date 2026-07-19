@@ -205,7 +205,8 @@ class ContractDetectionServiceTest {
             r -> {
               assertThat(r.status())
                   .isEqualTo(ContractDetectionService.DetectionResult.Status.FAILED);
-              assertThat(r.failureReason()).contains("internal explosion");
+              assertThat(r.failureReason()).isEqualTo("DETECTOR_FAILED:RuntimeException");
+              assertThat(r.failureReason()).doesNotContain("internal explosion");
             });
   }
 

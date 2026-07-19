@@ -69,7 +69,7 @@ public class StandardsOverrideController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
     // Audit 2026-05-12 review item B #14 — was no access guard at all.
-    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectAccessGuard.assertCanAdmin(projectId, userDetails);
     requireRationale(body);
     StandardsViolation v =
         violationRepo
@@ -107,7 +107,7 @@ public class StandardsOverrideController {
       Authentication auth,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
-    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectAccessGuard.assertCanAdmin(projectId, userDetails);
     requireRationale(body);
     ProjectStandardOverride.OverrideType type = parseOverrideType(body.overrideType());
     if (type == null) {
@@ -157,7 +157,7 @@ public class StandardsOverrideController {
       Authentication auth,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
-    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectAccessGuard.assertCanAdmin(projectId, userDetails);
     ProjectStandardOverride existing =
         overrideRepo
             .findByProjectIdAndStandardId(projectId, standardId)

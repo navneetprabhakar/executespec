@@ -28,6 +28,12 @@ class AdrInjectionServiceTest {
   @BeforeEach
   void setUp() {
     ReflectionTestUtils.setField(service, "fullBodyThreshold", 15);
+    ReflectionTestUtils.setField(service, "injectionEnabled", false);
+  }
+
+  @Test
+  void plannerInjectionIsFailClosedByDefault() {
+    assertThat(service.injectionEnabled()).isFalse();
   }
 
   @Test

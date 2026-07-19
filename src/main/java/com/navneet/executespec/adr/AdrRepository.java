@@ -14,6 +14,8 @@ public interface AdrRepository extends JpaRepository<Adr, UUID> {
 
   List<Adr> findByProjectId(String projectId);
 
+  long countByProjectId(String projectId);
+
   /** Drives E3.13 — only ACCEPTED ADRs flow into planner context. */
   @Query(
       "SELECT a FROM Adr a WHERE a.projectId = :projectId AND a.status = 'ACCEPTED' "

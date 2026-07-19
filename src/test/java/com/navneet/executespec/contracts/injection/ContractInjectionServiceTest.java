@@ -103,7 +103,9 @@ class ContractInjectionServiceTest {
 
     assertThat(res.mode()).isEqualTo(ContractInjectionService.Mode.INDEX_ONLY);
     assertThat(res.block()).contains("=== CONTRACTS_INDEX ===");
-    assertThat(res.block()).contains("Use the getContract(id, version) tool");
+    assertThat(res.block()).contains("full contract bodies are not available");
+    assertThat(res.block()).contains("Do not claim full contract compliance");
+    assertThat(res.block()).doesNotContain("getContract");
     assertThat(res.totalContracts()).isEqualTo(20);
     assertThat(res.contractIds()).hasSize(20);
     // Verify versionRepo never invoked (no body fetch in INDEX_ONLY mode)
@@ -131,7 +133,8 @@ class ContractInjectionServiceTest {
 
     assertThat(res.totalContracts()).isEqualTo(1);
     assertThat(res.block()).contains("payments-api");
-    assertThat(res.block()).contains("(content not inlined");
+    assertThat(res.block()).contains("content is unavailable in this planning context");
+    assertThat(res.block()).doesNotContain("getContract");
   }
 
   @Test

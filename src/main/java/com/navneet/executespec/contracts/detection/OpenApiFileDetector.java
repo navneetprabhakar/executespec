@@ -67,7 +67,9 @@ public class OpenApiFileDetector implements FileBasedContractDetector {
                 DetectorUtils.sha256(content),
                 DetectorUtils.pullOpenApiVersion(content)));
       } catch (Exception ex) {
-        log.warn("[OpenApiFileDetector] failed to read {}: {}", path, ex.getMessage());
+        log.warn(
+            "[OpenApiFileDetector] candidate read failed errorClass={}",
+            ex.getClass().getSimpleName());
       }
     }
     return out;
