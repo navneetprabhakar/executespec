@@ -129,10 +129,15 @@ public class KeyMigrationRunner {
       for (var row : rows) {
         String value = (String) row.get(column);
         if (value == null || value.isBlank()) continue;
-        if (encryptionService.isEnveloped(value)) continue;
+        if (encryptionService.isCurrentEnvelope(value)) continue;
 
         String plaintext = value;
-        if (encryptionService.isLikelyEncrypted(value)) {
+        if (encryptionService.isEnveloped(value)) {
+          // Rotation is not complete while existing rows remain under a retired decrypt-only key.
+          // Decrypt the old envelope and immediately rewrap it with the active key version so the
+          // previous key can be removed after a successful, verified migration.
+          plaintext = encryptionService.decrypt(value);
+        } else if (encryptionService.isLikelyEncrypted(value)) {
           // Legacy bare-Base64 ciphertext: recover the plaintext with the current key. The lenient
           // legacy path returns the input unchanged when it is not actually ciphertext — in that
           // ambiguous case we still envelope it (it was stored as-is, so it IS the credential).
@@ -153,13 +158,18 @@ public class KeyMigrationRunner {
       return count;
     } catch (Exception e) {
       String message =
-          "[KeyMigration] Failed to migrate " + table + "." + column + ": " + e.getMessage();
+          "[KeyMigration] Failed to migrate "
+              + table
+              + "."
+              + column
+              + " errorClass="
+              + e.getClass().getSimpleName();
       if (cryptoProperties.isRequireEncryption()) {
         // In prod/benchmark, starting after a partial credential migration is worse than staying
         // down: converters may then encounter legacy/plaintext values, new writes can mix formats,
         // and operators receive a false "encryption required" guarantee. Propagate the original
         // cause through the ApplicationReadyEvent so Spring aborts startup visibly.
-        throw new IllegalStateException(message, e);
+        throw new IllegalStateException(message);
       }
       log.warn(message);
       return 0;

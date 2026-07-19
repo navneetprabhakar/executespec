@@ -8,6 +8,13 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Values are `JWT` for browser/OAuth/JWT sessions and `PAT` for `es_pat_...` programmatic sessions.
 - Server-only capabilities that require a local approval-capable client, currently `POST /api/runs localExecution=true`, must accept only `PAT`.
 - Normal RBAC still comes from the same `AppUserDetails` regardless of JWT or PAT.
+- PAT scopes are enforceable capabilities, not display metadata. Legacy `full` rows remain
+  compatible; a new request with no explicit scopes receives the least-privilege client set
+  `api:read,runs:write,projects:write,agent:write,settings:write`. Billing, token management,
+  `/api/admin/**`, `/api/v2/test/**`, and unknown mutations require an explicit capability or
+  `full`. The filter stamps resolved token id/scopes request attributes after authorization.
+- Device-cap LRU revocation is returned in `CreatedToken.autoRevokedTokenIds` and the controller
+  appends one `USER_PAT_AUTO_REVOKED` audit event per displaced token.
 
 ## Provider Preference
 
@@ -29,6 +36,12 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   semantics; it can erase unrelated providers through positional client payloads.
 - Credential removal intentionally invalidates subsequent dispatch through V282 current-credential
   re-authorization. Existing execution snapshots do not preserve plaintext credentials.
+- Programmatic credential mutation requires the explicit `credentials:manage` PAT capability. It
+  is excluded from client-default PATs; routine CLI/device tokens cannot replace, validate or
+  revoke user/org provider, SCM, Jira or Confluence credentials or change org key-source mode.
+  Legacy `full` tokens remain compatible.
+- AI-key validation sends Gemini keys only in `x-goog-api-key` and returns bounded status messages;
+  raw provider/transport exception text and credential-bearing URLs are forbidden.
 
 ## Data Export
 
@@ -63,6 +76,10 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Project-only external collaborators use the separate V175 project invite surface (`POST /api/projects/{id}/invites`) and are controlled by `org.external_sharing_enabled`.
 - Accepted external project collaborators inherit the highest active host-project org tier through `TierEnforcementService.resolveUserTier` / `EntitlementResolver.resolveTier`. This is an effective entitlement only: do not mutate the collaborator's personal billing tier. Removing the `ProjectMember` row naturally falls back to the user's own org/user tier.
 - Project-scoped read surfaces must honor `ProjectMember` even when the caller's home `orgId` differs from the host project org. This includes project-filtered run lists, single-run reads for runs with `PipelineRun.projectId`, linked repo reads, and project chat. Write access remains stricter: use `ProjectAccessGuard.assertCanWrite` / `RunAccessGuard.requireRunWriteAccess` so `PROJECT_VIEWER` cannot mutate project or run state.
+- Query-string credentials must never be promoted by `JwtAuthenticationFilter` into general
+  authentication. PAT and normal JWT authentication are Authorization-header-only. The run and
+  execution SSE controllers alone may consume a query token, and must validate `scope=sse` plus the
+  exact resource identifier before subscribing.
 - `DELETE /api/org/me/invitations/{id}` cancels pending/escalated org invites by marking them `EXPIRED` and writing an `INVITATION_CANCELLED` audit row.
 - Project member add/remove accepts org admins and super admins in addition to project admins; `ProjectService.requireProjectAdmin` mirrors the controller/access-guard semantics.
 

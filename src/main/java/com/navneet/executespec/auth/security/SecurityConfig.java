@@ -198,6 +198,8 @@ public class SecurityConfig {
                     // SSE streaming (authenticated via ?token= query param)
                     .requestMatchers("/api/runs/*/events")
                     .permitAll()
+                    .requestMatchers("/api/executions/*/events")
+                    .permitAll()
                     // Public shared validation reports (no auth)
                     .requestMatchers(HttpMethod.GET, "/api/reports/shared/*")
                     .permitAll()

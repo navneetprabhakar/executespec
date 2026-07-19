@@ -11,6 +11,13 @@ tokens, generic secrets/passwords, and private-key blocks from outputs. `sanitiz
 returns a bounded, secret-free description; chat/tool/SSE paths must never expose a raw exception
 message.
 
+`SensitiveWorkspacePathPolicy` blocks credential-like workspace paths before tool output enters an
+LLM context. `ReadFileTool` and `WorkspaceFileService` reject those paths, `SearchFilesTool` omits their hits and redacts
+secret-shaped previews, and host `ShellSandboxPolicy` rejects explicit credential-file references;
+shell output is redacted as a second boundary. `WorkspaceFileService` also rejects symbolic-link
+reads and proves real-path containment, so run chat/file APIs cannot follow a repository link to a
+host secret. Safe configuration templates remain inspectable.
+
 `ArtifactPublicationGuard` is the final, fail-closed egress boundary. It streams the complete Git
 candidate set (tracked plus non-ignored untracked files) immediately before GitHub/Bitbucket push,
 scans every local or restored-GCS workspace ZIP member, and validates both newly generated and

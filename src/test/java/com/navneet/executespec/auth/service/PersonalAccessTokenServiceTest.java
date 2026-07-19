@@ -55,6 +55,9 @@ class PersonalAccessTokenServiceTest {
     appUserRepo = mock(AppUserRepository.class);
     orgRepo = mock(OrgRepository.class);
     svc = new PersonalAccessTokenService(repo, appUserRepo, orgRepo);
+    AppUser defaultUser = new AppUser();
+    defaultUser.setTier("FREE");
+    when(appUserRepo.findByIdForUpdate(any())).thenReturn(Optional.of(defaultUser));
   }
 
   @Test
@@ -74,7 +77,8 @@ class PersonalAccessTokenServiceTest {
     assertThat(row.getTokenPrefix()).startsWith("es_pat_").hasSize(14);
     assertThat(created.plaintext()).startsWith(row.getTokenPrefix());
     assertThat(row.getUserId()).isEqualTo("user-1");
-    assertThat(row.getScopes()).isEqualTo("full");
+    assertThat(row.getScopes())
+        .isEqualTo("api:read,runs:write,projects:write,agent:write,settings:write");
     assertThat(row.getExpiresAt()).isNull();
   }
 
@@ -92,6 +96,24 @@ class PersonalAccessTokenServiceTest {
     assertThatThrownBy(() -> svc.create("user-1", new CreatePatRequest("  ", null)))
         .isInstanceOf(ResponseStatusException.class);
     assertThatThrownBy(() -> svc.create("user-1", new CreatePatRequest("ok", 0)))
+        .isInstanceOf(ResponseStatusException.class);
+  }
+
+  @Test
+  void create_acceptsKnownExplicitScopes_andRejectsUnknownOrMixedFull() {
+    PersonalAccessTokenService.CreatedToken created =
+        svc.create("user-1", new CreatePatRequest("ci", null, List.of("api:read", "runs:write")));
+    assertThat(created.token().getScopes()).isEqualTo("api:read,runs:write");
+
+    assertThatThrownBy(
+            () ->
+                svc.create(
+                    "user-1", new CreatePatRequest("bad", null, List.of("api:read", "root"))))
+        .isInstanceOf(ResponseStatusException.class);
+    assertThatThrownBy(
+            () ->
+                svc.create(
+                    "user-1", new CreatePatRequest("bad", null, List.of("full", "api:read"))))
         .isInstanceOf(ResponseStatusException.class);
   }
 
@@ -119,6 +141,26 @@ class PersonalAccessTokenServiceTest {
     assertThat(svc.resolveUserId(plaintext)).isEqualTo("user-9");
     verify(repo, times(1)).save(row); // stamped because lastUsedAt was null
     assertThat(row.getLastUsedAt()).isNotNull();
+  }
+
+  @Test
+  void resolveToken_returnsSecretFreeIdentityAndScopes() {
+    String plaintext = "es_pat_scopedtoken";
+    PersonalAccessToken row =
+        PersonalAccessToken.builder()
+            .id("token-id")
+            .userId("user-9")
+            .tokenHash(DigestUtils.sha256Hex(plaintext))
+            .scopes("api:read,runs:write")
+            .lastUsedAt(Instant.now())
+            .build();
+    when(repo.findByTokenHashAndRevokedAtIsNull(DigestUtils.sha256Hex(plaintext)))
+        .thenReturn(Optional.of(row));
+
+    assertThat(svc.resolveToken(plaintext))
+        .isEqualTo(
+            new PersonalAccessTokenService.ResolvedToken(
+                "token-id", "user-9", "api:read,runs:write"));
   }
 
   @Test
@@ -184,7 +226,7 @@ class PersonalAccessTokenServiceTest {
     AppUser free = new AppUser();
     free.setTier("FREE");
     free.setOrgId(null);
-    when(appUserRepo.findById("u")).thenReturn(Optional.of(free));
+    when(appUserRepo.findByIdForUpdate("u")).thenReturn(Optional.of(free));
     PersonalAccessToken a = pat("a", 100, 100);
     PersonalAccessToken b = pat("b", 200, 200);
     when(repo.findByUserIdAndRevokedAtIsNull("u")).thenReturn(new ArrayList<>(List.of(a, b)));
@@ -201,7 +243,7 @@ class PersonalAccessTokenServiceTest {
   void create_paidTier_capsAtThree_revokesOnlyLeastRecentlyUsed() {
     AppUser member = new AppUser();
     member.setOrgId("org-1"); // org tier governs, not the user's own
-    when(appUserRepo.findById("u")).thenReturn(Optional.of(member));
+    when(appUserRepo.findByIdForUpdate("u")).thenReturn(Optional.of(member));
     when(orgRepo.findById("org-1")).thenReturn(Optional.of(orgWithTier("TEAM")));
 
     PersonalAccessToken lru = pat("lru", 10, 100); // least-recently-used → the only eviction
@@ -210,18 +252,20 @@ class PersonalAccessTokenServiceTest {
     when(repo.findByUserIdAndRevokedAtIsNull("u"))
         .thenReturn(new ArrayList<>(List.of(recent, lru, mid))); // unsorted on purpose
 
-    svc.create("u", new CreatePatRequest("4th device", null));
+    PersonalAccessTokenService.CreatedToken created =
+        svc.create("u", new CreatePatRequest("4th device", null));
 
     assertThat(lru.getRevokedAt()).isNotNull();
     assertThat(mid.getRevokedAt()).isNull();
     assertThat(recent.getRevokedAt()).isNull();
+    assertThat(created.autoRevokedTokenIds()).containsExactly("lru");
   }
 
   @Test
   void create_underCap_revokesNothing() {
     AppUser member = new AppUser();
     member.setOrgId("org-1");
-    when(appUserRepo.findById("u")).thenReturn(Optional.of(member));
+    when(appUserRepo.findByIdForUpdate("u")).thenReturn(Optional.of(member));
     when(orgRepo.findById("org-1")).thenReturn(Optional.of(orgWithTier("PRO")));
     PersonalAccessToken only = pat("only", 10, 10);
     when(repo.findByUserIdAndRevokedAtIsNull("u")).thenReturn(new ArrayList<>(List.of(only)));
