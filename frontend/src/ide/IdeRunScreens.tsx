@@ -150,9 +150,18 @@ export default function IdeRunScreens({runId}: {runId: string}) {
     <div className='ide-screens'>
       <div className='ide-screens-bar'>
         <div className='ide-screens-bar-left'>
-          <button className='ide-btn' onClick={start} disabled={starting || inFlight}>
-            {inFlight ? 'Rendering…' : manifest?.jobId ? 'Re-render' : 'Render screens'}
-          </button>
+          {manifest?.available === false ? (
+            /* The flag is off for this deployment. Previously this rendered an always-enabled
+               button whose 503 surfaced as "temporarily unavailable" — false for a feature that
+               is simply disabled. Say what is actually true instead. */
+            <span className='ide-screens-status'>
+              Screen rendering is turned off for this deployment.
+            </span>
+          ) : (
+            <button className='ide-btn' onClick={start} disabled={starting || inFlight}>
+              {inFlight ? 'Rendering…' : manifest?.jobId ? 'Re-render' : 'Render screens'}
+            </button>
+          )}
           {inFlight && (
             <span className='ide-screens-status'>
               Drawing your screens. This does not build or deploy anything.

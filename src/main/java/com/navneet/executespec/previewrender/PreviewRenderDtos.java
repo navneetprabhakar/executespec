@@ -24,10 +24,21 @@ public final class PreviewRenderDtos {
       String fidelityNote,
       Instant requestedAt,
       Instant completedAt,
-      List<RenderSurfaceDto> surfaces) {
+      List<RenderSurfaceDto> surfaces,
+      /**
+       * Whether this deployment can actually render at all, i.e. whether the {@code
+       * preview.render-agent.enabled} flag is on.
+       *
+       * <p>Without this the client cannot tell a permanently-disabled feature from a transient
+       * outage: the endpoint answers 503 in both cases, and the UI rendered an always-enabled
+       * "Render" button that produced "temporarily unavailable" — which is false when the feature
+       * is simply off. Same failure shape as the unconditional OAuth buttons on the login page.
+       */
+      boolean available) {
 
-    public static RenderManifest absent(String runId) {
-      return new RenderManifest(null, runId, "NONE", null, 0, 0, null, null, null, List.of());
+    public static RenderManifest absent(String runId, boolean available) {
+      return new RenderManifest(
+          null, runId, "NONE", null, 0, 0, null, null, null, List.of(), available);
     }
   }
 

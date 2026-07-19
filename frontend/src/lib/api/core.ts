@@ -612,6 +612,8 @@ export interface PreviewRenderManifest {
   requestedAt: string | null;
   completedAt: string | null;
   surfaces: PreviewRenderSurface[];
+  /** False when preview.render-agent.enabled is off — the feature is disabled, not merely busy. */
+  available?: boolean;
 }
 
 export interface PreviewRenderSurface {

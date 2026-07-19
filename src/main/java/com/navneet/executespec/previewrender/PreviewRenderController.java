@@ -68,7 +68,10 @@ public class PreviewRenderController {
     return renderService
         .latestJob(runId)
         .map(job -> ResponseEntity.ok(toManifest(job, renderService.bundles(job.getId()))))
-        .orElseGet(() -> ResponseEntity.ok(PreviewRenderDtos.RenderManifest.absent(runId)));
+        .orElseGet(
+            () ->
+                ResponseEntity.ok(
+                    PreviewRenderDtos.RenderManifest.absent(runId, renderService.enabled())));
   }
 
   /**
@@ -183,7 +186,8 @@ public class PreviewRenderController {
         surfaces.isEmpty() ? null : fidelityNote(surfaces),
         job.getRequestedAt(),
         job.getCompletedAt(),
-        surfaces);
+        surfaces,
+        renderService.enabled());
   }
 
   /** One honest sentence about what the operator is looking at, driven by the weakest surface. */
