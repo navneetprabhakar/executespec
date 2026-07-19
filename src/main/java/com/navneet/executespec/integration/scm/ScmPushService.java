@@ -1,6 +1,9 @@
 package com.navneet.executespec.integration.scm;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
@@ -15,6 +18,7 @@ import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.BitbucketRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmProvider;
 import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -33,9 +37,10 @@ import lombok.extern.slf4j.Slf4j;
  * SCM push orchestration. Originally extracted from the V1 pipeline; now called from the V2 run
  * orchestrator's post-merge path.
  *
- * <p>Decides between Bitbucket and GitHub based on credentials present on the run / user, creates a
- * feature branch (or new repo), pushes the workspace, and opens a pull request. Used by the {@code
- * /api/runs/{id}/push-scm} and legacy {@code /push-github} endpoints.
+ * <p>Routes from the run's durable SCM/source identity. Credentials authorize the selected route;
+ * they never choose it. Legacy runs without a durable route may infer one from an unambiguous
+ * remote URL or a single configured provider. Used by the {@code /api/runs/{id}/push-scm} and
+ * legacy {@code /push-github} endpoints.
  *
  * <p>Harness-agnostic — lives in the {@code integration.scm} package so it survives V1 deletion.
  */
@@ -107,23 +112,105 @@ public class ScmPushService {
     return pushIfConfigured(run, scmUser);
   }
 
-  /** Dispatch to Bitbucket or GitHub based on credentials. */
+  /** Dispatch to the durable source provider; credentials only authorize that provider. */
   private PushResult pushIfConfigured(PipelineRun run, AppUser user) {
-    if (StringUtils.hasText(run.getBitbucketUsername())
-        && StringUtils.hasText(run.getBitbucketWorkspace())) {
-      return pushToBitbucket(run);
+    ProviderDecision decision = resolveProviderDecision(run, user);
+    if (decision.error() != null) {
+      log.warn("[{}] SCM publication blocked: {}", run.getRunId(), decision.error());
+      return PushResult.failed(decision.error(), decision.provider());
     }
-    if (user != null
-        && StringUtils.hasText(user.getBitbucketUsername())
-        && StringUtils.hasText(user.getBitbucketWorkspace())) {
-      run.setBitbucketUsername(user.getBitbucketUsername());
-      run.setBitbucketAppPassword(user.getBitbucketAppPassword());
-      run.setBitbucketWorkspace(user.getBitbucketWorkspace());
-      run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
-      run.setScmProvider("BITBUCKET");
+    if (ScmProvider.BITBUCKET.name().equals(decision.provider())) {
+      hydrateBitbucketCredentials(run, user);
       return pushToBitbucket(run);
     }
     return pushToGitHubIfConfigured(run, user);
+  }
+
+  private record ProviderDecision(String provider, String error) {
+    static ProviderDecision route(ScmProvider provider) {
+      return new ProviderDecision(provider.name(), null);
+    }
+
+    static ProviderDecision blocked(String provider, String error) {
+      return new ProviderDecision(provider == null ? "" : provider, error);
+    }
+  }
+
+  private ProviderDecision resolveProviderDecision(PipelineRun run, AppUser user) {
+    List<java.util.UUID> selectedIds = parseRepoIds(run.getSelectedRepoIds());
+    if (StringUtils.hasText(run.getSelectedRepoIds())) {
+      if (selectedIds.isEmpty()) {
+        return ProviderDecision.blocked("", "Selected repository identity is invalid");
+      }
+      List<ProjectRepo> selectedRepos = projectRepoRepository.findAllById(selectedIds);
+      if (selectedRepos.size() != selectedIds.size()) {
+        return ProviderDecision.blocked("", "Selected repository identity is incomplete");
+      }
+      Set<ScmProvider> providers =
+          selectedRepos.stream()
+              .map(ProjectRepo::getScmProvider)
+              .map(ScmProvider::require)
+              .collect(Collectors.toSet());
+      if (providers.size() != 1) {
+        return ProviderDecision.blocked("", "Mixed-provider SCM publication is not supported");
+      }
+      ScmProvider selectedProvider = providers.iterator().next();
+      if (selectedProvider == ScmProvider.BITBUCKET) {
+        return ProviderDecision.blocked(
+            ScmProvider.BITBUCKET.name(),
+            "Bitbucket project publication is not supported on this release");
+      }
+      return ProviderDecision.route(selectedProvider);
+    }
+
+    if (StringUtils.hasText(run.getScmProvider())) {
+      try {
+        return ProviderDecision.route(
+            ScmProvider.valueOf(run.getScmProvider().trim().toUpperCase(Locale.ROOT)));
+      } catch (IllegalArgumentException unknown) {
+        return ProviderDecision.blocked("", "Unsupported SCM provider on run");
+      }
+    }
+
+    String repoUrl = run.getRepoUrl();
+    if (StringUtils.hasText(repoUrl)) {
+      String normalized = repoUrl.toLowerCase(Locale.ROOT);
+      if (normalized.contains("bitbucket.org/")) {
+        return ProviderDecision.route(ScmProvider.BITBUCKET);
+      }
+      if (normalized.contains("github.com/")) {
+        return ProviderDecision.route(ScmProvider.GITHUB);
+      }
+    }
+
+    boolean bitbucketConfigured = hasBitbucketConfiguration(run, user);
+    boolean githubConfigured = StringUtils.hasText(resolvePat(run, user));
+    if (bitbucketConfigured && githubConfigured) {
+      return ProviderDecision.blocked(
+          "", "Legacy run has multiple SCM credentials and no durable provider route");
+    }
+    return ProviderDecision.route(bitbucketConfigured ? ScmProvider.BITBUCKET : ScmProvider.GITHUB);
+  }
+
+  private static boolean hasBitbucketConfiguration(PipelineRun run, AppUser user) {
+    boolean runConfigured =
+        StringUtils.hasText(run.getBitbucketUsername())
+            && StringUtils.hasText(run.getBitbucketWorkspace())
+            && StringUtils.hasText(run.getBitbucketAppPassword());
+    boolean userConfigured =
+        user != null
+            && StringUtils.hasText(user.getBitbucketUsername())
+            && StringUtils.hasText(user.getBitbucketWorkspace())
+            && StringUtils.hasText(user.getBitbucketAppPassword());
+    return runConfigured || userConfigured;
+  }
+
+  private static void hydrateBitbucketCredentials(PipelineRun run, AppUser user) {
+    if (StringUtils.hasText(run.getBitbucketUsername()) || user == null) return;
+    run.setBitbucketUsername(user.getBitbucketUsername());
+    run.setBitbucketAppPassword(user.getBitbucketAppPassword());
+    run.setBitbucketWorkspace(user.getBitbucketWorkspace());
+    run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
   }
 
   private PushResult pushToBitbucket(PipelineRun run) {

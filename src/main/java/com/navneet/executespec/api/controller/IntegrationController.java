@@ -53,7 +53,10 @@ public class IntegrationController {
       log.warn("[Webhook] Unknown source: {}", source);
       return ResponseEntity.badRequest().body(Map.of("error", INVALID_REQUEST));
     } catch (Exception e) {
-      log.error("[Webhook] Error processing {} webhook: {}", source, e.getMessage(), e);
+      log.error(
+          "[Webhook] Error processing {} webhook errorType={}",
+          source,
+          e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
@@ -80,7 +83,7 @@ public class IntegrationController {
       String runId = manager.submitEvent(event);
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
-      log.error("[Webhook] Jira manual trigger error: {}", e.getMessage(), e);
+      log.error("[Webhook] Jira manual trigger errorType={}", e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
@@ -108,7 +111,7 @@ public class IntegrationController {
       String runId = manager.submitEvent(event);
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
-      log.error("[Webhook] Confluence manual trigger error: {}", e.getMessage(), e);
+      log.error("[Webhook] Confluence manual trigger errorType={}", e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }

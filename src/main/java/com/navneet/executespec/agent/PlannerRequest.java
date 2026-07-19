@@ -46,6 +46,8 @@ public record PlannerRequest(
      * flag is off; mirrors {@link #referenceDocs}.
      */
     String projectAdrs,
+    /** Effective project/org engineering standards, rendered as untrusted policy evidence. */
+    String engineeringStandards,
     /**
      * v2.5.2 (Phase 4.3) — when true, planner emits test tasks first with implementation tasks
      * declaring dependsOn the test ids.

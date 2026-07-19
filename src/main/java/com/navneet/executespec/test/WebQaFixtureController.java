@@ -144,9 +144,12 @@ public class WebQaFixtureController {
     runRepository.save(gate);
     PipelineRun recovery =
         createRun(
-            userId, orgId, "WORKING", "CLEAN_COMPLETION", "Release QA restart recovery", true);
-    recovery.setCompletedAt(null);
-    runRepository.save(recovery);
+            userId,
+            orgId,
+            "FAILED",
+            "REVIEWER_FAILED",
+            "Release QA restart recovery unavailable",
+            true);
     turn.setLinkedRunId(gate.getRunId());
     turnRepository.save(turn);
     return new FixtureResponse(
@@ -155,11 +158,11 @@ public class WebQaFixtureController {
 
   /**
    * Advance only a fixture-owned plan-gate row for provider-free screen captures. EXECUTING maps to
-   * the V2 pipeline's persisted WORKING state; RECOVERY arms a WORKING row with terminal task
-   * evidence so the boot resumer can exercise its deterministic salvage path after a JVM restart.
-   * Neither transition starts a worker, provider, quota, PR, or background job. The endpoint is
-   * intentionally local/dev + SUPER_ADMIN only with a strict prefix and transition order so it
-   * cannot mutate customer runs.
+   * the V2 pipeline's persisted WORKING state. Neither transition starts a worker, provider, quota,
+   * PR, or background job. Restart recovery is deliberately not simulated here because real
+   * recovery must run the fenced reviewer and validation lifecycle rather than manufacture a
+   * terminal status from fixture state. The endpoint is intentionally local/dev + SUPER_ADMIN only
+   * with a strict prefix and transition order so it cannot mutate customer runs.
    */
   @PostMapping("/{runId}/advance")
   public AdvanceResponse advance(
@@ -171,9 +174,9 @@ public class WebQaFixtureController {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "fixture run not found");
     }
     String requested = request == null || request.status() == null ? "" : request.status().trim();
-    if (!List.of("EXECUTING", "RECOVERY", "COMPLETE").contains(requested)) {
+    if (!List.of("EXECUTING", "COMPLETE").contains(requested)) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "status must be EXECUTING, RECOVERY, or COMPLETE");
+          HttpStatus.BAD_REQUEST, "status must be EXECUTING or COMPLETE");
     }
     PipelineRun run =
         runRepository
@@ -189,10 +192,6 @@ public class WebQaFixtureController {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "fixture run is not awaiting approval");
     }
-    if ("RECOVERY".equals(requested) && !"AWAITING_APPROVAL".equals(current)) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "fixture run is not awaiting approval");
-    }
     if ("COMPLETE".equals(requested) && !"WORKING".equals(current)) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "fixture run is not executing");
     }
@@ -202,14 +201,6 @@ public class WebQaFixtureController {
       run.setCompletedAt(null);
       run.setStatusReason("CLEAN_COMPLETION");
       advanceTasks(runId, false);
-    } else if ("RECOVERY".equals(requested)) {
-      // Keep the run in WORKING with a completed task. StartupRunResumer recognises this as an
-      // interrupted post-executor phase and salvages it without invoking any LLM/provider.
-      run.setStatus("WORKING");
-      run.setCurrentGate(null);
-      run.setCompletedAt(null);
-      run.setStatusReason("CLEAN_COMPLETION");
-      advanceTasks(runId, true);
     } else {
       run.setStatus("COMPLETE");
       run.setCompletedAt(Instant.now());

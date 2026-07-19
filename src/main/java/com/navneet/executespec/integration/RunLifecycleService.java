@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
@@ -131,6 +132,7 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -173,6 +175,7 @@ public class RunLifecycleService {
   private final RemoteToolDispatcher remoteToolDispatcher;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -540,6 +543,7 @@ public class RunLifecycleService {
     var opt = runRepo.findById(runId);
     if (opt.isEmpty()) return RunOrchestrator.CrashResumeOutcome.NOT_FOUND;
     var run = opt.get();
+    String interruptedInstance = run.getExecutingInstance();
     String status = run.getStatus();
     if (!"PLANNING".equals(status) && !"WORKING".equals(status) && !"REVIEWING".equals(status)) {
       return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
@@ -598,6 +602,26 @@ public class RunLifecycleService {
     run.setResumedAt(claimAt);
     run.setExecutingInstance(RECOVERY_INSTANCE_ID);
     run.setExecutionHeartbeat(claimAt);
+
+    // A local workspace is trustworthy after a same-host process restart. A different host may
+    // proceed only when operators have explicitly configured a shared persistent filesystem. The
+    // existing asynchronous GCS task checkpoint has no persisted acknowledged task frontier, so
+    // it is deliberately not treated as sufficient proof: restoring it could pair T(n-1) files
+    // with a database row that already marks T(n) terminal.
+    boolean sameHostRestart =
+        interruptedInstance != null && interruptedInstance.equals(RECOVERY_INSTANCE_ID);
+    boolean sharedWorkspace =
+        operationalReleasePolicy != null
+            && operationalReleasePolicy.sharedPersistentWorkspaceConfigured();
+    if (operationalReleasePolicy != null && !sameHostRestart && !sharedWorkspace) {
+      String reason =
+          "cross-node recovery refused: no shared persistent workspace or acknowledged checkpoint"
+              + " frontier";
+      log.warn("resumeAfterCrash run={} {}", runId, reason);
+      emitRecoveryEvidence(runId, "UNTRUSTED_WORKSPACE_FRONTIER", "REFUSED", 0);
+      controlPort.terminate(runId, "FAILED", reason, null);
+      return RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
+    }
 
     // Fence each stale in-flight task before submitting the resumed pipeline.  This is deliberately
     // fail-closed: if another worker changed the row between the read above and this CAS, do not

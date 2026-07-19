@@ -64,6 +64,25 @@ class SearchFilesToolRipgrepTest {
         .startsWith("1000+ match(es); engine=ripgrep; showing 1–2");
   }
 
+  @Test
+  void searchOmitsCredentialFilesAndRedactsSecretShapedSourcePreviews(@TempDir Path workspace)
+      throws Exception {
+    assumeRipgrep();
+    Files.writeString(workspace.resolve(".env"), "API_KEY=abcdefghijklmnopsecret\n");
+    Files.writeString(workspace.resolve("source.txt"), "api_key=abcdefghijklmnopsecret\n");
+    SearchFilesTool tool = new SearchFilesTool(new RepositorySearchService());
+
+    ToolResult result =
+        tool.execute(
+            json.readTree("{\"pattern\":\"api_key\",\"mode\":\"EXACT\"}"),
+            new ExecutionContext("run", "task", workspace));
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("source.txt", "[REDACTED]")
+        .doesNotContain(".env", "abcdefghijklmnopsecret");
+  }
+
   private static void assumeRipgrep() throws InterruptedException {
     try {
       Process process = new ProcessBuilder("rg", "--version").start();

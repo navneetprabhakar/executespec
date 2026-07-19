@@ -3,10 +3,13 @@
 project:
   rag:
     embedding:
+      max-cosine-distance: 0.55
       openai:
         model: text-embedding-3-small
         dimensions: 1536
         input-cost-per-million-usd: 0.02
+        connect-timeout-millis: 5000
+        read-timeout-millis: 60000
   exports:
     max-jobs-per-project-per-day: 5
     retention-hours: 24
@@ -267,7 +270,7 @@ model-matrix:
   # keeps protecting schema-sensitive ones (RL-2026-05-061). stagnation-*: per-provider worker
   # thresholds (consumed with progress-v2).
   # SHIPPED DARK: entries below are commented out until each passes its k>=3 gate vs the Phase-0
-  # baseline (see infra/benchmark/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
+  # baseline (see ../executespec-docs/release-evidence/archive/benchmark-history/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
   # the graduation act — do not do it without the eval evidence.
   # Activation is separately gated by worker.capability-profiles.enabled (V271), seeded false;
   # a YAML profile must never widen a worker schema or change thresholds by itself.
@@ -898,6 +901,7 @@ model-matrix:
     CodeReviewAgent: PLANNING
     ToolOutputCompactor: LIGHTWEIGHT
     WorkerHistoryCompactor: LIGHTWEIGHT
+    PreviewRenderAgent: WORKHORSE # translating a screen into standalone HTML is code transformation, not planning
   failover-order:
     anthropic:
       - openai
@@ -913,6 +917,11 @@ model-matrix:
       - fireworks
 
 durability:
+  workspace:
+    # Set only when every run workspace path is a shared, persistent filesystem visible to every
+    # execution node. GCS task archives do not satisfy this until they carry an acknowledged task
+    # frontier that recovery validates.
+    shared-persistent: false
   task-checkpoint:
     enabled: true
   # A workspace-local atomic worker checkpoint complements Redis. It survives a Redis restart
@@ -988,6 +997,9 @@ agent:
     pattern-min-occurrences: 2
   deployment:
     enabled: true
+    # Release profiles fail closed unless operators explicitly attest that phase recovery and
+    # external-resource reconciliation are configured.
+    recovery-safe-enabled: false
     gcp-project: executespecv1
     gcp-region: us-east4
     artifact-registry:
@@ -1102,6 +1114,17 @@ preview:
     orphan-discovery-enabled: ${PREVIEW_ORPHAN_DISCOVERY_ENABLED:false}
     # Rolling deploys preserve previews; expiration/explicit stop owns teardown.
     teardown-on-shutdown: ${PREVIEW_TEARDOWN_ON_SHUTDOWN:false}
+
+  # Static UI render (no container, no deploy). Gated by the preview.render-agent.enabled flag
+  # seeded OFF in V302; these values only bound the work once an operator turns it on.
+  render:
+    # Each surface costs one WORKHORSE call, so this is the primary cost lever.
+    max-surfaces: 6
+    # Total prompt characters across all surfaces. Discovery drops supporting context, then whole
+    # surfaces, to stay under it.
+    character-budget: 180000
+    parallelism: 3
+    timeout-seconds: 300
 
   engine:
     route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
@@ -1220,7 +1243,9 @@ executespec:
 
   crypto:
     enabled: false
-    gcp-secret-name: projects/${GCP_PROJECT:executespecv1}/secrets/executespec-crypto-key/versions/latest
+    # Remote/shared profiles fail closed when this is absent. When supplied, it must name an
+    # immutable numeric Secret Manager version; aliases such as /versions/latest are rejected.
+    gcp-secret-name: ${CRYPTO_GCP_SECRET_RESOURCE:}
     local-key: ${CRYPTO_LOCAL_KEY:}
 
   validator:
@@ -1271,6 +1296,13 @@ analytics:
     enabled: ${POSTHOG_ENABLED:false}
     api-key: ${POSTHOG_API_KEY:}
     host: ${POSTHOG_HOST:https://us.i.posthog.com}
+
+# Checked-in ADR discovery/synchronization is not implemented yet. Keep planner injection
+# fail-closed so historical cache rows cannot silently become repository policy.
+adrs:
+  injection:
+    enabled: ${ADRS_INJECTION_ENABLED:false}
+    full-body-threshold: 15
 
 management:
   endpoints:

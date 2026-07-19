@@ -181,7 +181,14 @@ public class GeminiNativeToolClient {
             ? Duration.ofSeconds(request.readTimeoutSeconds())
             : READ_TIMEOUT;
     factory.setReadTimeout(effectiveReadTimeout);
-    RestClient client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
+    // Google explicitly recommends the header form. Keeping the key out of the URI prevents it
+    // from entering access logs, tracing attributes, proxy diagnostics and exception messages.
+    RestClient client =
+        RestClient.builder()
+            .baseUrl(baseUrl)
+            .defaultHeader("x-goog-api-key", apiKey)
+            .requestFactory(factory)
+            .build();
 
     // RL-2026-05-059 — resolve (or mint) an explicit cache for the stable system+tools prefix.
     // null = caching disabled / ineligible / mint failed → inline body (today's behaviour).
@@ -205,7 +212,7 @@ public class GeminiNativeToolClient {
     }
 
     ObjectNode body = buildRequestBody(request, cacheName);
-    String uri = "/v1beta/models/" + request.model() + ":generateContent?key=" + apiKey;
+    String uri = "/v1beta/models/" + request.model() + ":generateContent";
     log.info(
         "Gemini wrapper POST {} model={} tools={} cached={}",
         baseUrl + "/v1beta/models/" + request.model() + ":generateContent",
@@ -233,16 +240,6 @@ public class GeminiNativeToolClient {
     }
     JsonNode response = pendingSuccess.response();
     if (response == null) throw new IllegalStateException("Gemini returned empty response body");
-    // DEBUG: raw request+response logging to diagnose empty-response issues. Temporary.
-    try {
-      log.info(
-          "Gemini wrapper REQUEST body (truncated): {}",
-          truncate(objectMapper.writeValueAsString(body), 2000));
-      log.info(
-          "Gemini wrapper RESPONSE body (truncated): {}",
-          truncate(objectMapper.writeValueAsString(response), 2000));
-    } catch (Exception ignored) {
-    }
     ChatResponse parsed;
     try {
       parsed = parseResponse(response, request.model());
@@ -564,7 +561,7 @@ public class GeminiNativeToolClient {
     List<Generation> generations = new ArrayList<>();
     JsonNode candidates = response.path("candidates");
     if (!candidates.isArray() || candidates.isEmpty()) {
-      throw new IllegalStateException("Gemini response missing 'candidates': " + response);
+      throw new IllegalStateException("Gemini response missing required candidates array");
     }
     for (JsonNode candidate : candidates) {
       JsonNode parts = candidate.path("content").path("parts");
@@ -768,7 +765,7 @@ public class GeminiNativeToolClient {
       JsonNode resp =
           client
               .post()
-              .uri("/v1beta/cachedContents?key=" + apiKey)
+              .uri("/v1beta/cachedContents")
               .contentType(MediaType.APPLICATION_JSON)
               .body(body)
               .retrieve()
@@ -787,14 +784,11 @@ public class GeminiNativeToolClient {
     } catch (HttpClientErrorException he) {
       recordFailure(
           auditContext, new PendingHttpSuccess(null, handle, elapsedSince(startedAt)), he);
-      log.warn(
-          "Gemini explicit cache mint FAILED http={} body={}",
-          he.getStatusCode(),
-          truncate(he.getResponseBodyAsString(), 500));
+      log.warn("Gemini explicit cache mint failed http={}", he.getStatusCode());
       return null;
     } catch (Exception e) {
       recordFailure(auditContext, new PendingHttpSuccess(null, handle, elapsedSince(startedAt)), e);
-      log.warn("Gemini explicit cache mint skipped: {}", e.toString());
+      log.warn("Gemini explicit cache mint skipped errorClass={}", e.getClass().getSimpleName());
       return null;
     }
   }

@@ -15,7 +15,10 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -40,9 +43,17 @@ import lombok.extern.slf4j.Slf4j;
 public class SearchFilesTool implements Tool {
 
   private final RepositorySearchService repositorySearchService;
+  private final ContextSanitizer contextSanitizer;
 
   public SearchFilesTool(RepositorySearchService repositorySearchService) {
+    this(repositorySearchService, new ContextSanitizer());
+  }
+
+  @Autowired
+  public SearchFilesTool(
+      RepositorySearchService repositorySearchService, ContextSanitizer contextSanitizer) {
     this.repositorySearchService = repositorySearchService;
+    this.contextSanitizer = contextSanitizer;
   }
 
   private static final Set<String> HIDDEN_DIRS =
@@ -155,6 +166,8 @@ public class SearchFilesTool implements Tool {
                 .append(relationships.repositoryFingerprint())
                 .append('\n');
         for (RepositorySearchService.RelationshipEdge edge : relationships.edges()) {
+          if (SensitiveWorkspacePathPolicy.isSensitive(edge.sourcePath())
+              || SensitiveWorkspacePathPolicy.isSensitive(edge.targetPath())) continue;
           typed
               .append(edge.relationshipType())
               .append(' ')
@@ -164,7 +177,7 @@ public class SearchFilesTool implements Tool {
               .append(" -> ")
               .append(edge.targetPath() == null ? "?" : edge.targetPath())
               .append(" [")
-              .append(edge.preview())
+              .append(contextSanitizer.sanitizeOutput(edge.preview()))
               .append("]\n");
         }
         return ToolResult.ok(typed.toString().trim());
@@ -224,12 +237,13 @@ public class SearchFilesTool implements Tool {
                   : "")
           .append('\n');
       for (RepositorySearchService.SearchHit hit : structured.hits()) {
+        if (SensitiveWorkspacePathPolicy.isSensitive(hit.path())) continue;
         typed
             .append(hit.path())
             .append(':')
             .append(hit.line())
             .append(':')
-            .append(hit.preview())
+            .append(contextSanitizer.sanitizeOutput(hit.preview()))
             .append(
                 mode == RepositorySearchService.SearchMode.SYMBOL
                     ? " [" + hit.matchType() + "] {reason=" + hit.relevanceReason() + '}'
@@ -326,6 +340,9 @@ public class SearchFilesTool implements Tool {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
+            if (SensitiveWorkspacePathPolicy.isSensitive(file.toString())) {
+              return FileVisitResult.CONTINUE;
+            }
             // walkFileTree does not follow directory links, but a symlink visited as a file would
             // otherwise be opened by readAllLines. Keep the compatibility fallback subject to the
             // same workspace-realpath boundary as the structured search implementation.
@@ -352,7 +369,8 @@ public class SearchFilesTool implements Tool {
                 String line = lines.get(i);
                 if (regex.matcher(line).find()) {
                   String rel = workspaceReal.relativize(file).toString();
-                  matches.add(rel + ":" + (i + 1) + ":" + clampLine(line));
+                  matches.add(
+                      rel + ":" + (i + 1) + ":" + contextSanitizer.sanitizeOutput(clampLine(line)));
                   if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
                 }
               }
@@ -418,6 +436,9 @@ public class SearchFilesTool implements Tool {
                   proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
         String out;
         while ((out = r.readLine()) != null) {
+          String outputPath = out.substring(0, Math.max(0, out.indexOf(':')));
+          if (SensitiveWorkspacePathPolicy.isSensitive(outputPath)) continue;
+          out = contextSanitizer.sanitizeOutput(out);
           String parsed = toMatchLine(out);
           if (parsed != null) matches.add(parsed);
           if (matches.size() >= MATCH_CEILING) {

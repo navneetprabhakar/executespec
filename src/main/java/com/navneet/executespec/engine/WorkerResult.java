@@ -16,7 +16,8 @@ import lombok.Builder;
  *     STOPPED_WITHOUT_COMPLETE)
  * @param repeatedAssistantTextCount highest count for the same normalized assistant text seen
  *     during the worker loop
- * @param toolCallLog ordered log of {tool name, args preview, ok/err} per dispatched call
+ * @param toolCallLog ordered log of {tool name, opaque argument signature, safe target, ok/err} per
+ *     dispatched call; raw arguments are never retained
  * @param totalLatencyMs wall-clock time across the whole loop
  */
 @Builder

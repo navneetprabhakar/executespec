@@ -199,6 +199,12 @@ public class ShellSandboxPolicy {
           Pattern.compile("curl\\s+.*-d\\s+@"), // curl post file contents
           Pattern.compile("wget\\s+.*--post-file"), // wget post file
 
+          // Credential material must never be printed into the worker/model context. Template
+          // files such as .env.example remain readable so agents can document configuration.
+          Pattern.compile("(?i)(?:^|[\\s'\"/])\\.env(?!\\.(?:example|sample|template)(?:\\s|$))"),
+          Pattern.compile(
+              "(?i)(?:^|[\\s'\"/])(?:\\.npmrc|\\.pypirc|\\.netrc|\\.git-credentials|credentials\\.json|service[-_]account\\.json|id_(?:rsa|dsa|ecdsa|ed25519)|[^\\s'\"]+\\.(?:pem|key|p12|pfx|jks|keystore))(?:[\\s'\"]|$)"),
+
           // Filesystem mount/unmount — word-boundary to avoid false-positives (e.g. Express "mount"
           // in router code)
           Pattern.compile("\\bmount\\b"),

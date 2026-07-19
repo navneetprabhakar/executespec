@@ -124,11 +124,12 @@ class AgentOrchestratorTurnService {
         "IMPLEMENTATION_PROPOSAL",
         decision.confidence(),
         "read_only_permission_blocks_run",
-        true,
+        false,
         "This looks like implementation work, but your current permission mode is read-only. I"
-            + " will not create a run unless you confirm an execution mode change.",
-        decision.proposedAction(),
-        new OrchestratorPolicy(false, true, "Read-only permission mode blocks new run submission."),
+            + " will not create a run. Change execution mode before asking for a cloud run.",
+        null,
+        new OrchestratorPolicy(
+            false, false, "Read-only permission mode blocks new run submission."),
         decision.traceId());
   }
 

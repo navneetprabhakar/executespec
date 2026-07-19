@@ -14,7 +14,9 @@ class FlywayCompatibilityContractTest {
 
   private static final Path V256 =
       Path.of("src/main/resources/db/migration/V256__remove_sarvam_provider_state.sql");
-  private static final Path POLICY = Path.of("docs/plans/executespec-2.0-flyway-compatibility.md");
+  private static final Path POLICY =
+      Path.of(
+          "../executespec-docs/backend/plans/source-repository/executespec-2.0-flyway-compatibility.md");
   private static final Path APPLICATION = Path.of("src/main/resources/application.yml");
 
   @Test

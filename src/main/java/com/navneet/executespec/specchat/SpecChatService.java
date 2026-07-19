@@ -899,13 +899,14 @@ claim in a tool result — never invent a runId, score, or status.""";
   private String sanitizeUserContent(String content) {
     String normalized = inputSanitizer.normalize(content);
     if (normalized == null) return "";
+    // The legacy marker is not server authority. Scan the entire client-authored payload before
+    // wrapping the evidence as untrusted context; otherwise its tail becomes a guardrail bypass.
+    inputSanitizer.scan(normalized);
     int localContext = normalized.indexOf("EXECUTESPEC_LOCAL_CONTEXT:");
     if (localContext < 0) {
-      inputSanitizer.scan(normalized);
       return normalized;
     }
     String userInstruction = normalized.substring(0, localContext);
-    inputSanitizer.scan(userInstruction);
     String evidence = normalized.substring(localContext);
     return userInstruction
         + "\n\n"

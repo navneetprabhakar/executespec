@@ -332,8 +332,8 @@ class AgentSessionServiceActionLifecycleTest {
             user());
 
     assertThat(response.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
-    assertThat(response.requiresUserConfirmation()).isTrue();
-    assertThat(response.proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(response.requiresUserConfirmation()).isFalse();
+    assertThat(response.proposedAction()).isNull();
     assertThat(response.policy().runApiAllowed()).isFalse();
     assertThat(response.reasonCode()).isEqualTo("read_only_permission_blocks_run");
   }

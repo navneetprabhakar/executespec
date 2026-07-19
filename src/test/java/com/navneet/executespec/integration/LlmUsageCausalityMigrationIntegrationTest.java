@@ -73,9 +73,10 @@ class LlmUsageCausalityMigrationIntegrationTest {
       jdbc.update(
           "INSERT INTO managed_ai_usage_event"
               + " (id,period_id,user_id,org_id,run_id,source_type,provider,model,raw_cost_usd,"
-              + " ai_credits_charged,routing_state_before,routing_state_after,usage_event_id)"
+              + " ai_credits_charged,routing_state_before,routing_state_after,usage_event_id,"
+              + " created_at)"
               + " VALUES ('managed-1','period-1','user-1','org-test','run-1','PLATFORM','deepseek',"
-              + " 'deepseek-v4',0.01,9,'FULL','FULL','usage-legacy')");
+              + " 'deepseek-v4',0.01,9,'FULL','FULL','usage-legacy',NOW()+INTERVAL '3 days')");
       assertThat(
               jdbc.queryForObject(
                   "SELECT managed_ai_credits FROM canonical_llm_usage_event"

@@ -30,6 +30,7 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.web.server.ResponseStatusException;
 
 class WebQaFixtureControllerTest {
 
@@ -130,7 +131,7 @@ class WebQaFixtureControllerTest {
   }
 
   @Test
-  void recoveryArmLeavesWorkingRunWithTerminalTaskEvidenceForBootSalvage() {
+  void recoveryFixtureCannotBypassRealRestartLifecycle() {
     PipelineRun run =
         PipelineRun.builder()
             .runId("web-qa-recovery")
@@ -145,15 +146,17 @@ class WebQaFixtureControllerTest {
     when(tasks.findByRunId("web-qa-recovery")).thenReturn(List.of(task));
     WebQaFixtureController controller = controller(runs, mock(AgentSessionRepository.class), tasks);
 
-    assertThat(
-            controller.advance(
-                "web-qa-recovery", new WebQaFixtureController.AdvanceRequest("RECOVERY"), user()))
-        .extracting(WebQaFixtureController.AdvanceResponse::persistedStatus)
-        .isEqualTo("WORKING");
-    assertThat(run.getCompletedAt()).isNull();
-    assertThat(task.getStatus()).isEqualTo("COMPLETE");
-    verify(runs).save(run);
-    verify(tasks).save(task);
+    assertThatThrownBy(
+            () ->
+                controller.advance(
+                    "web-qa-recovery",
+                    new WebQaFixtureController.AdvanceRequest("RECOVERY"),
+                    user()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(error -> ((ResponseStatusException) error).getStatusCode().value())
+        .isEqualTo(400);
+    verify(runs, never()).save(run);
+    verify(tasks, never()).save(task);
   }
 
   @Test

@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.security.ContextSanitizer;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -44,15 +45,26 @@ public class ShellTool implements Tool {
   // in-container workdir is stored per run because classic SWE-bench uses /testbed while
   // SWE-bench Pro uses /app.
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
+  private final ContextSanitizer contextSanitizer;
 
   @Autowired
   public ShellTool(
       ShellSandboxPolicy sandboxPolicy,
       ProgramBenchContainerStore programBenchContainers,
-      com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers) {
+      com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
+      ContextSanitizer contextSanitizer) {
     this.sandboxPolicy = sandboxPolicy;
     this.programBenchContainers = programBenchContainers;
     this.swebenchContainers = swebenchContainers;
+    this.contextSanitizer = contextSanitizer;
+  }
+
+  /** Compatibility constructor for focused tool tests. */
+  public ShellTool(
+      ShellSandboxPolicy sandboxPolicy,
+      ProgramBenchContainerStore programBenchContainers,
+      com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers) {
+    this(sandboxPolicy, programBenchContainers, swebenchContainers, new ContextSanitizer());
   }
 
   @Override
@@ -176,7 +188,8 @@ public class ShellTool implements Tool {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT, "command exceeded " + timeout + "s timeout: " + command);
       }
-      String output = new String(proc.getInputStream().readAllBytes());
+      String output =
+          contextSanitizer.sanitizeOutput(new String(proc.getInputStream().readAllBytes()));
       int exit = proc.exitValue();
       // Output budget (#6): large output is persisted to .agent-context/tool-output and the worker
       // gets a preview + a readFile path, so it can see a FULL failure trace instead of a 4 KB

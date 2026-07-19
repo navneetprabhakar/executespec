@@ -1,5 +1,7 @@
 package com.navneet.executespec.engine;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -2319,9 +2321,9 @@ public class WorkerAgent {
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception unexpected) {
-      log.error("Tool '{}' threw unexpectedly", tc.name(), unexpected);
-      return errEnvelope(
-          "INTERNAL", unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+      log.error(
+          "Tool '{}' threw unexpectedly: {}", tc.name(), unexpected.getClass().getSimpleName());
+      return errEnvelope("INTERNAL", "tool execution failed; inspect the correlation trace");
     }
   }
 
@@ -2350,7 +2352,7 @@ public class WorkerAgent {
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception e) {
-      return errEnvelope("INTERNAL", e.getClass().getSimpleName() + ": " + e.getMessage());
+      return errEnvelope("INTERNAL", "tool execution failed; inspect the correlation trace");
     }
   }
 
@@ -2420,9 +2422,15 @@ public class WorkerAgent {
     return (id == null || id.isBlank()) ? "call_" + Long.toHexString(System.nanoTime()) : id;
   }
 
-  private static String previewArgs(String args) {
-    if (args == null) return "";
-    return args.length() > 80 ? args.substring(0, 80) + "..." : args;
+  static String argumentSignature(String args) {
+    if (args == null || args.isBlank()) return "none";
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(args.getBytes(StandardCharsets.UTF_8));
+      return java.util.HexFormat.of().formatHex(digest, 0, 8);
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
   }
 
   private String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
@@ -2430,7 +2438,8 @@ public class WorkerAgent {
     String target = mutationTarget(tc.name(), tc.arguments());
     return tc.name()
         + "("
-        + previewArgs(tc.arguments())
+        + "sig="
+        + argumentSignature(tc.arguments())
         + ")"
         + (target.isBlank() ? "" : " [target=" + target + "]")
         + " -> "
@@ -2501,8 +2510,8 @@ public class WorkerAgent {
   /**
    * Per-tool-call log line. Filters out the high-volume read-only tools (readFile / listFiles /
    * searchFiles / gitStatus / gitDiff) so the LiveLog shows REAL progress (mutations + builds +
-   * shell) instead of the worker's introspective reads. Tool-arg preview kept short (~60 chars
-   * after a per-tool prefix) so each line fits one banner row.
+   * shell) instead of the worker's introspective reads. Only a safe mutation path is displayed;
+   * commands and tool payloads never enter SSE logs.
    */
   private void emitToolCallLog(WorkerTaskRequest req, AssistantMessage.ToolCall tc) {
     String name = tc.name() == null ? "" : tc.name();
@@ -2520,21 +2529,20 @@ public class WorkerAgent {
         return; // read-only tools — skip
       }
     }
-    String preview = extractPathOrCommand(tc.arguments());
+    String preview = extractSafeProgressTarget(tc.arguments());
     emitWorkerLog(req, emoji + " " + name + (preview.isEmpty() ? "" : " · " + preview));
   }
 
   /**
-   * Pull a short, human-friendly preview from a tool-call's JSON args. Looks for {@code path},
-   * {@code filePath}, {@code command}, then falls back to the {@link #previewArgs} truncation.
+   * Pull a short path-only preview from mutation arguments. Shell commands and malformed payloads
+   * deliberately produce no preview.
    */
-  private String extractPathOrCommand(String argsJson) {
+  private String extractSafeProgressTarget(String argsJson) {
     if (argsJson == null || argsJson.isEmpty()) return "";
     try {
       JsonNode node = objectMapper.readTree(argsJson);
       if (node.hasNonNull("path")) return truncate(node.get("path").asText(), 80);
       if (node.hasNonNull("filePath")) return truncate(node.get("filePath").asText(), 80);
-      if (node.hasNonNull("command")) return truncate(node.get("command").asText(), 80);
       // editFile uses an array of {oldStr, newStr} — show the path + edit count.
       if (node.hasNonNull("file")) {
         String file = truncate(node.get("file").asText(), 60);
@@ -2544,7 +2552,7 @@ public class WorkerAgent {
     } catch (Exception ignore) {
       /* fallthrough */
     }
-    return previewArgs(argsJson);
+    return "";
   }
 
   /**

@@ -46,7 +46,11 @@ class AuditActivitySeparationTest {
     ActivityFeedEntryRepository feedRepo = mock(ActivityFeedEntryRepository.class);
     ActivityAuditService auditService = mock(ActivityAuditService.class);
     ActivityEventEmitter emitter =
-        new ActivityEventEmitter(feedRepo, auditService, new ObjectMapper());
+        new ActivityEventEmitter(
+            feedRepo,
+            auditService,
+            new ObjectMapper(),
+            mock(com.navneet.executespec.auth.repository.ProjectRepository.class));
 
     // Drive every AUDIT_ONLY event through the emitter
     for (ActivityEventType t : ActivityEventType.values()) {
@@ -69,7 +73,11 @@ class AuditActivitySeparationTest {
     ActivityFeedEntryRepository feedRepo = mock(ActivityFeedEntryRepository.class);
     ActivityAuditService auditService = mock(ActivityAuditService.class);
     ActivityEventEmitter emitter =
-        new ActivityEventEmitter(feedRepo, auditService, new ObjectMapper());
+        new ActivityEventEmitter(
+            feedRepo,
+            auditService,
+            new ObjectMapper(),
+            mock(com.navneet.executespec.auth.repository.ProjectRepository.class));
 
     // MEMBER_ROLE_CHANGED is the canonical dual-surface event per plan §3.3
     assertThat(ActivityEventType.MEMBER_ROLE_CHANGED.surfaces())

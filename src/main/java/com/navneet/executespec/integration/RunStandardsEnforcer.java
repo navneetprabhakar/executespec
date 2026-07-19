@@ -3,10 +3,13 @@ package com.navneet.executespec.integration;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.standards.EffectiveStandardsResolver;
+import com.navneet.executespec.standards.ProjectStandardsYamlLoader;
+import com.navneet.executespec.standards.StandardsPromptComposer;
 import com.navneet.executespec.standards.StandardsRunner;
 import com.navneet.executespec.standards.StandardsViolationRepository;
 
@@ -61,6 +64,8 @@ class RunStandardsEnforcer {
   private final StandardsRunner standardsRunner;
   private final StandardsViolationRepository standardsViolationRepository;
   private final ProjectRepository projectRepository;
+  private final StandardsPromptComposer standardsPromptComposer;
+  private final ProjectStandardsYamlLoader projectStandardsYamlLoader;
 
   /**
    * Run deterministic coding standards (lint / file-pattern / AST) against the final workspace and
@@ -68,7 +73,8 @@ class RunStandardsEnforcer {
    * reflects reality. Project-gated by the caller; non-fatal here. Zero overhead when the org has
    * no standards defined (resolver returns empty → early return).
    */
-  void runStandardsEnforcement(String runId, String projectId, Path workspaceRoot) {
+  StandardsRunner.RunReport runStandardsEnforcement(
+      String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
     UUID runUuid;
     try {
       runUuid = UUID.fromString(runId);
@@ -80,9 +86,16 @@ class RunStandardsEnforcer {
             .findById(projectId)
             .map(com.navneet.executespec.auth.entity.Project::getOrgId)
             .orElse(null);
-    if (orgId == null) return;
-    var effective = effectiveStandardsResolver.resolve(orgId, projectId, null);
-    if (effective == null || effective.isEmpty()) return; // common case → no-op
+    if (orgId == null)
+      return new StandardsRunner.RunReport(java.util.List.of(), java.util.Map.of());
+    var effective =
+        effectiveStandardsResolver.resolveProjectSourcesStrict(
+            orgId,
+            projectId,
+            projectStandardsYamlLoader.load(projectId, workspaceRoot, selectedRepoIds));
+    if (effective == null || effective.isEmpty()) {
+      return new StandardsRunner.RunReport(java.util.List.of(), java.util.Map.of());
+    }
     java.util.List<String> repoFilePaths = new java.util.ArrayList<>();
     java.util.List<Path> sourceFiles = new java.util.ArrayList<>();
     collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
@@ -103,6 +116,81 @@ class RunStandardsEnforcer {
         runId,
         effective.size(),
         persisted);
+    return report;
+  }
+
+  /** Resolve the same effective set used by deterministic enforcement for pre-plan injection. */
+  String composePromptBlock(String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
+    String orgId =
+        projectRepository
+            .findById(projectId)
+            .map(com.navneet.executespec.auth.entity.Project::getOrgId)
+            .orElse(null);
+    if (orgId == null) return "";
+    return standardsPromptComposer.compose(
+        effectiveStandardsResolver.resolveProjectSourcesStrict(
+            orgId,
+            projectId,
+            projectStandardsYamlLoader.load(projectId, workspaceRoot, selectedRepoIds)));
+  }
+
+  /** Convert final deterministic policy evidence into the validation report's common issue form. */
+  static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> toReviewIssues(
+      StandardsRunner.RunReport report) {
+    java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> out =
+        new java.util.ArrayList<>();
+    if (report == null) return out;
+    int n = 0;
+    for (var violation : report.violations()) {
+      n++;
+      boolean blocking =
+          violation.severity()
+              == com.navneet.executespec.standards.model.Standard.Severity.BLOCKING;
+      out.add(
+          com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+              .id("SYNTH-STANDARD-" + (blocking ? "BLOCKING-" : "WARNING-") + n)
+              .severity(
+                  blocking
+                      ? com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL
+                      : com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
+              .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
+              .file(violation.location())
+              .description(
+                  "Engineering standard '"
+                      + violation.standardId()
+                      + "' failed: "
+                      + truncate(violation.message(), 500))
+              .fixInstruction("Satisfy the configured engineering standard before completion.")
+              .autoFixed(false)
+              .fixSucceeded(false)
+              .build());
+    }
+    for (var entry : report.lintResults().entrySet()) {
+      var lint = entry.getValue();
+      if (lint != null
+          && lint.status()
+              != com.navneet.executespec.standards.enforcement.lint.LintResult.Status.SUCCESS) {
+        n++;
+        out.add(
+            com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                .id("SYNTH-STANDARD-UNAVAILABLE-" + n)
+                .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
+                .description(
+                    "Engineering standard '"
+                        + entry.getKey()
+                        + "' could not be verified by "
+                        + lint.tool()
+                        + " ("
+                        + lint.status()
+                        + ").")
+                .fixInstruction("Restore the configured deterministic verifier and rerun.")
+                .autoFixed(false)
+                .fixSucceeded(false)
+                .build());
+      }
+    }
+    return out;
   }
 
   /** Pure mapping: StandardsRunner violations → persistable {@code standards_violation} rows. */
