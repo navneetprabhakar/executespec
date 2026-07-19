@@ -1,5 +1,7 @@
 package com.navneet.executespec.cost;
 
+import java.time.Instant;
+
 import com.navneet.executespec.observability.Metrics;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -49,9 +51,13 @@ public class LlmUsageIntegrityMonitor {
       metrics.recordLlmUsageRecoveryBacklog(
           ((Number) backlog.getOrDefault("pending", 0L)).longValue(),
           ((Number) backlog.getOrDefault("dead", 0L)).longValue());
+      metrics.recordLlmUsageIntegrityMonitorSuccess(Instant.now().getEpochSecond());
     } catch (RuntimeException failure) {
       metrics.recordLlmUsagePersistence("INTEGRITY_MONITOR", "failed");
-      log.error("Unable to measure stale LLM usage intents", failure);
+      metrics.recordLlmUsageIntegrityMonitorFailure();
+      log.error(
+          "Unable to measure stale LLM usage intents errorClass={}",
+          failure.getClass().getSimpleName());
     }
   }
 }

@@ -13,7 +13,9 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.engine.CodeGenEngine;
 import com.navneet.executespec.engine.EngineBudget;
 import com.navneet.executespec.engine.EngineOutcome;
@@ -71,18 +73,32 @@ public class BenchmarkGenerationService {
   private final CodeGenEngine codeGenEngine;
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
+  private final RunStepUsageRepository stepUsage;
   private final SseBroadcaster broadcaster;
 
   private final Object generationSlotsLock = new Object();
   private Semaphore generationSlots;
   private int generationSlotLimit;
 
-  /** Synchronous result returned straight to the HTTP caller. */
+  /**
+   * Synchronous result returned straight to the HTTP caller.
+   *
+   * <p>{@code provider}/{@code model} are the REQUESTED route. {@code effectiveProvider}/{@code
+   * effectiveModel} are the route that physically served the run, derived from the canonical {@code
+   * run_step_usage} ledger. Both are carried deliberately: a campaign that records only the
+   * requested route cannot detect that failover or a managed-AI substitution changed who actually
+   * did the work. {@code routeAttribution} is LEDGER / MIXED / UNATTRIBUTED, and {@code
+   * routeDiverged} is true whenever the served route is not provably the requested one.
+   */
   public record GenerateResult(
       String runId,
       String instanceId,
       String provider,
       String model,
+      String effectiveProvider,
+      String effectiveModel,
+      String routeAttribution,
+      boolean routeDiverged,
       String outcome,
       int iterations,
       int toolCalls,
@@ -93,6 +109,15 @@ public class BenchmarkGenerationService {
       String submissionPatch,
       String predsJson,
       String proPatchJson) {}
+
+  /**
+   * The physical route that actually served {@code runId}, read only from the canonical {@code
+   * run_step_usage} ledger. Never falls back to the requested provider/model: an unattributed run
+   * must stay visibly unattributed rather than borrow the route it asked for.
+   */
+  EffectiveRouteProjection effectiveRoute(String runId) {
+    return EffectiveRouteProjection.from(stepUsage.findByRunIdOrderByCreatedAtAsc(runId));
+  }
 
   /**
    * Generate a patch for one SWE-bench instance, blind, synchronously. Blocks until the worker
@@ -240,6 +265,18 @@ public class BenchmarkGenerationService {
 
       RunCostTracker.Snapshot usage = costTracker.snapshot(runId);
       double cost = usage.costUsd();
+      EffectiveRouteProjection route = effectiveRoute(runId);
+      if (route.divergesFrom(provider, model)) {
+        log.warn(
+            "benchmark-gen ROUTE DIVERGENCE run={} instance={} requested={}/{} served={}/{} ({})",
+            runId,
+            instanceId,
+            provider,
+            model,
+            route.provider(),
+            route.model(),
+            route.attribution());
+      }
       markTerminal(runId, er.outcome(), patch.length());
 
       log.info(
@@ -256,6 +293,10 @@ public class BenchmarkGenerationService {
           instanceId,
           provider,
           model,
+          route.provider(),
+          route.model(),
+          route.attribution().name(),
+          route.divergesFrom(provider, model),
           er.outcome().name(),
           er.iterations(),
           er.toolCalls(),

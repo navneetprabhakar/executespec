@@ -69,6 +69,10 @@ public class LlmUsageAttemptIntent {
   @Column(name = "agent_role", nullable = false, length = 80)
   private String agentRole;
 
+  /** Most-scoped project/org/global role captured before dispatch; never re-resolved later. */
+  @Column(name = "human_role_snapshot", nullable = false, length = 40)
+  private String humanRoleSnapshot;
+
   @Column(name = "step_id", length = 120)
   private String stepId;
 

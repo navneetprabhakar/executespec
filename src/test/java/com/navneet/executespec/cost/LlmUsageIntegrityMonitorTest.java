@@ -28,6 +28,7 @@ class LlmUsageIntegrityMonitorTest {
 
     verify(metrics).recordStaleLlmUsageIntents(3L);
     verify(metrics).recordLlmUsageRecoveryBacklog(2L, 1L);
+    verify(metrics).recordLlmUsageIntegrityMonitorSuccess(any(Long.class));
   }
 
   @Test
@@ -42,5 +43,6 @@ class LlmUsageIntegrityMonitorTest {
     monitor.measureStaleIntents();
 
     verify(metrics).recordLlmUsagePersistence("INTEGRITY_MONITOR", "failed");
+    verify(metrics).recordLlmUsageIntegrityMonitorFailure();
   }
 }

@@ -400,6 +400,138 @@ class BenchmarkTrackingServiceTest {
     assertThat(eventStore).extracting(BenchmarkEvent::getType).containsOnlyOnce("USAGE_RECONCILED");
   }
 
+  /**
+   * C1 Step 2 — when several physical providers served one attempt, the attempt must be recorded as
+   * MIXED. Silently picking one of them is exactly the failure mode that lets a campaign attribute
+   * work to a provider that did not do it.
+   */
+  @Test
+  void reconcileMarksAMultiProviderAttemptAsMixedInsteadOfPickingOneProvider() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 1, null, "u1");
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        1,
+        "es-1",
+        new BigDecimal("0.010000"),
+        0L,
+        0L,
+        null,
+        null);
+    when(usage.findByRunIdOrderByCreatedAtAsc("es-1"))
+        .thenReturn(
+            List.of(
+                usageRow("deepseek", "deepseek-v4-pro-native", 120, 8, 0.0123456),
+                usageRow("openrouter", "glm-5.2", 80, 4, 0.0012345)));
+
+    service.reconcileUsage(run.getId());
+
+    BenchmarkTaskResult stored = taskStore.getFirst();
+    assertThat(stored.getRouteAttribution()).isEqualTo("MIXED");
+    assertThat(stored.getProvider()).isNull();
+    assertThat(stored.getModel()).isNull();
+    // Verifier evidence stays immutable.
+    assertThat(stored.getReward()).isEqualTo(1);
+    assertThat(stored.getEsRunId()).isEqualTo("es-1");
+  }
+
+  @Test
+  void reconcileRecordsTheServedRouteWhenItDivergesFromTheRequestedOne() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 1, null, "u1");
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        1,
+        "es-1",
+        BigDecimal.ZERO,
+        0L,
+        0L,
+        null,
+        null);
+    when(usage.findByRunIdOrderByCreatedAtAsc("es-1"))
+        .thenReturn(List.of(usageRow("openrouter", "glm-5.2", 100, 10, 0.02)));
+
+    service.reconcileUsage(run.getId());
+
+    BenchmarkTaskResult stored = taskStore.getFirst();
+    assertThat(stored.getRouteAttribution()).isEqualTo("LEDGER");
+    assertThat(stored.getProvider()).isEqualTo("openrouter");
+    assertThat(stored.getModel()).isEqualTo("glm-5.2");
+    // The parent run still carries the REQUESTED route; the divergence is visible per attempt.
+    assertThat(run.getProvider()).isEqualTo("deepseek");
+  }
+
+  /** Fresh campaigns must be truthful at ingest, without needing a later repair pass. */
+  @Test
+  void taskScoredIngestDerivesTheRouteServerSideFromTheLinkedRun() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 1, null, "u1");
+    when(usage.findByRunIdOrderByCreatedAtAsc("es-1"))
+        .thenReturn(List.of(usageRow("openrouter", "glm-5.2", 100, 10, 0.02)));
+
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        1,
+        "es-1",
+        BigDecimal.ZERO,
+        0L,
+        0L,
+        null,
+        null);
+
+    BenchmarkTaskResult stored = taskStore.getFirst();
+    assertThat(stored.getRouteAttribution()).isEqualTo("LEDGER");
+    assertThat(stored.getProvider()).isEqualTo("openrouter");
+  }
+
+  @Test
+  void attemptWithNoLinkedRunStaysUnattributedRatherThanInheritingTheRunProvider() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 1, null, "u1");
+
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        0,
+        null,
+        BigDecimal.ZERO,
+        0L,
+        0L,
+        null,
+        null);
+
+    BenchmarkTaskResult stored = taskStore.getFirst();
+    assertThat(stored.getRouteAttribution()).isEqualTo("UNATTRIBUTED");
+    assertThat(stored.getProvider()).isNull();
+  }
+
+  private static RunStepUsage usageRow(
+      String provider, String model, long input, long output, double cost) {
+    return RunStepUsage.builder()
+        .provider(provider)
+        .model(model)
+        .attemptStatus("SUCCESS")
+        .inputTokens(input)
+        .outputTokens(output)
+        .costUsd(cost)
+        .build();
+  }
+
   @Test
   void taskScoredIsIdempotentByTaskAndAttemptAndAggregatesCostAndTokens() {
     BenchmarkRun run =

@@ -25,6 +25,8 @@ class RunStepUsageRecorderTest {
 
   private final LlmUsageAttributionResolver attributionResolver =
       org.mockito.Mockito.mock(LlmUsageAttributionResolver.class);
+  private final LlmUsageRoleSnapshotResolver roleSnapshotResolver =
+      org.mockito.Mockito.mock(LlmUsageRoleSnapshotResolver.class);
   private final LlmUsageAttemptIntentRepository intentRepository =
       org.mockito.Mockito.mock(LlmUsageAttemptIntentRepository.class);
   private final Metrics metrics = org.mockito.Mockito.mock(Metrics.class);
@@ -37,6 +39,7 @@ class RunStepUsageRecorderTest {
       new RunStepUsageRecorder(
           intentRepository,
           attributionResolver,
+          roleSnapshotResolver,
           metrics,
           modelRegistry,
           terminalOutbox,
@@ -101,6 +104,7 @@ class RunStepUsageRecorderTest {
                 "run-1",
                 "corr-1"));
     when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
+    when(roleSnapshotResolver.resolve("org-1", "user-1", "project-1")).thenReturn("ORG_ADMIN");
     when(terminalOutbox.persist(any(RunStepUsage.class)))
         .thenReturn(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
 
@@ -168,6 +172,7 @@ class RunStepUsageRecorderTest {
                 "run-1",
                 "corr-1"));
     when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
+    when(roleSnapshotResolver.resolve("org-1", "user-1", "project-1")).thenReturn("ORG_ADMIN");
 
     RunStepUsageRecorder.AttemptHandle handle =
         recorder.prepareAttempt(request, "deepseek", "deepseek-v4", "ORG", 1);
@@ -180,6 +185,7 @@ class RunStepUsageRecorderTest {
     assertThat(intent.getLogicalCallId()).isEqualTo(request.usageLogicalCallId());
     assertThat(intent.getCorrelationId()).isEqualTo("corr-1");
     assertThat(intent.getOrgId()).isEqualTo("org-1");
+    assertThat(intent.getHumanRoleSnapshot()).isEqualTo("ORG_ADMIN");
     assertThat(intent.getModelTier()).isEqualTo("CAPABLE");
     assertThat(intent.getAttemptKind()).isEqualTo("PRIMARY");
     assertThat(intent.getStartedAt()).isNotNull();

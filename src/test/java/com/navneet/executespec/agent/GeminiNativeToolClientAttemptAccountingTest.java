@@ -31,6 +31,7 @@ import com.navneet.executespec.tool.ExecutionContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -40,6 +41,9 @@ import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -181,6 +185,60 @@ class GeminiNativeToolClientAttemptAccountingTest {
   }
 
   @Test
+  void sendsApiKeyOnlyInHeaderNeverInRequestUri() throws Exception {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
+    server.enqueue(json(200, SUCCESS));
+
+    callWithFreshAuditContext();
+
+    RecordedRequest request = server.takeRequest(1, TimeUnit.SECONDS);
+    assertThat(request).isNotNull();
+    assertThat(request.getHeader("x-goog-api-key")).isEqualTo("test-key");
+    assertThat(request.getPath()).isEqualTo("/v1beta/models/gemini-test:generateContent");
+    assertThat(request.getRequestUrl().queryParameterNames()).doesNotContain("key");
+  }
+
+  @Test
+  void neverLogsPromptOrProviderResponseBodies() {
+    String promptSecret = "PROMPT_SECRET_SENTINEL";
+    String responseSecret = "RESPONSE_SECRET_SENTINEL";
+    List<Message> messages =
+        List.of(new SystemMessage("stable system"), new UserMessage(promptSecret));
+    wireRequest =
+        GeminiNativeToolClient.GeminiToolCallRequest.builder()
+            .model(MODEL)
+            .messages(messages)
+            .tools(List.of(tool()))
+            .apiKey("test-key")
+            .build();
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
+    server.enqueue(
+        json(
+            200,
+            "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\""
+                + responseSecret
+                + "\"}]},\"finishReason\":\"STOP\"}],"
+                + "\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":3}}"));
+    Logger logger = (Logger) LoggerFactory.getLogger(GeminiNativeToolClient.class);
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+
+    try {
+      callWithFreshAuditContext();
+
+      assertThat(appender.list)
+          .extracting(ILoggingEvent::getFormattedMessage)
+          .allSatisfy(
+              message ->
+                  assertThat(message).doesNotContain(promptSecret).doesNotContain(responseSecret));
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
+  }
+
+  @Test
   void recordsCached404ThenInlineFallbackWithoutAnOuterDuplicate() throws Exception {
     when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(true);
     server.enqueue(json(200, "{\"name\":\"cachedContents/cache-1\"}"));
@@ -247,7 +305,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
   }
 
   @Test
-  void recordsCacheMintSuccessThenGenerateSuccess() {
+  void recordsCacheMintSuccessThenGenerateSuccess() throws Exception {
     when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(true);
     server.enqueue(json(200, "{\"name\":\"cachedContents/cache-2\"}"));
     server.enqueue(json(200, SUCCESS));
@@ -267,6 +325,14 @@ class GeminiNativeToolClientAttemptAccountingTest {
             anyLong(),
             any(RunCostTracker.CallUsage.class),
             nullable(ChatResponse.class));
+
+    RecordedRequest mint = server.takeRequest(1, TimeUnit.SECONDS);
+    RecordedRequest generate = server.takeRequest(1, TimeUnit.SECONDS);
+    assertThat(mint.getHeader("x-goog-api-key")).isEqualTo("test-key");
+    assertThat(mint.getPath()).isEqualTo("/v1beta/cachedContents");
+    assertThat(mint.getRequestUrl().queryParameterNames()).doesNotContain("key");
+    assertThat(generate.getHeader("x-goog-api-key")).isEqualTo("test-key");
+    assertThat(generate.getRequestUrl().queryParameterNames()).doesNotContain("key");
   }
 
   private GeminiNativeToolClient.AuditedCallResult callWithFreshAuditContext() {

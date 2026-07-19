@@ -60,6 +60,13 @@ public class RunCostEvidenceService {
     call.put("latencyMs", row.getLatencyMs());
     call.put("provider", row.getProvider());
     call.put("model", row.getModel());
+    // C1 Step 5 (G5) — causality. Without these a consumer cannot tell a same-provider retry from
+    // a cross-provider failover, so a route change looks identical to a repeat of the same route.
+    call.put("modelTier", row.getModelTier());
+    call.put("attemptKind", row.getAttemptKind());
+    call.put("physicalAttemptId", row.getPhysicalAttemptId());
+    call.put("parentAttemptId", row.getParentAttemptId());
+    call.put("logicalCallId", row.getLogicalCallId());
     call.put("inputTokens", row.getInputTokens());
     call.put("outputTokens", row.getOutputTokens());
     call.put("cacheReadTokens", row.getCacheReadTokens());

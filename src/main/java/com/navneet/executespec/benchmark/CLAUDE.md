@@ -156,7 +156,7 @@ to emit nothing — so no SWE-bench prompt can leak the hidden tests. `SwebenchT
 
 ## In-app benchmark tracking layer (RL-2026-06, V236) — common / multi-suite
 
-> Design: [`docs/plans/benchmark-closed-loop-2026-06-09.md`](../../../../../../../docs/plans/benchmark-closed-loop-2026-06-09.md).
+> Design: [benchmark closed-loop plan](https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/benchmark-closed-loop-2026-06-09.md).
 > **Concern (2)** from the top of this file — separate from the SWE-bench *execution* harness above.
 
 A COMMON, suite-agnostic layer that **tracks** any benchmark run + its submission + events **inside
@@ -199,6 +199,21 @@ first consumer; SWE-bench + ProgramBench plug in with no schema change.
   migration fails with a diagnostic if historical duplicate sequences exist; it never silently
   rewrites audit history. `scripts/k-eval.py publish` emits scored task events plus `RUN_DONE` after
   an external scorer completes, while `generate` remains explicitly open/UNSCORED.
+- **V304** `V304__benchmark_task_result_route_attribution.sql` — adds nullable `provider`, `model`
+  and `route_attribution` (`LEDGER` / `MIXED` / `UNATTRIBUTED`) to `benchmark_task_result`. Before
+  this, an attempt carried no route at all: the only route identity was the parent run's
+  CLIENT-supplied value, so cross-provider failover or a managed-AI substitution stayed invisible
+  and every comparison built on those numbers was unsound. The columns are derived SERVER-SIDE only,
+  from `run_step_usage` via `es_run_id`, at `TASK_SCORED` ingest and again in `reconcileUsage`; the
+  client event contract deliberately gains no route fields. A MIXED attempt keeps `provider`/`model`
+  NULL and a database CHECK constraint makes collapsing it to one provider unstorable. Reward,
+  outcome, task identity and run linkage remain immutable; a changed reconciliation still appends
+  one `USAGE_RECONCILED` event and an exact replay is still a no-op. Shared derivation lives in
+  `cost/EffectiveRouteProjection`, read through `cost/RunEffectiveRouteService`.
+  Route-layer summary: `benchmark_run` carries the CLIENT-declared requested route and
+  `GenerateResult.provider`/`model` the requested argument; `benchmark_task_result.provider`/`model`/
+  `route_attribution` and `GenerateResult.effective*` carry the SERVED route projected from
+  `run_step_usage`. Never compare campaigns on the requested-side values.
 - **V297** `V297__benchmark_durable_progress_and_trajectory.sql` — persists concurrent active
   attempts, completed count, progress timestamp, ETA, normalized terminal failure classification,
   trajectory location/SHA-256 and deterministic submission readiness. Existing tracked runs remain
@@ -219,6 +234,12 @@ submission status) is implemented as `frontend/src/ide/IdeBenchmark.tsx`; the br
 and detail endpoints because EventSource cannot send the bearer token. Current internal benchmark
 scope: k=1, no submission, DeepSeek V4 native Pro/Flash, Sonnet 5, Sonnet 4.6, GLM 5.2 via
 OpenRouter.
+
+The bridge may run longer than the one-hour application access token. Credential-based launches
+therefore refresh once and retry the same telemetry request after HTTP 401; static `BR_TOKEN`-only
+launches remain fail-closed. An inactivity interval is not terminal evidence by itself: idle
+finalization is allowed only after Harbor's job-level `result.json` contains `finished_at`. Resume
+the same dashboard row with `--run-id ... --resume-existing`; task-attempt ingestion is idempotent.
 
 SWE generation now accepts an optional absolute deadline and shutdown reserve. The controller
 passes them into `BenchmarkGenerationService`, which tightens the caller deadline to the configured

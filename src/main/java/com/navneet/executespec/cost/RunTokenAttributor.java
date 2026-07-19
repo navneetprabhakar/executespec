@@ -30,6 +30,7 @@ public class RunTokenAttributor {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final RunCostTracker costTracker;
+  private final RunEffectiveRouteService effectiveRoutes;
 
   public enum Phase {
     PLANNER,
@@ -175,6 +176,11 @@ public class RunTokenAttributor {
           outcome.dispatchedModel() != null && !outcome.dispatchedModel().isBlank()
               ? outcome.dispatchedModel()
               : model;
+      // C1 Step 4 — the requested route above is what the executor ASKED for. The route that
+      // actually served the task comes from the physical-attempt ledger; failover and managed-AI
+      // tier locks make the two legitimately diverge. Recording only the requested route fed a
+      // wrong quality prior into ModelProviderCandidateService.
+      EffectiveRouteProjection route = effectiveRoutes.forTask(runId, outcome.taskId());
       taskRepo
           .findById(taskRowId)
           .ifPresent(
@@ -183,8 +189,38 @@ public class RunTokenAttributor {
                 t.setOutputTokens(finalOut);
                 t.setProvider(taskProvider);
                 t.setModel(taskModel);
+                applyEffectiveRoute(t, route, taskProvider, taskModel);
                 taskRepo.save(t);
               });
+    }
+  }
+
+  /**
+   * Writes the projected physical route onto the task row. The requested route is used ONLY when
+   * the ledger proves nothing, and in that case the attribution stays {@code UNATTRIBUTED} so a
+   * consumer can tell an unproven fallback from a ledger-proven route. A {@code MIXED} task keeps
+   * null provider/model — collapsing it to one provider would defeat the projection.
+   */
+  private static void applyEffectiveRoute(
+      com.navneet.executespec.state.entity.AgentTask task,
+      EffectiveRouteProjection route,
+      String fallbackProvider,
+      String fallbackModel) {
+    task.setEffectiveRouteAttribution(route.attribution().name());
+    switch (route.attribution()) {
+      case LEDGER -> {
+        task.setEffectiveProvider(
+            route.provider() == null ? null : route.provider().toUpperCase(java.util.Locale.ROOT));
+        task.setEffectiveModel(route.model());
+      }
+      case MIXED -> {
+        task.setEffectiveProvider(null);
+        task.setEffectiveModel(null);
+      }
+      case UNATTRIBUTED -> {
+        task.setEffectiveProvider(fallbackProvider);
+        task.setEffectiveModel(fallbackModel);
+      }
     }
   }
 
@@ -227,6 +263,10 @@ public class RunTokenAttributor {
               task.setOutputTokens(RunCostTracker.saturatedInt(snapshot.outputTokens()));
               task.setProvider(providerUpper);
               task.setModel(model);
+              // Re-project after a continuation rerun: leaving the previous pass's effective route
+              // in place would make the row claim a route that no longer served the task.
+              applyEffectiveRoute(
+                  task, effectiveRoutes.forTask(runId, logicalTaskId), providerUpper, model);
               taskRepo.save(task);
             });
   }

@@ -27,6 +27,7 @@ public class RunStepUsageRecorder {
 
   private final LlmUsageAttemptIntentRepository intentRepository;
   private final LlmUsageAttributionResolver attributionResolver;
+  private final LlmUsageRoleSnapshotResolver roleSnapshotResolver;
   private final Metrics metrics;
   private final ModelRegistry modelRegistry;
   private final LlmUsageTerminalOutbox terminalOutbox;
@@ -80,6 +81,9 @@ public class RunStepUsageRecorder {
             .runId(runId)
             .taskId(blankToNull(taskId))
             .agentRole(firstNonBlank(agentRole, "UNKNOWN"))
+            .humanRoleSnapshot(
+                roleSnapshotResolver.resolve(
+                    attribution.orgId(), attribution.userId(), attribution.projectId()))
             .stepId(blankToNull(stepId))
             .provider(handle.provider())
             .model(handle.model())
@@ -126,17 +130,24 @@ public class RunStepUsageRecorder {
             parentAttemptId,
             attributionResolver.resolve(request));
     try {
-      intentRepository.save(handle.toIntent(request));
+      intentRepository.save(
+          handle.toIntent(
+              request,
+              roleSnapshotResolver.resolve(
+                  handle.attribution().orgId(),
+                  handle.attribution().userId(),
+                  handle.attribution().projectId())));
       metrics.recordLlmUsagePersistence("STARTED", "ok");
       return handle;
     } catch (RuntimeException persistenceFailure) {
       metrics.recordLlmUsagePersistence("STARTED", "failed");
       log.error(
-          "LLM attempt intent write FAILED run={} task={} provider={}; provider call blocked",
+          "LLM attempt intent write FAILED run={} task={} provider={} errorClass={}; provider call"
+              + " blocked",
           request.context().runId(),
           request.context().taskId(),
           provider,
-          persistenceFailure);
+          persistenceFailure.getClass().getSimpleName());
       throw new LlmUsagePersistenceException(
           "Provider call blocked because usage intent could not be persisted", persistenceFailure);
     }
@@ -568,12 +579,13 @@ public class RunStepUsageRecorder {
     } catch (Exception persistenceFailure) {
       metrics.recordLlmUsagePersistence(status, "failed");
       log.warn(
-          "Canonical LLM attempt usage write FAILED run={} task={} provider={} status={}: {}",
+          "Canonical LLM attempt usage write FAILED run={} task={} provider={} status={}"
+              + " errorClass={}",
           runId,
           taskId,
           provider,
           status,
-          persistenceFailure.getMessage());
+          persistenceFailure.getClass().getSimpleName());
       // PostgreSQL may itself be unavailable, which prevents even an outbox stage. Preserve the
       // exact fact locally as a last resort; V293's intent remains the cross-JVM missing-terminal
       // signal and the critical persistence metric must page operators.
@@ -644,7 +656,7 @@ public class RunStepUsageRecorder {
       String keySource,
       int attemptNumber,
       LlmUsageAttributionResolver.Attribution attribution) {
-    private LlmUsageAttemptIntent toIntent(LlmRequest request) {
+    private LlmUsageAttemptIntent toIntent(LlmRequest request, String humanRoleSnapshot) {
       return LlmUsageAttemptIntent.builder()
           .physicalAttemptId(physicalAttemptId)
           .logicalCallId(logicalCallId)
@@ -662,6 +674,7 @@ public class RunStepUsageRecorder {
           .runId(request.context().runId())
           .taskId(blankToNull(request.context().taskId()))
           .agentRole(firstNonBlank(request.agentRole(), "UNKNOWN"))
+          .humanRoleSnapshot(firstNonBlank(humanRoleSnapshot, "UNKNOWN"))
           .stepId(blankToNull(request.stepId()))
           .provider(provider)
           .model(model)

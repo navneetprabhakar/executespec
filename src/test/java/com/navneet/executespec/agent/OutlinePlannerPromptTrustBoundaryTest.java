@@ -26,6 +26,7 @@ class OutlinePlannerPromptTrustBoundaryTest {
             "REFERENCE_DOCS",
             "CONTRACTS",
             "PROJECT_ADRS",
+            "ENGINEERING_STANDARDS",
             "PR_REVIEW_COMMENTS")) {
       assertThat(userMessage).contains("<<<UNTRUSTED_" + label);
       assertThat(userMessage).contains("UNTRUSTED_" + label + ">>>");
@@ -65,6 +66,7 @@ class OutlinePlannerPromptTrustBoundaryTest {
         .referenceDocs(repositoryControlledInput)
         .contracts(repositoryControlledInput)
         .projectAdrs(repositoryControlledInput)
+        .engineeringStandards(repositoryControlledInput)
         .prReviewComments(repositoryControlledInput)
         .build();
   }

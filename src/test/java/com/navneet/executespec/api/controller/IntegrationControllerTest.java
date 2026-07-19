@@ -12,7 +12,12 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.integration.IntegrationManager;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 class IntegrationControllerTest {
 
@@ -22,15 +27,27 @@ class IntegrationControllerTest {
 
   @Test
   void webhookDoesNotExposeInternalExceptionMessage() {
+    Logger logger = (Logger) LoggerFactory.getLogger(IntegrationController.class);
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
     when(manager.handleWebhook(anyString(), anyMap(), anyString()))
         .thenThrow(new IllegalStateException("jdbc password=secret"));
 
-    var response = controller.webhook("jira", Map.of(), "{}");
+    try {
+      var response = controller.webhook("jira", Map.of(), "{}");
 
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
-    assertThat(response.getBody())
-        .containsEntry("error", "Integration request could not be completed.");
-    assertThat(response.getBody()).doesNotContainValue("jdbc password=secret");
+      assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+      assertThat(response.getBody())
+          .containsEntry("error", "Integration request could not be completed.");
+      assertThat(response.getBody()).doesNotContainValue("jdbc password=secret");
+      assertThat(appender.list)
+          .extracting(ILoggingEvent::getFormattedMessage)
+          .allSatisfy(message -> assertThat(message).doesNotContain("password=secret"));
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
   }
 
   @Test

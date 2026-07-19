@@ -15,6 +15,13 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   (`USER`, `ORG`, or `PLATFORM`). Dispatch must resolve the current credential later.
 - `LlmExecutionPolicyFactory` reconstructs a customer context from the authoritative run, agent
   session or project plus the current org/user policy. OWN_KEYS never adds a PLATFORM source.
+- Operator-controlled benchmark/SWE-bench runs (`pipeline_run.sourceType` starting `benchmark` or
+  `swebench`) set `allowProviderFailover=false` and use the distinct `route-v3-controlled-worker`
+  policy generation, so `LlmExecutionDispatchGuard` rejects every alternate provider inside
+  `LlmRouter.maybeFailover` and a fixed-route campaign cannot be silently served by another
+  provider. The generation key must stay distinct from `route-v1`: contexts are recovered by that
+  key, so reusing it would let resumed runs keep the old permissive policy. `!ownKeysProviderLock`
+  remains a separate leading term — BYOK containment must not depend on the controlled-worker term.
 - Customer `OWN_KEYS` contexts narrow `allowedProviders`, credential provenance and model policy
   to the explicitly selected provider and set `allowProviderFailover=false`. Other configured BYOK
   keys remain stored but are ineligible for dispatch, model/provider continuation and chat/action

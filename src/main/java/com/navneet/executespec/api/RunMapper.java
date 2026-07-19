@@ -16,6 +16,8 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -38,6 +40,7 @@ public class RunMapper {
   private final RunCodeMapRepository runCodeMapRepository;
   private final ValidationReportRepository validationReportRepository;
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
+  private final RunEffectiveRouteService runEffectiveRouteService;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -216,6 +219,10 @@ public class RunMapper {
     // need a second request for the headline verifiedScore / accuracyScore.
     ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
 
+    // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
+    // so it can never drift from the usage facts it summarises.
+    EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
+
     return RunDetail.builder()
         .runId(r.getRunId())
         .status(r.getStatus())
@@ -302,6 +309,12 @@ public class RunMapper {
         .requestedModel(r.getRequestedModel())
         .routingMode(r.getRoutingMode())
         .routePinned(r.isRoutePinned())
+        .effectiveProvider(effectiveRoute.provider())
+        .effectiveModel(effectiveRoute.model())
+        .effectiveRouteAttribution(effectiveRoute.attribution().name())
+        .routeDiverged(
+            effectiveRoute.divergesFromRequestedRoute(
+                r.getRequestedProvider(), r.getRequestedModel()))
         .harnessVersion(r.getHarnessVersion())
         .runMode(r.getRunMode())
         .triggeredByFinding(r.getTriggeredByFinding())

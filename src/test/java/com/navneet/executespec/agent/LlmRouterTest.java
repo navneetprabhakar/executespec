@@ -27,8 +27,11 @@ import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
+import com.navneet.executespec.executioncontext.LlmExecutionContext;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.RunRoutePolicyService;
@@ -779,6 +782,50 @@ class LlmRouterTest {
     verify(gemini, never()).call(any());
   }
 
+  /**
+   * C1 Step 1 — a controlled benchmark/SWE-bench worker carries a durable context whose policy sets
+   * {@code allowProviderFailover=false}. The dispatch guard therefore rejects every alternate route
+   * and the primary error must propagate instead of a different physical provider silently serving
+   * the task under the requested provider's name.
+   */
+  @Test
+  void controlledWorkerDurablePolicyBlocksCrossProviderFailover() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(anyString()))
+        .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+    LlmExecutionContext benchmarkContext = mock(LlmExecutionContext.class);
+    when(benchmarkContext.getRequestedProvider()).thenReturn("openai");
+    lenient().when(benchmarkContext.getUserId()).thenReturn("u1");
+    lenient().when(benchmarkContext.getOrgId()).thenReturn("org-1");
+    // The guard authorizes the primary route but rejects any provider the policy did not allow.
+    when(executionDispatchGuard.authorize(any()))
+        .thenAnswer(
+            invocation -> {
+              LlmRequest attempted = invocation.getArgument(0);
+              if (!"openai".equals(attempted.provider())) {
+                throw new LlmDispatchPolicyException(
+                    LlmDispatchPolicyException.Reason.PROVIDER_NOT_ALLOWED,
+                    "Provider failover is disabled by the durable execution policy");
+              }
+              return new LlmExecutionDispatchGuard.ResolvedDispatch(
+                  "primary-key", RunKeyContext.Source.PLATFORM, benchmarkContext);
+            });
+
+    LlmRequest req =
+        req("openai", "gpt-x").toBuilder()
+            .llmExecutionContextId("llmctx-benchmark")
+            .llmExecutionScope(LlmExecutionScope.customer("org-1"))
+            .build();
+
+    assertThatThrownBy(() -> router.call(req))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("503 service unavailable");
+    verify(gemini, never()).call(any());
+    verify(gemini, never()).callAudited(any(), any());
+  }
+
   @Test
   void failover_enabled_crosses_to_next_provider_in_chain() {
     build();
@@ -1009,5 +1056,174 @@ class LlmRouterTest {
     Map<String, Object> extraBody = captor.getValue().extraBody();
     assertThat(extraBody).containsKey("provider");
     assertThat((Map<String, Object>) extraBody.get("provider")).containsEntry("sort", "latency");
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // C1 Step 6 (gap G7) — containment regression pins.
+  //
+  // These assert the C1 contract precisely: a route change is either recorded with a
+  // distinguishable kind/reason, or REJECTED. They deliberately do NOT assert "the provider always
+  // equals the requested provider" — a managed-AI tier lock changing provider is legitimate policy
+  // substitution, and the pin below proves it is still permitted.
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * The legacy branch: when {@code llmExecutionContextId} is null, {@code maybeFailover} skips the
+   * durable guard entirely and falls back to a {@code keys.keyFor(alt) == null} heuristic. That
+   * branch is defended only by the {@code executionContextEnforcementEnabled} config default, so it
+   * is pinned here rather than assumed unreachable. An OWN_KEYS run whose alternate provider has no
+   * customer key must not cross onto a platform key.
+   */
+  @Test
+  void ownKeysRunWithNullDurableContextCannotFailOverOntoAPlatformKey() {
+    LlmRouter subject = build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(keySourceModeResolver.isOwnKeysRun(anyString())).thenReturn(true);
+    // Customer keyed DeepSeek only. Nothing is keyed for the alternates in the chain.
+    when(keyStore.get(anyString()))
+        .thenReturn(
+            new RunKeyContext(
+                null,
+                null,
+                null,
+                null,
+                "customer-deepseek-key",
+                null,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.USER,
+                RunKeyContext.Source.PLATFORM,
+                "u1",
+                "o1"));
+    when(registry.fallbackChainFor(anyString(), anyString()))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "glm-5.2"}, new String[] {"fireworks", "glm-5.2-fw"}));
+    when(registry.fallbackChainFor(anyString()))
+        .thenReturn(List.<String[]>of(new String[] {"openrouter", "glm-5.2"}));
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+
+    LlmRequest byokRequest = req("deepseek", "deepseek-v4-pro-native");
+    assertThat(byokRequest.llmExecutionContextId()).isNull();
+
+    assertThatThrownBy(() -> subject.call(byokRequest))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("503");
+    // Gemini is never reached; every dispatch stayed on the customer-keyed DeepSeek route.
+    verify(gemini, never()).callAudited(any(), any());
+    verify(gemini, never()).call(any());
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> dispatched =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, org.mockito.Mockito.atLeastOnce()).call(dispatched.capture());
+    // The containment claim: EVERY physical dispatch used the customer's own DeepSeek credential.
+    // No attempt crossed onto a platform key or onto an unkeyed alternate provider.
+    assertThat(dispatched.getAllValues())
+        .isNotEmpty()
+        .allSatisfy(
+            call -> {
+              assertThat(call.apiKey()).isEqualTo("customer-deepseek-key");
+              assertThat(call.model()).startsWith("deepseek");
+            });
+  }
+
+  /**
+   * An EXACT_LOCK run cannot be re-pointed by managed-AI policy. The substitution is rejected, not
+   * silently applied — the customer pinned this route.
+   */
+  @Test
+  void exactLockRejectsManagedAiModelSubstitutionInsteadOfApplyingIt() {
+    LlmRouter subject = build();
+    when(registry.canonicalize(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(routePolicyService.forRun(anyString()))
+        .thenReturn(
+            new RunRoutePolicyService.RoutePolicy(
+                "DEEPSEEK", "deepseek-v4-pro-native", "EXACT_LOCK", true));
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "deepseek",
+                "deepseek-v4-flash-native",
+                ManagedAiUsageService.FULL,
+                true,
+                "Managed AI tier lock: FREE routes to deepseek-v4-flash-native"));
+
+    assertThatThrownBy(() -> subject.call(req("deepseek", "deepseek-v4-pro-native")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Exact run route cannot be changed by managed-AI policy");
+    verify(openai, never()).call(any());
+  }
+
+  /**
+   * The counterpart pin. A managed-AI tier lock IS allowed to change provider AND model on an
+   * unpinned run — a FREE-tier lock routing to native DeepSeek Flash is policy substitution, not
+   * failover. The change must be applied and surfaced with its reason, not rejected.
+   */
+  @Test
+  void managedAiTierLockMayStillChangeProviderOnAnUnpinnedRunAndSurfacesTheReason() {
+    LlmRouter subject = build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "deepseek",
+                "deepseek-v4-flash-native",
+                ManagedAiUsageService.FULL,
+                true,
+                "Managed AI tier lock: FREE routes to deepseek-v4-flash-native"));
+    when(keyStore.get(anyString()))
+        .thenReturn(
+            new RunKeyContext(
+                null,
+                null,
+                null,
+                null,
+                "platform-deepseek-key",
+                null,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                RunKeyContext.Source.PLATFORM,
+                "u1",
+                "o1"));
+    when(openai.call(any())).thenReturn(ok());
+
+    assertThat(subject.call(req("anthropic", "claude-sonnet-5"))).isNotNull();
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> dispatched =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, times(1)).call(dispatched.capture());
+    // Provider AND model changed — and that is correct here. The request left as anthropic/
+    // claude-sonnet-5 and physically dispatched on the DeepSeek wire client.
+    assertThat(dispatched.getValue().model()).startsWith("deepseek-v4-flash");
+    assertThat(dispatched.getValue().apiKey()).isEqualTo("platform-deepseek-key");
+    // The change is recorded with its reason rather than being silent.
+    verify(broadcaster, org.mockito.Mockito.atLeastOnce())
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && String.valueOf(event.payload()).contains("Managed AI tier lock")));
+  }
+
+  /** Managed-AI exhaustion with no step-down target must fail closed, never dispatch. */
+  @Test
+  void managedAiExhaustedWithNoStepDownTargetThrowsBeforeAnyProviderSpend() {
+    LlmRouter subject = build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenThrow(
+            new IllegalStateException("MANAGED_AI_EXHAUSTED: no step-down target available"));
+
+    assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("MANAGED_AI_EXHAUSTED");
+    verify(openai, never()).call(any());
+    verify(gemini, never()).call(any());
   }
 }
