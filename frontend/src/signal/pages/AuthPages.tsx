@@ -5,6 +5,7 @@ import AuthLayout from '@/signal/components/AuthLayout';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 import {writeSpecHandoff} from '@/lib/specHandoff';
+import {useAuthProviders} from '@/lib/authProviders';
 
 const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 
@@ -79,6 +80,7 @@ function ErrorBanner({msg}: {msg: string}) {
 }
 
 export function LoginPage() {
+  const {oauthProviders} = useAuthProviders();
   const navigate = useNavigate();
   const location = useLocation();
   const login = useAuthStore((s) => s.login);
@@ -92,7 +94,10 @@ export function LoginPage() {
   // CLI/VS Code `/cli-login` device-authorization flow, which must preserve its ?port=&state=.
   const redirectParam = new URLSearchParams(location.search).get('redirect');
   const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
-  const target = safeRedirect || fromState || '/compose';
+  // Default landing must match the rest of the app: `/` and the catch-all both redirect to
+  // /home, and the auth-page copy says "The app opens on Home." This previously sent a plain
+  // login to /compose, contradicting all three.
+  const target = safeRedirect || fromState || '/home';
   // Carry the device-auth return path through the OAuth round-trip too (the email path uses `target`).
   const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
 
@@ -130,14 +135,18 @@ export function LoginPage() {
 
         <ErrorBanner msg={err} />
 
-        <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
-          <GoogleIcon /> Continue with Google
-        </OAuthBtn>
-        <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
-          <GitHubIcon /> Continue with GitHub
-        </OAuthBtn>
+        {oauthProviders.includes('google') && (
+          <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
+            <GoogleIcon /> Continue with Google
+          </OAuthBtn>
+        )}
+        {oauthProviders.includes('github') && (
+          <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
+            <GitHubIcon /> Continue with GitHub
+          </OAuthBtn>
+        )}
 
-        <div className='or-row'>or</div>
+        {oauthProviders.length > 0 && <div className='or-row'>or</div>}
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
@@ -181,6 +190,7 @@ export function LoginPage() {
 }
 
 export function SignupPage() {
+  const {oauthProviders} = useAuthProviders();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectParam = new URLSearchParams(location.search).get('redirect');
@@ -235,14 +245,18 @@ export function SignupPage() {
 
         <ErrorBanner msg={err} />
 
-        <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
-          <GoogleIcon /> Continue with Google
-        </OAuthBtn>
-        <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
-          <GitHubIcon /> Continue with GitHub
-        </OAuthBtn>
+        {oauthProviders.includes('google') && (
+          <OAuthBtn href={`/api/auth/oauth2/authorize/google${oauthQS}`}>
+            <GoogleIcon /> Continue with Google
+          </OAuthBtn>
+        )}
+        {oauthProviders.includes('github') && (
+          <OAuthBtn href={`/api/auth/oauth2/authorize/github${oauthQS}`}>
+            <GitHubIcon /> Continue with GitHub
+          </OAuthBtn>
+        )}
 
-        <div className='or-row'>or</div>
+        {oauthProviders.length > 0 && <div className='or-row'>or</div>}
 
         <form onSubmit={onSubmit}>
           <div className='signal-field'>
