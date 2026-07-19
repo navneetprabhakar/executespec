@@ -3,6 +3,7 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
+import IdeRunScreens from '@/ide/IdeRunScreens';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
@@ -2494,6 +2495,14 @@ export default function IdeRunResult() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Screens ── static UI render; builds and deploys nothing. */}
+        {tab === 'Screens' && (
+          <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
+            <h1 className='ide-h1'>Screens</h1>
+            <IdeRunScreens runId={runId} />
           </div>
         )}
 

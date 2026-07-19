@@ -4,6 +4,7 @@ import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 
 const DIMENSIONS: Array<[api.UsageAuditDimension, string]> = [
   ['user', 'User'],
+  ['userRole', 'User role'],
   ['project', 'Project'],
   ['feature', 'Feature'],
   ['provider', 'Provider'],
@@ -32,6 +33,8 @@ function dimensionValue(
   switch (dimension) {
     case 'user':
       return row.userEmail || row.userId;
+    case 'userRole':
+      return row.userRole;
     case 'project':
       return row.projectName || row.projectId;
     case 'feature':
@@ -74,7 +77,8 @@ export function summarizeUsageRollups(
     };
     current.attempts += row.attempts;
     if (row.attemptStatus === 'FAILED') current.failedAttempts += row.attempts;
-    current.tokens += row.inputTokens + row.outputTokens + row.reasoningTokens;
+    // Reasoning is a subset of normalized output tokens, not a third billable token bucket.
+    current.tokens += row.inputTokens + row.outputTokens;
     current.cost += Number(row.knownCostUsdLowerBound || 0);
     current.unknownCostAttempts += row.unknownCostAttempts;
     grouped.set(label, current);
@@ -226,14 +230,8 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               ['Attempts', fmt(report.totals.attempts)],
               ['Failed', fmt(report.totals.failedAttempts)],
               ['Missing terminal', fmt(report.totals.missingTerminalAttempts)],
-              [
-                'Tokens',
-                fmt(
-                  report.totals.inputTokens +
-                    report.totals.outputTokens +
-                    report.totals.reasoningTokens,
-                ),
-              ],
+              ['Tokens', fmt(report.totals.inputTokens + report.totals.outputTokens)],
+              ['Reasoning (of output)', fmt(report.totals.reasoningTokens)],
               ['Cache read', fmt(report.totals.cacheReadTokens)],
               ['Known cost', `$${Number(report.totals.knownCostUsdLowerBound).toFixed(4)}`],
             ].map(([label, value]) => (
@@ -342,18 +340,20 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
                         {attempt.attemptKind} #{attempt.attemptOrdinal}
                       </td>
                       <td>{attempt.attemptStatus}</td>
-                      <td>
-                        {fmt(attempt.inputTokens + attempt.outputTokens + attempt.reasoningTokens)}
-                      </td>
-                      <td title={attempt.managedAiProjectionStatus}>
-                        {attempt.managedAiProjectionStatus === 'RECORDED'
-                          ? fmt(attempt.managedAiCredits)
-                          : attempt.managedAiProjectionStatus}
+                      <td
+                        title={`${fmt(attempt.reasoningTokens)} reasoning tokens are included in output`}
+                      >
+                        {fmt(attempt.inputTokens + attempt.outputTokens)}
                       </td>
                       <td>
                         {attempt.knownCostUsd === null
                           ? 'Unknown'
                           : `$${Number(attempt.knownCostUsd).toFixed(4)}`}
+                      </td>
+                      <td title={attempt.managedAiProjectionStatus}>
+                        {attempt.managedAiProjectionStatus === 'RECORDED'
+                          ? fmt(attempt.managedAiCredits)
+                          : attempt.managedAiProjectionStatus}
                       </td>
                     </tr>
                   ))}

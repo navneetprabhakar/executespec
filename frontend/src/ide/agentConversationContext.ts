@@ -4,7 +4,7 @@ import type {AgentUsageSummary} from './agentState';
 export const MAX_CONTEXT_TURNS = 8;
 
 export function totalUsageTokens(usage: AgentUsageSummary): number {
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+  return usage.inputTokens + usage.outputTokens;
 }
 
 export function usageFromTurns(turns: AgentTurnResponse[]): AgentUsageSummary {

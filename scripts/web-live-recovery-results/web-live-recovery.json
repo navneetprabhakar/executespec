@@ -1,27 +1,22 @@
 {
   "schemaVersion": "2026-07-15",
   "type": "web-live-recovery-smoke",
-  "backend": "http://localhost:8092",
-  "frontend": "http://localhost:5174",
-  "gateRunId": "web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab",
+  "backend": "http://127.0.0.1:8194",
+  "frontend": "http://127.0.0.1:8194",
+  "gateRunId": "web-qa-f148adba-49c8-4cc5-8b32-79ace3e925d8",
   "viewport": {
     "width": 390,
     "height": 844
   },
   "sseRequests": [
     {
-      "at": "2026-07-14T19:45:52.607Z",
-      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events",
+      "at": "2026-07-19T04:05:13.869Z",
+      "url": "http://127.0.0.1:8194/api/runs/web-qa-f148adba-49c8-4cc5-8b32-79ace3e925d8/events?lastEventId=5",
       "aborted": true
     },
     {
-      "at": "2026-07-14T19:45:52.617Z",
-      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events",
-      "aborted": false
-    },
-    {
-      "at": "2026-07-14T19:45:53.622Z",
-      "url": "http://localhost:5174/api/runs/web-qa-a4bdb658-b43a-448d-bd57-75b70aad6eab/events?lastEventId=8",
+      "at": "2026-07-19T04:05:14.884Z",
+      "url": "http://127.0.0.1:8194/api/runs/web-qa-f148adba-49c8-4cc5-8b32-79ace3e925d8/events?lastEventId=5",
       "aborted": false
     }
   ],
@@ -34,7 +29,7 @@
     {
       "label": "after forced SSE drop",
       "hasReconnect": false,
-      "streamRequests": 3,
+      "streamRequests": 2,
       "replayCursorSeen": true
     },
     {
@@ -47,6 +42,6 @@
     "error:Failed to load resource: net::ERR_FAILED"
   ],
   "unexpectedErrors": [],
-  "screenshot": "/Users/navneetprabhakar/Documents/antigravity/executespec-2.0/scripts/web-live-recovery-results/mobile-reconnect-complete.png",
+  "screenshot": "/Users/navneetprabhakar/Documents/antigravity/executespec/scripts/web-live-recovery-results/mobile-reconnect-complete.png",
   "result": "PASS"
 }

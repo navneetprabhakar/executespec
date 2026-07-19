@@ -21,10 +21,15 @@ import IdeBenchmark from './IdeBenchmark';
 let host: HTMLDivElement;
 let root: Root;
 
+function setDocumentHidden(hidden: boolean) {
+  Object.defineProperty(document, 'hidden', {configurable: true, value: hidden});
+}
+
 (globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT =
   true;
 
 beforeEach(() => {
+  setDocumentHidden(false);
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -52,6 +57,8 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.clearAllMocks();
+  vi.useRealTimers();
+  setDocumentHidden(false);
 });
 
 describe('IdeBenchmark mobile run cards', () => {
@@ -76,6 +83,82 @@ describe('IdeBenchmark mobile run cards', () => {
     expect(card?.textContent).toContain('7/10');
     expect(card?.textContent).toContain('$1.2500');
     expect(card?.textContent).toContain('12K↑ 678↓');
+    expect(host.querySelector('[data-testid="benchmark-sync-status"]')?.textContent).toContain(
+      'Synced',
+    );
+  });
+
+  it('refetches immediately when a hidden tab becomes visible', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/benchmark']}>
+          <Routes>
+            <Route path='/benchmark' element={<IdeBenchmark />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+    });
+    expect(api.listBenchmarks).toHaveBeenCalledTimes(1);
+
+    setDocumentHidden(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(api.listBenchmarks).toHaveBeenCalledTimes(1);
+
+    setDocumentHidden(false);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+    });
+    expect(api.listBenchmarks).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the last good rows and exposes a failed refresh', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/benchmark']}>
+          <Routes>
+            <Route path='/benchmark' element={<IdeBenchmark />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+    });
+
+    api.listBenchmarks.mockRejectedValueOnce(new Error('telemetry gateway unavailable'));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('deepseek-v4-pro-native');
+    expect(host.textContent).toContain('telemetry gateway unavailable');
+    expect(host.querySelector('[data-testid="benchmark-sync-status"]')?.textContent).toContain(
+      'Sync error · showing data from',
+    );
+  });
+
+  it('labels a last-known snapshot stale while background polling is suspended', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-19T08:00:00Z'));
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/benchmark']}>
+          <Routes>
+            <Route path='/benchmark' element={<IdeBenchmark />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+    });
+
+    setDocumentHidden(true);
+    await act(async () => {
+      vi.advanceTimersByTime(16_000);
+    });
+    expect(host.querySelector('[data-testid="benchmark-sync-status"]')?.textContent).toContain(
+      'Stale · last synced',
+    );
   });
 
   it('reloads durable attempt, ETA, trajectory and readiness evidence on detail', async () => {
@@ -147,6 +230,7 @@ describe('IdeBenchmark mobile run cards', () => {
     expect(host.textContent).toContain('django__django-123');
     expect(host.textContent).toContain('stale heartbeat');
     expect(host.textContent).toContain('TIMEOUT');
+    expect(host.textContent).toContain('$0.0001');
     expect(host.textContent).toContain('a1 trajectory · aaaaaaaaaa…');
     expect(host.textContent).toContain('IN_PROGRESS');
   });

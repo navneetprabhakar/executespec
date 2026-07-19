@@ -9,7 +9,9 @@ import {
   PrReviewWithComments,
   PreviewAnalysis,
   PreviewLogs,
+  PreviewRenderManifest,
   req,
+  reqText,
 } from './core';
 
 export const analyzePreview = (runId: string) =>
@@ -41,6 +43,27 @@ export const execPreviewCommand = (runId: string, cmd: string, args: string[] = 
     method: 'POST',
     body: JSON.stringify({cmd, args}),
   });
+
+/**
+ * Static UI render. Unlike startPreview, this builds nothing and deploys nothing — it renders the
+ * run's screens as offline HTML, so it also works when the build is red.
+ */
+export const startPreviewRender = (runId: string) =>
+  req<{jobId: string; status: string}>(`/runs/${runId}/preview-render`, {method: 'POST'});
+
+export const getPreviewRender = (runId: string) =>
+  req<PreviewRenderManifest>(`/runs/${runId}/preview-render`);
+
+/**
+ * HTML for one rendered screen.
+ *
+ * Fetched as text rather than pointed at with an iframe `src`, because auth is a bearer header an
+ * iframe cannot send. The caller must mount the result via `srcdoc` on a sandboxed iframe WITHOUT
+ * `allow-same-origin`, so this model-authored document executes on an opaque origin and cannot
+ * reach the app's session.
+ */
+export const getPreviewRenderSurfaceHtml = (runId: string, surfaceId: string) =>
+  reqText(`/runs/${runId}/preview-render/surfaces/${encodeURIComponent(surfaceId)}`);
 
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
 export const fetchPrReviewComments = (

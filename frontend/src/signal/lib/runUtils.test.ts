@@ -1,5 +1,13 @@
 import {describe, expect, it} from 'vitest';
-import {repoDisplayName} from './runUtils';
+import {humanStatusReason, repoDisplayName} from './runUtils';
+
+describe('humanStatusReason', () => {
+  it('does not present LOCAL execution as server-verified', () => {
+    expect(humanStatusReason('LOCAL_EXECUTION')).toBe(
+      'Changes ready locally — not server-verified',
+    );
+  });
+});
 
 describe('repoDisplayName', () => {
   it('prefers the GitHub slug for SCM rows', () => {

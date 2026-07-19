@@ -6,7 +6,11 @@ export type Verdict = {label: string; kind: 'ok' | 'warn' | 'bad'};
 export function verdictFor(score: number | null | undefined, status?: string | null): Verdict {
   const s = (status || '').toUpperCase();
   if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') return {label: 'Failed', kind: 'bad'};
-  if (score == null) return {label: s === 'COMPLETE' ? 'Complete' : 'In progress', kind: 'warn'};
+  if (score == null) {
+    if (s === 'COMPLETE') return {label: 'Complete', kind: 'warn'};
+    if (s === 'PARTIAL') return {label: 'Needs review', kind: 'warn'};
+    return {label: 'In progress', kind: 'warn'};
+  }
   if (score >= 85) return {label: 'Shippable', kind: 'ok'};
   if (score >= 70) return {label: 'Needs review', kind: 'warn'};
   return {label: 'Failed', kind: 'bad'};
@@ -35,6 +39,7 @@ export const num = (n?: number | null) => (n == null ? '—' : n.toLocaleString(
 export const TABS = [
   'Overview',
   'Code',
+  'Screens',
   'Tasks',
   'Timeline',
   'Logs',
@@ -50,6 +55,7 @@ export type Tab = (typeof TABS)[number];
 export const TAB_LABEL: Record<Tab, string> = {
   Overview: 'Overview',
   Code: 'Code',
+  Screens: 'Screens',
   Tasks: 'Steps',
   Timeline: 'Timeline',
   Logs: 'Activity log',
