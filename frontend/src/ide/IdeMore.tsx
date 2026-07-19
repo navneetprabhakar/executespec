@@ -772,6 +772,9 @@ export function IdeDeployments() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  // A failed load must not render as "no deployments yet" — that is an
+  // affirmative claim the app cannot make when the request never succeeded.
+  const [loadErr, setLoadErr] = useState('');
   // A destructive deployment action awaiting confirmation (rollback / delete).
   const [pendingAct, setPendingAct] = useState<{
     key: string;
@@ -784,8 +787,16 @@ export function IdeDeployments() {
   function load() {
     api
       .getDeployments()
-      .then(setItems)
-      .catch(() => setItems([]));
+      .then((d) => {
+        setLoadErr('');
+        setItems(d);
+      })
+      .catch((e: unknown) => {
+        setLoadErr(
+          e instanceof Error ? e.message : 'Could not load deployments. Please try again.',
+        );
+        setItems([]);
+      });
   }
   useEffect(() => {
     load();
@@ -820,6 +831,8 @@ export function IdeDeployments() {
       )}
       {items === null ? (
         <IdeLoader label='Loading deployments…' />
+      ) : loadErr ? (
+        <div className='ide-empty'>Could not load deployments. {loadErr}</div>
       ) : items.length === 0 ? (
         <div className='ide-empty'>No permanent deployments yet.</div>
       ) : (

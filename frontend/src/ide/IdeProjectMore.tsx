@@ -883,6 +883,7 @@ export function IdeProjectCode() {
           {(sub === 'browse' || sub === 'review') && repos.length > 0 && (
             <select
               className='ide-select'
+              aria-label='Repository'
               value={repoId}
               onChange={(e) => setRepoId(e.target.value)}
               style={{width: 'auto'}}
@@ -1586,6 +1587,7 @@ export function IdeProjectArchitecture() {
               <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
                 <select
                   className='ide-select'
+                  aria-label='Compare from version'
                   style={{width: 'auto'}}
                   value={diffFrom ?? ''}
                   onChange={(e) => setDiffFrom(e.target.value ? Number(e.target.value) : null)}
@@ -1600,6 +1602,7 @@ export function IdeProjectArchitecture() {
                 <span style={{color: 'var(--ide-fg-muted)'}}>→</span>
                 <select
                   className='ide-select'
+                  aria-label='Compare to version'
                   style={{width: 'auto'}}
                   value={diffTo ?? ''}
                   onChange={(e) => setDiffTo(e.target.value ? Number(e.target.value) : null)}

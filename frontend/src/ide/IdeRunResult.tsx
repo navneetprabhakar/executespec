@@ -1539,6 +1539,7 @@ export default function IdeRunResult() {
                 <div className='ide-mobile-file-picker'>
                   <select
                     className='ide-select'
+                    aria-label='Select a file to view'
                     value={activeFile || ''}
                     onChange={(e) => {
                       if (e.target.value) void openFile(e.target.value);

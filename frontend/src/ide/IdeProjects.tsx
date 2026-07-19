@@ -218,6 +218,7 @@ export default function IdeProjects() {
             </button>
             <button
               className='ide-btn ghost'
+              aria-label='Cancel creating project'
               onClick={() => {
                 setCreating(false);
                 setCreateError('');

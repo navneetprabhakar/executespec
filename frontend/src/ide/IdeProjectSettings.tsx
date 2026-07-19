@@ -493,6 +493,7 @@ export function IdeProjectSettings() {
                         </IdeBadge>
                         <button
                           className='ide-btn ghost'
+                          aria-label={`Delete ${display.label}`}
                           style={{padding: '3px 8px', color: 'var(--ide-red)'}}
                           onClick={() => setDeleteDocFor({docId: d.id, label: display.label})}
                         >
