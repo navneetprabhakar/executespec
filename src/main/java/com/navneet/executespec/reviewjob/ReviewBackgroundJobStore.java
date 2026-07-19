@@ -306,9 +306,16 @@ WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
             """
             UPDATE review_background_job SET status='QUEUED', next_attempt_at=NOW(),
               completed_at=NULL, cancel_requested_at=NULL, lease_owner=NULL,
-              lease_expires_at=NULL, last_error_code=NULL, last_error_message=NULL
+              lease_expires_at=NULL, last_error_code=NULL, last_error_message=NULL,
+              -- Explicit human retry resets the AUTOMATIC attempt budget rather than
+              -- consuming it. Previously this carried `AND attempt_count < max_attempts`,
+              -- so once the background worker exhausted its attempts the operator's
+              -- Retry action returned 409 forever and the subject could never be
+              -- reviewed again at that SHA -- a provider outage permanently stranded it.
+              -- Automatic backoff is a transient-failure budget; a person clicking Retry
+              -- is a new decision, usually taken *because* the cause was fixed.
+              attempt_count=0
             WHERE job_type=? AND subject_id=? AND status IN ('FAILED','CANCELLED')
-              AND attempt_count < max_attempts
             RETURNING *
             """,
             ReviewBackgroundJobStore::map,
