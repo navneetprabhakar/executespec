@@ -5,6 +5,8 @@ import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {
   ProjectBanner as Banner,
@@ -53,6 +55,12 @@ export function IdeProjectSettings() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [memory, setMemory] = useState<api.ProjectMemoryResponse | null>(null);
   const [exports, setExports] = useState<api.ProjectExportJob[] | null>(null);
+  // D4 — documents / exports / memory each render an affirmative "you have
+  // none" state. These loads are re-invoked by mutations via the refresh*
+  // helpers below, so they keep manual state and use the shared classifier.
+  const [docsFailure, setDocsFailure] = useState<LoadFailure | null>(null);
+  const [exportsFailure, setExportsFailure] = useState<LoadFailure | null>(null);
+  const [memoryFailure, setMemoryFailure] = useState<LoadFailure | null>(null);
   const [exportAudit, setExportAudit] = useState<{
     jobId: string;
     rows: api.ProjectExportAuditEvent[];
@@ -77,8 +85,11 @@ export function IdeProjectSettings() {
     refreshDocs();
     api
       .getProjectMemory(projectId)
-      .then(setMemory)
-      .catch(() => setMemory(null));
+      .then((m) => {
+        setMemory(m);
+        setMemoryFailure(null);
+      })
+      .catch((e: unknown) => setMemoryFailure(toLoadFailure(e)));
     if (canEdit) refreshExports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -86,15 +97,21 @@ export function IdeProjectSettings() {
   function refreshDocs() {
     api
       .listProjectDocuments(projectId)
-      .then(setDocs)
-      .catch(() => setDocs([]));
+      .then((d) => {
+        setDocs(d);
+        setDocsFailure(null);
+      })
+      .catch((e: unknown) => setDocsFailure(toLoadFailure(e)));
   }
 
   function refreshExports() {
     api
       .listProjectExports(projectId)
-      .then(setExports)
-      .catch(() => setExports([]));
+      .then((x) => {
+        setExports(x);
+        setExportsFailure(null);
+      })
+      .catch((e: unknown) => setExportsFailure(toLoadFailure(e)));
   }
 
   const indexing = isProjectDocumentIndexing(docs);
@@ -439,7 +456,9 @@ export function IdeProjectSettings() {
               >
                 {busy === 'upload' ? 'Uploading…' : 'Upload document'}
               </button>
-              {docs === null ? (
+              {docsFailure ? (
+                <LoadError failure={docsFailure} what='documents' onRetry={refreshDocs} />
+              ) : docs === null ? (
                 <IdeLoader label='Loading documents…' />
               ) : docs.length === 0 ? (
                 <div className='ide-empty'>No documents yet. Upload one above to start.</div>
@@ -545,10 +564,14 @@ export function IdeProjectSettings() {
 
               <div className='ide-h2'>What ExecuteSpec remembers</div>
               <div className='ide-card'>
-                <div style={{fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap'}}>
-                  {memory?.fullContext?.trim() ||
-                    'No context snapshot yet. ExecuteSpec builds this after the first few completed work items.'}
-                </div>
+                {memoryFailure ? (
+                  <LoadError failure={memoryFailure} what='project memory' />
+                ) : (
+                  <div style={{fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap'}}>
+                    {memory?.fullContext?.trim() ||
+                      'No context snapshot yet. ExecuteSpec builds this after the first few completed work items.'}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -574,7 +597,9 @@ export function IdeProjectSettings() {
                 </button>
               </div>
 
-              {exports === null ? (
+              {exportsFailure ? (
+                <LoadError failure={exportsFailure} what='exports' onRetry={refreshExports} />
+              ) : exports === null ? (
                 <IdeLoader label='Loading exports…' />
               ) : exports.length === 0 ? (
                 <div className='ide-empty'>No project exports yet.</div>

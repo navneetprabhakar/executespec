@@ -1,7 +1,9 @@
-import {useEffect, useState} from 'react';
+import {useState} from 'react';
 import {useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -22,11 +24,36 @@ const INVITE_ROLES: api.ProjectInviteRole[] = [
 export function IdeProjectMembers() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
-  const [members, setMembers] = useState<api.ProjectMemberDto[] | null>(null);
-  const [orgMembers, setOrgMembers] = useState<api.OrgMemberDto[]>([]);
-  const [invites, setInvites] = useState<api.ProjectInviteDto[] | null>(null);
-  const [shareLinks, setShareLinks] = useState<api.ShareLinkDto[] | null>(null);
-  const [externalSharingEnabled, setExternalSharingEnabled] = useState<boolean | null>(null);
+  // D4: each of these renders an affirmative "you have no X" empty state, so a
+  // failed load must stay distinguishable from a genuinely empty result.
+  const membersState = useAsyncData(
+    () => api.getProjectMembers(projectId),
+    [projectId],
+    !!projectId,
+  );
+  const shareLinksState = useAsyncData(
+    () => api.listShareLinks(projectId).then((r) => r.links ?? []),
+    [projectId],
+    !!projectId,
+  );
+  const invitesState = useAsyncData(
+    () => api.listProjectInvites(projectId),
+    [projectId],
+    !!projectId,
+  );
+  const orgMembersState = useAsyncData(() => api.getOrgMembers(), [projectId], !!projectId);
+  const orgState = useAsyncData(() => api.getMyOrg(), [projectId], !!projectId);
+
+  const members = membersState.data;
+  const setMembers = membersState.setData;
+  const invites = invitesState.data;
+  const setInvites = invitesState.setData;
+  const shareLinks = shareLinksState.data;
+  const setShareLinks = shareLinksState.setData;
+  const orgMembers = orgMembersState.data ?? [];
+  // Unknown (load failed) stays falsy, exactly as the previous `false` fallback
+  // did, so a failure cannot silently widen invite authority.
+  const externalSharingEnabled = orgState.data ? !!orgState.data.externalSharingEnabled : null;
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<api.ProjectInviteRole>('PROJECT_DEVELOPER');
   const [orgMemberUserId, setOrgMemberUserId] = useState('');
@@ -42,33 +69,11 @@ export function IdeProjectMembers() {
   const [removeFor, setRemoveFor] = useState<string | null>(null);
 
   function load() {
-    api
-      .getProjectMembers(projectId)
-      .then(setMembers)
-      .catch(() => setMembers([]));
-    api
-      .listShareLinks(projectId)
-      .then((r) => setShareLinks(r.links ?? []))
-      .catch(() => setShareLinks([]));
-    api
-      .listProjectInvites(projectId)
-      .then(setInvites)
-      .catch(() => setInvites([]));
-    api
-      .getOrgMembers()
-      .then(setOrgMembers)
-      .catch(() => setOrgMembers([]));
+    membersState.reload();
+    shareLinksState.reload();
+    invitesState.reload();
+    orgMembersState.reload();
   }
-
-  useEffect(() => {
-    if (!projectId) return;
-    load();
-    api
-      .getMyOrg()
-      .then((o) => setExternalSharingEnabled(!!o.externalSharingEnabled))
-      .catch(() => setExternalSharingEnabled(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
 
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
   const currentMember = members?.find((m) => m.userId === user?.id);
@@ -205,8 +210,10 @@ export function IdeProjectMembers() {
       <h1 className='ide-h1'>Members &amp; sharing</h1>
       <Banner err={err} msg={msg} />
 
-      <div className='ide-h2'>Project access · {members?.length ?? 0}</div>
-      {members === null ? (
+      <div className='ide-h2'>Project access{members ? ` · ${members.length}` : ''}</div>
+      {membersState.failure ? (
+        <LoadError failure={membersState.failure} what='members' onRetry={membersState.reload} />
+      ) : members === null ? (
         <IdeLoader label='Loading members…' />
       ) : members.length === 0 ? (
         <div className='ide-empty'>No members.</div>
@@ -414,8 +421,14 @@ export function IdeProjectMembers() {
 
       {canManage && (
         <>
-          <div className='ide-h2'>Pending invites · {invites?.length ?? 0}</div>
-          {invites === null ? (
+          <div className='ide-h2'>Pending invites{invites ? ` · ${invites.length}` : ''}</div>
+          {invitesState.failure ? (
+            <LoadError
+              failure={invitesState.failure}
+              what='pending invites'
+              onRetry={invitesState.reload}
+            />
+          ) : invites === null ? (
             <IdeLoader label='Loading invites…' />
           ) : invites.length === 0 ? (
             <div className='ide-empty'>No pending invites.</div>
@@ -470,7 +483,7 @@ export function IdeProjectMembers() {
         </>
       )}
 
-      <div className='ide-h2'>Share links · {shareLinks?.length ?? 0}</div>
+      <div className='ide-h2'>Share links{shareLinks ? ` · ${shareLinks.length}` : ''}</div>
       {newShareUrl && (
         <div className='ide-card' style={{marginBottom: 10}} role='status'>
           <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
@@ -492,7 +505,13 @@ export function IdeProjectMembers() {
           </div>
         </div>
       )}
-      {shareLinks === null ? (
+      {shareLinksState.failure ? (
+        <LoadError
+          failure={shareLinksState.failure}
+          what='share links'
+          onRetry={shareLinksState.reload}
+        />
+      ) : shareLinks === null ? (
         <IdeLoader label='Loading share links…' />
       ) : shareLinks.length === 0 ? (
         <div className='ide-empty'>No share links yet.</div>

@@ -2,6 +2,8 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
 import {
   providerIsProjectSelectable,
   providerDisplayName,
@@ -26,7 +28,6 @@ const debtTotal = (r: api.TechDebtReport): number =>
 export default function IdeProjects() {
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
-  const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
   const [stats, setStats] = useState<Record<string, Dash>>({});
   // Tech-debt count keyed by project id, fetched lazily alongside the dashboard.
   const [debt, setDebt] = useState<Record<string, number>>({});
@@ -47,12 +48,13 @@ export default function IdeProjects() {
     }
   }, [newProvider, selectableProviders]);
 
-  useEffect(() => {
-    api
-      .getProjects()
-      .then((list) => {
-        setProjects(list);
+  // D4 — the list itself renders "No {filter} projects.", a factual claim about
+  // the user's own data, so a failed load must not be able to produce it.
+  const projectsState = useAsyncData(
+    () =>
+      api.getProjects().then((list) => {
         list.forEach((p) => {
+          // Per-card enrichment stays best-effort; see the note at `card()`.
           api
             .getProjectDashboard(p.id)
             .then((d) => setStats((s) => ({...s, [p.id]: d as unknown as Dash})))
@@ -62,9 +64,11 @@ export default function IdeProjects() {
             .then((r) => setDebt((m) => ({...m, [p.id]: debtTotal(r)})))
             .catch(() => {});
         });
-      })
-      .catch(() => setProjects([]));
-  }, []);
+        return list;
+      }),
+    [],
+  );
+  const projects = projectsState.data;
 
   const filtered = useMemo(
     () => (projects ?? []).filter((p) => (filter === 'archived' ? !!p.archivedAt : !p.archivedAt)),
@@ -88,6 +92,11 @@ export default function IdeProjects() {
   }
 
   function card(p: api.ProjectDto) {
+    // D4: the per-project dashboard is a best-effort enrichment call, but its
+    // absence used to render as hard zeros ("0 repos · 0 runs · 0 PRs open")
+    // and a "New" status badge on a project that may be neither. Track whether
+    // it actually arrived so the card can say "not loaded" instead of lying.
+    const statsLoaded = stats[p.id] !== undefined;
     const s = stats[p.id] || {};
     const totalRuns =
       (numOf(s, 'activeRuns') ?? 0) +
@@ -108,11 +117,13 @@ export default function IdeProjects() {
     const techDebt = debt[p.id];
     const status = p.archivedAt
       ? {l: 'Archived', k: 'warn' as const}
-      : prs > 0
-        ? {l: 'Live', k: 'bad' as const}
-        : totalRuns > 0
-          ? {l: 'Healthy', k: 'ok' as const}
-          : {l: 'New', k: 'warn' as const};
+      : !statsLoaded
+        ? {l: 'Status unknown', k: 'warn' as const}
+        : prs > 0
+          ? {l: 'Live', k: 'bad' as const}
+          : totalRuns > 0
+            ? {l: 'Healthy', k: 'ok' as const}
+            : {l: 'New', k: 'warn' as const};
     return (
       <Link key={p.id} className='ide-run-card' to={`/projects/${p.id}`}>
         <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
@@ -123,8 +134,14 @@ export default function IdeProjects() {
           <IdeBadge kind={status.k}>{status.l}</IdeBadge>
         </div>
         <div className='ide-run-meta ide-mono' style={{marginBottom: 10}}>
-          {repoCount} repo{repoCount === 1 ? '' : 's'} · {totalRuns} run{totalRuns === 1 ? '' : 's'}{' '}
-          · {prs} PR{prs === 1 ? '' : 's'} open
+          {statsLoaded ? (
+            <>
+              {repoCount} repo{repoCount === 1 ? '' : 's'} · {totalRuns} run
+              {totalRuns === 1 ? '' : 's'} · {prs} PR{prs === 1 ? '' : 's'} open
+            </>
+          ) : (
+            'Project activity not loaded'
+          )}
         </div>
         <div
           style={{
@@ -241,7 +258,7 @@ export default function IdeProjects() {
           </span>
         )}
       </div>
-      <div className='ide-sub'>{filtered.length} projects</div>
+      <div className='ide-sub'>{projects ? `${filtered.length} projects` : ' '}</div>
 
       <div style={{display: 'flex', gap: 4, marginBottom: 14}}>
         {(['mine', 'archived'] as const).map((f) => (
@@ -261,7 +278,9 @@ export default function IdeProjects() {
         ))}
       </div>
 
-      {projects === null ? (
+      {projectsState.failure ? (
+        <LoadError failure={projectsState.failure} what='projects' onRetry={projectsState.reload} />
+      ) : projects === null ? (
         <IdeLoader label='Loading projects…' />
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>No {filter} projects.</div>

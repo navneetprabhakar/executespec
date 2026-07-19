@@ -5,6 +5,8 @@ import {writeSpecHandoff} from '@/lib/specHandoff';
 import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
@@ -651,7 +653,6 @@ export function IdeProjectCode() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
   const [sub, setSub] = useState<CodeSub>('browse');
-  const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -676,32 +677,35 @@ export function IdeProjectCode() {
   const [mobileCodeMode, setMobileCodeMode] = useState<'tree' | 'file'>('tree');
 
   // Other tabs
-  const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
-  const [docs, setDocs] = useState<api.GeneratedDocRow[] | null>(null);
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null | undefined>(undefined);
   const [standards, setStandards] = useState<api.ComplianceReport | null | undefined>(undefined);
 
-  useEffect(() => {
-    if (!projectId) return;
-    api
-      .getProjectRepos(projectId)
-      .then((l) => {
+  // D4 — repos / tech debt / docs each render an affirmative "you have none"
+  // empty state, so a failed load must not collapse into one.
+  const reposState = useAsyncData(
+    () =>
+      api.getProjectRepos(projectId).then((l) => {
         const arr = l as unknown as Array<Record<string, unknown>>;
-        setRepos(arr);
         if (arr[0]) setRepoId(repoIdFor(arr[0]));
-      })
-      .catch(() => setRepos([]));
-    api
-      .getTechDebt(projectId, 30)
-      .then(setDebt)
-      .catch(() => setDebt(null));
-    Promise.all([
-      api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
-      api.getProjectDoc(projectId, 'SETUP').catch(() => null),
-    ])
-      .then(([e, s]) => setDocs([e, s].filter(Boolean) as api.GeneratedDocRow[]))
-      .catch(() => setDocs([]));
-  }, [projectId]);
+        return arr;
+      }),
+    [projectId],
+    !!projectId,
+  );
+  const repos = reposState.data ?? [];
+  const debtState = useAsyncData(() => api.getTechDebt(projectId, 30), [projectId], !!projectId);
+  const debt = debtState.data;
+  const docsState = useAsyncData(
+    () =>
+      Promise.all([
+        api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
+        api.getProjectDoc(projectId, 'SETUP').catch(() => null),
+      ]).then(([e, s]) => [e, s].filter(Boolean) as api.GeneratedDocRow[]),
+    [projectId],
+    !!projectId,
+  );
+  const docs = docsState.data;
+  const setDocs = docsState.setData;
 
   // Browse — file list per selected repo.
   useEffect(() => {
@@ -921,7 +925,13 @@ export function IdeProjectCode() {
 
       {/* ── Browse ── */}
       {sub === 'browse' &&
-        (repos.length === 0 ? (
+        (reposState.failure ? (
+          <LoadError
+            failure={reposState.failure}
+            what='linked repositories'
+            onRetry={reposState.reload}
+          />
+        ) : repos.length === 0 ? (
           <div className='ide-empty'>No repos linked.</div>
         ) : (
           <div style={{flex: 1, minHeight: 0, position: 'relative'}}>
@@ -1011,7 +1021,9 @@ export function IdeProjectCode() {
       {/* ── Tech debt ── */}
       {sub === 'debt' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {debt === undefined ? (
+          {debtState.failure ? (
+            <LoadError failure={debtState.failure} what='code issues' onRetry={debtState.reload} />
+          ) : debtState.loading ? (
             <IdeLoader label='Loading code issues…' />
           ) : debtCats.length === 0 ? (
             <div className='ide-empty'>
@@ -1044,7 +1056,13 @@ export function IdeProjectCode() {
       {/* ── Code review (full whole-repo surface) ── */}
       {sub === 'review' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {repos.length === 0 ? (
+          {reposState.failure ? (
+            <LoadError
+              failure={reposState.failure}
+              what='linked repositories'
+              onRetry={reposState.reload}
+            />
+          ) : repos.length === 0 ? (
             <div className='ide-empty'>No repos linked — link one to review code.</div>
           ) : reviewRepos.length === 0 ? (
             <div className='ide-empty'>
@@ -1225,7 +1243,13 @@ export function IdeProjectCode() {
       {/* ── Docs ── */}
       {sub === 'docs' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {(docs || []).length === 0 ? (
+          {docsState.failure ? (
+            <LoadError
+              failure={docsState.failure}
+              what='generated docs'
+              onRetry={docsState.reload}
+            />
+          ) : (docs || []).length === 0 ? (
             <div className='ide-empty'>No generated docs yet. Use the buttons below.</div>
           ) : (
             (docs || []).map((d) => (

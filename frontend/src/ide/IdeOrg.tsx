@@ -12,6 +12,8 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
@@ -332,6 +334,9 @@ export function IdeOrgMembers() {
   const tier = useAuthStore(selectNormalizedTier);
   const [org, setOrg] = useState<api.OrgDto | null>(null);
   const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
+  // Distinct from "members is empty": a rejected load must never render as "No members
+  // found", which is an affirmative claim about the org we did not actually establish.
+  const [membersFailure, setMembersFailure] = useState<LoadFailure | null>(null);
   const [invites, setInvites] = useState<api.OrgInvitation[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -350,7 +355,12 @@ export function IdeOrgMembers() {
       ([o, m, i]) => {
         if (cancelled) return;
         if (o.status === 'fulfilled') setOrg(o.value);
-        if (m.status === 'fulfilled') setMembers(m.value);
+        if (m.status === 'fulfilled') {
+          setMembers(m.value);
+          setMembersFailure(null);
+        } else {
+          setMembersFailure(toLoadFailure(m.reason));
+        }
         if (i.status === 'fulfilled') setInvites(i.value);
         setLoaded(true);
       },
@@ -412,6 +422,15 @@ export function IdeOrgMembers() {
       setErr(e instanceof Error ? e.message : 'Cancel failed.');
     } finally {
       setRowBusy(null);
+    }
+  }
+
+  async function reloadMembers() {
+    try {
+      setMembers(await api.getOrgMembers());
+      setMembersFailure(null);
+    } catch (e: unknown) {
+      setMembersFailure(toLoadFailure(e));
     }
   }
 
@@ -549,6 +568,8 @@ export function IdeOrgMembers() {
       <div className='ide-h2'>Members · {members.length}</div>
       {!loaded ? (
         <IdeLoader label='Loading members…' />
+      ) : membersFailure ? (
+        <LoadError failure={membersFailure} what='members' onRetry={() => void reloadMembers()} />
       ) : members.length === 0 ? (
         <div className='ide-empty'>No members found.</div>
       ) : (

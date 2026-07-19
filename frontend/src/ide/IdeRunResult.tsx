@@ -3,6 +3,8 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import IdeRunScreens from '@/ide/IdeRunScreens';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
@@ -97,7 +99,18 @@ export default function IdeRunResult() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [costEvidence, setCostEvidence] = useState<api.RunCostEvidence | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
+  // D4 — the run-detail surfaces below all render affirmative absence claims
+  // ("No evidence report.", "No files", "No timeline data yet.", and the
+  // fabricated "patch and benchmark runs aren't scored" explanation). Track the
+  // failure separately so a fetch error can never masquerade as one of them.
+  const [reportFailure, setReportFailure] = useState<LoadFailure | null>(null);
+  const [filesFailure, setFilesFailure] = useState<LoadFailure | null>(null);
+  const [timelineFailure, setTimelineFailure] = useState<LoadFailure | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
+  // D4 — a failed read here rendered "No test report yet." and disabled the
+  // Re-run button with "No generated code or test plan is available to re-run".
+  const [testsFailure, setTestsFailure] = useState<LoadFailure | null>(null);
+  const [costEvidenceFailure, setCostEvidenceFailure] = useState<LoadFailure | null>(null);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
   const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
@@ -146,6 +159,18 @@ export default function IdeRunResult() {
     setEventLog(replay.events);
   }
 
+  // D4 — extracted so the Overview and Evidence failure states can offer Retry.
+  function reloadReport() {
+    if (!runId) return;
+    api
+      .getValidationReport(runId)
+      .then((r) => {
+        setReport(r);
+        setReportFailure(null);
+      })
+      .catch((e: unknown) => setReportFailure(toLoadFailure(e)));
+  }
+
   useEffect(() => {
     if (!runId) return;
     api
@@ -156,17 +181,15 @@ export default function IdeRunResult() {
         setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
       })
       .finally(() => setLoading(false));
-    api
-      .getValidationReport(runId)
-      .then(setReport)
-      .catch(() => setReport(null));
+    reloadReport();
     api
       .getFiles(runId)
       .then((f) => {
         setFiles(f);
+        setFilesFailure(null);
         if (f.length) openFile(f[0]);
       })
-      .catch(() => setFiles([]));
+      .catch((e: unknown) => setFilesFailure(toLoadFailure(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
@@ -204,8 +227,11 @@ export default function IdeRunResult() {
     if (tab === 'Tests' && !tests)
       api
         .getTestReport(runId)
-        .then(setTests)
-        .catch(() => setTests(null));
+        .then((t) => {
+          setTests(t);
+          setTestsFailure(null);
+        })
+        .catch((e: unknown) => setTestsFailure(toLoadFailure(e)));
     if (tab === 'Tests' && !testPlan)
       api
         .getTestPlan(runId)
@@ -214,8 +240,11 @@ export default function IdeRunResult() {
     if (tab === 'Timeline' && !timeline)
       api
         .getTimeline(runId)
-        .then(setTimeline)
-        .catch(() => setTimeline({tasks: []}));
+        .then((t) => {
+          setTimeline(t);
+          setTimelineFailure(null);
+        })
+        .catch((e: unknown) => setTimelineFailure(toLoadFailure(e)));
     if (tab === 'Logs' && !eventLog)
       void loadEventLog().catch(() => {
         setEventReplay({
@@ -231,8 +260,11 @@ export default function IdeRunResult() {
     if (tab === 'Cost' && !costEvidence)
       api
         .getLiveCost(runId)
-        .then(setCostEvidence)
-        .catch(() => setCostEvidence(null));
+        .then((c) => {
+          setCostEvidence(c);
+          setCostEvidenceFailure(null);
+        })
+        .catch((e: unknown) => setCostEvidenceFailure(toLoadFailure(e)));
     if (tab === 'Chat' && !chat) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -292,7 +324,20 @@ export default function IdeRunResult() {
         setEventReplay(replay);
         setEventLog(replay.events);
       })
-      .catch(() => setEventLog([]));
+      // D4: this used to fall through to "No activity is retained for this
+      // run." The honest STORE_UNAVAILABLE branch already exists two effects
+      // up; route the failure into it instead of inventing a retention claim.
+      .catch(() => {
+        setEventReplay({
+          events: [],
+          available: false,
+          reason: 'STORE_UNAVAILABLE',
+          retainedUntil: null,
+          lastEventId: null,
+          truncated: false,
+        });
+        setEventLog([]);
+      });
   }, [eventLog, run?.status, runId]);
 
   // Keep the chat thread pinned to the newest message — but only when the user
@@ -900,7 +945,15 @@ export default function IdeRunResult() {
             <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
               {/* RES-3 — when nothing was measured (patch/bench runs), one honest
                   line beats a wall of em-dashes that reads as "broken". */}
-              {!report && !tests && score == null ? (
+              {reportFailure ? (
+                <div className='ide-card' style={{flex: 1, minWidth: 240}}>
+                  <LoadError
+                    failure={reportFailure}
+                    what='verified score evidence'
+                    onRetry={reloadReport}
+                  />
+                </div>
+              ) : !report && !tests && score == null ? (
                 <div
                   className='ide-card'
                   style={{flex: 1, minWidth: 240, color: 'var(--ide-fg-muted)', fontSize: 12}}
@@ -1525,6 +1578,10 @@ export default function IdeRunResult() {
               </div>
               {files.length ? (
                 <IdeFileTree files={files} activePath={activeFile} onOpen={openFile} />
+              ) : filesFailure ? (
+                <div className='ide-empty' style={{padding: 14}}>
+                  File list unavailable
+                </div>
               ) : (
                 <div className='ide-empty' style={{padding: 14}}>
                   No files
@@ -1584,6 +1641,8 @@ export default function IdeRunResult() {
                       : undefined
                   }
                 />
+              ) : filesFailure ? (
+                <LoadError failure={filesFailure} what='generated files' />
               ) : (
                 <div className='ide-empty'>
                   {emptyCodeTabMessage({hasFiles: files.length > 0, status: run?.status})}
@@ -2022,7 +2081,9 @@ export default function IdeRunResult() {
                 <RunTimeline tasks={timeline.tasks} />
               </div>
             )}
-            {timeline == null ? (
+            {timelineFailure ? (
+              <LoadError failure={timelineFailure} what='timeline data' />
+            ) : timeline == null ? (
               <IdeLoader label='Loading timeline…' />
             ) : (timeline.tasks || []).length === 0 ? (
               <div className='ide-empty'>No timeline data yet. Tasks populate as the run runs.</div>
@@ -2130,7 +2191,9 @@ export default function IdeRunResult() {
                 </button>
               )}
             </h1>
-            {!report ? (
+            {reportFailure ? (
+              <LoadError failure={reportFailure} what='evidence report' onRetry={reloadReport} />
+            ) : !report ? (
               <div className='ide-empty'>No evidence report.</div>
             ) : (
               <>
@@ -2382,7 +2445,9 @@ export default function IdeRunResult() {
                 </div>
                 <div className='ide-h2'>Provider calls</div>
                 <div className='ide-card' style={{overflowX: 'auto'}}>
-                  {(costEvidence?.stepCalls ?? []).length === 0 ? (
+                  {costEvidenceFailure ? (
+                    <LoadError failure={costEvidenceFailure} what='per-call attribution' />
+                  ) : (costEvidence?.stepCalls ?? []).length === 0 ? (
                     <div className='ide-empty'>
                       No per-call attribution is available for this run.
                     </div>
@@ -2531,7 +2596,9 @@ export default function IdeRunResult() {
                 Tests are running against the preview. This panel will refresh automatically.
               </div>
             )}
-            {!tests ? (
+            {testsFailure ? (
+              <LoadError failure={testsFailure} what='test results' />
+            ) : !tests ? (
               <div className='ide-empty'>{noCodeTestMessage}</div>
             ) : (
               <>
