@@ -83,7 +83,9 @@ public interface PreviewRenderJobRepository extends JpaRepository<PreviewRenderJ
           UPDATE preview_render_job
              SET status = :status,
                  -- Explicit cast: :reason is null on a clean finish, and PostgreSQL cannot infer
-                 -- a parameter's type from an untyped null.
+                 -- the parameter type from an untyped null. NOTE: never put an apostrophe in a
+                 -- comment inside @Query. The Spring Data query rewriter reads it as an
+                 -- unterminated quoted range and fails repository creation at context startup.
                  failure_reason = CAST(:reason AS VARCHAR),
                  surfaces_found = :found, surfaces_rendered = :rendered,
                  completed_at = :completedAt, lease_owner = NULL, lease_expires_at = NULL
