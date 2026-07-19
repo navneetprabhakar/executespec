@@ -93,9 +93,9 @@ public class ContractDetectionService {
       if (files == null) files = List.of();
     } catch (Exception ex) {
       log.warn(
-          "[ContractDetectionService] file list failed for {}: {}",
+          "[ContractDetectionService] file list failed for {} errorClass={}",
           repo.getGithubRepoFullName(),
-          ex.getMessage());
+          ex.getClass().getSimpleName());
       return List.of();
     }
 
@@ -118,9 +118,9 @@ public class ContractDetectionService {
                 null));
       } catch (Exception ex) {
         log.warn(
-            "[ContractDetectionService] detector {} failed: {}",
+            "[ContractDetectionService] detector {} failed errorClass={}",
             detector.detectorName(),
-            ex.getMessage());
+            ex.getClass().getSimpleName());
         summary.add(
             new DetectionResult(
                 detector.detectorName(),
@@ -128,7 +128,7 @@ public class ContractDetectionService {
                 detector.filePatterns(),
                 DetectionResult.Status.FAILED,
                 List.of(),
-                ex.getMessage()));
+                "DETECTOR_FAILED:" + ex.getClass().getSimpleName()));
       }
     }
     return summary;
@@ -225,10 +225,9 @@ public class ContractDetectionService {
       return contract.getId();
     } catch (Exception ex) {
       log.warn(
-          "[ContractDetectionService] upsert failed for {}/{}: {}",
+          "[ContractDetectionService] upsert failed for {} errorClass={}",
           repo.getGithubRepoFullName(),
-          dc.name(),
-          ex.getMessage());
+          ex.getClass().getSimpleName());
       return null;
     }
   }

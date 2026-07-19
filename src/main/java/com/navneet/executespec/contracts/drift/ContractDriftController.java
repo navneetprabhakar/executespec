@@ -60,7 +60,8 @@ public class ContractDriftController {
   @PostMapping("/contracts/{contractId}/check-drift")
   public ResponseEntity<DriftDetectionService.DriftCheckResult> checkContract(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     return ResponseEntity.ok(
         driftService.checkContract(contractId, parseUuidOrNull(projectId), patFor(auth)));
   }
@@ -68,7 +69,7 @@ public class ContractDriftController {
   @PostMapping("/repos/{repoId}/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkRepo(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ensureLinked(projectId, repoId);
     return ResponseEntity.ok(
         driftService.checkAllForRepo(repoId, parseUuidOrNull(projectId), patFor(auth)));
@@ -77,7 +78,7 @@ public class ContractDriftController {
   @PostMapping("/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkProject(
       @PathVariable String projectId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     List<UUID> repoIds =
         linkRepo.findByProjectId(projectId).stream().map(l -> l.getRepoId()).toList();
     return ResponseEntity.ok(
@@ -92,6 +93,7 @@ public class ContractDriftController {
         registryRepo
             .findById(contractId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract"));
+    ensureLinked(projectId, contract.getRepoId());
     ProjectRepo repo =
         projectRepoRepo
             .findById(contract.getRepoId())
@@ -179,6 +181,7 @@ public class ContractDriftController {
       @RequestBody DismissRequest body,
       Authentication auth) {
     projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     if (body == null || body.rationale() == null || body.rationale().trim().length() < 10) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rationale required (≥10 chars)");
     }
@@ -218,8 +221,19 @@ public class ContractDriftController {
 
   private void ensureLinked(String projectId, UUID repoId) {
     if (linkRepo.findByProjectIdAndRepoId(projectId, repoId).isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "repo not linked to project");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "contract or repo not found");
     }
+  }
+
+  private void ensureContractLinked(String projectId, UUID contractId) {
+    ContractRegistry contract =
+        registryRepo
+            .findById(contractId)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "contract or repo not found"));
+    ensureLinked(projectId, contract.getRepoId());
   }
 
   private String patFor(Authentication auth) {

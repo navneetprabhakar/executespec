@@ -8,6 +8,11 @@ import java.util.Map;
 import com.navneet.executespec.contracts.ContractRegistry;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 /**
  * Unit tests for the 5 {@link FileBasedContractDetector} implementations + {@link DetectorUtils}.
@@ -130,6 +135,54 @@ class DetectorsTest {
         };
     List<DetectedContract> found = det.detect(List.of("api/openapi.yaml"), brokenLoader);
     assertThat(found).isEmpty(); // Logged + skipped, not propagated
+  }
+
+  @Test
+  void detectorReadFailures_doNotLogPathMessageOrThrowable() {
+    Logger logger = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
+    String secretPath = "schemas/customer-secret-token.schema.json";
+    String secretMessage = "Authorization: Bearer should-never-reach-logs";
+    FileBasedContractDetector.ContentLoader brokenLoader =
+        path -> {
+          throw new RuntimeException(secretMessage);
+        };
+    try {
+      for (FileBasedContractDetector detector :
+          List.of(
+              new OpenApiFileDetector(),
+              new ProtoFileDetector(),
+              new GraphQlSdlDetector(),
+              new JsonSchemaDetector(),
+              new AsyncApiDetector())) {
+        String candidate =
+            detector instanceof ProtoFileDetector
+                ? "customer-secret-token.proto"
+                : detector instanceof GraphQlSdlDetector
+                    ? "customer-secret-token.graphql"
+                    : detector instanceof AsyncApiDetector
+                        ? "customer-secret-token.asyncapi.yaml"
+                        : detector instanceof OpenApiFileDetector
+                            ? "customer-secret-token.openapi.yaml"
+                            : secretPath;
+        assertThat(detector.detect(List.of(candidate), brokenLoader)).isEmpty();
+      }
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
+
+    assertThat(appender.list)
+        .extracting(ILoggingEvent::getFormattedMessage)
+        .allSatisfy(
+            message -> {
+              assertThat(message).doesNotContain("customer-secret-token");
+              assertThat(message).doesNotContain(secretMessage);
+              assertThat(message).contains("errorClass=RuntimeException");
+            });
+    assertThat(appender.list).extracting(ILoggingEvent::getThrowableProxy).containsOnlyNulls();
   }
 
   @Test

@@ -33,6 +33,13 @@ public class AdrInjectionService {
   @Value("${adrs.injection.full-body-threshold:15}")
   private int fullBodyThreshold;
 
+  /**
+   * Fail closed until checked-in ADR discovery and synchronization exist. Cached rows may be
+   * historical or operator-created and therefore cannot be represented as repository truth.
+   */
+  @Value("${adrs.injection.enabled:false}")
+  private boolean injectionEnabled;
+
   public Result compose(String projectId) {
     List<Adr> accepted = adrRepo.findAcceptedForProject(projectId);
     if (accepted.isEmpty()) return new Result(Mode.EMPTY, "", List.of(), 0);
@@ -94,6 +101,10 @@ public class AdrInjectionService {
 
   public int fullBodyThreshold() {
     return fullBodyThreshold;
+  }
+
+  public boolean injectionEnabled() {
+    return injectionEnabled;
   }
 
   static String firstNonHeadingLine(String body) {

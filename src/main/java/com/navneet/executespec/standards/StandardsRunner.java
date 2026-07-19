@@ -69,7 +69,14 @@ public class StandardsRunner {
         case Standard.LintEnforcement le -> {
           LintAdapter adapter = byTool.get(le.tool());
           if (adapter == null) {
-            log.debug("[StandardsRunner] no adapter for lint tool '{}'; skipping", le.tool());
+            log.warn("[StandardsRunner] no adapter for configured lint tool '{}'", le.tool());
+            lintResults.put(
+                s.id(),
+                new LintResult(
+                    le.tool(),
+                    LintResult.Status.UNAVAILABLE,
+                    List.of(),
+                    "No server adapter is registered for the configured lint tool"));
             continue;
           }
           Path config = le.configPath() == null ? null : Path.of(le.configPath());

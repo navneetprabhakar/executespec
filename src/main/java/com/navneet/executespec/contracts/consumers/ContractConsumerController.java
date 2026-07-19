@@ -13,6 +13,7 @@ import com.navneet.executespec.contracts.ContractRegistry;
 import com.navneet.executespec.contracts.ContractRegistryRepository;
 import com.navneet.executespec.folder.ExecutespecFolderWriter;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.http.HttpStatus;
@@ -48,6 +49,7 @@ public class ContractConsumerController {
   private final ContractRegistryRepository registryRepo;
   private final ContractConsumerRepository consumerRepo;
   private final ProjectRepoRepository projectRepoRepo;
+  private final ProjectRepoLinkRepository projectRepoLinkRepo;
   private final ExecutespecFolderWriter folderWriter;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
@@ -59,6 +61,7 @@ public class ContractConsumerController {
   public ResponseEntity<List<ConsumerDto>> list(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
     projectAccessGuard.assertCanRead(projectId, principal(auth));
+    requireContractInProject(projectId, contractId);
     List<ConsumerDto> out =
         consumerRepo.findByContractIdAndDeclaredInProjectId(contractId, projectId).stream()
             .map(ConsumerDto::from)
@@ -80,6 +83,8 @@ public class ContractConsumerController {
         registryRepo
             .findById(contractId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract"));
+    requireRepoInProject(projectId, contract.getRepoId());
+    requireRepoInProject(projectId, body.consumerRepoId());
     ProjectRepo consumerRepo2 =
         projectRepoRepo
             .findById(body.consumerRepoId())
@@ -189,6 +194,8 @@ public class ContractConsumerController {
       @PathVariable UUID consumerRepoId,
       Authentication auth) {
     projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    requireContractInProject(projectId, contractId);
+    requireRepoInProject(projectId, consumerRepoId);
     ContractConsumer existing =
         consumerRepo
             .findByContractIdAndConsumerRepoIdAndDeclaredInProjectId(
@@ -223,6 +230,23 @@ public class ContractConsumerController {
         .append(versionConstraint == null ? "any" : versionConstraint)
         .append("\n");
     return sb.toString();
+  }
+
+  private ContractRegistry requireContractInProject(String projectId, UUID contractId) {
+    ContractRegistry contract =
+        registryRepo
+            .findById(contractId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract not found"));
+    requireRepoInProject(projectId, contract.getRepoId());
+    return contract;
+  }
+
+  private void requireRepoInProject(String projectId, UUID repoId) {
+    if (repoId == null
+        || projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, repoId).isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "contract or repo not found");
+    }
   }
 
   private com.navneet.executespec.auth.security.AppUserDetails principal(

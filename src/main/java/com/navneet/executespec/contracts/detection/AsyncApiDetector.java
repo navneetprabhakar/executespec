@@ -60,7 +60,9 @@ public class AsyncApiDetector implements FileBasedContractDetector {
                 DetectorUtils.sha256(content),
                 DetectorUtils.pullOpenApiVersion(content)));
       } catch (Exception ex) {
-        log.warn("[AsyncApiDetector] failed to read {}: {}", path, ex.getMessage());
+        log.warn(
+            "[AsyncApiDetector] candidate read failed errorClass={}",
+            ex.getClass().getSimpleName());
       }
     }
     return out;
