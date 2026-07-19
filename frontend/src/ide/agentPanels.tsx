@@ -18,6 +18,8 @@ import {
 import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
 import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
 import {boundedInlineDiff} from '@/ide/agentDiff';
+import {isCloudRunAction, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
   friendlyTool,
@@ -121,7 +123,7 @@ function tokenCount(value: number): string {
 
 function totalTokens(usage?: AgentUsageSummary | null): number {
   if (!usage) return 0;
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+  return usage.inputTokens + usage.outputTokens;
 }
 
 function hasRenderableAssistantContent(content: string): boolean {
@@ -734,7 +736,10 @@ function ArtifactRail({
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 
-  function requestSandbox(artifact: AgentArtifact) {
+  // Honest naming (Phase 4, item 29): this only drafts a message into the
+  // composer. It does not start a sandbox, and there is no sandbox runtime yet,
+  // so the control must not claim one.
+  function draftSandboxRequest(artifact: AgentArtifact) {
     dispatch({
       type: 'input:set',
       input: `Create a remote sandbox from the generated artifact ${artifact.filename}. Preserve the artifact content from the previous assistant message and return evidence, changed files, and the handoff path.`,
@@ -782,8 +787,12 @@ function ArtifactRail({
               >
                 Preview
               </button>
-              <button className='ide-btn ghost' onClick={() => requestSandbox(artifact)}>
-                Use in sandbox
+              <button
+                className='ide-btn ghost'
+                onClick={() => draftSandboxRequest(artifact)}
+                title='Draft a sandbox request in the composer. Nothing runs until you send it.'
+              >
+                Draft sandbox request
               </button>
             </div>
             {copyErrorId === artifact.id && (
@@ -1248,10 +1257,12 @@ function ActionCard({
   onDismiss: () => void;
   busy: boolean;
 }) {
-  const isCloudRun = pending.action.type === 'create_cloud_run';
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
-  if (isCloudRun) {
+  // The same predicate the confirmation dispatcher uses. A cloud-run proposal
+  // that is not confirmable renders as a blocked explanation instead of a
+  // confirm button that would be dropped on click.
+  if (isConfirmableCloudRun(pending.action)) {
     return (
       <SandboxProposalCard
         pending={pending}
@@ -1260,6 +1271,9 @@ function ActionCard({
         onDismiss={onDismiss}
       />
     );
+  }
+  if (isCloudRunAction(pending.action)) {
+    return <AgentBlockedActionCard action={pending.action} onDismiss={onDismiss} busy={busy} />;
   }
   if (isLocal) return <LocalHandoffCard pending={pending} onDismiss={onDismiss} />;
   const args = Object.entries(pending.action.arguments || {});

@@ -10,6 +10,10 @@ vi.mock('@/lib/api', () => ({
   getRuns: vi.fn().mockResolvedValue({content: []}),
   getUnreadCount: vi.fn().mockResolvedValue({count: 0}),
   getProjects: vi.fn().mockResolvedValue([]),
+  // Backs the "latest sandbox" palette command, which now reads the
+  // server-owned agent-session read model instead of the global run list.
+  listAgentSessions: vi.fn().mockResolvedValue([]),
+  createAgentSession: vi.fn().mockResolvedValue({id: 's1'}),
 }));
 
 vi.mock('@/stores/useUiStore', () => ({

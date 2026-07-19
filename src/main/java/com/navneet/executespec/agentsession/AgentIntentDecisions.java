@@ -1,10 +1,13 @@
 package com.navneet.executespec.agentsession;
 
+import com.navneet.executespec.agentsession.dto.AgentActionContext;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TypedAction;
 
 final class AgentIntentDecisions {
+
+  static final String CREATE_CLOUD_RUN = "create_cloud_run";
 
   private AgentIntentDecisions() {}
 
@@ -36,6 +39,31 @@ final class AgentIntentDecisions {
       boolean runApiAllowed,
       boolean confirmationRequiredBeforeSubmit,
       String policyReason) {
+    return decision(
+        route,
+        confidence,
+        reasonCode,
+        requiresConfirmation,
+        assistantReply,
+        action,
+        runApiAllowed,
+        confirmationRequiredBeforeSubmit,
+        policyReason,
+        null);
+  }
+
+  static OrchestratorDecision decision(
+      String route,
+      double confidence,
+      String reasonCode,
+      boolean requiresConfirmation,
+      String assistantReply,
+      TypedAction action,
+      boolean runApiAllowed,
+      boolean confirmationRequiredBeforeSubmit,
+      String policyReason,
+      AgentActionContext actionContext) {
+    assertCloudRunInvariant(action, actionContext, runApiAllowed);
     return new OrchestratorDecision(
         route,
         confidence,
@@ -44,7 +72,30 @@ final class AgentIntentDecisions {
         assistantReply,
         action,
         new OrchestratorPolicy(runApiAllowed, confirmationRequiredBeforeSubmit, policyReason),
-        null);
+        null,
+        actionContext);
+  }
+
+  /**
+   * Fail-closed guard for the Phase 4 invariant: a decision without a confirmable typed context, or
+   * without a project/repository to run against, must never carry a confirmable {@code
+   * create_cloud_run} action. This is enforced structurally rather than by convention so a future
+   * intent branch cannot reintroduce a non-executable but clickable run proposal.
+   */
+  private static void assertCloudRunInvariant(
+      TypedAction action, AgentActionContext actionContext, boolean runApiAllowed) {
+    if (action == null || !CREATE_CLOUD_RUN.equals(action.type())) return;
+    if (!runApiAllowed) {
+      throw new IllegalStateException("create_cloud_run proposed while the Run API is disallowed");
+    }
+    if (actionContext != null && !actionContext.confirmable()) {
+      throw new IllegalStateException(
+          "create_cloud_run proposed with a blocked context: " + actionContext.blockingReasons());
+    }
+    Object projectId = action.arguments() == null ? null : action.arguments().get("projectId");
+    if (!(projectId instanceof String value) || value.isBlank()) {
+      throw new IllegalStateException("create_cloud_run proposed without project context");
+    }
   }
 
   static String billingImpact(String actionType) {

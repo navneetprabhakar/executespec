@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {consumeSpecHandoff, writeSpecHandoff} from '@/lib/specHandoff';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {ScoreBadge} from '@/ide/ScoreBadge';
@@ -167,9 +168,9 @@ export function IdeWelcome() {
     setSampleBusyId(s.id);
     try {
       const picked = await api.pickOnboardingSample(s.id);
-      sessionStorage.setItem('signal:pending-spec', picked.spec || s.title);
+      writeSpecHandoff({spec: picked.spec || s.title, source: 'onboarding-sample'});
     } catch {
-      sessionStorage.setItem('signal:pending-spec', s.title);
+      writeSpecHandoff({spec: s.title, source: 'onboarding-sample'});
     } finally {
       setSampleBusyId(null);
     }
@@ -371,15 +372,12 @@ export function IdeCompose() {
   const [mobileStep, setMobileStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Compose handoff — a discovery surface (library / templates / chat compile)
-  // may stash a pre-filled spec under `signal:pending-spec` before navigating
-  // here. Consume it once on mount so the textarea pre-fills, mirroring the
-  // Signal ComposePage behaviour.
+  // may stash a versioned structured handoff before navigating here. Consume it
+  // once on mount so the textarea pre-fills. `consumeSpecHandoff` migrates the
+  // legacy bare-string form so a handoff written by an older bundle is honoured.
   useEffect(() => {
-    const pending = sessionStorage.getItem('signal:pending-spec');
-    if (pending) {
-      setSpec(pending);
-      sessionStorage.removeItem('signal:pending-spec');
-    }
+    const pending = consumeSpecHandoff();
+    if (pending) setSpec(pending.spec);
   }, []);
 
   useEffect(() => {
