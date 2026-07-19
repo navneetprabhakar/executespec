@@ -18,6 +18,8 @@ import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
+import com.navneet.executespec.run.RunIdempotencyStatus;
+import com.navneet.executespec.run.RunRequestFingerprint;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -126,13 +128,24 @@ public class AgentRunSubmissionGate {
               + " localInstallationId are verified before any run or provider spend.");
     }
 
+    // Durable atomic claim (V303): one confirmed turn can only ever produce one run, even when the
+    // same confirmation is dispatched twice in parallel. Taken before quota/usage accounting below.
     String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
-    var priorRunId = runIdempotencyService.lookup(user.getUser().getId(), idempotencyKey);
-    if (priorRunId.isPresent()) {
-      var prior = stateStore.findRun(priorRunId.get());
+    var claim =
+        runIdempotencyService.claim(
+            user.getUser().getId(),
+            idempotencyKey,
+            RunRequestFingerprint.of(java.util.Arrays.asList(projectId, spec)));
+    if (claim.status() == RunIdempotencyStatus.DUPLICATE) {
+      var prior = stateStore.findRun(claim.runId());
       if (prior.isPresent() && user.getUser().getId().equals(prior.get().getCreatedByUserId())) {
         return new Submission(prior.get().getRunId(), false, "ALREADY_SUBMITTED");
       }
+    }
+    if (!claim.owned() && claim.status() != RunIdempotencyStatus.DISABLED) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "This confirmation is already being submitted. Reload the session before retrying.");
     }
 
     inputSanitizer.scan(spec);
@@ -171,36 +184,49 @@ public class AgentRunSubmissionGate {
     modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
     String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
 
-    PipelineRun run =
-        runOrchestrator.submitRun(
-            spec,
-            "AGENT_ORCHESTRATOR",
-            null,
-            "EXISTING",
-            user.getUser().getGithubPat(),
-            user.getUser().getGithubOwner(),
-            false,
-            false,
-            modelName,
-            effectiveProvider,
-            user.getUser().getId(),
-            user.getUser().getOrgId(),
-            projectId,
-            executionMode,
-            null,
-            null,
-            false,
-            null,
-            null,
-            null,
-            null,
-            lowStartTier);
+    PipelineRun run;
+    try {
+      run =
+          runOrchestrator.submitRun(
+              spec,
+              "AGENT_ORCHESTRATOR",
+              null,
+              "EXISTING",
+              user.getUser().getGithubPat(),
+              user.getUser().getGithubOwner(),
+              false,
+              false,
+              modelName,
+              effectiveProvider,
+              user.getUser().getId(),
+              user.getUser().getOrgId(),
+              projectId,
+              executionMode,
+              null,
+              null,
+              false,
+              null,
+              null,
+              null,
+              null,
+              lowStartTier);
+    } catch (ResponseStatusException e) {
+      if (e.getStatusCode().is4xxClientError()) {
+        runIdempotencyService.failFinal(claim, e.getStatusCode() + " " + e.getReason());
+      } else {
+        runIdempotencyService.releaseForRetry(claim, String.valueOf(e.getStatusCode()));
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      runIdempotencyService.releaseForRetry(claim, e.getClass().getSimpleName());
+      throw e;
+    }
 
+    runIdempotencyService.complete(claim, run.getRunId());
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
     }
-    runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
     return new Submission(run.getRunId(), true, "SUBMITTED");
   }
 

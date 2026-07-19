@@ -125,6 +125,10 @@ public class RunController {
 
     // Content-level security scan (prompt injection, shell embedding, abuse patterns)
     inputSanitizer.scan(req.userRequest());
+    if (req.localRepositoryInventory() != null) {
+      validateLocalRepositoryInventory(req.localRepositoryInventory());
+      inputSanitizer.scan(req.localRepositoryInventory());
+    }
 
     // Check if submissions are paused (maintenance mode)
     if (featureFlagService.isEnabled("submissions.paused")) {
@@ -164,92 +168,113 @@ public class RunController {
       }
     }
 
-    // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same
-    // Idempotency-Key returns the ORIGINAL run instead of creating a duplicate. Checked BEFORE the
-    // quota/usage increments below, so a client retry (after a transient 5xx whose response was
-    // lost) never double-charges the user's monthly quota. Scoped + ownership-checked so a key can
-    // only ever resolve to the caller's own run; fail-open if Redis is down.
+    // Idempotent submit (RL-2026-06-005, made durable + atomic by V303). The claim is taken BEFORE
+    // the quota/usage increments below, so a client retry — or a genuinely parallel duplicate —
+    // never creates a second run nor double-charges the user's quota. Exactly one caller can own a
+    // key at a time across every JVM sharing this database; losers resolve to the winner's run.
+    // Scoped by userId, so one user's key can never reference another user's run.
     final String userId = userDetails.getUser().getId();
-    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      java.util.Optional<String> priorRunId = runIdempotencyService.lookup(userId, idempotencyKey);
-      if (priorRunId.isPresent()) {
-        java.util.Optional<PipelineRun> prior = stateStore.findRun(priorRunId.get());
-        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
-          log.info(
-              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
-              prior.get().getRunId());
-          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
-        }
+    final com.navneet.executespec.run.RunIdempotencyClaim idempotencyClaim =
+        runIdempotencyService.claim(
+            userId,
+            idempotencyKey,
+            com.navneet.executespec.run.RunRequestFingerprint.of(fingerprintOf(req)));
+    var alreadySubmitted = resolveIdempotentSubmit(idempotencyClaim, userId);
+    if (alreadySubmitted != null) return alreadySubmitted;
+
+    // Everything from here to run creation runs under the idempotency claim. Any failure must
+    // publish a terminal claim state, otherwise the key would stay locked until its lease elapses.
+    PipelineRun run;
+    try {
+      // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
+      // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
+      // rejected model never burns the user's monthly quota.
+      modelAccessService.assertModelAllowed(userId, req.modelName());
+      String effectiveAiProvider =
+          req.aiProvider() != null && !req.aiProvider().isBlank()
+              ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
+              : aiProviderPreferenceService.preferredProvider(userDetails);
+      if ((effectiveAiProvider == null || effectiveAiProvider.isBlank())
+          && req.modelName() != null
+          && !req.modelName().isBlank()) {
+        effectiveAiProvider = modelAccessService.providerForModel(req.modelName());
       }
+      modelAccessService.assertProviderModelPair(effectiveAiProvider, req.modelName());
+
+      // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly
+      // run
+      // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
+      // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
+      // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
+      // the mid-run source of truth.
+      managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
+      tierEnforcementService.incrementRunCountForAnalytics(userId);
+      // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
+      apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
+
+      // Extract per-user GitHub credentials to pass into the run
+      String githubPat = userDetails.getUser().getGithubPat();
+      String githubOwner = userDetails.getUser().getGithubOwner();
+      // Pass ALL pre-async fields INTO submitRun so they're set on the entity
+      // BEFORE the async pipeline thread starts (avoids race condition where the
+      // pipeline thread re-loads and re-saves the run without ownership fields).
+      String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
+
+      // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
+      String planningRequest =
+          localExecutionRequested
+                  && req.localRepositoryInventory() != null
+                  && !req.localRepositoryInventory().isBlank()
+              ? req.userRequest()
+                  + "\n\n--- LOCAL REPOSITORY INVENTORY (untrusted path-only evidence) ---\n"
+                  + req.localRepositoryInventory()
+                  + "\n--- END LOCAL REPOSITORY INVENTORY ---"
+              : req.userRequest();
+      run =
+          v2Orchestrator.submitRunWithLocalExecution(
+              planningRequest,
+              req.source() != null ? req.source() : "REST",
+              req.repoUrl(),
+              req.repoMode(),
+              githubPat,
+              githubOwner,
+              Boolean.TRUE.equals(req.skipApproval()),
+              Boolean.TRUE.equals(req.autoMerge()),
+              req.modelName(),
+              effectiveAiProvider,
+              userDetails.getUser().getId(),
+              userDetails.getUser().getOrgId(),
+              req.projectId(),
+              executionMode,
+              req.selectedRepoIds(),
+              req.figmaUrl(),
+              Boolean.TRUE.equals(req.tddMode()),
+              req.branch(),
+              req.prReviewComments(),
+              com.navneet.executespec.state.RunMode.BUILD,
+              req.requireConfirmationBeforeExpensiveContinuation(),
+              req.requireBenchmarkPriorForAutomaticContinuation(),
+              req.lowComplexityWorkerStartTier(),
+              localExecutionRequested);
+
+    } catch (ResponseStatusException e) {
+      // A 4xx is deterministic for this exact body: retrying it would fail identically, so the key
+      // is closed rather than left open for a retry storm. Anything else may succeed on retry.
+      if (e.getStatusCode().is4xxClientError()) {
+        runIdempotencyService.failFinal(idempotencyClaim, e.getStatusCode() + " " + e.getReason());
+      } else {
+        runIdempotencyService.releaseForRetry(idempotencyClaim, String.valueOf(e.getStatusCode()));
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      runIdempotencyService.releaseForRetry(idempotencyClaim, e.getClass().getSimpleName());
+      throw e;
     }
 
-    // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
-    // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
-    // rejected model never burns the user's monthly quota.
-    modelAccessService.assertModelAllowed(userId, req.modelName());
-    String effectiveAiProvider =
-        req.aiProvider() != null && !req.aiProvider().isBlank()
-            ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
-            : aiProviderPreferenceService.preferredProvider(userDetails);
-    if ((effectiveAiProvider == null || effectiveAiProvider.isBlank())
-        && req.modelName() != null
-        && !req.modelName().isBlank()) {
-      effectiveAiProvider = modelAccessService.providerForModel(req.modelName());
-    }
-    modelAccessService.assertProviderModelPair(effectiveAiProvider, req.modelName());
-
-    // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly run
-    // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
-    // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
-    // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
-    // the mid-run source of truth.
-    managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
-    tierEnforcementService.incrementRunCountForAnalytics(userId);
-    // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
-    apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
-
-    // Extract per-user GitHub credentials to pass into the run
-    String githubPat = userDetails.getUser().getGithubPat();
-    String githubOwner = userDetails.getUser().getGithubOwner();
-    // Pass ALL pre-async fields INTO submitRun so they're set on the entity
-    // BEFORE the async pipeline thread starts (avoids race condition where the
-    // pipeline thread re-loads and re-saves the run without ownership fields).
-    String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
-
-    // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
-    PipelineRun run =
-        v2Orchestrator.submitRunWithLocalExecution(
-            req.userRequest(),
-            req.source() != null ? req.source() : "REST",
-            req.repoUrl(),
-            req.repoMode(),
-            githubPat,
-            githubOwner,
-            Boolean.TRUE.equals(req.skipApproval()),
-            Boolean.TRUE.equals(req.autoMerge()),
-            req.modelName(),
-            effectiveAiProvider,
-            userDetails.getUser().getId(),
-            userDetails.getUser().getOrgId(),
-            req.projectId(),
-            executionMode,
-            req.selectedRepoIds(),
-            req.figmaUrl(),
-            Boolean.TRUE.equals(req.tddMode()),
-            req.branch(),
-            req.prReviewComments(),
-            com.navneet.executespec.state.RunMode.BUILD,
-            req.requireConfirmationBeforeExpensiveContinuation(),
-            req.requireBenchmarkPriorForAutomaticContinuation(),
-            req.lowComplexityWorkerStartTier(),
-            localExecutionRequested);
-
-    // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
-    // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
-    // present when the client's backoff retry arrives; best-effort (no-op if Redis is down).
-    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      runIdempotencyService.record(userId, idempotencyKey, run.getRunId());
-    }
+    // Publish the run against the claim immediately after creation, so a concurrent loser (which is
+    // waiting on this key) and any later retry both resolve to THIS run instead of creating
+    // another.
+    runIdempotencyService.complete(idempotencyClaim, run.getRunId());
 
     // Run count incremented atomically inside `assertAndIncrementRunCount` above. The
     // usageTrackingService increment below tracks the BILLING surface (not the quota counter),
@@ -282,6 +307,74 @@ public class RunController {
 
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .body(mapper.toSummary(run, localExecutionRequested, localExecutionRequested));
+  }
+
+  /**
+   * The values that decide what a run builds and what it costs. A reused Idempotency-Key carrying
+   * any different value here is a conflict, never a silent replay of the earlier run.
+   */
+  private static java.util.List<String> fingerprintOf(RunRequest req) {
+    return java.util.Arrays.asList(
+        req.userRequest(),
+        req.source(),
+        req.repoUrl(),
+        req.repoMode(),
+        req.projectId(),
+        req.modelName(),
+        req.aiProvider(),
+        req.executionMode(),
+        req.branch(),
+        req.figmaUrl(),
+        String.valueOf(req.skipApproval()),
+        String.valueOf(req.autoMerge()),
+        String.valueOf(req.tddMode()),
+        String.valueOf(req.localExecution()),
+        String.valueOf(req.userCostCap()),
+        String.valueOf(req.selectedRepoIds()),
+        String.valueOf(req.lowComplexityWorkerStartTier()));
+  }
+
+  /**
+   * Translate a lost idempotency claim into a response, or null when this caller owns the claim and
+   * must proceed with the submission.
+   */
+  private ResponseEntity<RunSummary> resolveIdempotentSubmit(
+      com.navneet.executespec.run.RunIdempotencyClaim claim, String userId) {
+    switch (claim.status()) {
+      case DISABLED, CLAIMED -> {
+        return null;
+      }
+      case DUPLICATE -> {
+        java.util.Optional<PipelineRun> prior = stateStore.findRun(claim.runId());
+        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
+          log.info(
+              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
+              prior.get().getRunId());
+          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
+        }
+        // The claim resolved to a run this caller does not own, or one that no longer exists.
+        // Failing closed is the only safe answer: never fabricate a second run for a claimed key.
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "This Idempotency-Key is already bound to a run that is not available to you.");
+      }
+      case CONFLICT ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "This Idempotency-Key was already used with a different request body. Use a new"
+                  + " key.");
+      case FAILED_FINAL ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "This Idempotency-Key already failed permanently ("
+                  + claim.detail()
+                  + "). Use a new key.");
+      case IN_PROGRESS ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "A submission with this Idempotency-Key is still in flight. Retry shortly.");
+    }
+    return null;
   }
 
   /**
@@ -441,6 +534,14 @@ public class RunController {
   static boolean isPatAuthenticated(HttpServletRequest request) {
     return JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(
         request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE));
+  }
+
+  static void rejectRepositoryDestinationOverride(String repoUrl) {
+    if (repoUrl != null && !repoUrl.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Repository destination is bound to the run and cannot be overridden during push.");
+    }
   }
 
   /** Approve or reject the plan-approval gate. */
@@ -751,7 +852,8 @@ public class RunController {
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "NEW") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
-    log.info("POST /api/runs/{}/push-github — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+    rejectRepositoryDestinationOverride(repoUrl);
+    log.info("POST /api/runs/{}/push-github — repoMode={}", runId, repoMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -759,8 +861,6 @@ public class RunController {
               + run.getStatus()
               + ")");
     }
-    // Override run's repo config with request params
-    if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
     run.setRepoMode(repoMode);
     // Ensure PAT is available (from user or run or system)
     if (run.getGithubPat() == null || run.getGithubPat().isBlank()) {
@@ -878,14 +978,13 @@ public class RunController {
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
-    log.info("POST /api/runs/{}/push-scm — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+    rejectRepositoryDestinationOverride(repoUrl);
+    log.info("POST /api/runs/{}/push-scm — repoMode={}", runId, repoMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
           "Only COMPLETE or PARTIAL runs can be pushed to SCM (current: " + run.getStatus() + ")");
     }
-    // Override run's repo config with request params
-    if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
     run.setRepoMode(repoMode);
 
     var user = userDetails.getUser();
@@ -1560,6 +1659,26 @@ public class RunController {
           HttpStatus.GONE,
           "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
               + " REALTIME");
+    }
+  }
+
+  static void validateLocalRepositoryInventory(String inventory) {
+    if (inventory == null || inventory.isBlank()) return;
+    for (String line : inventory.split("\\R")) {
+      if (line.isBlank()) continue;
+      if (!line.startsWith("- ")) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Local repository inventory must contain path entries only");
+      }
+      String path = line.substring(2).trim().replace('\\', '/');
+      if ("(inventory truncated)".equals(path)) continue;
+      if (path.isBlank()
+          || path.startsWith("/")
+          || path.matches("^[A-Za-z]:/.*")
+          || java.util.Arrays.asList(path.split("/")).contains("..")) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Local repository inventory contains an unsafe path");
+      }
     }
   }
 
