@@ -79,6 +79,32 @@ class RetrievalServiceTest {
     verify(chunks, never()).lexical(anyString(), anyString(), anyInt());
   }
 
+  @Test
+  void unrelatedSemanticHitsAreRejectedBeforeTheyEnterAgentPrompts() {
+    when(embeddings.availability("p1")).thenReturn(semanticAvailability());
+    float[] vector = new float[] {0.1f};
+    when(embeddings.embedQueryForProject(
+            eq("p1"),
+            eq("unrelated query"),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(vector);
+    when(chunks.nearest("p1", vector, 3))
+        .thenReturn(
+            List.of(
+                new ChunkStore.RetrievedChunk(
+                    "d1", "payroll.md", 0, "Private payroll instructions", 8, 0.91)));
+    when(chunks.lexical("p1", "unrelated query", 3)).thenReturn(List.of());
+
+    var result = service.retrieveWithReadiness("p1", "unrelated query", 3, 100);
+
+    assertThat(result.mode()).isEqualTo("LEXICAL");
+    assertThat(result.reason()).isEqualTo("SEMANTIC_BELOW_RELEVANCE_THRESHOLD");
+    assertThat(result.content()).isEmpty();
+  }
+
   private static ChunkStore.RetrievedChunk hit(String filename, String content) {
     return new ChunkStore.RetrievedChunk("d1", filename, 0, content, 8, 0.1);
   }

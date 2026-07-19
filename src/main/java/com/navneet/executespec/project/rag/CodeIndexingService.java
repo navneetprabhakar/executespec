@@ -27,6 +27,8 @@ import com.navneet.executespec.project.rag.CodeIndexStateStore.Completion;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Lease;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.State;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Status;
+import com.navneet.executespec.security.GeneratedSecretScanner;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
@@ -148,6 +150,7 @@ public class CodeIndexingService {
   private final EmbeddingService embedder;
   private final CodeChunkStore codeChunkStore;
   private final CodeIndexStateStore stateStore;
+  private final GeneratedSecretScanner secretScanner;
   private final int maxRefreshedFiles;
 
   @Autowired
@@ -156,13 +159,15 @@ public class CodeIndexingService {
       ChunkingService chunker,
       EmbeddingService embedder,
       CodeChunkStore codeChunkStore,
-      CodeIndexStateStore stateStore) {
+      CodeIndexStateStore stateStore,
+      GeneratedSecretScanner secretScanner) {
     this(
         workspaceInitService,
         chunker,
         embedder,
         codeChunkStore,
         stateStore,
+        secretScanner,
         DEFAULT_MAX_REFRESHED_FILES);
   }
 
@@ -174,11 +179,30 @@ public class CodeIndexingService {
       CodeChunkStore codeChunkStore,
       CodeIndexStateStore stateStore,
       int maxRefreshedFiles) {
+    this(
+        workspaceInitService,
+        chunker,
+        embedder,
+        codeChunkStore,
+        stateStore,
+        new GeneratedSecretScanner(),
+        maxRefreshedFiles);
+  }
+
+  CodeIndexingService(
+      WorkspaceInitService workspaceInitService,
+      ChunkingService chunker,
+      EmbeddingService embedder,
+      CodeChunkStore codeChunkStore,
+      CodeIndexStateStore stateStore,
+      GeneratedSecretScanner secretScanner,
+      int maxRefreshedFiles) {
     this.workspaceInitService = workspaceInitService;
     this.chunker = chunker;
     this.embedder = embedder;
     this.codeChunkStore = codeChunkStore;
     this.stateStore = stateStore;
+    this.secretScanner = secretScanner;
     this.maxRefreshedFiles = Math.max(1, maxRefreshedFiles);
   }
 
@@ -283,8 +307,11 @@ public class CodeIndexingService {
       String shaKey = shortSha(sourceSha);
       String cloneWsId = "projchat-" + repo.getId() + "-" + shaKey;
       try {
-        workspaceInitService.cloneFromRepo(
-            cloneWsId, cloneUrl, credentialUsername, credentialSecret);
+        String gitUsername =
+            "BITBUCKET".equalsIgnoreCase(repo.getScmProvider())
+                ? "x-bitbucket-api-token-auth"
+                : credentialUsername;
+        workspaceInitService.cloneFromRepo(cloneWsId, cloneUrl, gitUsername, credentialSecret);
       } catch (Exception cloneFailure) {
         stateStore.fail(lease, "SOURCE_CLONE_FAILED");
         log.warn("code index clone failed repo={} type={}", fullName, failureType(cloneFailure));
@@ -311,7 +338,8 @@ public class CodeIndexingService {
       int capDeferred = 0;
 
       for (Candidate candidate : inventory.files()) {
-        if (isBinaryName(candidate.relativePath())
+        if (SensitiveWorkspacePathPolicy.isSensitive(candidate.relativePath())
+            || isBinaryName(candidate.relativePath())
             || candidate.size() == 0
             || candidate.size() > MAX_FILE_BYTES) {
           skipped++;
@@ -327,6 +355,11 @@ public class CodeIndexingService {
           continue;
         }
         if (isBinaryContent(bytes)) {
+          skipped++;
+          continue;
+        }
+        String content = new String(bytes, StandardCharsets.UTF_8);
+        if (secretScanner.scan(content).isPresent()) {
           skipped++;
           continue;
         }
@@ -346,8 +379,7 @@ public class CodeIndexingService {
         if (!stateStore.renew(lease, LEASE_DURATION)) throw new LeaseLostException();
 
         try {
-          List<ChunkingService.Chunk> chunks =
-              chunker.chunk(new String(bytes, StandardCharsets.UTF_8));
+          List<ChunkingService.Chunk> chunks = chunker.chunk(content);
           if (chunks.isEmpty()) {
             skipped++;
             failed++;
@@ -399,7 +431,7 @@ public class CodeIndexingService {
       Status finalStatus = ready ? Status.READY : Status.PARTIAL;
       String reason =
           ready
-              ? "FULL_SOURCE_COVERAGE"
+              ? "FULL_ELIGIBLE_SOURCE_COVERAGE"
               : partialReason(sourcePinned, inventory.truncated(), capDeferred, failed, eligible);
       int chunks = codeChunkStore.countChunks(projectId, repo.getId().toString());
       Completion completion =

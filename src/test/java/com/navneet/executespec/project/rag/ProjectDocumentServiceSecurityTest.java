@@ -27,6 +27,7 @@ import com.navneet.executespec.project.rag.entity.ProjectDocumentBlob;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentBlobRepository;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,7 @@ class ProjectDocumentServiceSecurityTest {
       org.mockito.Mockito.mock(ProjectWorkspaceService.class);
   private final DocumentExtractor extractor = org.mockito.Mockito.mock(DocumentExtractor.class);
   private final DocumentMalwareScanner scanner = new DeterministicDocumentMalwareScanner();
+  private final GeneratedSecretScanner secretScanner = new GeneratedSecretScanner();
   private final ChunkingService chunker = new ChunkingService();
   private final EmbeddingService embedder = org.mockito.Mockito.mock(EmbeddingService.class);
   private final ChunkStore chunkStore = org.mockito.Mockito.mock(ChunkStore.class);
@@ -97,6 +99,7 @@ class ProjectDocumentServiceSecurityTest {
             extractor,
             new DocumentTypeInspector(),
             scanner,
+            secretScanner,
             properties,
             chunker,
             embedder,
@@ -146,6 +149,21 @@ class ProjectDocumentServiceSecurityTest {
   }
 
   @Test
+  void rejectsExtractedCredentialContentBeforeBlobPersistenceOrProcessingDispatch() {
+    String credential = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+    when(extractor.extractBounded(any(), any(), anyInt()))
+        .thenReturn(new ExtractionResult("deployment key: " + credential, 1, 56, 15));
+
+    assertThatThrownBy(() -> service.upload("p1", textFile("architecture.md", credential), "u1"))
+        .isInstanceOf(DocumentAdmissionException.class)
+        .extracting(e -> ((DocumentAdmissionException) e).code())
+        .isEqualTo("CREDENTIAL_CONTENT_DETECTED");
+    verify(repo, never()).save(any());
+    verify(blobRepo, never()).save(any());
+    verify(events, never()).publishEvent(any(ProjectDocumentProcessingEvent.class));
+  }
+
+  @Test
   void failsClosedWhenEnterpriseScannerUnavailable() {
     DocumentMalwareScanner unavailable =
         bytes ->
@@ -161,6 +179,7 @@ class ProjectDocumentServiceSecurityTest {
             extractor,
             new DocumentTypeInspector(),
             unavailable,
+            secretScanner,
             properties,
             chunker,
             embedder,
@@ -256,7 +275,32 @@ class ProjectDocumentServiceSecurityTest {
     service.delete("p1", "d1");
 
     verify(repo, never()).save(other);
+    verify(blobRepo, never()).deleteById("d1");
     verify(chunkStore, never()).deleteByDocument("d1");
+  }
+
+  @Test
+  void deletePurgesRawSourceBytesAndDerivedChunksWhileKeepingTheTombstone(@TempDir Path tempDir) {
+    ProjectDocument document =
+        ProjectDocument.builder()
+            .id("d1")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d1.bin")
+            .status(ProjectDocument.Status.READY)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    when(repo.findByIdForUpdate("d1")).thenReturn(Optional.of(document));
+    when(workspace.resolve("p1", "docs/.uploads/d1.bin")).thenReturn(tempDir.resolve("d1.bin"));
+
+    service.delete("p1", "d1");
+
+    verify(blobRepo).deleteById("d1");
+    verify(chunkStore).deleteByDocument("d1");
+    verify(repo).save(document);
+    assertThat(document.getStatus()).isEqualTo(ProjectDocument.Status.CANCELLED);
+    assertThat(document.getDeletedAt()).isNotNull();
+    assertThat(document.isCancellationRequested()).isTrue();
   }
 
   @Test
@@ -316,6 +360,44 @@ class ProjectDocumentServiceSecurityTest {
     verify(embedder, org.mockito.Mockito.times(1))
         .embedForProject(any(), any(), any(), any(), any(), eq("member-1"));
     verify(chunkStore, org.mockito.Mockito.times(1)).insertAll(any(), any(), any());
+  }
+
+  @Test
+  void legacyStoredCredentialIsRejectedBeforeWorkspaceOrEmbeddingEgress() {
+    ProjectDocument pending =
+        ProjectDocument.builder()
+            .id("d-secret")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-secret.bin")
+            .mimeType("text/plain")
+            .status(ProjectDocument.Status.UPLOADED)
+            .processingAttempt(0)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    String credential = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+    when(repo.findByIdForUpdate("d-secret")).thenReturn(Optional.of(pending));
+    when(blobRepo.findById("d-secret"))
+        .thenReturn(
+            Optional.of(
+                ProjectDocumentBlob.builder()
+                    .documentId("d-secret")
+                    .contentBytes(credential.getBytes(StandardCharsets.UTF_8))
+                    .createdAt(OffsetDateTime.now())
+                    .build()));
+    when(extractor.extractBounded(any(), any(), anyInt()))
+        .thenReturn(new ExtractionResult("deployment key: " + credential, 1, 56, 15));
+
+    service.processDocument("d-secret");
+
+    assertThat(pending.getStatus()).isEqualTo(ProjectDocument.Status.FAILED);
+    assertThat(pending.getErrorCode()).isEqualTo("CREDENTIAL_CONTENT_DETECTED");
+    verify(workspace, never()).initIfMissing(any());
+    verify(workspace, never()).resolve(any(), any());
+    verify(embedder, never())
+        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
+    verify(chunkStore, never()).insertAll(any(), any(), any());
+    verify(chunkStore, never()).insertLexicalAll(any(), any());
   }
 
   @Test

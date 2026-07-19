@@ -420,7 +420,7 @@ public class ProjectChatService {
             .build();
     chatRepo.save(userMsg);
 
-    List<Message> conversation = new ArrayList<>(buildMessages(project));
+    List<Message> conversation = new ArrayList<>(buildMessages(project, userId));
 
     ExecutionContext ctx =
         new ExecutionContext(
@@ -710,7 +710,7 @@ public class ProjectChatService {
             model));
   }
 
-  private List<Message> buildMessages(Project project) {
+  private List<Message> buildMessages(Project project, String actorUserId) {
     StringBuilder sys = new StringBuilder();
     sys.append("You are the ExecuteSpec project assistant. Answer the user's questions ")
         .append(
@@ -812,7 +812,7 @@ public class ProjectChatService {
             .orElse("");
     if (!retrievalQuery.isBlank()) {
       try {
-        String refs = retrievalService.retrieve(project.getId(), retrievalQuery);
+        String refs = retrievalService.retrieve(project.getId(), retrievalQuery, actorUserId);
         if (refs != null && !refs.isBlank()) {
           evidence
               .append("## RETRIEVED PROJECT DOCS (untrusted context)\n")

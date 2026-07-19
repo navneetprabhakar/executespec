@@ -85,10 +85,21 @@ class BitbucketCloudScmRepositoryClientTest {
   void rejectsCrossOriginPaginationBeforeCredentialCouldBeForwarded() {
     BitbucketCloudScmRepositoryClient client = client();
     assertThatThrownBy(
-            () -> client.listRepositories(null, new ScmCredential("forge", "unsafe-secret")))
+            () -> client.listRepositories("acme", new ScmCredential("forge", "unsafe-secret")))
         .isInstanceOf(ScmProviderException.class)
         .hasMessageContaining("BITBUCKET_UNSAFE_PAGINATION_URL");
     assertThat(requestedUris).hasSize(1);
+  }
+
+  @Test
+  void requiresWorkspaceInsteadOfCallingRemovedCrossWorkspaceCatalogue() {
+    BitbucketCloudScmRepositoryClient client = client();
+
+    assertThatThrownBy(
+            () -> client.listRepositories(null, new ScmCredential("forge", "safe-secret")))
+        .isInstanceOf(ScmProviderException.class)
+        .hasMessageContaining("BITBUCKET_WORKSPACE_REQUIRED");
+    assertThat(requestedUris).isEmpty();
   }
 
   @Test
@@ -114,7 +125,7 @@ class BitbucketCloudScmRepositoryClientTest {
     authorizationHeaders.add(exchange.getRequestHeaders().getFirst("Authorization"));
     String path = exchange.getRequestURI().getPath();
     String query = exchange.getRequestURI().getQuery();
-    if (path.equals("/2.0/repositories") && query != null && query.contains("role=member")) {
+    if (path.equals("/2.0/repositories/acme") && query != null && query.contains("role=member")) {
       if (query.contains("page=2")) {
         json(exchange, 200, "{\"values\":[" + repositoryJson("{id-2}", "acme/web") + "]}");
       } else if (query.contains("sort=full_name") && query.contains("role=member")) {
@@ -128,7 +139,7 @@ class BitbucketCloudScmRepositoryClientTest {
                                 .encodeToString(
                                     "forge:unsafe-secret".getBytes(StandardCharsets.UTF_8)))
                 ? "https://attacker.example/steal"
-                : base + "/repositories?role=member&pagelen=100&page=2";
+                : base + "/repositories/acme?role=member&pagelen=100&page=2";
         json(
             exchange,
             200,

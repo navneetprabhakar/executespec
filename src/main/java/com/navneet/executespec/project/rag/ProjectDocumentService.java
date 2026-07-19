@@ -29,6 +29,7 @@ import com.navneet.executespec.project.rag.entity.ProjectDocumentBlob;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentBlobRepository;
 import com.navneet.executespec.project.rag.repository.ProjectDocumentRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -55,6 +56,7 @@ public class ProjectDocumentService {
   private final DocumentExtractor extractor;
   private final DocumentTypeInspector typeInspector;
   private final DocumentMalwareScanner malwareScanner;
+  private final GeneratedSecretScanner secretScanner;
   private final ProjectDocumentProperties properties;
   private final ChunkingService chunker;
   private final EmbeddingService embedder;
@@ -82,6 +84,7 @@ public class ProjectDocumentService {
       enforceMalwarePolicy(project, bytes);
       ExtractionResult extraction = preflightExtraction(bytes, inspected.mimeType());
       enforcePerFileExtractionLimits(extraction);
+      enforceCredentialContentPolicy(extraction);
       String documentId = UUID.randomUUID().toString();
       String relativePath = "docs/.uploads/" + documentId + ".bin";
       OffsetDateTime now = OffsetDateTime.now();
@@ -164,11 +167,10 @@ public class ProjectDocumentService {
                       new DocumentAdmissionException(
                           "SOURCE_BYTES_MISSING", "Stored document content is unavailable."));
       if (!heartbeat(lease)) return;
-      Path rawPath = persistOpaqueWorkspaceCopy(claimed, bytes);
-      ExtractionResult extraction =
-          extractor.extractBounded(
-              rawPath, claimed.getMimeType(), properties.getMaxExtractedCharsPerFile());
+      ExtractionResult extraction = preflightExtraction(bytes, claimed.getMimeType());
       enforcePerFileExtractionLimits(extraction);
+      enforceCredentialContentPolicy(extraction);
+      persistOpaqueWorkspaceCopy(claimed, bytes);
       List<ChunkingService.Chunk> chunks = chunker.chunk(extraction.text());
       if (chunks.isEmpty()) {
         failTerminal(lease, "NO_EXTRACTABLE_TEXT", "No readable text was found.");
@@ -239,6 +241,9 @@ public class ProjectDocumentService {
               doc.setFailureReason(null);
               invalidateLease(doc);
               repo.save(doc);
+              // Soft-delete keeps the document tombstone for audit/recovery fencing, so the
+              // database FK cannot purge the separately stored source bytes for us.
+              blobRepo.deleteById(documentId);
               deleted.set(true);
             });
     if (!deleted.get()) return;
@@ -539,6 +544,19 @@ public class ProjectDocumentService {
     if (extraction.tokenCount() > properties.getMaxTokensPerFile()) {
       throw new DocumentAdmissionException("TOKEN_LIMIT", "The document exceeds the token limit.");
     }
+  }
+
+  private void enforceCredentialContentPolicy(ExtractionResult extraction) {
+    if (extraction == null) return;
+    secretScanner
+        .scan(extraction.text())
+        .ifPresent(
+            finding -> {
+              throw new DocumentAdmissionException(
+                  "CREDENTIAL_CONTENT_DETECTED",
+                  "The document contains credential material and was rejected.",
+                  HttpStatus.UNPROCESSABLE_ENTITY);
+            });
   }
 
   private void enforceProjectQuotas(

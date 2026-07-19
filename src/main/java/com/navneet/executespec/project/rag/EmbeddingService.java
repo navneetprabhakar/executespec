@@ -116,8 +116,6 @@ public class EmbeddingService {
 
     String runId = usageRunId(sourceId);
     RunKeyContext managedKeys = managedAiContext(dispatch);
-    managedAiUsageService.authorizeFixedCapabilityCall(
-        runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
 
     List<float[]> vectors = new ArrayList<>(texts.size());
     int batchNumber = 0;
@@ -125,6 +123,10 @@ public class EmbeddingService {
       batchNumber++;
       List<String> batch = texts.subList(from, Math.min(from + BATCH_SIZE, texts.size()));
       String taskId = "embedding.batch." + batchNumber;
+      // Each batch is a distinct provider charge. Re-authorize immediately before every physical
+      // attempt so a large document cannot spend N batches under one stale admission decision.
+      managedAiUsageService.authorizeFixedCapabilityCall(
+          runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
       var attempt =
           usageRecorder.prepareProviderCapabilityAttempt(
               reference,

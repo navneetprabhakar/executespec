@@ -260,9 +260,9 @@ public class ProjectArchitectureService {
               confirmedActionReference);
     } catch (Exception e) {
       log.warn(
-          "[{}] LLM combined-arch failed ({}) — falling back to deterministic combine",
+          "[{}] LLM combined-arch failed (type={}) — falling back to deterministic combine",
           projectId,
-          e.getMessage());
+          e.getClass().getSimpleName());
       java.util.LinkedHashMap<String, String> byRepo = new java.util.LinkedHashMap<>();
       for (int i = 0; i < repoArchDocs.size(); i++) {
         byRepo.put(
@@ -335,6 +335,7 @@ public class ProjectArchitectureService {
         repoArchDocs,
         repoFullNames,
         combined.markdown(),
+        provider,
         actorUserId,
         confirmedActionReference);
     workspaceWarmer.warmDiskCache(projectId);
@@ -455,20 +456,13 @@ public class ProjectArchitectureService {
               confirmedActionReference);
     } catch (Exception e) {
       log.warn(
-          "[{}] repo-arch LLM failed for {} ({}) — falling back to codemap as arch content",
+          "[{}] repo-arch LLM failed for {} (type={}) — falling back to codemap as arch content",
           projectId,
           repo.getGithubRepoFullName(),
-          e.getMessage());
+          e.getClass().getSimpleName());
       rar =
           new RepoArchitectureGenerator.Result(
-              "# "
-                  + repo.getGithubRepoFullName()
-                  + " — Architecture\n\n"
-                  + "_LLM generation failed ("
-                  + e.getMessage()
-                  + "). "
-                  + "Showing raw codemap instead._\n\n"
-                  + codeMap.getContent(),
+              fallbackRepoArchitectureMarkdown(repo.getGithubRepoFullName(), codeMap.getContent()),
               0,
               0,
               "fallback");
@@ -514,6 +508,14 @@ public class ProjectArchitectureService {
         && !model.isBlank()
         && !"fallback".equalsIgnoreCase(model)
         && !doc.getContent().contains("LLM generation failed");
+  }
+
+  static String fallbackRepoArchitectureMarkdown(String repoFullName, String codeMap) {
+    return "# "
+        + repoFullName
+        + " — Architecture\n\n"
+        + "_LLM generation failed. Showing raw codemap instead._\n\n"
+        + codeMap;
   }
 
   static boolean isReusableProjectArchitecture(ProjectArchitectureDoc doc) {
@@ -595,6 +597,7 @@ public class ProjectArchitectureService {
       List<RepoArchitectureDoc> repoArchDocs,
       List<String> repoFullNames,
       String archMarkdown,
+      LlmProvider provider,
       String actorUserId,
       LlmExecutionReference confirmedActionReference) {
     try {
@@ -628,16 +631,34 @@ public class ProjectArchitectureService {
       workspace.writeAndCommit(
           projectId, "architecture.md", archMarkdown, "architecture: combined regenerated");
 
-      LlmProvider provider = projectProviderResolver.resolve(projectId);
       String summary =
-          briefService.summarise(
-              projectId, archMarkdown, provider, actorUserId, confirmedActionReference);
+          summariseBrief(
+              briefService,
+              projectId,
+              archMarkdown,
+              provider,
+              actorUserId,
+              confirmedActionReference);
       if (summary != null && !summary.isBlank()) {
         workspace.writeAndCommit(projectId, "summary.md", summary, "summary: regenerated");
       }
     } catch (Exception e) {
-      log.warn("Failed to persist project workspace files for {}: {}", projectId, e.getMessage());
+      log.warn(
+          "Failed to persist project workspace files for {} errorClass={}",
+          projectId,
+          e.getClass().getSimpleName());
     }
+  }
+
+  static String summariseBrief(
+      ProjectBriefService briefService,
+      String projectId,
+      String archMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return briefService.summarise(
+        projectId, archMarkdown, provider, actorUserId, confirmedActionReference);
   }
 
   private static String repoShortName(String full) {

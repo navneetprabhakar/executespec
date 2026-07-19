@@ -22,7 +22,8 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -44,8 +45,29 @@ public class MemoryCompactionService {
   private final PromptAssembler promptAssembler;
   private final ProjectProviderResolver projectProviderResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final TransactionTemplate transactionTemplate;
 
   @Autowired
+  public MemoryCompactionService(
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      ProjectRunLedgerRepository ledgerRepo,
+      ProjectMemorySnapshotRepository snapshotRepo,
+      PromptAssembler promptAssembler,
+      ProjectProviderResolver projectProviderResolver,
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      PlatformTransactionManager transactionManager) {
+    this.llmRouter = llmRouter;
+    this.modelResolver = modelResolver;
+    this.ledgerRepo = ledgerRepo;
+    this.snapshotRepo = snapshotRepo;
+    this.promptAssembler = promptAssembler;
+    this.projectProviderResolver = projectProviderResolver;
+    this.executionPolicyFactory = executionPolicyFactory;
+    this.transactionTemplate = new TransactionTemplate(transactionManager);
+  }
+
+  /** Compatibility constructor for focused unit callers that do not boot persistence. */
   public MemoryCompactionService(
       LlmRouter llmRouter,
       ModelResolver modelResolver,
@@ -61,6 +83,7 @@ public class MemoryCompactionService {
     this.promptAssembler = promptAssembler;
     this.projectProviderResolver = projectProviderResolver;
     this.executionPolicyFactory = executionPolicyFactory;
+    this.transactionTemplate = null;
   }
 
   /** Compatibility constructor for older unit callers. */
@@ -79,24 +102,20 @@ public class MemoryCompactionService {
    * on demand (handy for demos + testing without driving 20+ runs). Returns the new snapshot
    * version, or 0 if nothing needed compacting.
    */
-  @Transactional
   public int compactNow(String projectId, String orgId) {
     return compactNow(projectId, orgId, null);
   }
 
-  @Transactional
   public int compactNow(String projectId, String orgId, String actorUserId) {
     List<ProjectRunLedger> entries =
         ledgerRepo.findUncompactedBeforeRunNumber(projectId, Integer.MAX_VALUE);
     return doCompact(projectId, orgId, actorUserId, entries);
   }
 
-  @Transactional
   public void compactIfNeeded(String projectId, int currentRunNumber, String orgId) {
     compactIfNeeded(projectId, currentRunNumber, orgId, null);
   }
 
-  @Transactional
   public void compactIfNeeded(
       String projectId, int currentRunNumber, String orgId, String actorUserId) {
     int cutoff = currentRunNumber - 10;
@@ -157,12 +176,7 @@ public class MemoryCompactionService {
               .tokenCount(estimateTokens(compacted))
               .orgId(orgId != null && !orgId.isBlank() ? orgId : "default")
               .build();
-      snapshotRepo.save(snapshot);
-
-      for (ProjectRunLedger entry : entries) {
-        entry.setCompactedInto(snapshot.getId());
-      }
-      ledgerRepo.saveAll(entries);
+      persistSnapshotAndMarkers(snapshot, entries);
 
       log.info(
           "MemoryCompactionService: compacted {} entries (R{}-R{}) into v{} for project {}",
@@ -176,6 +190,27 @@ public class MemoryCompactionService {
       log.warn("MemoryCompactionService failed for project {}: {}", projectId, e.getMessage(), e);
       return 0;
     }
+  }
+
+  /**
+   * Keep the database transaction around the two dependent writes only. The LLM call above may take
+   * tens of seconds and must never pin a JDBC connection for that wait.
+   */
+  private void persistSnapshotAndMarkers(
+      ProjectMemorySnapshot snapshot, List<ProjectRunLedger> entries) {
+    Runnable persist =
+        () -> {
+          snapshotRepo.save(snapshot);
+          for (ProjectRunLedger entry : entries) {
+            entry.setCompactedInto(snapshot.getId());
+          }
+          ledgerRepo.saveAll(entries);
+        };
+    if (transactionTemplate == null) {
+      persist.run();
+      return;
+    }
+    transactionTemplate.executeWithoutResult(ignored -> persist.run());
   }
 
   private String callLightweightLlm(String memoryEvidence, String projectId, String actorUserId) {

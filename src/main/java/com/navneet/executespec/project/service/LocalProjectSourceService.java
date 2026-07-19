@@ -87,8 +87,8 @@ public class LocalProjectSourceService {
       RegisterLocalSourceRequest request,
       String callerUserId,
       String callerOrgId,
-      boolean superAdmin) {
-    Project project = requireProjectAccess(projectId, callerUserId, callerOrgId, superAdmin);
+      boolean privilegedAdmin) {
+    Project project = requireProjectAccess(projectId, callerUserId, callerOrgId, privilegedAdmin);
     validate(request);
 
     Instant now = clock.instant();
@@ -169,8 +169,8 @@ public class LocalProjectSourceService {
       LocalSourceHeartbeatRequest request,
       String callerUserId,
       String callerOrgId,
-      boolean superAdmin) {
-    requireProjectAccess(projectId, callerUserId, callerOrgId, superAdmin);
+      boolean privilegedAdmin) {
+    requireProjectAccess(projectId, callerUserId, callerOrgId, privilegedAdmin);
     if (request == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "request is required");
     }
@@ -228,22 +228,21 @@ public class LocalProjectSourceService {
   }
 
   private Project requireProjectAccess(
-      String projectId, String callerUserId, String callerOrgId, boolean superAdmin) {
+      String projectId, String callerUserId, String callerOrgId, boolean privilegedAdmin) {
     Project project =
         projectRepository
             .findById(projectId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    boolean sameOrg = callerOrgId != null && callerOrgId.equals(project.getOrgId());
     var membership =
         callerUserId == null
             ? java.util.Optional.<com.navneet.executespec.auth.entity.ProjectMember>empty()
             : projectMemberRepository.findByProjectIdAndUserId(projectId, callerUserId);
     boolean projectMember =
         membership.isPresent() && !"PROJECT_VIEWER".equals(membership.get().getProjectRole());
-    if (!superAdmin && !sameOrg && !projectMember) {
+    if (!privilegedAdmin && !projectMember) {
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project belongs to another organization");
+          HttpStatus.FORBIDDEN, "Project membership with write access is required");
     }
     return project;
   }

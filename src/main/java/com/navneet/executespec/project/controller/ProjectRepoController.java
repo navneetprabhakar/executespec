@@ -190,7 +190,7 @@ public class ProjectRepoController {
             request,
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole()));
+            isOrgAdmin(userDetails));
     return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
         .body(result);
   }
@@ -213,7 +213,7 @@ public class ProjectRepoController {
             request,
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())));
+            isOrgAdmin(userDetails)));
   }
 
   @GetMapping("/api/projects/{projectId}/repos")
