@@ -91,3 +91,77 @@ terraform destroy
 - Disk holds ~500 images comfortably, so **no batch-rotation needed** for the full 300 — unlike the laptop.
 - To eval multiple providers in one VM session, run separate `run-core-codegen.sh` arms (the `MODEL`/`PROVIDERS` env vars are per-invocation).
 - Spot caveat: a preemption mid-run loses in-flight work; only use `use_spot=true` if you batch + resume.
+
+## Internal runs vs. official submissions
+
+`run-tb.sh` is the **internal** Terminal-Bench runner. It is locked to K=1, refuses
+`SUBMIT_TB`, and its output is never leaderboard evidence. Nothing in the official path
+below relaxes any of that.
+
+`run-tb-official.sh` is the **separate official** campaign runner. It refuses to start or
+to seal a submission unless every one of these holds:
+
+| Gate | Refusal code | Meaning |
+| --- | --- | --- |
+| K >= 5 | `REFUSE_K_TOO_LOW` | An internal K=1 job can never be submitted. |
+| Internal marker absent | `REFUSE_INTERNAL_PROFILE` | Jobs from `run-tb.sh` are structurally unsubmittable; there is no override. |
+| Official Harbor timeout | `REFUSE_TIMEOUT_DRIFT` | A non-default timeout needs `TIMEOUT_OVERRIDE_ALLOWED=1` **and** a published-rule reference. |
+| `harbor run --upload` | `REFUSE_UPLOAD_DISABLED` | A local-only run is not a submission. |
+| Frozen versions recorded | `REFUSE_MISSING_FROZEN_VERSION` | Harbor / dataset / agent / config-sha256 / container digest must all be pinned. |
+| Exactly K terminal attempts per task | `REFUSE_INCOMPLETE_ATTEMPTS` | A killed or partial campaign cannot be submitted as if it had finished. |
+| Trajectory for every passing trial | `REFUSE_MISSING_TRAJECTORY` | Presence check only — Harbor's own ATIF validator still runs in `submit-tb.sh`. |
+| Sealed manifest matches disk | `REFUSE_CORRUPT_CHECKSUM` | Detects post-hoc edits, deletions and smuggled-in files. |
+| Manifest written once | `REFUSE_MANIFEST_IMMUTABLE` | Evidence is not rewritten; delete the job and rerun. |
+
+Refusal logic lives in `scripts/official_profile.py` (also usable as a CLI:
+`validate-profile` / `gate` / `seal` / `verify`, exit 2 on every refusal).
+
+**These are refusal gates, not blessings.** Passing them means only that the artifacts are
+internally consistent and the run was configured as an official campaign. The official
+verifier — never `run-tb-official.sh` and never the in-app `/benchmark` dashboard — owns the
+benchmark verdict.
+
+## Supervised artifact sync
+
+`scripts/sync-results.sh` remains the one-shot copy. `scripts/supervised_sync.py` is the
+supervised supplement for long campaigns: an interval loop with capped exponential backoff,
+durable last-success / last-error state, and a final sync on SIGTERM/SIGINT so artifacts
+survive `terraform destroy`. It **never deletes remote objects** — `-d` / `--delete` raise
+`UnsafeSyncCommand` at construction rather than being silently stripped.
+
+```bash
+python3 scripts/supervised_sync.py --source ~/es-tb-jobs/<job> \
+  --dest gs://bucket/prefix --state ~/es-tb-jobs/<job>.sync.json --interval 300
+```
+
+## Read-only health monitor
+
+`scripts/benchmark_health_monitor.py` emits one versioned JSON health/evidence report across
+suites. It is **structurally incapable of altering a campaign**: it imports no `subprocess`,
+`signal`, or network module and opens no file for writing. `assert_read_only_source()` proves
+that from the AST of its own source, and a unit test calls it, so a future edit that adds a
+mutation primitive fails the suite instead of quietly gaining authority over a live run.
+
+```bash
+python3 scripts/benchmark_health_monitor.py --job-dir ~/es-tb-jobs/<job> --k 5 \
+  --expected-tasks 89 --sync-state ~/es-tb-jobs/<job>.sync.json
+```
+
+## Concurrency provenance
+
+`scripts/concurrency_profile.py` records the concurrency used per suite **and how strong the
+evidence for it is**. The operational default is unchanged at 4. Terminal-Bench is recorded as
+`OBSERVED` (an 89-task K=1 campaign completed at 4 without observed failure) — that is an
+absence of observed failure, not a saturation measurement; the ceiling was never probed. Every
+other suite is `UNMEASURED` and inherits 4 as a guess. Only a controlled RAM/CPU/provider/DB/
+Redis/Harbor saturation measurement may be recorded as `MEASURED`.
+
+## Deterministic tests
+
+```bash
+python3 -m pytest -q infra/benchmark/tb/test_tb_bench_bridge.py \
+  infra/benchmark/scripts/test_k_eval.py infra/benchmark/scripts/test_benchmark_infra.py
+```
+
+These use fakes and temp directories. They prove script logic only — never Harbor behaviour,
+real GCS behaviour, official verifier acceptance, or campaign health.

@@ -118,7 +118,8 @@ Set the benchmark config/env on the VM (`swebench.*`, `DEEPSEEK_API_KEY`, crypto
 
 ⚠️ **Gotcha #5 (crypto gate on `benchmark` profile):** the `benchmark` Spring profile has
 `crypto.require-encryption: true`, so the backend refuses to boot without a crypto key
-(`CRYPTO_LOCAL_KEY` env, a Base64 32-byte AES key, or a reachable GCP Secret Manager key). Provide
+(`CRYPTO_LOCAL_KEY`, a Base64 32-byte AES key, or `CRYPTO_GCP_SECRET_RESOURCE`, an immutable
+`projects/.../secrets/.../versions/<number>` resource; aliases such as `latest` are rejected). Provide
 one, or (for a purely local dry-run) use `ES_PROFILE=local` which disables crypto — but `local`
 also disables live-LLM, so override `executespec.live-llm.enabled=true` and note `local` reuses an
 already-healthy `:8080` backend instead of starting its own.
@@ -180,6 +181,12 @@ silently double-spend. The canonical manifest contains only unique HTTP-200 term
 attempts remain in the separate `passN.attempts.jsonl` audit trail. The command-wide budget ledger
 uses an OS file lock, so a duplicate process using the same output directory sees current
 reservations instead of oversubscribing from stale memory.
+
+The Terminal-Bench dashboard bridge follows the same long-run authentication rule when launched
+with `BR_ADMIN_EMAIL`/`BR_ADMIN_PW`: an expired access token is refreshed once after HTTP 401 and
+the exact telemetry request is retried. `BR_TOKEN`-only operation cannot refresh and fails closed.
+The bridge must not finalize a quiet campaign merely because no attempt completed during
+`--idle-min`; Harbor's job-level `result.json.finished_at` is required before idle finalization.
 
 `--max-new-tasks N` is positive-only and pass@1-only. It launches only the next N unfinished
 dataset rows, writes canonical terminal rows exactly as normal, publishes `RUN_PROGRESS` rather
