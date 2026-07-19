@@ -4,6 +4,8 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
@@ -270,6 +272,7 @@ export function IdeAccount() {
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
+  const [notifFailure, setNotifFailure] = useState<LoadFailure | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -297,8 +300,12 @@ export function IdeAccount() {
   useEffect(() => {
     api
       .getNotificationPreferences()
-      .then(setNotifPrefs)
-      .catch(() => setNotifPrefs([]));
+      .then((rows) => {
+        setNotifPrefs(rows);
+        setNotifFailure(null);
+      })
+      // D4: an empty list renders "No notification events to configure yet."
+      .catch((e: unknown) => setNotifFailure(toLoadFailure(e)));
   }, []);
 
   async function togglePref(eventType: string, channel: 'IN_APP' | 'EMAIL', enabled: boolean) {
@@ -596,7 +603,9 @@ export function IdeAccount() {
         <span className='ide-tree-chev'>{notifOpen ? '▾' : '▸'}</span>
         <span>Notifications{notifPrefs ? ` · ${notifPrefs.length}` : ''}</span>
       </button>
-      {!notifOpen ? null : notifPrefs === null ? (
+      {!notifOpen ? null : notifFailure ? (
+        <LoadError failure={notifFailure} what='notification settings' />
+      ) : notifPrefs === null ? (
         <IdeLoader label='Loading notification preferences…' />
       ) : notifPrefs.length === 0 ? (
         <div className='ide-empty'>No notification events to configure yet.</div>

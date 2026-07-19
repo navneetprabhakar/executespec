@@ -5,6 +5,8 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {explicitLinkedRepoSelection, repoSupports} from '@/ide/projectRepoUi';
 import {
   PRODUCT_PROVIDER_OPTIONS,
@@ -36,6 +38,11 @@ export default function IdeProject() {
   const tier = useAuthStore(selectNormalizedTier);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
+  // D4 — this effect coordinates three loads against a shared `loading` /
+  // `runsLoaded` gate, so it keeps manual state and uses the shared classifier
+  // rather than the `useAsyncData` hook.
+  const [reposFailure, setReposFailure] = useState<LoadFailure | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [runsLoaded, setRunsLoaded] = useState(false);
@@ -66,6 +73,7 @@ export default function IdeProject() {
       .then((list) => {
         const loadedRepos = (list as unknown as Repo[]) ?? [];
         setRepos(loadedRepos);
+        setReposFailure(null);
         // Project runs are explicit about their code boundary. The previous UI displayed every
         // linked repo as selected while leaving this array empty, so the request omitted
         // selectedRepoIds and the backend created a seed-only workspace.
@@ -75,11 +83,17 @@ export default function IdeProject() {
           ),
         );
       })
-      .catch(() => setRepos([]));
+      // D4: an empty repo list is a claim about the project's code boundary and
+      // it also drives `selected`. Failing to a bare `[]` here silently allowed
+      // a run to be composed against no repositories at all.
+      .catch((e: unknown) => setReposFailure(toLoadFailure(e)));
     api
       .getRuns({projectId, size: 6})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]))
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailure(null);
+      })
+      .catch((e: unknown) => setRunsFailure(toLoadFailure(e)))
       .finally(() => setRunsLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -199,7 +213,10 @@ export default function IdeProject() {
         {project?.name || 'Project'}
       </h1>
       <div className='ide-sub'>
-        {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
+        {reposFailure
+          ? 'Repositories not loaded'
+          : `${repos.length} repo${repos.length === 1 ? '' : 's'}`}{' '}
+        · {project?.status || 'ACTIVE'}
       </div>
 
       <div className='ide-project-context-grid'>
@@ -209,11 +226,11 @@ export default function IdeProject() {
           </div>
           <div className='ide-kv'>
             <span>Repos connected</span>
-            <span>{repos.length}</span>
+            <span>{reposFailure ? 'Unknown' : repos.length}</span>
           </div>
           <div className='ide-kv' style={{borderBottom: 'none'}}>
             <span>Repos selected</span>
-            <span>{selected.length}</span>
+            <span>{reposFailure ? 'Unknown' : selected.length}</span>
           </div>
         </div>
         <div className='ide-card'>
@@ -261,6 +278,12 @@ export default function IdeProject() {
         <SpecChat projectId={projectId} draftSpec={spec} onApply={setSpec} />
       </div>
 
+      {reposFailure && (
+        <>
+          <div className='ide-h2'>Repos the agent may touch</div>
+          <LoadError failure={reposFailure} what='linked repositories' />
+        </>
+      )}
       {repos.length > 0 && (
         <>
           <div className='ide-h2'>Repos the agent may touch</div>
@@ -357,7 +380,9 @@ export default function IdeProject() {
       </button>
 
       <div className='ide-h2'>Recent work in this project</div>
-      {runs.length === 0 ? (
+      {runsFailure ? (
+        <LoadError failure={runsFailure} what='work in this project' />
+      ) : runs.length === 0 ? (
         <div className='ide-empty'>No work yet.</div>
       ) : (
         <div className='ide-grid'>

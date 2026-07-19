@@ -2,6 +2,8 @@ import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {
@@ -19,6 +21,10 @@ export function IdeIntegrations() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [sources, setSources] = useState<string[] | null>(null);
+  // D4 — a failed integration-status read used to render every provider as
+  // "Not connected", and a failed PAT read as "No personal access tokens."
+  const [sourcesFailure, setSourcesFailure] = useState<LoadFailure | null>(null);
+  const [patsFailure, setPatsFailure] = useState<LoadFailure | null>(null);
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
@@ -31,13 +37,19 @@ export function IdeIntegrations() {
   const loadSources = () =>
     api
       .getIntegrationStatus()
-      .then((s) => setSources(s.enabledSources ?? []))
-      .catch(() => setSources([]));
+      .then((s) => {
+        setSources(s.enabledSources ?? []);
+        setSourcesFailure(null);
+      })
+      .catch((e: unknown) => setSourcesFailure(toLoadFailure(e)));
   const loadPats = () =>
     api
       .listPats()
-      .then(setPats)
-      .catch(() => setPats([]));
+      .then((rows) => {
+        setPats(rows);
+        setPatsFailure(null);
+      })
+      .catch((e: unknown) => setPatsFailure(toLoadFailure(e)));
 
   useEffect(() => {
     loadSources();
@@ -288,7 +300,9 @@ export function IdeIntegrations() {
         </div>
       )}
 
-      {sources === null ? (
+      {sourcesFailure ? (
+        <LoadError failure={sourcesFailure} what='connected integrations' onRetry={loadSources} />
+      ) : sources === null ? (
         <IdeLoader label='Loading integrations…' />
       ) : (
         <div className='ide-card' style={{padding: 0}}>
@@ -330,7 +344,9 @@ export function IdeIntegrations() {
         Revocation takes effect on the next authenticated request. Token secrets are never shown
         again.
       </div>
-      {pats === null ? (
+      {patsFailure ? (
+        <LoadError failure={patsFailure} what='access tokens' onRetry={loadPats} />
+      ) : pats === null ? (
         <IdeLoader label='Loading access tokens…' />
       ) : pats.length === 0 ? (
         <div className='ide-empty'>No personal access tokens.</div>
@@ -628,11 +644,16 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
+  const [usersFailure, setUsersFailure] = useState<LoadFailure | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
   const load = () =>
     api
       .adminListUsers()
-      .then(setUsers)
-      .catch(() => setUsers([]));
+      .then((rows) => {
+        setUsers(rows);
+        setUsersFailure(null);
+      })
+      .catch((e: unknown) => setUsersFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -671,6 +692,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (usersFailure) return <LoadError failure={usersFailure} what='users' onRetry={load} />;
   if (!users) return <IdeLoader label='Loading users…' />;
   return (
     <>
@@ -761,6 +783,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
 
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
@@ -768,8 +792,11 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const load = () =>
     api
       .adminListOrgs()
-      .then(setOrgs)
-      .catch(() => setOrgs([]));
+      .then((rows) => {
+        setOrgs(rows);
+        setOrgsFailure(null);
+      })
+      .catch((e: unknown) => setOrgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -798,6 +825,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (orgsFailure) return <LoadError failure={orgsFailure} what='orgs' onRetry={load} />;
   if (!orgs) return <IdeLoader label='Loading orgs…' />;
   return (
     <>
@@ -1182,6 +1210,8 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
   const role = useAuthStore((s) => s.user?.globalRole);
   const isSuperAdmin = role === 'SUPER_ADMIN';
   const [flags, setFlags] = useState<api.FeatureFlagDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [flagsFailure, setFlagsFailure] = useState<LoadFailure | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -1189,7 +1219,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
     api
       .adminListFeatureFlags()
       .then(setFlags)
-      .catch(() => setFlags([]));
+      .catch((e: unknown) => setFlagsFailure(toLoadFailure(e)));
   }, []);
 
   function toggle(f: api.FeatureFlagDto) {
@@ -1214,6 +1244,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
       .finally(() => setBusy(null));
   }
 
+  if (flagsFailure) return <LoadError failure={flagsFailure} what='feature flags' />;
   if (flags === null) return <IdeLoader label='Loading feature flags…' />;
   return (
     <>
@@ -1419,6 +1450,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
 
 function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [pkgsFailure, setPkgsFailure] = useState<LoadFailure | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
 
@@ -1426,7 +1459,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
     api
       .adminListTopupPackages()
       .then(setPkgs)
-      .catch(() => setPkgs([]));
+      .catch((e: unknown) => setPkgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -1441,6 +1474,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
       .catch(bad);
   }
 
+  if (pkgsFailure) return <LoadError failure={pkgsFailure} what='top-up packages' onRetry={load} />;
   if (!pkgs) return <IdeLoader label='Loading top-up packages…' />;
   return (
     <>

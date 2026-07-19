@@ -5,6 +5,8 @@ import type {ProjectCodeIndexStatus, ProjectRepo, ProjectRepoLink} from '@/types
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -260,6 +262,8 @@ export function IdeProjectPulse() {
   const [dash, setDash] = useState<Dash | null>(null);
   const [health, setHealth] = useState<Array<Record<string, unknown>>>([]);
   const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
+  const [recentFailure, setRecentFailure] = useState<LoadFailure | null>(null);
+  const [healthFailure, setHealthFailure] = useState<LoadFailure | null>(null);
 
   // RL-2026-05-052 (#9): refresh recent runs via a callback so we can poll while a
   // run is live — the pulse fetched once on mount, so live project runs never updated.
@@ -267,8 +271,12 @@ export function IdeProjectPulse() {
     if (!projectId) return;
     api
       .getRuns({projectId, page: 0, size: 6})
-      .then((r) => setRecent(r.content ?? []))
-      .catch(() => setRecent([]));
+      .then((r) => {
+        setRecent(r.content ?? []);
+        setRecentFailure(null);
+      })
+      // D4: "No work yet in this project." is a claim about the user's history.
+      .catch((e: unknown) => setRecentFailure(toLoadFailure(e)));
   }, [projectId]);
 
   useEffect(() => {
@@ -282,8 +290,10 @@ export function IdeProjectPulse() {
       .then((h) => {
         const arr = (h as unknown as {repos?: unknown[]}).repos || (Array.isArray(h) ? h : []);
         setHealth(arr as Array<Record<string, unknown>>);
+        setHealthFailure(null);
       })
-      .catch(() => setHealth([]));
+      // D4: an empty health list renders as "No linked repos."
+      .catch((e: unknown) => setHealthFailure(toLoadFailure(e)));
     refreshRuns();
   }, [projectId, refreshRuns]);
 
@@ -371,7 +381,9 @@ export function IdeProjectPulse() {
           )}
 
           <div className='ide-h2'>Workspace health</div>
-          {health.length === 0 ? (
+          {healthFailure ? (
+            <LoadError failure={healthFailure} what='linked repositories' />
+          ) : health.length === 0 ? (
             <div className='ide-empty'>No linked repos.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
@@ -471,7 +483,9 @@ export function IdeProjectPulse() {
               View all
             </Link>
           </div>
-          {recent === null ? (
+          {recentFailure ? (
+            <LoadError failure={recentFailure} what='work' onRetry={refreshRuns} />
+          ) : recent === null ? (
             <IdeLoader label='Loading work…' />
           ) : recent.length === 0 ? (
             <div className='ide-empty'>No work yet in this project.</div>
@@ -721,6 +735,7 @@ export function IdeProjectRuns() {
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<Sub>('runs');
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
   const [linkedRepos, setLinkedRepos] = useState<ProjectRepoLink[]>([]);
@@ -742,8 +757,13 @@ export function IdeProjectRuns() {
     if (!projectId) return;
     api
       .getRuns({projectId, page: 0, size: 50})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]));
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailure(null);
+      })
+      // D4: a failure here rendered "No work matches this filter." plus zeroed
+      // filter-tab badges, i.e. a confident count of work the user may well have.
+      .catch((e: unknown) => setRunsFailure(toLoadFailure(e)));
   }, [projectId]);
 
   // Load PR list lazily when the PRs sub-tab is opened. The dashboard endpoint
@@ -929,7 +949,9 @@ export function IdeProjectRuns() {
             ))}
           </div>
 
-          {runs === null ? (
+          {runsFailure ? (
+            <LoadError failure={runsFailure} what='work' />
+          ) : runs === null ? (
             <IdeLoader label='Loading work…' />
           ) : filtered.length === 0 ? (
             <div className='ide-empty'>No work matches this filter.</div>
@@ -1197,6 +1219,7 @@ export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
   const authUser = useAuthStore((state) => state.user);
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
+  const [reposFailure, setReposFailure] = useState<LoadFailure | null>(null);
   const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
   const [codeIndex, setCodeIndex] = useState<Record<string, ProjectCodeIndexStatus>>({});
   const [provider, setProvider] = useState<'GITHUB' | 'BITBUCKET'>('GITHUB');
@@ -1223,8 +1246,13 @@ export function IdeProjectRepos() {
   function load() {
     api
       .getProjectRepos(projectId)
-      .then((l) => setRepos(l as unknown as Array<Record<string, unknown>>))
-      .catch(() => setRepos([]));
+      .then((l) => {
+        setRepos(l as unknown as Array<Record<string, unknown>>);
+        setReposFailure(null);
+      })
+      // D4: "No repos linked. Click 'Link repo' above to add one." invited the
+      // user to duplicate a link for a repo that may already exist.
+      .catch((e: unknown) => setReposFailure(toLoadFailure(e)));
     api
       .getWorkspaceHealth(projectId)
       .then((h) => {
@@ -1508,7 +1536,9 @@ export function IdeProjectRepos() {
         </div>
       )}
 
-      {repos === null ? (
+      {reposFailure ? (
+        <LoadError failure={reposFailure} what='linked repositories' onRetry={load} />
+      ) : repos === null ? (
         <IdeLoader label='Loading repos…' />
       ) : repos.length === 0 ? (
         <div className='ide-empty'>No repos linked. Click “Link repo” above to add one.</div>

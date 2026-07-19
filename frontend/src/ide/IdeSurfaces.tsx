@@ -4,6 +4,8 @@ import * as api from '@/lib/api';
 import {consumeSpecHandoff, writeSpecHandoff} from '@/lib/specHandoff';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {CostProgressBar} from '@/signal/components/CostProgressBar';
@@ -108,6 +110,8 @@ export function IdeWelcome() {
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
+  const [projectsFailure, setProjectsFailure] = useState<LoadFailure | null>(null);
   const [liveRun, setLiveRun] = useState<api.RunDetail | null>(null);
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
@@ -144,11 +148,17 @@ export function IdeWelcome() {
           setLiveRun(null);
         }
       })
-      .catch(() => !cancelled && setRuns([]));
+      // D4: an empty run list here renders the "Ship your first verified PR"
+      // onboarding card — shown to a user who may have shipped fifty.
+      .catch((e: unknown) => !cancelled && setRunsFailure(toLoadFailure(e)));
     api
       .getProjects()
-      .then((p) => !cancelled && setProjects(p.filter((x) => !x.archivedAt)))
-      .catch(() => !cancelled && setProjects([]));
+      .then((p) => {
+        if (cancelled) return;
+        setProjects(p.filter((x) => !x.archivedAt));
+        setProjectsFailure(null);
+      })
+      .catch((e: unknown) => !cancelled && setProjectsFailure(toLoadFailure(e)));
     return () => {
       cancelled = true;
     };
@@ -241,7 +251,9 @@ export function IdeWelcome() {
       </div>
 
       <div className='ide-h2'>Recent work</div>
-      {runs === null ? (
+      {runsFailure ? (
+        <LoadError failure={runsFailure} what='work' />
+      ) : runs === null ? (
         <IdeLoader label='Loading work…' />
       ) : runs.length === 0 ? (
         <div className='ide-card' style={{marginBottom: 8}}>
@@ -306,7 +318,9 @@ export function IdeWelcome() {
       )}
 
       <div className='ide-h2'>Projects</div>
-      {projects === null ? (
+      {projectsFailure ? (
+        <LoadError failure={projectsFailure} what='projects' />
+      ) : projects === null ? (
         <IdeLoader label='Loading projects…' />
       ) : projects.length === 0 ? (
         <div className='ide-empty'>No projects yet.</div>
