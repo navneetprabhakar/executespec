@@ -66,12 +66,27 @@ public class Metrics {
   private final AtomicLong staleLlmUsageIntents = new AtomicLong();
   private final AtomicLong pendingLlmUsageRecovery = new AtomicLong();
   private final AtomicLong deadLlmUsageRecovery = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryPending = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryDead = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryOldestSeconds = new AtomicLong();
+  private final AtomicLong llmUsageIntegrityMonitorHealthy = new AtomicLong();
+  private final AtomicLong llmUsageIntegrityMonitorLastSuccessEpoch = new AtomicLong();
+  private final AtomicLong staleQuotaRefunds = new AtomicLong();
 
   public Metrics(MeterRegistry registry) {
     this.registry = registry;
     registry.gauge(NS + "llm.usage.stale_intents", staleLlmUsageIntents);
     registry.gauge(NS + "llm.usage.recovery.pending", pendingLlmUsageRecovery);
     registry.gauge(NS + "llm.usage.recovery.dead", deadLlmUsageRecovery);
+    registry.gauge(NS + "llm.usage.recovery.local.pending", localLlmUsageRecoveryPending);
+    registry.gauge(NS + "llm.usage.recovery.local.dead", localLlmUsageRecoveryDead);
+    registry.gauge(
+        NS + "llm.usage.recovery.local.oldest_seconds", localLlmUsageRecoveryOldestSeconds);
+    registry.gauge(NS + "llm.usage.integrity_monitor.healthy", llmUsageIntegrityMonitorHealthy);
+    registry.gauge(
+        NS + "llm.usage.integrity_monitor.last_success_epoch_seconds",
+        llmUsageIntegrityMonitorLastSuccessEpoch);
+    registry.gauge(NS + "billing.quota_refund.stale", staleQuotaRefunds);
   }
 
   public void recordRunOutcome(String overall) {
@@ -200,6 +215,33 @@ public class Metrics {
   public void recordLlmUsageRecoveryBacklog(long pending, long dead) {
     pendingLlmUsageRecovery.set(Math.max(0, pending));
     deadLlmUsageRecovery.set(Math.max(0, dead));
+  }
+
+  /** Last-resort node-local spool state; shared DB outbox remains the primary recovery path. */
+  public void recordLlmUsageLocalRecovery(long pending, long dead, long oldestSeconds) {
+    localLlmUsageRecoveryPending.set(Math.max(0, pending));
+    localLlmUsageRecoveryDead.set(Math.max(0, dead));
+    localLlmUsageRecoveryOldestSeconds.set(Math.max(0, oldestSeconds));
+  }
+
+  public void recordLlmUsageIntegrityMonitorSuccess(long epochSeconds) {
+    llmUsageIntegrityMonitorHealthy.set(1);
+    llmUsageIntegrityMonitorLastSuccessEpoch.set(Math.max(0, epochSeconds));
+  }
+
+  public void recordLlmUsageIntegrityMonitorFailure() {
+    llmUsageIntegrityMonitorHealthy.set(0);
+  }
+
+  public void recordQuotaRefundBacklog(long stale) {
+    staleQuotaRefunds.set(Math.max(0, stale));
+  }
+
+  public void recordQuotaRefundAttempt(String result) {
+    Counter.builder(NS + "billing.quota_refund.attempt")
+        .tag("result", nonNull(result))
+        .register(registry)
+        .increment();
   }
 
   /**

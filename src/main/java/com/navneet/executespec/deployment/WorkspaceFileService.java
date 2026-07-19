@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
@@ -107,9 +108,14 @@ public class WorkspaceFileService {
    * @throws IOException on read errors
    */
   public String readFile(String runId, String relativePath) throws IOException {
-    if (relativePath.contains("..")) {
+    if (relativePath == null || relativePath.isBlank()) {
+      throw new NoSuchFileException(String.valueOf(relativePath));
+    }
+    Path requested = Path.of(relativePath);
+    if (requested.isAbsolute() || relativePath.contains("..")) {
       throw new SecurityException("Path traversal not allowed: " + relativePath);
     }
+    assertModelSafePath(relativePath);
 
     Path root = workspaceRoot(runId);
     if (Files.isDirectory(root)) {
@@ -143,8 +149,12 @@ public class WorkspaceFileService {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             String name = file.getFileName().toString();
-            if (!skipByExtension(name)) {
-              paths.add(root.relativize(file).toString());
+            String relative = root.relativize(file).toString();
+            if (attrs.isRegularFile()
+                && !Files.isSymbolicLink(file)
+                && !skipByExtension(name)
+                && !SensitiveWorkspacePathPolicy.isSensitive(relative)) {
+              paths.add(relative);
             }
             return FileVisitResult.CONTINUE;
           }
@@ -163,6 +173,15 @@ public class WorkspaceFileService {
     if (!Files.exists(file) || !Files.isRegularFile(file)) {
       throw new NoSuchFileException(relativePath);
     }
+    if (Files.isSymbolicLink(file)) {
+      throw new SecurityException("Symbolic-link reads are not allowed: " + relativePath);
+    }
+    Path realRoot = root.toRealPath();
+    Path realFile = file.toRealPath();
+    if (!realFile.startsWith(realRoot)) {
+      throw new SecurityException("Path escapes workspace: " + relativePath);
+    }
+    assertModelSafePath(realRoot.relativize(realFile).toString());
 
     long size = Files.size(file);
     if (size > MAX_FILE_SIZE) {
@@ -184,10 +203,13 @@ public class WorkspaceFileService {
         "[WorkspaceFileService] Local workspace missing for run {} — listing from GitHub: {}",
         runId,
         run.getRepoUrl());
-    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), pat);
+    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), pat).stream()
+        .filter(path -> !SensitiveWorkspacePathPolicy.isSensitive(path))
+        .toList();
   }
 
   private String readFromGitHub(String runId, String relativePath) throws IOException {
+    assertModelSafePath(relativePath);
     PipelineRun run = stateStore.findRun(runId).orElse(null);
     if (run == null || run.getRepoUrl() == null || run.getRepoUrl().isBlank()) {
       throw new NoSuchFileException(relativePath);
@@ -617,5 +639,11 @@ public class WorkspaceFileService {
       if (name.endsWith(ext)) return true;
     }
     return false;
+  }
+
+  private static void assertModelSafePath(String relativePath) {
+    if (SensitiveWorkspacePathPolicy.isSensitive(relativePath)) {
+      throw new SecurityException("Credential-like files are not available through run file APIs");
+    }
   }
 }

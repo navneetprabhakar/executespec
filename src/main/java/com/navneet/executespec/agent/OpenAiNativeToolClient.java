@@ -27,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
@@ -140,7 +141,11 @@ public class OpenAiNativeToolClient {
               .retrieve()
               .body(JsonNode.class);
     } catch (Exception e) {
-      log.error("OpenAI native tool call failed", e);
+      if (e instanceof RestClientResponseException responseError) {
+        log.error("OpenAI native tool call failed http={}", responseError.getStatusCode());
+      } else {
+        log.error("OpenAI native tool call failed errorClass={}", e.getClass().getSimpleName());
+      }
       throw e;
     }
     if (response == null) {
@@ -319,7 +324,7 @@ public class OpenAiNativeToolClient {
     List<Generation> generations = new ArrayList<>();
     JsonNode choices = response.path("choices");
     if (!choices.isArray()) {
-      throw new IllegalStateException("OpenAI response missing 'choices' array: " + response);
+      throw new IllegalStateException("OpenAI response missing required choices array");
     }
     for (JsonNode choice : choices) {
       JsonNode message = choice.path("message");

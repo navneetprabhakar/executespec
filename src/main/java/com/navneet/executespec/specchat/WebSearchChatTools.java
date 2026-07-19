@@ -352,7 +352,9 @@ public class WebSearchChatTools {
     try {
       sanitized = contextSanitizer.sanitizeInput(sanitized, source);
     } catch (Exception e) {
-      log.warn("web tool sanitize failed for {}: {}", source, e.getMessage());
+      log.warn(
+          "web tool sanitize failed for {} errorClass={}", source, e.getClass().getSimpleName());
+      return errorEnvelope("external content could not be sanitized");
     }
     if (sanitized.length() > MAX_CHARS) {
       sanitized = sanitized.substring(0, MAX_CHARS) + "\n...[truncated]";
@@ -405,13 +407,12 @@ public class WebSearchChatTools {
                 ? json.createObjectNode()
                 : json.readTree(toolInput);
       } catch (Exception e) {
-        return errorEnvelope("invalid JSON input: " + e.getMessage()).toString();
+        return errorEnvelope("invalid JSON input").toString();
       }
       try {
         return body.run(args).toString();
       } catch (Exception e) {
-        log.warn(
-            "web tool '{}' threw {}: {}", def.name(), e.getClass().getSimpleName(), e.getMessage());
+        log.warn("web tool '{}' failed errorClass={}", def.name(), e.getClass().getSimpleName());
         return errorEnvelope(e.getClass().getSimpleName()).toString();
       }
     }

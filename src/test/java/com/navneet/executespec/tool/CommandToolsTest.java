@@ -392,8 +392,66 @@ class CommandToolsTest {
     assertThat(((ToolResult.Err) failed).message()).contains("\"exit_code\":1");
   }
 
+  @Test
+  void readFile_blocksCredentialMaterialBeforeItCanEnterModelContext() throws Exception {
+    Files.writeString(root.resolve(".env"), "API_KEY=super-secret-value\n");
+    Files.writeString(root.resolve(".env.example"), "API_KEY=replace-me\n");
+    ReadFileTool tool = readFileTool(new ReadFileStateStore());
+
+    ToolResult denied = tool.execute(json("{\"path\":\".env\"}"), ctx());
+    ToolResult template = tool.execute(json("{\"path\":\".env.example\"}"), ctx());
+
+    assertThat(denied).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) denied).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(template).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) template).content()).contains("replace-me");
+  }
+
+  @Test
+  void readFile_blocksCredentialContentInTemplatesOrdinarySourceAndRanges() throws Exception {
+    String credential = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+    Files.writeString(root.resolve(".env.example"), "ANTHROPIC_API_KEY=" + credential + "\n");
+    Files.writeString(
+        root.resolve("Main.java"), "// fixture\nString key = \"" + credential + "\";\n");
+    ReadFileTool tool = readFileTool(new ReadFileStateStore());
+
+    for (String request :
+        List.of(
+            "{\"path\":\".env.example\"}",
+            "{\"path\":\"Main.java\"}",
+            "{\"path\":\"Main.java\",\"startLine\":2,\"endLine\":2}")) {
+      ToolResult result = tool.execute(json(request), ctx());
+      assertThat(result).isInstanceOf(ToolResult.Err.class);
+      assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+      assertThat(((ToolResult.Err) result).message())
+          .contains("credential content")
+          .doesNotContain(credential);
+    }
+  }
+
+  @Test
+  void shellOutputRedactsSecretShapesBeforeReturningToWorker() {
+    Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
+
+    ToolResult result =
+        tool.execute(json("{\"command\":\"echo api_key=abcdefghijklmnopsecret\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("[REDACTED]")
+        .doesNotContain("abcdefghijklmnopsecret");
+  }
+
   private static ReadFileTool readFileTool(ReadFileStateStore readState) {
-    return new ReadFileTool(null, null, null, null, null, null, readState);
+    return new ReadFileTool(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        readState,
+        new com.navneet.executespec.security.GeneratedSecretScanner());
   }
 
   private static EditFileTool editFileTool(ReadFileStateStore readState) {

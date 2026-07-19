@@ -2,6 +2,8 @@ package com.navneet.executespec.agentsession;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionEventRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanResponse;
@@ -28,10 +30,12 @@ import com.navneet.executespec.agentsession.subagent.ImplementerMutationService;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol;
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -153,7 +157,9 @@ public class AgentSessionController {
   public WriterReservation reserveWriter(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
-      @RequestBody WriterReserveRequest request) {
+      @RequestBody WriterReserveRequest request,
+      HttpServletRequest httpRequest) {
+    requirePatLocalHands(httpRequest);
     if (request == null) throw new IllegalArgumentException("writer reservation is required");
     return implementerMutationService.reserve(
         sessionId, request.requestId(), request.scope(), user, orgId(user));
@@ -166,7 +172,9 @@ public class AgentSessionController {
   public com.navneet.executespec.tool.ToolResult mutateWriter(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
-      @RequestBody WriterMutationRequest request) {
+      @RequestBody WriterMutationRequest request,
+      HttpServletRequest httpRequest) {
+    requirePatLocalHands(httpRequest);
     if (request == null) throw new IllegalArgumentException("writer mutation is required");
     return implementerMutationService.mutate(
         sessionId,
@@ -183,7 +191,9 @@ public class AgentSessionController {
   public ImplementerExecutionService.ExecutionResult executeWriter(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
-      @RequestBody WriterExecutionRequest request) {
+      @RequestBody WriterExecutionRequest request,
+      HttpServletRequest httpRequest) {
+    requirePatLocalHands(httpRequest);
     if (request == null) throw new IllegalArgumentException("writer execution is required");
     return implementerExecutionService.execute(
         sessionId,
@@ -203,10 +213,22 @@ public class AgentSessionController {
   public WriterReservation releaseWriter(
       @AuthenticationPrincipal AppUserDetails user,
       @PathVariable String sessionId,
-      @RequestBody WriterReleaseRequest request) {
+      @RequestBody WriterReleaseRequest request,
+      HttpServletRequest httpRequest) {
+    requirePatLocalHands(httpRequest);
     if (request == null) throw new IllegalArgumentException("writer release is required");
     return implementerMutationService.release(
         sessionId, request.reservationId(), request.reason(), user, orgId(user));
+  }
+
+  static void requirePatLocalHands(HttpServletRequest request) {
+    Object source =
+        request == null
+            ? null
+            : request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE);
+    if (!JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(source)) {
+      throw new AccessDeniedException("writer operations require PAT local-hands authentication");
+    }
   }
 
   record WriterReserveRequest(String requestId, String scope) {}

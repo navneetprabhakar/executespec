@@ -171,6 +171,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
+  private final RunInvariantEnforcer invariantEnforcer;
   private final RunValidationKickoff validationKickoff;
   private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
@@ -1476,6 +1477,8 @@ public class RunOrchestrator implements RunControlPort {
 
       Plan plan;
       String designBlock;
+      String standardsBlock =
+          resolveStandardsPromptBlock(runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds);
       RunCostTracker.Snapshot afterPlan;
       if (approvedPlanContinuation == null) {
 
@@ -1670,16 +1673,18 @@ public class RunOrchestrator implements RunControlPort {
               log.warn("V2 run={} contracts planner injection skipped: {}", runId, e.getMessage());
               contractsBlock = "";
             }
-            try {
-              String a = adrInjectionService.compose(projectId).block();
-              adrsBlock = truncate(a == null ? "" : a, ENTERPRISE_INJECT_CAP);
-              if (!adrsBlock.isBlank()) {
-                log.info(
-                    "V2 run={} injected ADRs into planner ({} chars)", runId, adrsBlock.length());
+            if (adrInjectionService.injectionEnabled()) {
+              try {
+                String a = adrInjectionService.compose(projectId).block();
+                adrsBlock = truncate(a == null ? "" : a, ENTERPRISE_INJECT_CAP);
+                if (!adrsBlock.isBlank()) {
+                  log.info(
+                      "V2 run={} injected ADRs into planner ({} chars)", runId, adrsBlock.length());
+                }
+              } catch (Exception e) {
+                log.warn("V2 run={} ADR planner injection skipped: {}", runId, e.getMessage());
+                adrsBlock = "";
               }
-            } catch (Exception e) {
-              log.warn("V2 run={} ADR planner injection skipped: {}", runId, e.getMessage());
-              adrsBlock = "";
             }
           }
           PlannerRequest plannerReq =
@@ -1696,6 +1701,7 @@ public class RunOrchestrator implements RunControlPort {
                   .referenceDocs(referenceDocs)
                   .contracts(contractsBlock)
                   .projectAdrs(adrsBlock)
+                  .engineeringStandards(standardsBlock)
                   .tddMode(tddMode)
                   .prReviewComments(prReviewComments)
                   .build();
@@ -1842,6 +1848,9 @@ public class RunOrchestrator implements RunControlPort {
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
         afterPlan = costTracker.snapshot(runId);
       }
+      if (!standardsBlock.isBlank()) {
+        designBlock = designBlock + "\n\n" + standardsBlock;
+      }
 
       persistenceWriter.updateStatus(runId, "WORKING");
       perky.start(runId, "WORKING");
@@ -1921,15 +1930,19 @@ public class RunOrchestrator implements RunControlPort {
       // for
       // a normal run.
       if (localRun) {
+        StatusAndReason localTerminal = localExecutionTerminalStatus();
         broadcaster.emit(
             runId,
             RunEvent.log(
-                runId, null, "Local-hands run complete — changes are in your working tree"));
+                runId,
+                null,
+                "Changes are ready in your local working tree — server verification was not"
+                    + " performed"));
         terminate(
             runId,
-            "COMPLETE",
-            "LOCAL_EXECUTION",
-            "local-hands run; diff in the client working tree (server-side steps skipped)",
+            localTerminal.status(),
+            localTerminal.reason(),
+            "local changes ready; server-side verification and scoring were not performed",
             startedAt);
         return;
       }
@@ -2074,21 +2087,56 @@ public class RunOrchestrator implements RunControlPort {
       // change classifier surfaces touched-contract breaks as report-only run
       // issues. Both project-gated + flag-gated (default OFF) + non-fatal.
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> contractBreakingIssues =
-          java.util.List.of();
+          new java.util.ArrayList<>();
       if (projectId != null) {
         if (featureFlagService.isEnabled("standards.enforcement.enabled")) {
           try {
-            standardsEnforcer.runStandardsEnforcement(runId, projectId, rootCtx.workspaceRoot());
+            var standardsReport =
+                standardsEnforcer.runStandardsEnforcement(
+                    runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds);
+            contractBreakingIssues.addAll(RunStandardsEnforcer.toReviewIssues(standardsReport));
           } catch (Exception e) {
             log.warn(
-                "RunOrchestrator run={} standards enforcement skipped: {}", runId, e.getMessage());
+                "RunOrchestrator run={} standards enforcement unavailable: {}",
+                runId,
+                e.getClass().getSimpleName());
+            contractBreakingIssues.add(
+                com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                    .id("SYNTH-STANDARD-UNAVAILABLE-RUN")
+                    .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                    .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
+                    .description("Configured engineering standards could not be verified.")
+                    .fixInstruction("Restore standards enforcement and rerun.")
+                    .autoFixed(false)
+                    .fixSucceeded(false)
+                    .build());
           }
+        }
+        try {
+          contractBreakingIssues.addAll(
+              invariantEnforcer.enforce(runId, projectId, rootCtx.workspaceRoot()));
+        } catch (Exception e) {
+          log.warn(
+              "RunOrchestrator run={} architecture invariant enforcement unavailable: {}",
+              runId,
+              e.getClass().getSimpleName());
+          contractBreakingIssues.add(
+              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                  .id("SYNTH-INVARIANT-UNAVAILABLE-RUN")
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                  .category(
+                      com.navneet.executespec.reviewer.model.IssueCategory.CROSS_TASK_MISMATCH)
+                  .description("Configured architecture invariants could not be verified.")
+                  .fixInstruction("Restore invariant enforcement and rerun.")
+                  .autoFixed(false)
+                  .fixSucceeded(false)
+                  .build());
         }
         if (featureFlagService.isEnabled("contracts.breaking-change.enabled")) {
           try {
-            contractBreakingIssues =
+            contractBreakingIssues.addAll(
                 detectBreakingChangeIssues(
-                    runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds);
+                    runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds));
           } catch (Exception e) {
             log.warn(
                 "RunOrchestrator run={} breaking-change detection skipped: {}",
@@ -2131,6 +2179,8 @@ public class RunOrchestrator implements RunControlPort {
       // every PARTIAL/COMPLETE run tagged with a vague reason that conveyed nothing.
       // The flag should only gate the SCORING formula choice, not the reason field.
       StatusAndReason srDerived = resolveTerminalStatus(execResult, reviewResult);
+      srDerived = applyStandardsGateStatus(srDerived, contractBreakingIssues);
+      srDerived = applyInvariantGateStatus(srDerived, contractBreakingIssues);
       StatusAndReason sr =
           featureFlagService.isEnabled("scoring.v2-verified")
               ? srDerived
@@ -2169,6 +2219,8 @@ public class RunOrchestrator implements RunControlPort {
         execResult = result.execResult();
         reviewResult = result.reviewResult();
         srDerived = resolveTerminalStatus(execResult, reviewResult);
+        srDerived = applyStandardsGateStatus(srDerived, contractBreakingIssues);
+        srDerived = applyInvariantGateStatus(srDerived, contractBreakingIssues);
         sr =
             featureFlagService.isEnabled("scoring.v2-verified")
                 ? srDerived
@@ -2981,7 +3033,8 @@ public class RunOrchestrator implements RunControlPort {
     // first run that reaches COMPLETE or PARTIAL (terminal-but-usable).
     // FAILED/CANCELLED don't count as activation signals — a user who
     // submits 3 runs that all fail hasn't hit the "my code works" moment.
-    if ("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus)) {
+    if (("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus))
+        && !"LOCAL_EXECUTION".equalsIgnoreCase(actualReason)) {
       try {
         runRepo
             .findById(runId)
@@ -4061,8 +4114,38 @@ public class RunOrchestrator implements RunControlPort {
     return value != null && !value.isBlank();
   }
 
+  private String resolveStandardsPromptBlock(
+      String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
+    if (projectId == null || !featureFlagService.isEnabled("standards.enforcement.enabled")) {
+      return "";
+    }
+    try {
+      String block =
+          truncate(
+              standardsEnforcer.composePromptBlock(projectId, workspaceRoot, selectedRepoIds),
+              ENTERPRISE_INJECT_CAP);
+      if (!block.isBlank()) {
+        log.info(
+            "V2 run={} injected engineering standards into agent context ({} chars)",
+            runId,
+            block.length());
+      }
+      return block;
+    } catch (Exception e) {
+      log.warn(
+          "V2 run={} standards prompt injection unavailable: {}",
+          runId,
+          e.getClass().getSimpleName());
+      return "";
+    }
+  }
+
   /** v2.5.10 — pair of run-level terminal status + explicit reason string. */
   record StatusAndReason(String status, String reason) {}
+
+  static StatusAndReason localExecutionTerminalStatus() {
+    return new StatusAndReason("PARTIAL", "LOCAL_EXECUTION");
+  }
 
   /**
    * v2.5.10 — decide run-level status from the authoritative signals available at terminate time:
@@ -4078,6 +4161,44 @@ public class RunOrchestrator implements RunControlPort {
       ExecutionResult exec, com.navneet.executespec.reviewer.ReviewerResult review) {
     TerminalStatusResolver.Result result = TerminalStatusResolver.resolve(exec, review);
     return new StatusAndReason(result.status(), result.reason());
+  }
+
+  /** A configured BLOCKING standard or unavailable verifier cannot end as a clean run. */
+  static StatusAndReason applyStandardsGateStatus(
+      StatusAndReason base,
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
+    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
+    boolean unavailable =
+        issues.stream()
+            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
+            .filter(java.util.Objects::nonNull)
+            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-UNAVAILABLE"));
+    if (unavailable) return new StatusAndReason("PARTIAL", "STANDARDS_ENFORCEMENT_UNAVAILABLE");
+    boolean blocking =
+        issues.stream()
+            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
+            .filter(java.util.Objects::nonNull)
+            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-BLOCKING"));
+    return blocking ? new StatusAndReason("PARTIAL", "STANDARDS_BLOCKING_VIOLATION") : base;
+  }
+
+  /** Configured architecture invariants are hard evidence, not a decorative report. */
+  static StatusAndReason applyInvariantGateStatus(
+      StatusAndReason base,
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
+    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
+    boolean unavailable =
+        issues.stream()
+            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
+            .filter(java.util.Objects::nonNull)
+            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-UNAVAILABLE"));
+    if (unavailable) return new StatusAndReason("PARTIAL", "INVARIANT_ENFORCEMENT_UNAVAILABLE");
+    boolean violated =
+        issues.stream()
+            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
+            .filter(java.util.Objects::nonNull)
+            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-VIOLATION"));
+    return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
   }
 
   /**

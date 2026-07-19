@@ -15,14 +15,13 @@ import lombok.RequiredArgsConstructor;
  * Durable, cache-independent answer to "is this run a pure-BYOK (OWN_KEYS) run?" — used to fail the
  * BYOK boundary CLOSED at dispatch time (BYOK deep-dive §7 #2, 2026-07-17).
  *
- * <p>The per-run resolved-key caches ({@code RunKeyContextStore} / {@code RunKeyStore}) are
- * best-effort in-memory/Redis stores. On eviction, Redis outage, cross-JVM resume, or a background
- * job they miss, and the router previously treated a miss as {@code PLATFORM} — silently spending
- * on platform credentials for an Enterprise customer. The run's key-source <b>mode</b>, by
- * contrast, is derived from the org row ({@code Org.keySourceMode}) via the run's persisted {@code
- * createdByUserId}, so it survives every cache failure. The router consults this ONLY at the moment
- * it would otherwise fall back to platform keys, so the extra lookup is off the hot path; results
- * are bounded-cached to keep even that rare path cheap.
+ * <p>The legacy per-run resolved-key context was best-effort and could disappear on eviction, Redis
+ * outage, cross-JVM resume, or a background job. The router previously treated a miss as {@code
+ * PLATFORM} — silently spending on platform credentials for an Enterprise customer. The run's
+ * key-source <b>mode</b>, by contrast, is derived from the org row ({@code Org.keySourceMode}) via
+ * the run's persisted {@code createdByUserId}, so it survives every cache failure. The router
+ * consults this ONLY at the moment it would otherwise fall back to platform keys, so the extra
+ * lookup is off the hot path; results are bounded-cached to keep even that rare path cheap.
  */
 @Service
 @RequiredArgsConstructor

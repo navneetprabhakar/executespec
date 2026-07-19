@@ -1,14 +1,11 @@
 package com.navneet.executespec.recovery;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -75,15 +72,6 @@ public class StartupRunResumer {
   private final SseBroadcaster broadcaster;
 
   /**
-   * 2026-05-09 (B-22 fix from audit) — workspace root for the workspace-gone precheck. Read from
-   * {@code agent.workspace} so dev / prod / test profiles all align. Optional via property
-   * placeholder so unit tests that construct the bean without Spring don't NPE; when null we skip
-   * the precheck (lexical salvage proceeds as before).
-   */
-  @org.springframework.beans.factory.annotation.Value("${agent.workspace:}")
-  private String workspaceRoot;
-
-  /**
    * 2026-05-04 — lazy {@code RunLifecycleService} reference (was RunOrchestrator before the inc-6b
    * god-class split; {@code resumeAfterCrash} moved to the lifecycle service). Direct constructor
    * injection would create a bean-init cycle (the service transitively depends on RunOrchestrator,
@@ -124,7 +112,6 @@ public class StartupRunResumer {
     int failedInterrupted = 0;
     int failedCapped = 0;
     int failedStale = 0;
-    int salvaged = 0;
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
@@ -146,50 +133,6 @@ public class StartupRunResumer {
         continue;
       }
 
-      // NEW — "salvage" path: if the executor already completed (every
-      // AgentTask is in a terminal status), the generated code is on disk
-      // and the run is effectively done. Only the post-executor phase
-      // (reviewer / validation) was interrupted, which is a strictly
-      // non-destructive loss. Mark the run COMPLETE (with a clear
-      // status_reason) so the user keeps access to the workspace, preview,
-      // chat, and retry-validation — instead of being told to re-run
-      // everything from scratch.
-      //
-      // 2026-05-09 (B-22 fix) — but only if the workspace directory still
-      // exists. If the JVM died during cleanup, or a deploy wiped scratch,
-      // marking the run COMPLETE leaves the user with a useless terminal
-      // run (no preview, no chat target, broken downloads). Detect that
-      // case and fail-cleanly with a clear status_reason.
-      if (isExecutorDone(run.getRunId())) {
-        if (workspaceMissing(run.getRunId())) {
-          var restoreOutcome = recoverMissingWorkspace(run.getRunId());
-          if (restoreOutcome
-              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK) {
-            // The lifecycle path restored the checkpoint and queued the post-executor recovery.
-            // Do not mark the run COMPLETE here: reviewer/validation still need to run.
-            failedInterrupted++;
-            continue;
-          }
-          if (restoreOutcome
-              == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
-                  .NOT_APPLICABLE) {
-            // Another JVM owns the recovery lease; leave the durable row untouched.
-            failedInterrupted++;
-            continue;
-          }
-          markFailed(
-              run,
-              status,
-              "Workspace directory was lost during interruption — cannot salvage; please submit"
-                  + " a fresh run.");
-          failedInterrupted++;
-          continue;
-        }
-        markSalvaged(run, status);
-        salvaged++;
-        continue;
-      }
-
       int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
       if (attempts >= MAX_RESUME_ATTEMPTS) {
         markFailed(
@@ -203,8 +146,13 @@ public class StartupRunResumer {
         continue;
       }
 
-      Instant startedAt = run.getStartedAt();
-      if (startedAt != null && startedAt.isBefore(cutoff)) {
+      // Long-running work must not become "abandoned" merely because its original start time is
+      // old. The execution owner refreshes this durable heartbeat every 30 seconds, so a run that
+      // was healthy immediately before a JVM/VM restart remains eligible for the fenced recovery
+      // path even after six hours. Legacy rows without a heartbeat retain the started-at fallback.
+      Instant latestRunActivity =
+          run.getExecutionHeartbeat() != null ? run.getExecutionHeartbeat() : run.getStartedAt();
+      if (latestRunActivity != null && latestRunActivity.isBefore(cutoff)) {
         // Abandoned — too old to replay meaningfully. Fail without consuming
         // an attempt so the counter only reflects real resume attempts.
         markFailed(
@@ -212,7 +160,7 @@ public class StartupRunResumer {
             status,
             "Run exceeded "
                 + STALE_CUTOFF.toHours()
-                + "h since start; "
+                + "h since its last durable execution activity; "
                 + "considered stale rather than interrupted.");
         failedStale++;
         continue;
@@ -259,127 +207,11 @@ public class StartupRunResumer {
     }
     log.warn(
         "StartupRunResumer: recovery complete — awaiting-approval={} "
-            + "salvaged={} interrupted={} cap-exceeded={} stale={}",
+            + "interrupted={} cap-exceeded={} stale={}",
         awaitingApproval,
-        salvaged,
         failedInterrupted,
         failedCapped,
         failedStale);
-  }
-
-  /**
-   * Give the normal crash-recovery path a chance to restore a missing workspace before the
-   * terminal-task salvage branch fails the run. The lifecycle service owns the GCS restore
-   * collaborator and the cross-JVM CAS/lease, so duplicating that logic here would create a second
-   * recovery protocol. A null provider is retained as a fail-closed compatibility path for focused
-   * tests and legacy embedders.
-   */
-  private com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
-      recoverMissingWorkspace(String runId) {
-    try {
-      if (runLifecycleServiceProvider == null) {
-        return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
-            .WORKSPACE_GONE;
-      }
-      return runLifecycleServiceProvider.getObject().resumeAfterCrash(runId);
-    } catch (Exception e) {
-      log.warn(
-          "StartupRunResumer: missing workspace recovery dispatch failed for run={}: {}",
-          runId,
-          e.getMessage());
-      return com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
-    }
-  }
-
-  /**
-   * B-22 (audit, 2026-05-09) — true if the run's workspace directory does not exist. Salvaging a
-   * run whose workspace has been wiped (deploy cleaned scratch, `rm -rf` ran during interruption,
-   * pod scratch volume detached) leaves the user staring at a "COMPLETE" run with no preview, no
-   * chat context, and broken file downloads. Detecting it lets us fail with a clear reason instead.
-   * Returns false (i.e. "don't block salvage") when {@code agent.workspace} isn't configured (e.g.
-   * unit-test paths without Spring) so legacy behaviour is preserved.
-   */
-  private boolean workspaceMissing(String runId) {
-    if (workspaceRoot == null || workspaceRoot.isBlank()) return false;
-    try {
-      Path p = Path.of(workspaceRoot, runId);
-      return !Files.isDirectory(p);
-    } catch (Exception e) {
-      log.warn(
-          "StartupRunResumer: workspaceMissing precheck failed for run={}: {} — proceeding",
-          runId,
-          e.getMessage());
-      return false;
-    }
-  }
-
-  /**
-   * True if every {@link AgentTask} for this run is in a terminal status. "Terminal" = COMPLETE /
-   * PARTIAL / FAILED / BLOCKED. PENDING or WORKING means the executor didn't actually finish → the
-   * run isn't salvageable, it was genuinely interrupted mid-flight.
-   */
-  private boolean isExecutorDone(String runId) {
-    List<AgentTask> tasks = taskRepo.findByRunId(runId);
-    if (tasks.isEmpty()) return false; // planner never made it — not salvageable
-    for (AgentTask t : tasks) {
-      if (t.getParentTaskId() != null) continue; // subtasks follow parent; ignore
-      String s = t.getStatus();
-      if (s == null) return false;
-      if (!("COMPLETE".equals(s)
-          || "PARTIAL".equals(s)
-          || "FAILED".equals(s)
-          || "BLOCKED".equals(s))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /**
-   * Mark a run COMPLETE (or PARTIAL if any task warned) when the executor already finished but a
-   * post-executor phase was interrupted. The code is on disk; the user keeps access; no
-   * resume-attempt consumed; validation report can be (re-)generated via {@code POST
-   * /runs/{id}/retry-validation}.
-   */
-  private void markSalvaged(PipelineRun run, String previousStatus) {
-    String runId = run.getRunId();
-    List<AgentTask> tasks = taskRepo.findByRunId(runId);
-    boolean anyNonClean =
-        tasks.stream()
-            .filter(t -> t.getParentTaskId() == null)
-            .anyMatch(
-                t ->
-                    "PARTIAL".equals(t.getStatus())
-                        || "FAILED".equals(t.getStatus())
-                        || "BLOCKED".equals(t.getStatus()));
-    String terminalStatus = anyNonClean ? "PARTIAL" : "COMPLETE";
-    String reason = "REVIEWER_INTERRUPTED_CODE_PRESERVED";
-
-    run.setStatus(terminalStatus);
-    run.setStatusReason(reason);
-    if (run.getFailureReason() == null) {
-      run.setFailureReason(
-          "Post-executor phase ("
-              + previousStatus
-              + ") was interrupted by a JVM restart, but all tasks had already finished and "
-              + "the workspace is intact. Run marked "
-              + terminalStatus
-              + ". Click Regenerate on the Validation Report to re-run the reviewer + scoring.");
-    }
-    if (run.getCompletedAt() == null) run.setCompletedAt(Instant.now());
-    runRepo.save(run);
-    log.warn(
-        "StartupRunResumer: run={} prev={} salvaged → {} ({})",
-        runId,
-        previousStatus,
-        terminalStatus,
-        reason);
-    try {
-      broadcaster.emit(runId, RunEvent.runStatus(runId, terminalStatus));
-      broadcaster.complete(runId);
-    } catch (Exception e) {
-      log.debug("StartupRunResumer salvage: SSE emit failed for run={}: {}", runId, e.getMessage());
-    }
   }
 
   private void markFailed(PipelineRun run, String previousStatus, String reason) {

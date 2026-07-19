@@ -192,12 +192,12 @@ auth:
 # Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
 # Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
 # configured in the base profile. Safe fallback: if the key can't be loaded the
-# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
-# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
-# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+# Shared dev is a remote enterprise-test surface: missing key/IAM is a boot failure, never a
+# plaintext fallback. Local/test profiles retain developer-friendly passthrough semantics.
 executespec:
   crypto:
     enabled: true
+    require-encryption: true
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:

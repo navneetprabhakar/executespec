@@ -218,8 +218,13 @@ public class ChatService {
         reply = "(The model returned an empty response. Try rephrasing the question.)";
       reply = contextSanitizer.sanitizeOutput(reply);
     } catch (Exception e) {
-      log.error("ChatService send failed for run={}: {}", runId, e.getMessage(), e);
-      throw new RuntimeException("Chat failed: " + e.getMessage(), e);
+      String safeFailure = contextSanitizer.sanitizeException(e);
+      log.error(
+          "ChatService send failed for run={} type={} detail={}",
+          runId,
+          e.getClass().getSimpleName(),
+          safeFailure);
+      throw new RuntimeException("Chat failed: " + safeFailure);
     }
 
     // Persist: append both messages + bump counter.

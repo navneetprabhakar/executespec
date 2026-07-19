@@ -14,6 +14,7 @@ import com.navneet.executespec.contracts.gate.PlanBreakingChangeReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.standards.StandardsRunner;
 import com.navneet.executespec.standards.StandardsViolation;
+import com.navneet.executespec.standards.enforcement.lint.LintResult;
 import com.navneet.executespec.standards.model.Standard;
 
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,81 @@ class RunOrchestratorEnterpriseEnforcementTest {
   void null_report_yields_no_rows() {
     assertTrue(
         RunStandardsEnforcer.toStandardsViolationRows(UUID.randomUUID(), "p", null, 200).isEmpty());
+  }
+
+  @Test
+  void blockingAndUnavailableStandardsBecomeCriticalEvidenceAndPreventCleanStatus() {
+    StandardsRunner.RunReport report =
+        new StandardsRunner.RunReport(
+            List.of(
+                new StandardsRunner.AggregatedViolation(
+                    "no-system-out",
+                    Standard.Severity.BLOCKING,
+                    "AST_CHECK",
+                    "src/Main.java:42",
+                    "System.out is banned"),
+                new StandardsRunner.AggregatedViolation(
+                    "naming",
+                    Standard.Severity.WARNING,
+                    "FILE_PATTERN",
+                    "src/bad.java",
+                    "wrong name")),
+            Map.of(
+                "checkstyle",
+                new LintResult(
+                    "checkstyle", LintResult.Status.UNAVAILABLE, List.of(), "not installed")));
+
+    var issues = RunStandardsEnforcer.toReviewIssues(report);
+
+    assertEquals(3, issues.size());
+    assertEquals(IssueSeverity.CRITICAL, issues.get(0).getSeverity());
+    assertEquals(IssueSeverity.MINOR, issues.get(1).getSeverity());
+    assertTrue(issues.get(2).getId().startsWith("SYNTH-STANDARD-UNAVAILABLE"));
+    assertEquals(
+        new RunOrchestrator.StatusAndReason("PARTIAL", "STANDARDS_ENFORCEMENT_UNAVAILABLE"),
+        RunOrchestrator.applyStandardsGateStatus(
+            new RunOrchestrator.StatusAndReason("COMPLETE", "CLEAN_COMPLETION"), issues));
+  }
+
+  @Test
+  void blockingStandardAloneProducesExplicitPartialReason() {
+    var issues =
+        RunStandardsEnforcer.toReviewIssues(
+            new StandardsRunner.RunReport(
+                List.of(
+                    new StandardsRunner.AggregatedViolation(
+                        "rule", Standard.Severity.BLOCKING, "AST_CHECK", "f:1", "bad")),
+                Map.of()));
+
+    assertEquals(
+        new RunOrchestrator.StatusAndReason("PARTIAL", "STANDARDS_BLOCKING_VIOLATION"),
+        RunOrchestrator.applyStandardsGateStatus(
+            new RunOrchestrator.StatusAndReason("COMPLETE", "CLEAN_COMPLETION"), issues));
+  }
+
+  @Test
+  void invariantEvidencePreventsCleanStatus() {
+    var violation =
+        com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+            .id("SYNTH-INVARIANT-VIOLATION-1")
+            .severity(IssueSeverity.CRITICAL)
+            .build();
+    var unavailable =
+        com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+            .id("SYNTH-INVARIANT-UNAVAILABLE-1")
+            .severity(IssueSeverity.CRITICAL)
+            .build();
+
+    assertEquals(
+        new RunOrchestrator.StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION"),
+        RunOrchestrator.applyInvariantGateStatus(
+            new RunOrchestrator.StatusAndReason("COMPLETE", "CLEAN_COMPLETION"),
+            List.of(violation)));
+    assertEquals(
+        new RunOrchestrator.StatusAndReason("PARTIAL", "INVARIANT_ENFORCEMENT_UNAVAILABLE"),
+        RunOrchestrator.applyInvariantGateStatus(
+            new RunOrchestrator.StatusAndReason("COMPLETE", "CLEAN_COMPLETION"),
+            List.of(unavailable)));
   }
 
   // Breaking-change report rows → report-only run issues

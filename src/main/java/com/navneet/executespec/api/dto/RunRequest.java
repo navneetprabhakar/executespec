@@ -167,4 +167,9 @@ public record RunRequest(
      * include a LOCAL folder: admission verifies the installation matches the registered connector
      * and its lease is currently ONLINE. Never a filesystem path; ignored for remote runs.
      */
-    java.util.UUID localInstallationId) {}
+    java.util.UUID localInstallationId,
+    /**
+     * Path-only, client-generated repository inventory for local-hands planning. The server treats
+     * it as untrusted evidence and never accepts absolute filesystem paths or file contents here.
+     */
+    @Size(max = 20_000, message = "Local repository inventory must not exceed 20,000 characters") String localRepositoryInventory) {}

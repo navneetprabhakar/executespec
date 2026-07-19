@@ -334,6 +334,7 @@ public class OutlinePlannerAgent {
             .replace("{{REFERENCE_DOCS}}", "(provided as untrusted evidence below)")
             .replace("{{CONTRACTS}}", "(provided as untrusted evidence below)")
             .replace("{{PROJECT_ADRS}}", "(provided as untrusted evidence below)")
+            .replace("{{ENGINEERING_STANDARDS}}", "(provided as untrusted evidence below)")
             .replace("{{TDD_MODE_BLOCK}}", renderTddBlock(req.tddMode()))
             .replace("{{MOBILE_PREFERENCE_BLOCK}}", "")
             .replace("{{PR_REVIEW_COMMENTS}}", "(provided as untrusted evidence below)");
@@ -523,6 +524,11 @@ public class OutlinePlannerAgent {
     appendUntrusted(message, "REFERENCE_DOCS", req.referenceDocs(), "(no reference docs)");
     appendUntrusted(message, "CONTRACTS", req.contracts(), "(no contracts)");
     appendUntrusted(message, "PROJECT_ADRS", req.projectAdrs(), "(no project ADRs)");
+    appendUntrusted(
+        message,
+        "ENGINEERING_STANDARDS",
+        req.engineeringStandards(),
+        "(no engineering standards enabled)");
     appendUntrusted(
         message, "PR_REVIEW_COMMENTS", req.prReviewComments(), "(no PR review comments)");
     if (retryFeedback != null && !retryFeedback.isBlank()) {

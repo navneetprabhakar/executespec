@@ -49,6 +49,8 @@ public class RepositorySearchService {
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
   private static final int HASH_BUFFER_BYTES = 64 * 1024;
+  static final int MAX_CACHED_SNAPSHOTS_PER_WORKSPACE = 512;
+  static final long MAX_CACHED_CHARACTERS_PER_WORKSPACE = 8L * 1024 * 1024;
 
   /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
   private static final int MAX_INDEXED_WORKSPACES = 4;
@@ -152,10 +154,10 @@ public class RepositorySearchService {
       throw new IllegalArgumentException("workspace and non-blank symbol are required");
     }
     SearchResult all = searchAllSymbolHits(workspace, request);
-    Map<String, String> declarations = new HashMap<>();
+    Set<String> declarations = new java.util.LinkedHashSet<>();
     for (SearchHit hit : all.hits()) {
       if (hit.matchType() == MatchType.SYMBOL_DEFINITION) {
-        declarations.putIfAbsent(hit.path(), hit.path());
+        declarations.add(hit.path());
       }
     }
     List<RelationshipEdge> edges = new ArrayList<>();
@@ -168,7 +170,11 @@ public class RepositorySearchService {
             default -> null;
           };
       if (type == null) continue;
-      String target = declarations.isEmpty() ? null : declarations.keySet().iterator().next();
+      // A lexical token can legitimately have many declarations (for example Django's backend-
+      // specific DatabaseWrapper classes). Picking the first path fabricates a confidently wrong
+      // graph. Link only the unambiguous case; language-aware resolution owns multi-definition
+      // disambiguation.
+      String target = declarations.size() == 1 ? declarations.iterator().next() : null;
       edges.add(
           new RelationshipEdge(
               hit.path(),
@@ -255,7 +261,6 @@ public class RepositorySearchService {
         workspaceIndex.put(root, cached);
       } else if (requestSequence >= cached.lastInventoryRequest) {
         cached.files = List.copyOf(currentFiles);
-        cached.lastInventoryRequest = requestSequence;
       }
       return cached.files.stream().filter(path -> path.startsWith(searchRoot)).toList();
     }
@@ -276,7 +281,8 @@ public class RepositorySearchService {
     private final Path root;
     private List<Path> files;
     private long lastInventoryRequest;
-    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>();
+    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>(64, 0.75f, true);
+    private long cachedCharacters;
 
     private CachedWorkspace(Path root, List<Path> files) {
       this.root = root;
@@ -289,7 +295,7 @@ public class RepositorySearchService {
         // targets at the read boundary so a newly introduced link cannot make a search disclose
         // content outside the workspace that was originally canonicalized.
         if (Files.isSymbolicLink(file) && !file.toRealPath().startsWith(root)) {
-          snapshots.remove(file);
+          removeSnapshot(file);
           return null;
         }
         // Metadata is only a useful fast path when the filesystem guarantees a reliable
@@ -301,16 +307,69 @@ public class RepositorySearchService {
           return previous.lines;
         }
         List<String> current = Files.readAllLines(file);
-        snapshots.put(file, new FileSnapshot(contentHash, current));
+        putSnapshot(file, new FileSnapshot(contentHash, current, characterCount(current)));
         return current;
       } catch (IOException | OutOfMemoryError e) {
-        snapshots.remove(file);
+        removeSnapshot(file);
         return null;
       }
     }
+
+    private void putSnapshot(Path file, FileSnapshot snapshot) {
+      FileSnapshot previous = snapshots.put(file, snapshot);
+      if (previous != null) cachedCharacters -= previous.characterCount;
+      cachedCharacters += snapshot.characterCount;
+      var iterator = snapshots.entrySet().iterator();
+      while ((snapshots.size() > MAX_CACHED_SNAPSHOTS_PER_WORKSPACE
+              || cachedCharacters > MAX_CACHED_CHARACTERS_PER_WORKSPACE)
+          && iterator.hasNext()) {
+        FileSnapshot evicted = iterator.next().getValue();
+        cachedCharacters -= evicted.characterCount;
+        iterator.remove();
+      }
+    }
+
+    private void removeSnapshot(Path file) {
+      FileSnapshot removed = snapshots.remove(file);
+      if (removed != null) cachedCharacters -= removed.characterCount;
+    }
+
+    private static long characterCount(List<String> lines) {
+      long total = 0;
+      for (String line : lines) {
+        long characters = line.length() + 1L;
+        if (total > Long.MAX_VALUE - characters) return Long.MAX_VALUE;
+        total += characters;
+      }
+      return total;
+    }
+
+    private synchronized int snapshotCount() {
+      return snapshots.size();
+    }
+
+    private synchronized long characterCount() {
+      return cachedCharacters;
+    }
   }
 
-  private record FileSnapshot(String contentHash, List<String> lines) {}
+  private record FileSnapshot(String contentHash, List<String> lines, long characterCount) {}
+
+  int cachedSnapshotCount(Path workspace) throws IOException {
+    Path root = workspace.toRealPath();
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      return cached == null ? 0 : cached.snapshotCount();
+    }
+  }
+
+  long cachedCharacterCount(Path workspace) throws IOException {
+    Path root = workspace.toRealPath();
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      return cached == null ? 0 : cached.characterCount();
+    }
+  }
 
   private static Pattern compile(SearchRequest request) {
     if (request.mode() == SearchMode.SYMBOL) {

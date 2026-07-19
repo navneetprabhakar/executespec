@@ -11,6 +11,7 @@ import com.navneet.executespec.api.dto.DeploymentSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierPermissionService;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
@@ -56,10 +57,12 @@ public class DeploymentController {
   private final CredentialService credentialService;
   private final DeployEngineOrchestrator deployEngine;
   private final TierPermissionService tierPermissionService;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   @PostMapping
   public ResponseEntity<DeploymentSummary> deploy(
       @RequestBody DeployRequest request, @AuthenticationPrincipal AppUserDetails userDetails) {
+    requireDeploymentCreationEnabled();
     guard.requireRunAccess(request.runId(), userDetails);
     // [F-31] (audit Sprint 2, 2026-04-30) — server-side tier gate.
     // Was: only `RunAccessGuard.requireRunAccess` ran, which only
@@ -203,6 +206,7 @@ public class DeploymentController {
   @PostMapping("/analyze")
   public ResponseEntity<?> analyze(
       @RequestParam String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    requireDeploymentCreationEnabled();
     guard.requireRunAccess(runId, userDetails);
 
     PipelineRun run =
@@ -251,6 +255,7 @@ public class DeploymentController {
   public ResponseEntity<DeploymentSummary> confirm(
       @RequestBody DeployConfirmRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
+    requireDeploymentCreationEnabled();
     guard.requireRunAccess(request.runId(), userDetails);
     String userId = userDetails.getUser().getId();
 
@@ -341,6 +346,14 @@ public class DeploymentController {
     } catch (Exception e) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "Destroy failed: " + e.getMessage());
+    }
+  }
+
+  private void requireDeploymentCreationEnabled() {
+    if (!operationalReleasePolicy.deploymentCreationEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Deployment creation is disabled until durable recovery is configured.");
     }
   }
 }

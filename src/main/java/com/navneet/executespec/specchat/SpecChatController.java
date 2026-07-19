@@ -410,9 +410,11 @@ public class SpecChatController {
       Object raw = copy.get("content");
       String content = raw == null ? "" : inputSanitizer.normalize(String.valueOf(raw));
       if ("user".equalsIgnoreCase(role)) {
+        // The legacy marker is client-authored compatibility metadata, not an attestation. Scan
+        // the complete payload before splitting it so a forged marker cannot bypass ingress.
+        inputSanitizer.scan(content);
         int localContext = content.indexOf("EXECUTESPEC_LOCAL_CONTEXT:");
         String instruction = localContext < 0 ? content : content.substring(0, localContext);
-        inputSanitizer.scan(instruction);
         if (localContext >= 0) {
           content =
               instruction

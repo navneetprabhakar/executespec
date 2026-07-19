@@ -4475,8 +4475,7 @@ to boot — skip it for those.""";
    *   "iterBudget":       75,
    *   "toolCallsTotal":   132,
    *   "totalLatencyMs":   1837451,
-   *   "lastToolCall":     "writeFile(app/x.py) → ERR: permission denied",
-   *   "lastAssistantText":"Let me also check..."
+   *   "lastToolCall":     "writeFile(sig=…)[target=app/x.py] → ERR"
    * }</pre>
    *
    * <p>JSON is hand-built (vs Jackson) to keep the persistence path allocation-light + guarantee
@@ -4500,11 +4499,6 @@ to boot — skip it for those.""";
         if (last.length() > 200) last = last.substring(0, 200) + "…";
         b.append(",\"lastToolCall\":\"").append(jsonEscape(last)).append('"');
       }
-    }
-    String tail = r.finalAssistantText();
-    if (tail != null && !tail.isBlank()) {
-      if (tail.length() > 240) tail = tail.substring(0, 240) + "…";
-      b.append(",\"lastAssistantText\":\"").append(jsonEscape(tail)).append('"');
     }
     b.append('}');
     return b.toString();
@@ -4539,19 +4533,13 @@ to boot — skip it for those.""";
   /**
    * v2.5.12 — maps a non-COMPLETED worker outcome to a human-readable failure reason. Keeps the
    * message short enough to render inline on the run detail page while preserving the most
-   * diagnostic snippet (finalAssistantText for STOPPED_WITHOUT_COMPLETE, the iteration count for
-   * ITERATION_LIMIT_EXCEEDED).
+   * diagnostic metadata without persisting model text, tool payloads or provider responses.
    */
   private static String describeWorkerFailure(WorkerResult r) {
     if (r == null || r.outcome() == null) return "Worker outcome unknown";
-    String tail = r.finalAssistantText();
-    if (tail != null && tail.length() > 240) tail = tail.substring(0, 240) + "…";
     return switch (r.outcome()) {
       case STOPPED_WITHOUT_COMPLETE ->
-          "Worker stopped without calling completeTask after "
-              + r.iterations()
-              + " iterations"
-              + (tail != null && !tail.isBlank() ? ". Final: " + tail : "");
+          "Worker stopped without calling completeTask after " + r.iterations() + " iterations";
       case ITERATION_LIMIT_EXCEEDED ->
           "Iteration cap exceeded ("
               + r.iterations()
@@ -4572,9 +4560,7 @@ to boot — skip it for those.""";
               + " iters, "
               + r.toolCallsDispatched()
               + " tool calls).";
-      case ERROR ->
-          "Worker threw unrecoverable exception"
-              + (tail != null && !tail.isBlank() ? ": " + tail : "");
+      case ERROR -> "Worker threw an unrecoverable exception; inspect the correlation trace.";
       case BUDGET_EXCEEDED -> "Run hit its hard cost cap; worker stopped cleanly mid-task.";
       default -> "Worker outcome=" + r.outcome();
     };

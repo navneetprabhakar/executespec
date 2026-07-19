@@ -1,12 +1,10 @@
 package com.navneet.executespec.billing.service;
 
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -36,10 +34,9 @@ import lombok.extern.slf4j.Slf4j;
 public class RunQuotaRefundListener {
 
   private final StateStore stateStore;
-  private final TierEnforcementService tierEnforcementService;
-  private final UsageTrackingService usageTrackingService;
+  private final RunQuotaRefundStore refundStore;
+  private final RunQuotaRefundWorker refundWorker;
 
-  @Async
   @EventListener
   public void onRunFailed(PipelineEvent.RunFailed event) {
     String runId = event.runId();
@@ -69,12 +66,12 @@ public class RunQuotaRefundListener {
     // `creditsCharged` is only the estimated cost-credit field today; refunding it here can erase
     // unrelated usage when an expensive failed run had creditsCharged > 1.
     int credits = 1;
-    tierEnforcementService.decrementRunCount(userId, credits);
-    usageTrackingService.decrement(userId, "RUNS", credits);
+    refundStore.enqueue(runId, userId, credits);
+    refundWorker.attempt(runId);
 
     String kind = isFailed ? "failed" : "clean-partial";
     log.info(
-        "Refunded {} credit(s) for {} run {} (user={}, reason={})",
+        "Recorded durable refund of {} credit(s) for {} run {} (user={}, reason={})",
         credits,
         kind,
         runId,

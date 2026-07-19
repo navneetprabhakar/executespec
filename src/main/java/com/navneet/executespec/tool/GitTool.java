@@ -777,8 +777,9 @@ public class GitTool {
   }
 
   /**
-   * Push workspace to a Bitbucket branch using Basic auth (username:appPassword). Mirrors {@link
-   * #pushToBranch} but uses Bitbucket credential format.
+   * Push workspace to a Bitbucket branch using a scoped API token. The static Git username is the
+   * Bitbucket-supported {@code x-bitbucket-api-token-auth}; the legacy username parameter remains
+   * for call compatibility and REST operations.
    *
    * @param runId run whose workspace to push
    * @param cloneUrl HTTPS clone URL (e.g. https://bitbucket.org/workspace/repo.git)
@@ -808,7 +809,7 @@ public class GitTool {
       ProcessBuilder push =
           com.navneet.executespec.repo.GitProcessAuth.git(
               appPassword,
-              username,
+              "x-bitbucket-api-token-auth",
               java.util.List.of("-C", wsPath, "push", cloneUrl, branchName, "--force"));
       push.redirectErrorStream(true);
       Process p2 = push.start();

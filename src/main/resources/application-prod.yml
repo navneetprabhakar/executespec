@@ -119,6 +119,7 @@ agent:
   github:
     default-owner: ${GITHUB_OWNER:}
   deployment:
+    recovery-safe-enabled: ${DEPLOYMENT_RECOVERY_SAFE_ENABLED:false}
     gcp-project: ${GCP_PROJECT:executespecv1}
     gcp-region: ${GCP_REGION:us-east4}
     artifact-registry:
@@ -127,6 +128,9 @@ agent:
     workspace:
       gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-workspaces}
   integrations:
+    # Outbound lifecycle adapters are BEST_EFFORT and non-idempotent today. The release policy
+    # suppresses their dispatch even if an individual adapter is accidentally enabled.
+    enabled: false
     jira:
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       dashboard-url: ${DASHBOARD_URL:https://executespec.ai}

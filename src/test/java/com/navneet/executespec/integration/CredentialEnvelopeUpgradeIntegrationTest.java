@@ -28,6 +28,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class CredentialEnvelopeUpgradeIntegrationTest {
 
   private static final String LOCAL_KEY = Base64.getEncoder().encodeToString(new byte[32]);
+  private static final String ROTATED_KEY =
+      Base64.getEncoder()
+          .encodeToString(
+              "11111111111111111111111111111111"
+                  .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
 
   @Container
   static final PostgreSQLContainer<?> POSTGRES =
@@ -82,10 +87,50 @@ class CredentialEnvelopeUpgradeIntegrationTest {
       // A restart must skip exact envelopes; re-encrypting would change AES-GCM IV/ciphertext.
       runner.migrateExistingKeys();
       assertThat(readSeededCiphertexts(jdbc)).isEqualTo(firstPass);
+
+      // Rotate with the previous version decrypt-only, rewrap every column, then prove both normal
+      // restart (old key removed) and an explicit rollback window (old primary + new decrypt key).
+      SimpleKeyEncryptionService rotated =
+          encryption(ROTATED_KEY, "test-v2", Map.of("test-v1", LOCAL_KEY));
+      new KeyMigrationRunner(
+              rotated, jdbc, properties("test-v2", ROTATED_KEY, Map.of("test-v1", LOCAL_KEY)))
+          .migrateExistingKeys();
+      Map<String, String> rotatedPass = readSeededCiphertexts(jdbc);
+      assertThat(rotatedPass.values()).allMatch(value -> value.startsWith("enc:v1:test-v2:"));
+
+      SimpleKeyEncryptionService restarted = encryption(ROTATED_KEY, "test-v2", Map.of());
+      assertThat(rotatedPass.values()).allMatch(value -> restarted.decrypt(value) != null);
+      SimpleKeyEncryptionService rollback =
+          encryption(LOCAL_KEY, "test-v1", Map.of("test-v2", ROTATED_KEY));
+      assertThat(rotatedPass.values()).allMatch(value -> rollback.decrypt(value) != null);
       assertThat(flyway(dataSource, schema, null).migrate().migrationsExecuted).isZero();
     } finally {
       jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
     }
+  }
+
+  private static SimpleKeyEncryptionService encryption(
+      String key, String version, Map<String, String> previousKeys) {
+    CryptoProperties properties = new CryptoProperties();
+    properties.setEnabled(true);
+    properties.setLocalKey(key);
+    properties.setRequireEncryption(true);
+    properties.setKeyVersion(version);
+    properties.setPreviousKeys(previousKeys);
+    SimpleKeyEncryptionService service = new SimpleKeyEncryptionService(properties);
+    ReflectionTestUtils.invokeMethod(service, "init");
+    return service;
+  }
+
+  private static CryptoProperties properties(
+      String version, String key, Map<String, String> previousKeys) {
+    CryptoProperties properties = new CryptoProperties();
+    properties.setEnabled(true);
+    properties.setLocalKey(key);
+    properties.setRequireEncryption(true);
+    properties.setKeyVersion(version);
+    properties.setPreviousKeys(previousKeys);
+    return properties;
   }
 
   private static Flyway flyway(

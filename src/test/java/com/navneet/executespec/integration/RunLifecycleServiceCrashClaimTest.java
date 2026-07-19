@@ -335,4 +335,62 @@ class RunLifecycleServiceCrashClaimTest {
     verify(runRepo, never())
         .claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString());
   }
+
+  @Test
+  void crossNodeRecoveryWithoutSharedWorkspaceOrAcknowledgedFrontierFailsHonestly() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("cross-node-untrusted")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .executingInstance("old-node")
+            .resumeAttempts(0)
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
+        .thenReturn(1);
+    when(taskRepo.findByRunIdAndStatusIn(run.getRunId(), List.of("WORKING", "LOCKED")))
+        .thenReturn(List.of());
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo,
+            taskRepo,
+            null,
+            null,
+            null,
+            controlPort,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+    com.navneet.executespec.config.OperationalReleasePolicy policy =
+        mock(com.navneet.executespec.config.OperationalReleasePolicy.class);
+    when(policy.sharedPersistentWorkspaceConfigured()).thenReturn(false);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "operationalReleasePolicy", policy);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE);
+    verify(controlPort)
+        .terminate(
+            run.getRunId(),
+            "FAILED",
+            "cross-node recovery refused: no shared persistent workspace or acknowledged checkpoint"
+                + " frontier",
+            null);
+  }
 }

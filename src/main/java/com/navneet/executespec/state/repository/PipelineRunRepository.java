@@ -365,6 +365,7 @@ public interface PipelineRunRepository
         AND r.completedAt < :cutoff
         AND r.gcsArchivedAt IS NULL
         AND r.gcsWorkspaceKey IS NULL
+        AND r.localExecutionRequested = false
       ORDER BY r.completedAt ASC
       """)
   List<PipelineRun> findRunsToArchive(@Param("cutoff") Instant cutoff, Pageable pageable);
@@ -393,6 +394,7 @@ public interface PipelineRunRepository
       WHERE r.status IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED')
         AND r.completedAt < :cutoff
         AND r.gcsWorkspaceKey IS NULL
+        AND r.localExecutionRequested = false
       ORDER BY r.completedAt ASC
       """)
   List<PipelineRun> findTerminalRunsWithoutGcsKey(

@@ -209,9 +209,6 @@ class AccessGuardCoverageTest {
   private static final Set<String> READ_ONLY_WRITE_HANDLERS =
       new LinkedHashSet<>(
           Set.of(
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkContract",
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkProject",
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkRepo",
               // Read-only POST computations gated by assertCanRead (mutate no tenant state):
               // resolve picks a variant; dry-run computes applicability + cost + sample diff.
               // C2 — audit 2026-05-29.
