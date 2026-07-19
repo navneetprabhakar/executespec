@@ -9,7 +9,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V292`              | `src/main/resources/db/migration/V292_*.sql`                           |
+| Flyway head       | `V304`              | `src/main/resources/db/migration/V304__benchmark_task_result_route_attribution.sql` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -22,7 +22,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V292                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V304                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -60,7 +60,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │   └── ... (76 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V292, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V304, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -232,7 +232,8 @@ The long-form documentation now lives in the central docs repo — see [`DOCS.md
 
 → **https://github.com/navneetprabhakar/executespec-docs/tree/main/backend** — architecture · product · operations · security · design · plans · ADRs · reason-logs · business · competitive analysis · reference.
 
-The REST API spec remains in this repo at [`docs/openapi.yaml`](docs/openapi.yaml).
+The REST API contract is maintained in the central docs repository at
+[`backend/reference/openapi.yaml`](../executespec-docs/backend/reference/openapi.yaml).
 
 ## Required environment variables
 
@@ -266,10 +267,18 @@ OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire defau
 | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`  | `localhost` / `5432` / `executespec` / `postgres` / `postgres`        |
 | `REDIS_HOST`                                                                               | `localhost`                                                           |
+| `CRYPTO_LOCAL_KEY` / `CRYPTO_GCP_SECRET_RESOURCE`                                          | Shared dev/prod/benchmark require one. Local key is Base64 AES-256; GCP resource must end in immutable `/versions/<number>` (never `latest`). |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET`                   | Required when `BILLING_DEFAULT_GATEWAY=stripe`                        |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                                    | Enables Google OAuth2 login                                           |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
+| `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
+
+Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
+updates because the current adapters are non-idempotent, best-effort append operations. Deployment
+creation is also hidden and returns 503 unless durable external-resource recovery has been
+explicitly attested with `DEPLOYMENT_RECOVERY_SAFE_ENABLED=true`; existing deployment read,
+rollback, and destroy operations remain available for cleanup.
 | `APP_SURFACE_RETURN_URL`                                                                   | Browser OAuth callback URL (e.g. `http://localhost:5173/auth/callback`) |
 | `DASHBOARD_URL`                                                                            | Dashboard URL used in Slack and notification links                    |
 
