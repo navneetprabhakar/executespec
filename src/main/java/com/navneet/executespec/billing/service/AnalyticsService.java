@@ -92,12 +92,12 @@ public class AnalyticsService {
     var countRows = jdbc.queryForList(countSql, countParams);
     if (!countRows.isEmpty()) {
       var row = countRows.get(0);
-      totalRuns = ((Number) row.getOrDefault("total", 0)).intValue();
-      successfulRuns = ((Number) row.getOrDefault("success", 0)).intValue();
-      failedRuns = ((Number) row.getOrDefault("failed", 0)).intValue();
-      partialRuns = ((Number) row.getOrDefault("partial", 0)).intValue();
-      avgTime = ((Number) row.getOrDefault("avg_time", 0)).doubleValue();
-      totalCost = ((Number) row.getOrDefault("total_cost", 0)).doubleValue();
+      totalRuns = intOf(row, "total");
+      successfulRuns = intOf(row, "success");
+      failedRuns = intOf(row, "failed");
+      partialRuns = intOf(row, "partial");
+      avgTime = doubleOf(row, "avg_time");
+      totalCost = doubleOf(row, "total_cost");
     }
 
     // --- Runs per day ---
@@ -200,10 +200,7 @@ GROUP BY m.model_name ORDER BY calls DESC
 
       jdbc.queryForList(costSql, costParams)
           .forEach(
-              row ->
-                  costByModel.put(
-                      (String) row.get("model"),
-                      ((Number) row.getOrDefault("total_cost_usd", 0)).doubleValue()));
+              row -> costByModel.put((String) row.get("model"), doubleOf(row, "total_cost_usd")));
     } catch (Exception e) {
       log.warn("Failed to query cost by model: {}", e.getMessage());
     }
@@ -242,8 +239,8 @@ GROUP BY m.model_name ORDER BY calls DESC
     return jdbc.queryForList(sql, orgId, Timestamp.from(since), orgId).stream()
         .map(
             row -> {
-              int runs = ((Number) row.getOrDefault("runs", 0)).intValue();
-              int success = ((Number) row.getOrDefault("success", 0)).intValue();
+              int runs = intOf(row, "runs");
+              int success = intOf(row, "success");
               double rate = runs > 0 ? (success * 100.0 / runs) : 0;
               Timestamp lastRun = (Timestamp) row.get("last_run");
               return new MemberUsage(
@@ -614,5 +611,27 @@ GROUP BY m.model_name ORDER BY calls DESC
   private static String normalizeEntityType(String entityType) {
     if (entityType == null) return "USER";
     return entityType.trim().toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * Null-safe numeric read from a JDBC row.
+   *
+   * <p>{@code getOrDefault} only substitutes the default when the key is ABSENT. A SQL aggregate
+   * such as {@code AVG(...)} or {@code SUM(...)} over zero rows returns the column PRESENT and
+   * NULL, so {@code getOrDefault(key, 0)} handed back null and the cast NPE'd. That made the
+   * analytics endpoint 500 for any account with no runs yet — i.e. every newly registered user
+   * loading the insights surface.
+   */
+  private static int intOf(java.util.Map<String, Object> row, String key) {
+    Object v = row.get(key);
+    return v instanceof Number n ? n.intValue() : 0;
+  }
+
+  /**
+   * @see #intOf
+   */
+  private static double doubleOf(java.util.Map<String, Object> row, String key) {
+    Object v = row.get(key);
+    return v instanceof Number n ? n.doubleValue() : 0d;
   }
 }
