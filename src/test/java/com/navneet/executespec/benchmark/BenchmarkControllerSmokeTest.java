@@ -71,7 +71,15 @@ class BenchmarkControllerSmokeTest {
         new BenchmarkController(generationService, mock(SwebenchInstanceLoader.class), props);
     BenchmarkController.SubmitRequest request =
         new BenchmarkController.SubmitRequest(
-            "django__django-11001", "openrouter", "glm-5.2", null, null, 2.0, true, 1_900_000L, 120_000L);
+            "django__django-11001",
+            "openrouter",
+            "glm-5.2",
+            null,
+            null,
+            2.0,
+            true,
+            1_900_000L,
+            120_000L);
 
     controller.generate(request);
 
