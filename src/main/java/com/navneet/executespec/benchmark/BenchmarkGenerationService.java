@@ -50,10 +50,10 @@ import lombok.extern.slf4j.Slf4j;
  * instance) and hands back the diff — no polling, no harvesting.
  *
  * <p>It still creates ONE minimal {@link PipelineRun} row, because the worker reads two things from
- * it: optional {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code sourceType}
- * (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"} ⇒ gate OFF
- * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
- * lifecycle.
+ * it: optional {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code
+ * sourceType} (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"}
+ * ⇒ gate OFF for blind runs). That row is the minimal subset of what {@code submitRun} sets, not
+ * the full lifecycle.
  *
  * <p>Blind: the agent sees only the issue {@code problem_statement}; the hidden tests are applied
  * externally at scoring.
@@ -152,9 +152,8 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
-    Double hardCapUsd = Boolean.FALSE.equals(enforceHardCap)
-        ? null
-        : validatedHardCapUsd(requestedHardCapUsd);
+    Double hardCapUsd =
+        Boolean.FALSE.equals(enforceHardCap) ? null : validatedHardCapUsd(requestedHardCapUsd);
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);
