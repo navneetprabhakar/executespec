@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doThrow;
@@ -13,7 +15,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
-import java.util.Optional;
 
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
@@ -32,6 +33,7 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.run.RunIdempotencyClaim;
 import com.navneet.executespec.run.RunIdempotencyService;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
@@ -114,8 +116,8 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunSubmitsExactlyOnceAndRecordsUsage() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
@@ -177,13 +179,16 @@ class AgentRunSubmissionGateTest {
             (Boolean) null,
             (String) null);
     verify(usageTrackingService).increment("u1", "RUNS", 1);
-    verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-1");
+    verify(runIdempotencyService)
+        .complete(
+            argThat(c -> "agent-orchestrator:turn-1".equals(c.idempotencyKey()) && c.owned()),
+            eq("run-1"));
   }
 
   @Test
   void confirmationInheritsSessionProviderAndModelWhenClientsDoNotEchoThem() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(runOrchestrator.submitRun(
             anyString(),
             anyString(),
@@ -254,8 +259,8 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunCanStartLowComplexityWorkersOnLightweightTier() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
@@ -319,8 +324,8 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunPropagatesPrototypeExecutionModeAndEditedSpec() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
