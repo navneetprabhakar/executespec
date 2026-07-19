@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {writeSpecHandoff} from '@/lib/specHandoff';
 import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
@@ -208,7 +209,9 @@ export function IdeProjectChat() {
     try {
       const r = await api.compileProjectChatToSpec(projectId);
       if (r?.spec) {
-        sessionStorage.setItem('signal:pending-spec', r.spec);
+        // Retain the project identity the compile came from; the composer used
+        // to receive only the spec text.
+        writeSpecHandoff({spec: r.spec, source: 'project-chat-compile', projectId});
         window.location.href = `/projects/${projectId}`;
       }
     } catch (e: unknown) {
@@ -1318,6 +1321,9 @@ export function IdeProjectArchitecture() {
   const [invariants, setInvariants] = useState<api.InvariantSummary[] | null>(null);
   const [violations, setViolations] = useState<api.InvariantViolation[]>([]);
   const [adrs, setAdrs] = useState<api.AdrSummary[] | null>(null);
+  const [adrCapability, setAdrCapability] = useState<api.AdrCapability | null | undefined>(
+    undefined,
+  );
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [coverage, setCoverage] = useState<Record<
     string,
@@ -1347,13 +1353,15 @@ export function IdeProjectArchitecture() {
       uiBound(api.listProjectInvariants(projectId)),
       uiBound(api.listProjectInvariantViolations(projectId)),
       uiBound(api.listProjectAdrs(projectId, false)),
+      uiBound(api.getProjectAdrCapability(projectId)),
       uiBound(api.getArchitectureStaleness(projectId)),
       uiBound(api.getProjectRepos(projectId)),
-    ]).then(async ([v, inv, viol, adr, st, rp]) => {
+    ]).then(async ([v, inv, viol, adr, adrCap, st, rp]) => {
       setVersions(v.status === 'fulfilled' ? (v.value as ArchitectureDoc[]) : []);
       setInvariants(inv.status === 'fulfilled' ? inv.value : []);
       if (viol.status === 'fulfilled') setViolations(viol.value);
       setAdrs(adr.status === 'fulfilled' ? adr.value : []);
+      setAdrCapability(adrCap.status === 'fulfilled' ? adrCap.value : null);
       if (st.status === 'fulfilled') setStaleness(st.value);
       if (rp.status === 'fulfilled') {
         const list = rp.value as unknown as Array<Record<string, unknown>>;
@@ -1725,43 +1733,65 @@ export function IdeProjectArchitecture() {
       {sub === 'adrs' &&
         (adrs === null ? (
           <IdeLoader label='Loading decisions…' />
-        ) : adrs.length === 0 ? (
-          <div className='ide-empty'>No architecture decisions yet.</div>
         ) : (
-          <div className='ide-card' style={{padding: 0}}>
-            {adrs.map((adr, i) => {
-              const status = (adr.status || 'PROPOSED').toUpperCase();
-              return (
-                <div
-                  key={adr.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '11px 16px',
-                    borderBottom: i < adrs.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                  }}
-                >
-                  <div style={{flex: 1, minWidth: 0}}>
-                    <span style={{fontWeight: 600}}>
-                      ADR {String(adr.adrIdInRepo ?? '').padStart(4, '0')} ·{' '}
-                      {adr.title || 'untitled'}
-                    </span>
-                    {adr.decisionDate && (
-                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginLeft: 8}}>
-                        {new Date(adr.decisionDate).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                  <IdeBadge
-                    kind={status === 'ACCEPTED' ? 'ok' : status === 'DEPRECATED' ? 'bad' : 'warn'}
-                  >
-                    {status}
-                  </IdeBadge>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <div
+              className='ide-card'
+              style={{
+                marginBottom: 10,
+                borderColor: 'var(--ide-warning)',
+                color: 'var(--ide-fg-muted)',
+              }}
+            >
+              {adrCapability === null
+                ? 'Decision indexing readiness is unknown because the capability check failed.'
+                : adrCapability?.automaticIngestion
+                  ? 'Checked-in architecture decisions are synchronized automatically.'
+                  : adrs.length > 0
+                    ? 'These are cached decision records. Checked-in ADR files are not discovered or synchronized automatically.'
+                    : 'Checked-in ADR discovery is not available yet; an empty cache does not prove that the repositories contain no architecture decisions.'}
+            </div>
+            {adrs.length === 0 ? (
+              <div className='ide-empty'>No cached architecture decisions.</div>
+            ) : (
+              <div className='ide-card' style={{padding: 0}}>
+                {adrs.map((adr, i) => {
+                  const status = (adr.status || 'PROPOSED').toUpperCase();
+                  return (
+                    <div
+                      key={adr.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '11px 16px',
+                        borderBottom: i < adrs.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      }}
+                    >
+                      <div style={{flex: 1, minWidth: 0}}>
+                        <span style={{fontWeight: 600}}>
+                          ADR {String(adr.adrIdInRepo ?? '').padStart(4, '0')} ·{' '}
+                          {adr.title || 'untitled'}
+                        </span>
+                        {adr.decisionDate && (
+                          <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginLeft: 8}}>
+                            {new Date(adr.decisionDate).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <IdeBadge
+                        kind={
+                          status === 'ACCEPTED' ? 'ok' : status === 'DEPRECATED' ? 'bad' : 'warn'
+                        }
+                      >
+                        {status}
+                      </IdeBadge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         ))}
 
       {/* ── Contracts ── */}

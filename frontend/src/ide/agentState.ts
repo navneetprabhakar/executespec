@@ -129,6 +129,7 @@ export type AgentAction =
     }
   | {type: 'load:error'; error: string}
   | {type: 'sessions:set'; sessions: api.AgentSessionResponse[]}
+  | {type: 'session:created'; session: api.AgentSessionResponse}
   | {type: 'session:select'; sessionId: string | null}
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
   | {type: 'events:set'; events: StreamTimelineItem[]}
@@ -193,6 +194,17 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return {...state, status: 'error', error: action.error};
     case 'sessions:set':
       return {...state, sessions: action.sessions};
+    // Canonical creation result. Deduping by id means an idempotent re-create
+    // (same client request id) selects the existing session instead of
+    // appending a duplicate row to the drawer.
+    case 'session:created':
+      return agentReducer(
+        {
+          ...state,
+          sessions: [action.session, ...state.sessions.filter((s) => s.id !== action.session.id)],
+        },
+        {type: 'session:select', sessionId: action.session.id},
+      );
     case 'session:select':
       return {
         ...state,

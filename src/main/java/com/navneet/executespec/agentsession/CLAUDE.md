@@ -22,6 +22,18 @@ turns separately from runs.
   calls `SpecChatService` with the read-only allow-list, its system prompt must not advertise legacy
   direct run-control tools; web run creation stays on the structured `create_cloud_run` proposal and
   confirmation path.
+- `create_cloud_run` is emitted only for `CODE_RUN_REQUIRED` decisions whose policy allows the Run
+  API. Missing project/repository context and read-only permission mode return explanation-only
+  `IMPLEMENTATION_PROPOSAL` decisions with no confirmation card. That blocked state is now a typed
+  contract (`dto/AgentActionContext`: `requiredContext[]`, `blockingReasons[]`, `confirmable`,
+  `recommendedAction`, `projectSelectionRequired`) carried on both `OrchestratorDecision` and the
+  `TypedAction` itself, so clients decide confirmability from structured fields rather than prose,
+  and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
+  The context is nullable for rows persisted before it existed; clients must treat absent context
+  as unknown, never as confirmable. `AgentIntentDecisions.decision(...)` enforces the invariant
+  structurally and throws when a `create_cloud_run` action is built with a blocked context, a
+  disallowed Run API, or a missing/blank `projectId`. Non-run decisions must never reach
+  `/api/orchestrator/turn/confirm` or produce “stored orchestrator decision is not a run route”.
 - `POST /api/orchestrator/turn` is the non-stream primary decision endpoint. It uses the same
   deterministic route/policy contract, persists `ORCHESTRATOR_DECISION`, and uses client `turnId`
   as the idempotency key.
@@ -118,7 +130,9 @@ turns separately from runs.
   pessimistic parent-session lock and append-only `SUBAGENT_WRITER_RESERVED` /
   `SUBAGENT_WRITER_RELEASED` events to permit at most one active reservation per explicit workspace
   scope. `authorizeWriter` must be called before every mutation and `releaseWriter` is
-  terminal/idempotent. `ImplementerMutationService` is the deliberately narrow opt-in execution
+  terminal/idempotent. All writer reserve/mutate/execute/release endpoints additionally require
+  PAT transport proven by `JwtAuthenticationFilter`; a caller-declared CLI surface is never an
+  authentication credential. `ImplementerMutationService` is the deliberately narrow opt-in execution
   seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
   sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
   `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded WORKHORSE model loop
@@ -140,7 +154,9 @@ turns separately from runs.
   `(session_id, action_id)` for `LOCAL_HANDS_COMPLETED` rows (deduping historical duplicates first),
   so retried result envelopes are first-writer-wins across JVMs. `LocalHandsStateService` reports
   whether the terminal insert was accepted; a duplicate is an expected idempotent retry.
-- `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
+- Every local tool transport route (`tool-results`, reconnect/status/disconnect and pending calls)
+  requires PAT transport in addition to run read/write authorization; a same-user browser JWT is
+  not a local connector. `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
   means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
   evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the
   old worker. Persisted calls older than the remote lease are returned as `staleCallIds` and must
@@ -257,7 +273,14 @@ turns separately from runs.
   `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
-  missing/blank project context cannot call the run API.
+  missing/blank project context cannot call the run API. It also pins the typed blocking contract:
+  a missing project yields a non-confirmable `AgentActionContext` with `MISSING_PROJECT_CONTEXT` +
+  `SELECT_PROJECT`, and a confirmable proposal carries the context on the action so it survives
+  persistence and reload.
+- `AgentIntentDecisionsTest` additionally pins the fail-closed `create_cloud_run` invariant: a
+  proposal with no project context, with a blocked `AgentActionContext`, or with `runApiAllowed`
+  false throws instead of producing a clickable-but-unexecutable proposal. It also pins that an
+  `AgentActionContext` cannot simultaneously be confirmable and carry blocking reasons.
 - `AgentNonRunIntentsTest` pins non-run routing around the code-change branch: local terminal
   actions, review/plan, vague mutation clarification, read-only code help, cost queries, and
   project resolution cannot call the run API.
@@ -288,9 +311,12 @@ turns separately from runs.
   no store write. `specchat/WebSearchChatToolsTest` pins the `web_fetch` SSRF guards (scheme,
   localhost/`*.internal`, loopback/link-local/metadata IPs), suspicious egress-query rejection,
   default-port-only enforcement, pinned-address handoff, content-type/length response guards, and
-  required-arg rejection.
-- `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
-  routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
+  required-arg rejection. External content now fails closed when `ContextSanitizer` throws;
+  neither raw fetched content, malformed tool JSON, nor exception messages are echoed into the
+  model envelope/log. The hostile canary regression pins that boundary.
+- The docs-repository `tests/test_openapi_contract.py` gate pins that public agent-session,
+  orchestrator, and managed-AI routes plus action-lifecycle schemas are represented in
+  `executespec-docs/backend/reference/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, latest linked-run summary
   hydration for session rows, owned-session loading, missing/forbidden session rejection, event
   listing, bounded turn pagination, and stored trace hydration.

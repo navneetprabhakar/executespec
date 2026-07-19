@@ -4,6 +4,7 @@ import {Button} from '@/signal/components/Primitives';
 import AuthLayout from '@/signal/components/AuthLayout';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
+import {writeSpecHandoff} from '@/lib/specHandoff';
 
 const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 
@@ -412,7 +413,7 @@ export function WelcomePage() {
   ];
 
   function pick(spec: string) {
-    sessionStorage.setItem('signal:pending-spec', spec);
+    writeSpecHandoff({spec, source: 'signup-picker'});
     setPickedSpec(spec);
     setStep(2);
   }

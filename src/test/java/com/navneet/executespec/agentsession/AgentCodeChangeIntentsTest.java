@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Locale;
 
+import com.navneet.executespec.agentsession.dto.AgentActionContext;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
 
@@ -55,9 +56,41 @@ class AgentCodeChangeIntentsTest {
 
     assertThat(decision.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
     assertThat(decision.reasonCode()).isEqualTo("code_mutation_missing_project_context");
-    assertThat(decision.proposedAction().type()).isEqualTo("create_cloud_run");
-    assertThat(decision.proposedAction().arguments()).doesNotContainKey("projectId");
+    assertThat(decision.proposedAction()).isNull();
+    assertThat(decision.requiresUserConfirmation()).isFalse();
     assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
+  void missingProjectContextCarriesTypedBlockingContract() {
+    var decision =
+        decide("implement OAuth login", null, new ClientCapabilities(false, true, true, true));
+
+    AgentActionContext context = decision.actionContext();
+    assertThat(context).isNotNull();
+    assertThat(context.confirmable()).isFalse();
+    assertThat(context.projectSelectionRequired()).isTrue();
+    assertThat(context.requiredContext()).containsExactly(AgentActionContext.CONTEXT_PROJECT);
+    assertThat(context.blockingReasons())
+        .containsExactly(AgentActionContext.REASON_MISSING_PROJECT);
+    assertThat(context.recommendedAction()).isEqualTo(AgentActionContext.ACTION_SELECT_PROJECT);
+  }
+
+  @Test
+  void confirmableCloudRunCarriesConfirmableContextOnTheActionItself() {
+    var decision =
+        decide(
+            "fix the failing auth refresh test",
+            "project-1",
+            new ClientCapabilities(false, true, true, true));
+
+    assertThat(decision.actionContext()).isNotNull();
+    assertThat(decision.actionContext().confirmable()).isTrue();
+    // The context must ride on the action so it survives persistence in
+    // agent_turn.proposed_action_json and a client reload.
+    assertThat(decision.proposedAction().actionContext()).isNotNull();
+    assertThat(decision.proposedAction().actionContext().confirmable()).isTrue();
+    assertThat(decision.proposedAction().actionContext().projectSelectionRequired()).isFalse();
   }
 
   @Test
@@ -65,7 +98,10 @@ class AgentCodeChangeIntentsTest {
     var decision = decide("implement OAuth login", "  ", null);
 
     assertThat(decision.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
+    assertThat(decision.proposedAction()).isNull();
     assertThat(decision.policy().runApiAllowed()).isFalse();
+    assertThat(decision.actionContext()).isNotNull();
+    assertThat(decision.actionContext().confirmable()).isFalse();
   }
 
   @Test
