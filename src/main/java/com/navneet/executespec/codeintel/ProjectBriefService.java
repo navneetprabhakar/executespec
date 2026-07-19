@@ -157,7 +157,10 @@ public class ProjectBriefService {
       String text = response.getResult().getOutput().getText();
       return text == null ? "" : text.trim();
     } catch (Exception e) {
-      log.debug("ProjectBriefService summarise failed for {}: {}", projectId, e.getMessage());
+      log.debug(
+          "ProjectBriefService summarise failed for {} errorClass={}",
+          projectId,
+          e.getClass().getSimpleName());
       String fallback =
           extractHeadings(archMarkdown, 1).stream()
               .findFirst()

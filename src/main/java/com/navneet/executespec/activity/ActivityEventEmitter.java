@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 
 import org.springframework.scheduling.annotation.Async;
@@ -48,6 +49,7 @@ public class ActivityEventEmitter {
   private final ActivityFeedEntryRepository feedRepo;
   private final ActivityAuditService auditService;
   private final ObjectMapper objectMapper;
+  private final ProjectRepository projectRepository;
 
   /**
    * Emit an event. Returns immediately; the persist runs on the configured async executor (or
@@ -92,11 +94,10 @@ public class ActivityEventEmitter {
       // Non-blocking by contract — log + swallow. Losing an event is
       // strictly better than failing the calling action.
       log.warn(
-          "[ActivityEventEmitter] event {} for project {} failed to persist: {}",
+          "[ActivityEventEmitter] event {} for project {} failed to persist type={}",
           type,
           projectId,
-          ex.getMessage(),
-          ex);
+          ex.getClass().getSimpleName());
     }
   }
 
@@ -143,7 +144,7 @@ public class ActivityEventEmitter {
             .eventType(type.name())
             .entityType(targetType == null ? "PROJECT" : targetType)
             .entityId(targetId == null ? projectId.toString() : targetId)
-            .orgId(null) // org_id not required for project-scoped events; left null
+            .orgId(resolveOrgId(projectId, targetType, targetId))
             .actorId(actorUserId == null ? null : actorUserId.toString())
             .newValue(summary)
             .metadata(serializePayload(structuredPayload))
@@ -152,12 +153,25 @@ public class ActivityEventEmitter {
     auditService.record(audit);
   }
 
+  private String resolveOrgId(UUID projectId, String targetType, String targetId) {
+    if ("ORG".equalsIgnoreCase(targetType) && targetId != null && !targetId.isBlank()) {
+      return targetId;
+    }
+    return projectRepository
+        .findById(projectId.toString())
+        .map(com.navneet.executespec.auth.entity.Project::getOrgId)
+        .filter(orgId -> !orgId.isBlank())
+        .orElse(null);
+  }
+
   String serializePayload(Map<String, Object> structuredPayload) {
     if (structuredPayload == null || structuredPayload.isEmpty()) return null;
     try {
       return objectMapper.writeValueAsString(structuredPayload);
     } catch (JsonProcessingException ex) {
-      log.warn("[ActivityEventEmitter] could not serialize payload: {}", ex.getMessage());
+      log.warn(
+          "[ActivityEventEmitter] could not serialize payload type={}",
+          ex.getClass().getSimpleName());
       return null;
     }
   }

@@ -1,5 +1,7 @@
 package com.navneet.executespec.project.rag;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -11,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -34,13 +37,26 @@ class OpenAiEmbeddingTransport {
   @Value("${project.rag.embedding.openai.dimensions:1536}")
   private int dimensions = 1536;
 
+  @Value("${project.rag.embedding.openai.connect-timeout-millis:5000}")
+  private int connectTimeoutMillis = 5000;
+
+  @Value("${project.rag.embedding.openai.read-timeout-millis:60000}")
+  private int readTimeoutMillis = 60000;
+
   Result embed(String apiKey, String model, List<String> texts) {
     if (apiKey == null || apiKey.isBlank()) {
       throw new IllegalStateException("Resolved OpenAI embedding credential is unavailable");
     }
+    HttpClient httpClient =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(Math.max(1, connectTimeoutMillis)))
+            .build();
+    JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+    requestFactory.setReadTimeout(Duration.ofMillis(Math.max(1, readTimeoutMillis)));
     String response =
         RestClient.builder()
             .baseUrl(baseUrl)
+            .requestFactory(requestFactory)
             .build()
             .post()
             .uri("/v1/embeddings")

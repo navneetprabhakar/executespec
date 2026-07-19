@@ -2,6 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -339,5 +340,20 @@ class CodeMapGeneratorFunctionMapTest {
     assertFalse(md.contains("## Functions"), "no Functions section when nothing extracted");
     assertTrue(md.contains("# owner/repo"));
     assertTrue(md.contains("**Files**: 3"));
+  }
+
+  @Test
+  void generate_failsClosedWhenRepositoryInventoryIsUnavailable() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    when(gh.listRepoFiles(any(), any(), any()))
+        .thenThrow(new RuntimeException("upstream body must not become a valid empty codemap"));
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> gen.generate("owner/repo", "main", "pat"));
+
+    assertEquals("Repository inventory unavailable for codemap generation", failure.getMessage());
   }
 }

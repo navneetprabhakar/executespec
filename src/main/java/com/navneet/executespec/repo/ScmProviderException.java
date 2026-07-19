@@ -31,6 +31,7 @@ public class ScmProviderException extends ResponseStatusException {
   private static HttpStatus httpStatus(Integer upstreamStatus) {
     if (upstreamStatus == null) return HttpStatus.BAD_GATEWAY;
     return switch (upstreamStatus) {
+      case 400 -> HttpStatus.BAD_REQUEST;
       case 401 -> HttpStatus.UNPROCESSABLE_ENTITY;
       case 403 -> HttpStatus.FORBIDDEN;
       case 404 -> HttpStatus.NOT_FOUND;

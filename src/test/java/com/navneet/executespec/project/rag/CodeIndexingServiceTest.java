@@ -107,6 +107,7 @@ class CodeIndexingServiceTest {
     assertThat(completion.getValue().indexedFiles()).isEqualTo(1);
     assertThat(completion.getValue().skippedFiles()).isEqualTo(2);
     assertThat(completion.getValue().coveragePercent()).isEqualTo(100.0);
+    assertThat(completion.getValue().reason()).isEqualTo("FULL_ELIGIBLE_SOURCE_COVERAGE");
     verify(embedder)
         .embedForProject(
             eq("proj-1"),
@@ -115,6 +116,35 @@ class CodeIndexingServiceTest {
             eq("PROJECT_REPOSITORY"),
             eq(repo.getId().toString()),
             eq("member-1"));
+  }
+
+  @Test
+  void sensitivePathsAndCredentialContentNeverReachEmbeddingOrChunkStorage(@TempDir Path root)
+      throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Files.writeString(root.resolve(".env"), "OPENAI_API_KEY=sk-" + "a".repeat(40));
+    Files.writeString(
+        root.resolve("src/fixture.txt"),
+        "-----BEGIN PRIVATE KEY-----\n" + "not-real-but-sensitive\n-----END PRIVATE KEY-----\n");
+    Files.writeString(root.resolve("src/Safe.java"), "public class Safe {}\n");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+
+    var result = service(4000).indexRepo("proj-1", repo, null, null, "member-1");
+
+    assertThat(result.outcome()).isEqualTo(CodeIndexingService.Outcome.READY);
+    verify(chunks)
+        .replaceFileChunks(
+            eq(lease), eq("acme/widget"), eq("src/Safe.java"), anyString(), anyList(), anyList());
+    verify(chunks, never())
+        .replaceFileChunks(
+            eq(lease), eq("acme/widget"), eq(".env"), anyString(), anyList(), anyList());
+    verify(chunks, never())
+        .replaceFileChunks(
+            eq(lease), eq("acme/widget"), eq("src/fixture.txt"), anyString(), anyList(), anyList());
+    ArgumentCaptor<Completion> completion = ArgumentCaptor.forClass(Completion.class);
+    verify(states).complete(eq(lease), completion.capture());
+    assertThat(completion.getValue().eligibleFiles()).isEqualTo(1);
+    assertThat(completion.getValue().skippedFiles()).isEqualTo(2);
   }
 
   @Test
@@ -236,6 +266,23 @@ class CodeIndexingServiceTest {
     verify(embedder, never())
         .embedForProject(
             anyString(), anyList(), anyString(), anyString(), anyString(), nullable(String.class));
+  }
+
+  @Test
+  void bitbucketCloneUsesApiTokenGitIdentityRatherThanRestEmail(@TempDir Path root)
+      throws Exception {
+    repo.setScmProvider("BITBUCKET");
+    repo.setScmCloneUrl("https://bitbucket.org/acme/widget.git");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+
+    service(4000).indexRepo("proj-1", repo, "owner@acme.example", "scoped-api-token", "member-1");
+
+    verify(ws)
+        .cloneFromRepo(
+            anyString(),
+            eq("https://bitbucket.org/acme/widget.git"),
+            eq("x-bitbucket-api-token-auth"),
+            eq("scoped-api-token"));
   }
 
   private static ProjectRepo repo() {

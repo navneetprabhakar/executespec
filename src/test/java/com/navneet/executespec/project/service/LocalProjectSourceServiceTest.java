@@ -218,7 +218,7 @@ class LocalProjectSourceServiceTest {
                     "other-org",
                     false))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("another organization");
+        .hasMessageContaining("membership with write access");
     verify(repoRepository, never()).save(any());
   }
 
@@ -252,7 +252,27 @@ class LocalProjectSourceServiceTest {
                     "external-org",
                     false))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("another organization");
+        .hasMessageContaining("membership with write access");
+  }
+
+  @Test
+  void sameOrgUnassignedUserCannotBypassProjectMembershipAtServiceBoundary() {
+    when(projectRepository.findById(PROJECT_ID))
+        .thenReturn(Optional.of(Project.builder().id(PROJECT_ID).orgId(ORG_ID).name("P").build()));
+    when(projectMemberRepository.findByProjectIdAndUserId(PROJECT_ID, USER_ID))
+        .thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () ->
+                service.register(
+                    PROJECT_ID,
+                    request(UUID.randomUUID(), UUID.randomUUID(), Map.of()),
+                    USER_ID,
+                    ORG_ID,
+                    false))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("membership with write access");
+    verify(repoRepository, never()).save(any());
   }
 
   /* ── heartbeat ── */
@@ -414,6 +434,14 @@ class LocalProjectSourceServiceTest {
   private void allowProject() {
     when(projectRepository.findById(PROJECT_ID))
         .thenReturn(Optional.of(Project.builder().id(PROJECT_ID).orgId(ORG_ID).name("P").build()));
+    when(projectMemberRepository.findByProjectIdAndUserId(PROJECT_ID, USER_ID))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId(PROJECT_ID)
+                    .userId(USER_ID)
+                    .projectRole("PROJECT_DEVELOPER")
+                    .build()));
   }
 
   private void saveEntities() {

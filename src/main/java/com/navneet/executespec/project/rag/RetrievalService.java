@@ -2,6 +2,7 @@ package com.navneet.executespec.project.rag;
 
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -22,8 +23,16 @@ public class RetrievalService {
   private final EmbeddingService embeddingService;
   private final ChunkStore chunkStore;
 
+  @Value("${project.rag.embedding.max-cosine-distance:0.55}")
+  private double maxSemanticDistance = 0.55;
+
   public String retrieve(String projectId, String query) {
     return retrieve(projectId, query, DEFAULT_K, DEFAULT_TOKEN_CAP);
+  }
+
+  public String retrieve(String projectId, String query, String actorUserId) {
+    return retrieveWithReadiness(projectId, query, DEFAULT_K, DEFAULT_TOKEN_CAP, actorUserId)
+        .content();
   }
 
   public String retrieve(String projectId, String query, int k, int tokenCap) {
@@ -41,6 +50,7 @@ public class RetrievalService {
       return new RetrievalResult("", "NONE", "QUERY_OR_PROJECT_MISSING");
     }
     var availability = embeddingService.availability(projectId);
+    String semanticFallbackReason = "SEMANTIC_RESULTS_UNAVAILABLE";
     if (availability.semanticSearchAvailable()) {
       try {
         float[] queryVector =
@@ -51,13 +61,17 @@ public class RetrievalService {
                 "PROJECT_DOCUMENT_QUERY",
                 projectId,
                 actorUserId);
-        List<ChunkStore.RetrievedChunk> semantic = chunkStore.nearest(projectId, queryVector, k);
+        List<ChunkStore.RetrievedChunk> semantic =
+            chunkStore.nearest(projectId, queryVector, k).stream()
+                .filter(this::withinSemanticThreshold)
+                .toList();
         if (!semantic.isEmpty()) {
           return new RetrievalResult(
               render(semantic, tokenCap, "## REFERENCE DOCS"),
               "SEMANTIC",
               "GOVERNED_OPENAI_EMBEDDING");
         }
+        semanticFallbackReason = "SEMANTIC_BELOW_RELEVANCE_THRESHOLD";
       } catch (RuntimeException semanticFailure) {
         log.warn(
             "Semantic document retrieval degraded to lexical project={} failureType={}",
@@ -70,9 +84,12 @@ public class RetrievalService {
     return new RetrievalResult(
         render(lexical, tokenCap, "## REFERENCE DOCS (LEXICAL FALLBACK)"),
         "LEXICAL",
-        availability.semanticSearchAvailable()
-            ? "SEMANTIC_RESULTS_UNAVAILABLE"
-            : availability.reason());
+        availability.semanticSearchAvailable() ? semanticFallbackReason : availability.reason());
+  }
+
+  private boolean withinSemanticThreshold(ChunkStore.RetrievedChunk hit) {
+    double configured = Math.max(0.0, Math.min(2.0, maxSemanticDistance));
+    return hit != null && Double.isFinite(hit.distance()) && hit.distance() <= configured;
   }
 
   private static String render(List<ChunkStore.RetrievedChunk> hits, int tokenCap, String heading) {

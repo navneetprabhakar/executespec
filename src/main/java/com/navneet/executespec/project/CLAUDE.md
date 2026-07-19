@@ -46,7 +46,9 @@ to one or more projects. The legacy GitHub fields and `/api/repos` contracts rem
   installation attempting to claim the same user/folder identity fails with 409.
 - Connector state is derived from `source_lease_expires_at`: future means `ONLINE`, expired or
   absent means `OFFLINE`. Registration proves only `LINKED`, not readable/inventoried/ready source.
-- LOCAL rows are user-owned. The controller and service both enforce tenant/project access, and a
+- LOCAL rows are user-owned. The controller and service both enforce project-write access: only a
+  PROJECT_ADMIN/PROJECT_DEVELOPER member or an explicitly controller-validated ORG_ADMIN/
+  SUPER_ADMIN may register or heartbeat one. Same-org membership alone is not authority, and a
   cross-org `PROJECT_VIEWER` cannot register one.
 - The normal cloud clone pipeline rejects LOCAL rows with 422 — `ProjectRepoService.resolveForRunStrict`
   keeps LOCAL sources out of cloud runs unconditionally. This prevents a null GitHub identity from
@@ -138,6 +140,10 @@ bypassed with a raw user id.
 - Inventory traversal is deterministic, symlink-safe and bounded. Manifest/build/source paths are
   prioritised, deleted/no-longer-indexable files are removed, and an inventory ceiling is reported
   as `PARTIAL` rather than hidden.
+- Credential-like paths are rejected through `SensitiveWorkspacePathPolicy` before file reads, and
+  high-confidence credential content is rejected through `GeneratedSecretScanner` before chunking
+  or embedding. Because excluded paths do not enter the current eligible set, a successful refresh
+  also deletes any older chunks for a file that has become sensitive.
 - `search_code` remains an embedding-backed chunk similarity aid, not a language-aware relationship
   graph. The response and Repos UI explicitly report `relationshipGraphAvailable=false`; the
   ripgrep-backed `search_repo_files` path stays available for exact/regex lookup whenever semantic
@@ -161,7 +167,10 @@ bypassed with a raw user id.
   built-in signature check replaces a full enterprise AV engine.
 - Tika extraction is hard-bounded and returns typed page/character/token evidence. Per-file and
   transactionally serialized per-project document/byte/page/text/token quotas are enforced before
-  the accepted row and blob commit.
+  the accepted row and blob commit. Extracted text also passes `GeneratedSecretScanner` before the
+  blob/row commit; restart processing repeats that check before writing a workspace copy, chunking,
+  lexical publication or embedding dispatch. Credential-bearing content fails with the stable
+  `CREDENTIAL_CONTENT_DETECTED` code and the matched value is never retained or logged.
 - User filenames are NFKC-normalized display labels only. Storage uses
   `docs/.uploads/<document-uuid>.bin`, while `project_document_blob` is authoritative for new
   uploads so a restarted JVM can reconstruct its workspace copy. Internal path, actor and parser

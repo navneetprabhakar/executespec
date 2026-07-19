@@ -68,8 +68,14 @@ public class BitbucketCloudScmRepositoryClient implements ScmRepositoryClient {
   @Override
   public List<ScmRemoteRepository> listRepositories(String ownerFilter, ScmCredential credential) {
     requireCredential(credential);
+    String workspace = requireWorkspace(ownerFilter);
     List<ScmRemoteRepository> repos = new ArrayList<>();
-    URI next = resolve("/repositories?role=member&pagelen=100&sort=full_name");
+    // Bitbucket removed the cross-workspace GET /repositories?role=member endpoint under
+    // CHANGE-2770. ExecuteSpec already stores the selected workspace, so use the supported,
+    // least-privilege workspace-scoped catalogue instead of requiring an additional workspace
+    // discovery scope.
+    URI next =
+        resolve("/repositories/" + segment(workspace) + "?role=member&pagelen=100&sort=full_name");
     for (int page = 0; next != null && page < MAX_CATALOG_PAGES; page++) {
       JsonNode root = getJson(next, credential);
       JsonNode values = root.path("values");
@@ -78,11 +84,7 @@ public class BitbucketCloudScmRepositoryClient implements ScmRepositoryClient {
       for (JsonNode value : values) {
         ScmRemoteRepository repo = mapRepository(value);
         if (repo == null) continue;
-        if (ownerFilter == null
-            || ownerFilter.isBlank()
-            || repo.fullName()
-                .regionMatches(
-                    true, 0, ownerFilter.trim() + "/", 0, ownerFilter.trim().length() + 1)) {
+        if (repo.fullName().regionMatches(true, 0, workspace + "/", 0, workspace.length() + 1)) {
           repos.add(repo);
         }
         if (repos.size() >= MAX_CATALOG_ITEMS) break;
@@ -337,6 +339,14 @@ public class BitbucketCloudScmRepositoryClient implements ScmRepositoryClient {
     String value = fullName == null ? "" : fullName.trim();
     if (!value.matches("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) {
       throw new ScmProviderException("INVALID_REPOSITORY_IDENTITY", null, false);
+    }
+    return value;
+  }
+
+  private static String requireWorkspace(String workspace) {
+    String value = workspace == null ? "" : workspace.trim();
+    if (!value.matches("[A-Za-z0-9_.-]+")) {
+      throw new ScmProviderException("BITBUCKET_WORKSPACE_REQUIRED", 400, false);
     }
     return value;
   }

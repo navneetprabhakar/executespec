@@ -119,8 +119,11 @@ public class CodeMapGenerator {
     try {
       files = github.listRepoFiles("https://github.com/" + repoFullName, defaultBranch, pat);
     } catch (Exception e) {
-      log.warn("CodeMapGenerator list-files failed for {}: {}", repoFullName, e.getMessage());
-      files = List.of();
+      log.warn(
+          "CodeMapGenerator inventory failed for {} (type={})",
+          repoFullName,
+          e.getClass().getSimpleName());
+      throw new IllegalStateException("Repository inventory unavailable for codemap generation", e);
     }
 
     StringBuilder md = new StringBuilder();

@@ -73,6 +73,11 @@ surface, not a chat-model proposal protocol.
 entries compacted after a bounded, non-empty snapshot is produced; failures return without
 mutating ledger state.
 
+The provider call runs outside a database transaction. Only the snapshot insert and dependent
+ledger-marker updates share a short `TransactionTemplate` transaction, so a slow provider cannot
+pin a JDBC connection. Cross-JVM duplicate-spend/version fencing is still a separate durability
+requirement; do not infer it from this transaction split.
+
 `ProjectMemoryProvider` enforces a conservative 12,000-token (48,000-character) planner-memory
 budget. The durable snapshot is selected before recent ledger entries; recent entries are included
 newest-first only when complete entries fit, then rendered chronologically. Provider-side context

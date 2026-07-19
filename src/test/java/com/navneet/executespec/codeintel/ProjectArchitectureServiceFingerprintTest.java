@@ -111,6 +111,18 @@ class ProjectArchitectureServiceFingerprintTest {
   }
 
   @Test
+  void fallbackRepoArchitecture_neverPersistsProviderExceptionText() {
+    String markdown =
+        ProjectArchitectureService.fallbackRepoArchitectureMarkdown(
+            "owner/repo", "## Files\n- src/App.java");
+
+    assertThat(markdown)
+        .contains("LLM generation failed")
+        .contains("src/App.java")
+        .doesNotContain("api-key", "Bearer", "exception");
+  }
+
+  @Test
   void providerGeneratedRepoArchitecture_isReusable() {
     RepoArchitectureDoc generated =
         RepoArchitectureDoc.builder()

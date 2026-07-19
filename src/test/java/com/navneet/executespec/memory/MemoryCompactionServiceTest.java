@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +27,7 @@ import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -111,6 +113,19 @@ class MemoryCompactionServiceTest {
     assertThat(messages.getValue().get(0).getText()).doesNotContain("compact prompt");
     assertThat(messages.getValue().get(1).getText())
         .contains("<<<UNTRUSTED_PROJECT_MEMORY_EVIDENCE", "compact prompt");
+    InOrder paidCallBeforePersistence = inOrder(llmRouter, snapshotRepo, ledgerRepo);
+    paidCallBeforePersistence
+        .verify(llmRouter)
+        .callText(
+            eq("anthropic"),
+            eq("claude-haiku-4-5-20251001"),
+            anyList(),
+            eq("compact-project-1"),
+            eq("memory-compaction"),
+            eq("compact"),
+            eq(executionReference));
+    paidCallBeforePersistence.verify(snapshotRepo).save(any());
+    paidCallBeforePersistence.verify(ledgerRepo).saveAll(any());
   }
 
   private static ChatResponse ok(String text) {

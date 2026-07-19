@@ -9,10 +9,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
@@ -225,6 +227,49 @@ class EmbeddingServiceTest {
             eq("embedding.batch"),
             anyLong(),
             any(IllegalStateException.class));
+  }
+
+  @Test
+  void reauthorizesImmediatelyBeforeEveryPhysicalBatch() {
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "customer-openai-key", RunKeyContext.Source.ORG, null));
+    List<String> texts = IntStream.range(0, 101).mapToObj(i -> "chunk-" + i).toList();
+    List<float[]> firstBatchVectors =
+        IntStream.range(0, 100).mapToObj(i -> new float[] {0.1f}).toList();
+    when(transport.embed(
+            eq("customer-openai-key"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq(texts.subList(0, 100))))
+        .thenReturn(new OpenAiEmbeddingTransport.Result(firstBatchVectors, 100));
+    org.mockito.Mockito.doNothing()
+        .doThrow(new IllegalStateException("managed budget exhausted"))
+        .when(managedUsage)
+        .authorizeFixedCapabilityCall(
+            eq("embedding:repo-1"),
+            eq("openai"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq("ProjectCodeEmbedding"),
+            nullable(RunKeyContext.class),
+            eq(RunKeyContext.Source.ORG));
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1", texts, "ProjectCodeEmbedding", "PROJECT_REPOSITORY", "repo-1"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("managed budget exhausted");
+
+    verify(managedUsage, times(2))
+        .authorizeFixedCapabilityCall(
+            eq("embedding:repo-1"),
+            eq("openai"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq("ProjectCodeEmbedding"),
+            nullable(RunKeyContext.class),
+            eq(RunKeyContext.Source.ORG));
+    verify(transport, times(1)).embed(anyString(), anyString(), any());
   }
 
   @Test
