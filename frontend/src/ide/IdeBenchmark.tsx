@@ -744,37 +744,57 @@ export default function IdeBenchmark() {
   const [runs, setRuns] = useState<api.BenchmarkRun[] | null>(null);
   const [detail, setDetail] = useState<api.BenchmarkDetail | null>(null);
   const [err, setErr] = useState('');
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const [currentCollapsed, setCurrentCollapsed] = useState(false);
   const [historicalCollapsed, setHistoricalCollapsed] = useState(false);
   const groups = useMemo(() => groupRuns(runs ?? []), [runs]);
 
   const loadList = useCallback(async () => {
+    setRefreshing(true);
     try {
       setRuns(await api.listBenchmarks());
       setErr('');
+      setLastSuccessfulRefresh(Date.now());
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to load benchmark runs.');
-      setRuns([]);
+      // A transient telemetry failure must not replace the last known-good snapshot with an
+      // authoritative-looking empty state.
+      setRuns((current) => current ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
+    setRefreshing(true);
     try {
       setDetail(await api.getBenchmark(id));
-    } catch {
-      /* keep the last good detail on a transient poll error */
+      setErr('');
+      setLastSuccessfulRefresh(Date.now());
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to refresh benchmark detail.');
+      // Keep the last good detail, but make the failed refresh visible to the operator.
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
+  const refreshActive = useCallback(() => {
+    if (benchmarkId) return loadDetail(benchmarkId);
+    return loadList();
+  }, [benchmarkId, loadDetail, loadList]);
+
   // List: initial load + 5s poll (skipped when the tab is hidden).
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || benchmarkId) return;
     void loadList();
     const t = setInterval(() => {
       if (!document.hidden) void loadList();
     }, 5000);
     return () => clearInterval(t);
-  }, [isAdmin, loadList]);
+  }, [benchmarkId, isAdmin, loadList]);
 
   // Detail route: load on open + 3s poll while selected (skipped when hidden).
   useEffect(() => {
@@ -789,6 +809,54 @@ export default function IdeBenchmark() {
     return () => clearInterval(t);
   }, [benchmarkId, loadDetail]);
 
+  // Browser timers are throttled in background tabs. Refetch immediately when the operator
+  // returns instead of waiting for the next polling interval and presenting an old snapshot.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const onVisible = () => {
+      if (!document.hidden) void refreshActive();
+    };
+    const onFocus = () => void refreshActive();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isAdmin, refreshActive]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const staleAfterMs = benchmarkId ? 10_000 : 15_000;
+  const isStale = lastSuccessfulRefresh !== null && now - lastSuccessfulRefresh > staleAfterMs;
+  const syncLabel = lastSuccessfulRefresh
+    ? `${err ? 'Sync error · showing data from' : isStale ? 'Stale · last synced' : 'Synced'} ${new Date(
+        lastSuccessfulRefresh,
+      ).toLocaleTimeString()}`
+    : refreshing
+      ? 'Syncing benchmark telemetry…'
+      : err
+        ? 'Benchmark telemetry unavailable'
+        : 'Waiting for benchmark telemetry';
+
+  const SyncStatus = () => (
+    <div
+      data-testid='benchmark-sync-status'
+      aria-live='polite'
+      style={{
+        color: err || isStale ? 'var(--ide-yellow)' : 'var(--ide-muted)',
+        fontSize: 11,
+        marginBottom: 10,
+      }}
+    >
+      {refreshing && lastSuccessfulRefresh ? 'Refreshing · ' : ''}
+      {syncLabel}
+    </div>
+  );
+
   if (!isAdmin) {
     return (
       <div className='ide-pane' style={{maxWidth: 760}}>
@@ -801,6 +869,7 @@ export default function IdeBenchmark() {
   if (benchmarkId) {
     return (
       <div className='ide-pane' style={{maxWidth: 1180}}>
+        <SyncStatus />
         {err && <ErrCard msg={err} />}
         {!detail ? <IdeLoader label='Loading benchmark detail…' pad={24} /> : <Detail d={detail} />}
       </div>
@@ -825,6 +894,8 @@ export default function IdeBenchmark() {
         Operator telemetry for Terminal-Bench and SWE-bench. This is not a customer run launcher;
         external harnesses publish verifier events and this page tracks them.
       </div>
+
+      <SyncStatus />
 
       {err && <ErrCard msg={err} />}
 

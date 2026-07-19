@@ -595,6 +595,37 @@ export interface PreviewAnalysis {
   }[];
 }
 
+/**
+ * Static UI render — a self-contained HTML approximation of a run's screens, produced without
+ * building or deploying anything. Distinct from LocalPreviewStatus, which runs the real app in a
+ * container. This never contributes to verifiedScore.
+ */
+export interface PreviewRenderManifest {
+  jobId: string | null;
+  runId: string;
+  status: 'NONE' | 'QUEUED' | 'RENDERING' | 'READY' | 'NO_SURFACES' | 'FAILED';
+  failureReason: string | null;
+  surfacesFound: number;
+  surfacesRendered: number;
+  /** Operator-facing honesty label, driven by the least faithful surface in the set. */
+  fidelityNote: string | null;
+  requestedAt: string | null;
+  completedAt: string | null;
+  surfaces: PreviewRenderSurface[];
+}
+
+export interface PreviewRenderSurface {
+  surfaceId: string;
+  displayName: string;
+  sourcePath: string;
+  target: 'WEB' | 'REACT_NATIVE' | 'ANDROID_NATIVE' | 'IOS_NATIVE';
+  fidelity: 'CLOSE' | 'STRUCTURAL' | 'APPROXIMATE';
+  viewportWidth: number;
+  viewportHeight: number;
+  rendered: boolean;
+  failureReason: string | null;
+}
+
 export interface ExecResult {
   stdout: string;
   stderr: string;
@@ -1404,6 +1435,14 @@ export interface AdrSummary {
   decisionDate: string | null;
   repoId: string | null;
   filePath: string | null;
+}
+
+export interface AdrCapability {
+  automaticIngestion: boolean;
+  source: 'READ_ONLY_CACHE';
+  indexedCount: number;
+  plannerInjectionEnabled: boolean;
+  reason: string;
 }
 
 export interface AdrDetail extends AdrSummary {

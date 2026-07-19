@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   listProjectInvariants: vi.fn(),
   listProjectInvariantViolations: vi.fn(),
   listProjectAdrs: vi.fn(),
+  getProjectAdrCapability: vi.fn(),
   getArchitectureStaleness: vi.fn(),
   getProjectRepos: vi.fn(),
 }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   api.listProjectInvariants.mockReturnValue(pending);
   api.listProjectInvariantViolations.mockReturnValue(pending);
   api.listProjectAdrs.mockReturnValue(pending);
+  api.getProjectAdrCapability.mockReturnValue(pending);
   api.getArchitectureStaleness.mockReturnValue(pending);
   api.getProjectRepos.mockReturnValue(pending);
 });
@@ -74,5 +76,32 @@ describe('IdeProjectArchitecture empty-state contract', () => {
       'No system map yet — refresh it to build one from your repos.',
     );
     expect(host.textContent).toContain('Refresh system map');
+  });
+
+  it('does not present an empty ADR cache as proof that repositories contain no decisions', async () => {
+    api.getArchitectureVersions.mockResolvedValue([]);
+    api.listProjectInvariants.mockResolvedValue([]);
+    api.listProjectInvariantViolations.mockResolvedValue([]);
+    api.listProjectAdrs.mockResolvedValue([]);
+    api.getProjectAdrCapability.mockResolvedValue({
+      automaticIngestion: false,
+      source: 'READ_ONLY_CACHE',
+      indexedCount: 0,
+      plannerInjectionEnabled: false,
+      reason: 'Checked-in ADR discovery and synchronization are not implemented.',
+    });
+    api.getArchitectureStaleness.mockResolvedValue(null);
+    api.getProjectRepos.mockResolvedValue([]);
+    await renderArchitecture();
+
+    const decisions = Array.from(host.querySelectorAll('button')).find((button) =>
+      button.textContent?.startsWith('Decisions'),
+    );
+    expect(decisions).toBeDefined();
+    await act(async () => decisions?.click());
+
+    expect(host.textContent).toContain('Checked-in ADR discovery is not available yet');
+    expect(host.textContent).toContain('No cached architecture decisions.');
+    expect(host.textContent).not.toContain('No architecture decisions yet.');
   });
 });

@@ -10,6 +10,7 @@ import type {
 } from '@/types/project';
 import {
   ActivityPage,
+  AdrCapability,
   AdrDetail,
   AdrSummary,
   ApiError,
@@ -498,6 +499,9 @@ export const getActivityFeed = (
 
 export const listProjectAdrs = (projectId: string, acceptedOnly = false) =>
   req<AdrSummary[]>(`/projects/${projectId}/adrs${acceptedOnly ? '?acceptedOnly=true' : ''}`);
+
+export const getProjectAdrCapability = (projectId: string) =>
+  req<AdrCapability>(`/projects/${projectId}/adrs/capability`);
 
 export const getProjectAdr = (projectId: string, id: string) =>
   req<AdrDetail>(`/projects/${projectId}/adrs/${id}`);

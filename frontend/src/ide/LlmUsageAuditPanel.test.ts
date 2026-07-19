@@ -6,6 +6,7 @@ function row(overrides: Partial<LlmUsageRollup>): LlmUsageRollup {
   return {
     userId: 'user-1',
     userEmail: 'developer@example.com',
+    userRole: 'DEVELOPER',
     provider: 'deepseek',
     model: 'deepseek-chat',
     agentRole: 'WorkerAgent',
@@ -45,7 +46,7 @@ describe('summarizeUsageRollups', () => {
         label: 'deepseek',
         attempts: 3,
         failedAttempts: 1,
-        tokens: 36,
+        tokens: 30,
         cost: 0.03,
         unknownCostAttempts: 1,
       }),
@@ -56,5 +57,20 @@ describe('summarizeUsageRollups', () => {
     expect(
       summarizeUsageRollups([row({projectId: null, projectName: null})], 'project')[0].label,
     ).toBe('Unattributed');
+  });
+
+  it('categorizes physical attempts by the human user role independently of agent role', () => {
+    const result = summarizeUsageRollups(
+      [
+        row({userRole: 'DEVELOPER', agentRole: 'WorkerAgent'}),
+        row({userRole: 'ORG_ADMIN', agentRole: 'WorkerAgent', attempts: 2}),
+      ],
+      'userRole',
+    );
+
+    expect(result.map(({label, attempts}) => ({label, attempts}))).toEqual([
+      {label: 'ORG_ADMIN', attempts: 2},
+      {label: 'DEVELOPER', attempts: 1},
+    ]);
   });
 });

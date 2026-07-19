@@ -121,5 +121,26 @@ export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
 export const createPat = (name: string) =>
   req<{token: string; meta: {id: string; name: string}}>('/auth/me/tokens', {
     method: 'POST',
-    body: JSON.stringify({name}),
+    body: JSON.stringify({
+      name,
+      scopes: ['api:read', 'runs:write', 'projects:write', 'agent:write', 'settings:write'],
+    }),
   });
+
+export type PersonalAccessTokenMeta = {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string;
+  createdAt: string;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  revoked: boolean;
+};
+
+/** Secret-free inventory of this user's CLI / VS Code / CI tokens. */
+export const listPats = () => req<PersonalAccessTokenMeta[]>('/auth/me/tokens');
+
+/** Idempotently revoke one token owned by the authenticated user. */
+export const revokePat = (tokenId: string) =>
+  req<void>(`/auth/me/tokens/${encodeURIComponent(tokenId)}`, {method: 'DELETE'});

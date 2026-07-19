@@ -263,6 +263,7 @@ const STATUS_REASON_LABELS: Record<string, string> = {
   REVIEWER_UNRESOLVED: 'Reviewer found unresolved issues',
   REVIEWER_FAILED: 'Reviewer pass failed',
   ALL_TASKS_FAILED: 'All tasks failed',
+  LOCAL_EXECUTION: 'Changes ready locally — not server-verified',
   LEGACY_UNKNOWN: '',
 };
 export function humanStatusReason(reason?: string | null): string {

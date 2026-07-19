@@ -22,6 +22,8 @@ export function IdeIntegrations() {
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
+  const [pats, setPats] = useState<api.PersonalAccessTokenMeta[] | null>(null);
+  const [revokePat, setRevokePat] = useState<api.PersonalAccessTokenMeta | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -31,9 +33,15 @@ export function IdeIntegrations() {
       .getIntegrationStatus()
       .then((s) => setSources(s.enabledSources ?? []))
       .catch(() => setSources([]));
+  const loadPats = () =>
+    api
+      .listPats()
+      .then(setPats)
+      .catch(() => setPats([]));
 
   useEffect(() => {
     loadSources();
+    loadPats();
     api
       .getSlackStatus()
       .then(setSlack)
@@ -145,22 +153,23 @@ export function IdeIntegrations() {
       case 'bitbucket':
         return {
           title: 'Connect Bitbucket Cloud',
-          body: 'Provide a Bitbucket username and app password. Workspace is an optional catalogue hint; projects choose repositories when linking.',
+          body: 'Provide an Atlassian account email and a scoped Bitbucket API token. The workspace is required for the repository catalogue.',
           fields: [
             {
               name: 'workspace',
-              label: 'Preferred workspace (optional)',
+              label: 'Workspace',
               placeholder: 'your-workspace',
               defaultValue: user?.bitbucketWorkspace ?? '',
+              required: true,
             },
             {
               name: 'username',
-              label: 'Username',
-              placeholder: 'you',
+              label: 'Atlassian account email',
+              placeholder: 'you@company.com',
               defaultValue: user?.bitbucketUsername ?? '',
               required: true,
             },
-            {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
+            {name: 'appPassword', label: 'API token', placeholder: 'ATATT…', required: true},
           ],
           run: (v) => api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, ''),
         };
@@ -314,6 +323,56 @@ export function IdeIntegrations() {
         </div>
       )}
 
+      <div className='ide-h2' style={{marginTop: 22}}>
+        CLI, OpenTUI and CI tokens
+      </div>
+      <div className='ide-sub'>
+        Revocation takes effect on the next authenticated request. Token secrets are never shown
+        again.
+      </div>
+      {pats === null ? (
+        <IdeLoader label='Loading access tokens…' />
+      ) : pats.length === 0 ? (
+        <div className='ide-empty'>No personal access tokens.</div>
+      ) : (
+        <div className='ide-card' style={{padding: 0}}>
+          {pats.map((token, i) => (
+            <div
+              key={token.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 16px',
+                borderBottom: i < pats.length - 1 ? '1px solid var(--ide-border)' : 'none',
+              }}
+            >
+              <div style={{flex: 1, minWidth: 0}}>
+                <div style={{fontWeight: 500}}>{token.name}</div>
+                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                  {token.tokenPrefix}… · created {new Date(token.createdAt).toLocaleDateString()}
+                  {token.lastUsedAt
+                    ? ` · last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
+                    : ' · never used'}
+                </div>
+              </div>
+              <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
+                {token.revoked ? 'Revoked' : 'Active'}
+              </IdeBadge>
+              {!token.revoked && (
+                <button
+                  className='ide-btn ghost'
+                  style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
+                  onClick={() => setRevokePat(token)}
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {spec && (
         <PromptModal
           key={connect ?? 'closed'}
@@ -328,6 +387,35 @@ export function IdeIntegrations() {
           onSubmit={submitConnect}
         />
       )}
+      <ConfirmModal
+        open={!!revokePat}
+        title='Revoke access token'
+        body={
+          revokePat
+            ? `Revoke “${revokePat.name}”? Connected clients using it will stop working.`
+            : ''
+        }
+        confirmLabel='Revoke'
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          const token = revokePat;
+          if (!token) return;
+          setBusy(true);
+          setErr('');
+          try {
+            await api.revokePat(token.id);
+            setMsg(`${token.name} revoked.`);
+            setRevokePat(null);
+            await loadPats();
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Token revocation failed.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onClose={() => setRevokePat(null)}
+      />
     </div>
   );
 }

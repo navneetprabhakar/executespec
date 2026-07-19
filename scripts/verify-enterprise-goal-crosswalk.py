@@ -15,8 +15,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MASTER = ROOT / "docs/plans/enterprise-hardening-benchmark-master-plan-2026-07-17.md"
-TRACKER = ROOT / "docs/plans/enterprise-hardening-benchmark-status-2026-07-17.md"
+DOCS = ROOT.parent / "executespec-docs" / "backend" / "plans" / "source-repository"
+MASTER = DOCS / "enterprise-hardening-benchmark-master-plan-2026-07-17.md"
+TRACKER = DOCS / "enterprise-hardening-benchmark-status-2026-07-17.md"
 ROW = re.compile(r"^\| ([A-Z]+-\d+) \|", re.MULTILINE)
 
 

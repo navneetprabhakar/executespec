@@ -2,6 +2,7 @@ import {ApiError, BASE, authHeader, parseErrorMessage, req} from './core';
 
 export type UsageAuditDimension =
   | 'user'
+  | 'userRole'
   | 'project'
   | 'feature'
   | 'provider'
@@ -30,6 +31,7 @@ export interface LlmUsageTotals {
 export interface LlmUsageRollup {
   userId: string | null;
   userEmail: string | null;
+  userRole: string | null;
   provider: string | null;
   model: string | null;
   agentRole: string | null;
@@ -58,6 +60,7 @@ export interface LlmUsageAttempt {
   llmExecutionContextId: string | null;
   userId: string | null;
   userEmail: string | null;
+  userRole: string | null;
   projectId: string | null;
   projectName: string | null;
   runId: string | null;
