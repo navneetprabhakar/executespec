@@ -464,7 +464,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Plan, code, test, review, and open a PR');
     expect(host.textContent).toContain('Create a remote sandbox to add audit logging');
     expect(host.textContent).toContain('What will happen before spend');
-    expect(host.textContent).toContain('isolated remote clone');
+    expect(host.textContent).toContain('remote clone');
     expect(host.textContent).toContain('Run events stay in audit trail');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
@@ -1095,7 +1095,9 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('Branch');
     expect(host.textContent).toContain('Secrets are not displayed in chat');
-    expect(host.textContent).toContain('Outbound network follows sandbox policy');
+    // The trust panel must NOT claim an outbound-network policy: no such policy
+    // is enforced today. Re-add only when the strict sandbox runtime lands.
+    expect(host.textContent).not.toContain('Outbound network');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
   });
 

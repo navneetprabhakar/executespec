@@ -55,11 +55,11 @@ export function TrustPage() {
           </ul>
         </Card>
 
-        <SectionHeader>How execution is isolated</SectionHeader>
+        <SectionHeader>How execution is constrained</SectionHeader>
         <Card>
           <ul style={{padding: '0 0 0 18px', margin: 0, fontSize: 14, lineHeight: 1.7}}>
-            <li>Every run gets its own workspace, wiped at run end</li>
-            <li>Shell + file access run inside a sandbox policy, not on a shared host account</li>
+            <li>Every run gets its own workspace directory, retained for run evidence</li>
+            <li>Shell commands and file access are restricted by an enforced policy</li>
             <li>Generated code is scanned for abuse patterns before execution</li>
             <li>Test execution runs in read-only, capability-dropped containers</li>
             <li>Tenant access guards are enforced in code and pinned by automated tests</li>
