@@ -1331,8 +1331,8 @@ function SandboxProposalCard({
         <span className='agent-card-meta'>plan gate before spend</span>
       </div>
       <div className='agent-card-sub'>
-        ExecuteSpec will create an isolated remote workspace, draft a plan, then stop for your
-        approval before coding or charging run credits.
+        ExecuteSpec will create a remote workspace, draft a plan, then stop for your approval before
+        coding or charging run credits.
       </div>
       {pending.action.confirmationPrompt && (
         <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
@@ -1469,7 +1469,7 @@ function SandboxContractPanel() {
       <div className='agent-contract-grid'>
         <span>
           <b>Workspace</b>
-          isolated remote clone
+          remote clone
         </span>
         <span>
           <b>Branch</b>
@@ -1504,7 +1504,6 @@ function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
       <span>Run events stay in audit trail</span>
       <span>Approval required before code execution</span>
       <span>Retention follows workspace cleanup policy</span>
-      <span>Outbound network follows sandbox policy</span>
     </div>
   );
 }
@@ -1561,7 +1560,7 @@ function EmptyState({onPick}: {onPick: (text: string) => void}) {
       </div>
       <strong>Remote sandbox ready</strong>
       <p>
-        Describe the change, review the generated plan, then let ExecuteSpec work in an isolated
+        Describe the change, review the generated plan, then let ExecuteSpec work in a remote
         sandbox. Browser sessions never get local shell authority.
       </p>
       <div className='agent-empty-chips'>

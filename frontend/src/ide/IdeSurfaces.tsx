@@ -842,7 +842,7 @@ export function IdeCompose() {
               <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
                 {projectId
                   ? `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-                  : 'Sandbox creates an isolated run without touching a repo.'}
+                  : 'Sandbox starts a run without linking a repository.'}
               </div>
             </div>
 
