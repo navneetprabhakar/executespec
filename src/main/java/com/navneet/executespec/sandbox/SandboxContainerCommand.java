@@ -1,0 +1,136 @@
+package com.navneet.executespec.sandbox;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Builds the exact argument vector for a {@link SandboxIsolationProfile#CONTAINER_STRICT_V1}
+ * container.
+ *
+ * <p>Deliberately pure and free of I/O so the hardening flags are asserted directly rather than
+ * inferred from a running container. Arguments are produced as a list and never as a shell string,
+ * so no path or image name can be interpreted as shell syntax.
+ *
+ * <p>What the profile applies, and what each flag is actually for:
+ *
+ * <ul>
+ *   <li>{@code --network none} — no network namespace access at all. This is the default and the
+ *       only implemented policy.
+ *   <li>{@code --user} a fixed non-root uid:gid, plus {@code --security-opt no-new-privileges}, so
+ *       a setuid binary inside the image cannot regain root.
+ *   <li>{@code --read-only} root filesystem, with writes possible only through explicit mounts and
+ *       a size-capped {@code tmpfs} at {@code /tmp}.
+ *   <li>{@code --cap-drop ALL} — no capabilities are added back.
+ *   <li>{@code --cpus}, {@code --memory} (with {@code --memory-swap} pinned equal so swap cannot be
+ *       used to exceed it) and {@code --pids-limit} bound resource bombs.
+ *   <li>No {@code /var/run/docker.sock}, no host credential path, no {@code --privileged}, no
+ *       {@code --cap-add}, no host PID or network namespace. Enforced by {@code
+ *       SandboxRuntimeDispatchBoundaryTest}.
+ * </ul>
+ *
+ * <p>Wall-clock is enforced by the caller rather than by an argument, because a container flag
+ * cannot express it; {@link #limitsExceededTimeout} exposes the value the runtime must apply.
+ */
+public final class SandboxContainerCommand {
+
+  /** Fixed unprivileged identity. Chosen high to avoid colliding with image system accounts. */
+  public static final String NON_ROOT_USER = "65532:65532";
+
+  private static final String TMPFS_MOUNT = "/tmp";
+
+  private SandboxContainerCommand() {}
+
+  /**
+   * The argv that starts a strict sandbox container detached.
+   *
+   * @param allowedHostRoot the configured sandbox workspace root; every writable mount must resolve
+   *     inside it, so no host path outside the sandbox area can be bound
+   */
+  public static List<String> create(
+      String containerName, SandboxRuntimeSpec spec, Path allowedHostRoot) {
+    if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
+      throw new IllegalArgumentException("unsafe container name: " + containerName);
+    }
+    var limits = spec.limits();
+    List<String> argv = new ArrayList<>(List.of("docker", "run", "--detach"));
+
+    argv.addAll(List.of("--name", containerName));
+
+    // Isolation.
+    argv.addAll(List.of("--network", "none"));
+    argv.addAll(List.of("--user", NON_ROOT_USER));
+    argv.addAll(List.of("--security-opt", "no-new-privileges"));
+    argv.addAll(List.of("--cap-drop", "ALL"));
+    argv.add("--read-only");
+
+    // Resource ceilings. memory-swap equals memory so swap cannot be used to exceed the cap.
+    argv.addAll(List.of("--cpus", String.valueOf(limits.cpus())));
+    argv.addAll(List.of("--memory", limits.memoryBytes() + "b"));
+    argv.addAll(List.of("--memory-swap", limits.memoryBytes() + "b"));
+    argv.addAll(List.of("--pids-limit", String.valueOf(limits.pids())));
+
+    // The only writable surfaces: a size-capped noexec tmpfs and the explicit mounts.
+    argv.addAll(
+        List.of(
+            "--tmpfs", "%s:rw,noexec,nosuid,size=%d".formatted(TMPFS_MOUNT, limits.tmpfsBytes())));
+    for (SandboxRuntimeSpec.WritableMount mount : spec.writableMounts()) {
+      requireAbsolute(mount.hostPath(), "writable mount host path");
+      requireAbsolute(mount.containerPath(), "writable mount container path");
+      requireContained(mount.hostPath(), allowedHostRoot);
+      argv.addAll(List.of("--volume", mount.hostPath() + ":" + mount.containerPath() + ":rw"));
+    }
+
+    argv.addAll(List.of("--workdir", spec.workdir()));
+    argv.add(spec.image());
+    argv.addAll(List.of("sleep", String.valueOf(limits.wallClock().toSeconds())));
+    return List.copyOf(argv);
+  }
+
+  /** Idempotent teardown. Succeeds for a container that is already gone. */
+  public static List<String> destroy(String containerName) {
+    return List.of("docker", "rm", "--force", "--volumes", containerName);
+  }
+
+  /** Liveness probe used by reconciliation to find orphaned containers. */
+  public static List<String> inspectState(String containerName) {
+    return List.of("docker", "inspect", "--format", "{{.State.Running}}", containerName);
+  }
+
+  /** The wall-clock ceiling the runtime must enforce; no container flag expresses it. */
+  public static long limitsExceededTimeout(SandboxRuntimeSpec spec) {
+    return spec.limits().wallClock().toSeconds();
+  }
+
+  private static void requireAbsolute(String path, String label) {
+    if (path == null || !path.startsWith("/") || path.contains("..")) {
+      throw new IllegalArgumentException(
+          label + " must be absolute and free of traversal: " + path);
+    }
+  }
+
+  /**
+   * Requires a writable mount to resolve inside the configured sandbox workspace root, which is the
+   * property that keeps the container engine socket, ambient credential stores, other tenants'
+   * workspaces and the host root unbindable.
+   *
+   * <p>Containment is proved by normalising both paths — traversal segments are already rejected by
+   * {@link #requireAbsolute}. This is a bind-argument guard: it does not resolve symlinks on the
+   * host, so a symlink planted inside the workspace root is out of scope here and must be handled
+   * where the workspace is populated.
+   */
+  private static void requireContained(String hostPath, Path allowedHostRoot) {
+    if (allowedHostRoot == null || !allowedHostRoot.isAbsolute()) {
+      throw new IllegalArgumentException("sandbox workspace root must be an absolute path");
+    }
+    Path root = allowedHostRoot.normalize();
+    if (root.getNameCount() == 0) {
+      throw new IllegalArgumentException("refusing to treat the host root as a sandbox root");
+    }
+    Path candidate = Path.of(hostPath).normalize();
+    if (!candidate.startsWith(root) || candidate.equals(root.getRoot())) {
+      throw new IllegalArgumentException(
+          "refusing to mount a host path outside the sandbox workspace root: " + hostPath);
+    }
+  }
+}
