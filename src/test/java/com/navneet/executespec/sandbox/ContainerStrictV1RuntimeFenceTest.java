@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -177,7 +178,9 @@ class ContainerStrictV1RuntimeFenceTest {
     private final Map<String, ExecResult> responses = new LinkedHashMap<>();
 
     ScriptedRuntime(SandboxProperties properties, FeatureFlagService featureFlags) {
-      super(properties, featureFlags);
+      // The fence tests never reach the run-workspace mount path (they reattach to a running
+      // container), so any workspace root suffices here.
+      super(properties, featureFlags, Path.of(System.getProperty("java.io.tmpdir")));
       responses.put("version", new ExecResult(0, "27.0.0"));
       responses.put("state", new ExecResult(1, "Error: No such object"));
       responses.put("digest", new ExecResult(0, "img@sha256:deadbeef"));

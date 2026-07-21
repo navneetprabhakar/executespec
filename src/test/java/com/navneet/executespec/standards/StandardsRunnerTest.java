@@ -20,6 +20,7 @@ class StandardsRunnerTest {
   static class StubLintAdapter implements LintAdapter {
     final String tool;
     final List<LintViolation> violations;
+    volatile String observedRunId;
 
     StubLintAdapter(String tool, List<LintViolation> violations) {
       this.tool = tool;
@@ -32,7 +33,8 @@ class StandardsRunnerTest {
     }
 
     @Override
-    public LintResult run(Path repoRoot, Path config, List<Path> changed) {
+    public LintResult run(String runId, Path repoRoot, Path config, List<Path> changed) {
+      this.observedRunId = runId;
       return new LintResult(tool, LintResult.Status.SUCCESS, violations, null);
     }
   }
@@ -41,7 +43,8 @@ class StandardsRunnerTest {
   void emptyEffective_emptyReport() {
     StandardsRunner runner =
         new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
-    StandardsRunner.RunReport r = runner.run(List.of(), Path.of("."), List.of(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(), Path.of("."), List.of(), List.of());
     assertThat(r.violations()).isEmpty();
     assertThat(r.lintResults()).isEmpty();
   }
@@ -64,6 +67,7 @@ class StandardsRunnerTest {
 
     StandardsRunner.RunReport r =
         runner.run(
+            "run-1",
             List.of(e),
             Path.of("."),
             List.of("db/V42__SKIP_x.sql", "db/V43__legit.sql"),
@@ -97,11 +101,13 @@ class StandardsRunnerTest {
         new StandardsRunner(
             new FilePatternEnforcer(), new AstCheckEnforcer(), List.of(eslint, detekt));
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
 
     assertThat(r.violations()).hasSize(1);
     assertThat(r.violations().get(0).enforcementType()).isEqualTo("LINT");
     assertThat(r.lintResults()).containsKey("eslint-rules");
+    // The run id is threaded into the adapter — the scope a sandbox needs to contain the linter.
+    assertThat(eslint.observedRunId).isEqualTo("run-1");
   }
 
   @Test
@@ -122,7 +128,7 @@ class StandardsRunnerTest {
             new AstCheckEnforcer(),
             List.of(new StubLintAdapter("eslint", List.of())));
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
     assertThat(r.violations()).isEmpty();
     assertThat(r.lintResults().get("ruff-rules").status()).isEqualTo(LintResult.Status.UNAVAILABLE);
   }
@@ -142,7 +148,7 @@ class StandardsRunnerTest {
     StandardsRunner runner =
         new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
     // No deterministic violation for llm-review type — handled separately by reviewer
     assertThat(r.violations()).isEmpty();
   }
