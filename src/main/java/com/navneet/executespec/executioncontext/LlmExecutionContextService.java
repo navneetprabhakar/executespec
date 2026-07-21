@@ -97,6 +97,12 @@ public class LlmExecutionContextService {
   /**
    * Claims a due queued context or steals an expired RUNNING lease. An active lease, cancellation,
    * tenant mismatch, exhausted attempt budget, or expired context returns empty.
+   *
+   * <p>RR-1666 — NOT WIRED. This method (and {@link #heartbeat}, {@link #complete}, {@link #fail}
+   * that read the lease it sets) has ZERO production callers, so every real context stays {@code
+   * QUEUED} with a null lease and {@code attempt=0}. The lease/attempt fences in {@link
+   * LlmExecutionDispatchGuard#checkFencing} therefore never fire in production. See that method and
+   * {@code executioncontext/CLAUDE.md} for the exact remaining wiring and why it is deferred.
    */
   @Transactional
   public Optional<LlmExecutionContext> claim(
