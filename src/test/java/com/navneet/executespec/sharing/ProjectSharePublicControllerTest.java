@@ -143,8 +143,11 @@ class ProjectSharePublicControllerTest {
     assertEquals(100, body.verifiedScore());
     assertEquals(100, body.rubricScore());
     assertNotNull(body.verificationLedger());
+    // RR-1646: the shared ledger still carries a provenance label for the tests row, but the
+    // persisted counts come from runner report files read off disk with no exit-code check, so a
+    // public report must not present them as DETERMINISTIC (independent-of-LLM) proof.
     assertEquals(
-        "DETERMINISTIC",
+        "UNVERIFIED_COUNT",
         body.verificationLedger().stream()
             .filter(entry -> "tests".equals(entry.id()))
             .findFirst()

@@ -27,14 +27,25 @@ invalid reports are excluded and counted separately.
 ## Evidence contract
 
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
-  preview verifier supplied a `BootVerification`. Concrete-test rescoring rehydrates that signal;
-  it must never pass `null` merely because the original `ReportInput` is gone.
+  preview verifier supplied a `BootVerification`. Concrete-test rescoring AND the SUPER_ADMIN
+  `VerifiedScoreBackfillService` rehydrate that signal through the shared
+  `ValidationReportService.bootVerification(report)` helper; no re-derivation path may pass `null`
+  merely because the original `ReportInput` is gone. Dropping it silently upgraded an UNHEALTHY
+  boot (BUILD slot 55) to a full BUILD slot.
 - V273 persists executable-test run/pass state, verification status, failure stage, and bounded
   deterministic JSON. New reports and concrete-test rescoring populate those columns, and the
   reloadable ledger exposes the same evidence. `FAILED` and `UNAVAILABLE` rows are excluded from
   project health; historical nullable rows remain readable for backward compatibility.
-- Ledger entries label provenance (`DETERMINISTIC`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `HYBRID`, or
-  `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+- Ledger entries label provenance (`DETERMINISTIC`, `UNVERIFIED_COUNT`, `LLM_REVIEWER`,
+  `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or `INTERNAL_FORMULA`). A score is a summary,
+  not independent proof.
+- `DETERMINISTIC` is the only label that claims independence from an LLM, so it may not be attached
+  to the persisted concrete-test counts: those come from test-runner report files read off disk
+  with no exit-code check and no per-run directory reset, and can therefore describe a run that did
+  not happen. The `tests` row — and the `executable-verification` row whenever
+  `executable_tests_run` is true — are labelled `UNVERIFIED_COUNT` at MEDIUM confidence. Restoring
+  `DETERMINISTIC`/HIGH requires an execution-freshness/provenance token persisted alongside the
+  counts. Row *status* is unchanged, so run-level goal proof keeps its existing semantics.
 - Public/shared report DTOs expose score metadata and the same sanitized ledger, but not run-goal
   persistence or credentials.
 - New report shares are `ProjectShareLink.Surface.VALIDATION_REPORT` links with digest-only storage,
@@ -48,7 +59,19 @@ invalid reports are excluded and counted separately.
   zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
 - Concrete test evidence is monotonic. The run-end workspace suite may establish positive counts;
   a later HTTP/preview test-generation `NOT_APPLICABLE` event carries 0/0 and must not erase those
-  counts or lower the score. A later positive concrete summary may still rescore the report.
+  counts or lower the score. A later positive concrete summary is **combined** with the workspace
+  suite, never substituted for it: the two are different populations, so a 2/3 generated smoke may
+  not discard a passing 10/10 worker suite. The merge is anchored on a `baselineTestsTotal` /
+  `baselineTestsPassed` pair persisted inside `executable_evidence_json`, so a re-delivered
+  execution event recomputes the same counts instead of stacking increments.
+- Anti-gaming guards (`scoring.gaming-guards`) are tighten-only and must not be defeated by absent
+  evidence. With the guards on, a null endpoint-coverage reading gives CODE_DELIVERED the midpoint
+  of the guarded range (75), not the full slot, and a missing or unrecognised test-coverage
+  judgment caps the TESTS slot at 85 rather than falling through to an uncapped 100.
+- The legacy multiplicative scorer (`scoring.additive-v2` off) is a supported rollback path and
+  applies the same RL-2026-06-026 trust caps as the additive scorer. Its neutral factor for an
+  unmeasured endpoint signal is intentional — the shape has no denominator to drop a slot from —
+  and is safe only because the trust cap constrains the result.
 - `reviewer/AccuracyAssessmentService` receives test files through a separate bounded evidence lane
   (six files / 30K characters). Production-file inference still excludes tests, but the LLM coverage
   judgment must inspect real test content rather than infer `NONE` from an intentionally test-free
