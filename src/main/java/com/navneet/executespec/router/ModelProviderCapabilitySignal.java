@@ -42,15 +42,31 @@ public record ModelProviderCapabilitySignal(
       throw new IllegalArgumentException("model required");
     }
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
-    recentFailurePenalty = Math.max(0.0, recentFailurePenalty);
-    inputCostPerMillionTokens = Math.max(0.0, inputCostPerMillionTokens);
-    outputCostPerMillionTokens = Math.max(0.0, outputCostPerMillionTokens);
+    // RR-397 fail-closed: Math.max preserves NaN, so a non-finite penalty or cost would corrupt the
+    // derived quality/cost ranking. A non-finite penalty is treated as none (0.0 — quality is then
+    // floored downstream) and a non-finite cost as the maximum (so garbage can never rank
+    // cheapest).
+    recentFailurePenalty =
+        Double.isFinite(recentFailurePenalty) ? Math.max(0.0, recentFailurePenalty) : 0.0;
+    inputCostPerMillionTokens =
+        Double.isFinite(inputCostPerMillionTokens)
+            ? Math.max(0.0, inputCostPerMillionTokens)
+            : Double.MAX_VALUE;
+    outputCostPerMillionTokens =
+        Double.isFinite(outputCostPerMillionTokens)
+            ? Math.max(0.0, outputCostPerMillionTokens)
+            : Double.MAX_VALUE;
     latencyP50Ms = Math.max(0L, latencyP50Ms);
     latencyP95Ms = Math.max(latencyP50Ms, latencyP95Ms);
     contextWindowTokens = Math.max(0, contextWindowTokens);
     providerAvailable = providerAvailable == null ? Boolean.TRUE : providerAvailable;
     fallbackOrder = Math.max(0, fallbackOrder);
-    requiredQualityThreshold = Math.max(0.0, Math.min(100.0, requiredQualityThreshold));
+    // RR-397 fail-closed: a non-finite threshold becomes the strictest bar (100.0) rather than
+    // passing through as NaN and defeating every below-threshold rejection.
+    requiredQualityThreshold =
+        Double.isFinite(requiredQualityThreshold)
+            ? Math.max(0.0, Math.min(100.0, requiredQualityThreshold))
+            : 100.0;
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
     contextFitsRequestedBudget = contextFitsRequestedBudget == null || contextFitsRequestedBudget;
   }
