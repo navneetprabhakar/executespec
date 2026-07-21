@@ -1,12 +1,10 @@
 package com.navneet.executespec.testgen;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -22,25 +20,44 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Executes compiled tests against a live preview deployment. Runs Maven Surefire with base URL
  * pointed at the preview.
+ *
+ * <p><strong>RR-1582 / RR-1583 / RR-1587.</strong> These counts rewrite the customer-facing
+ * verifiedScore, so an attempt only publishes them when it can prove they belong to it. Before
+ * launch the report directory is cleared and the plan's V277 workspace fingerprint is re-verified;
+ * the container runs under a timeout that can actually fire; afterwards the exit status must mean
+ * "tests ran", every report file must postdate the launch, and the fingerprint must still match.
+ * Anything else publishes an explicitly unavailable summary instead of a pass count.
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class TestExecutionService {
 
-  private static final long EXECUTION_TIMEOUT_SECONDS = 120;
+  private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(120);
+
+  /**
+   * Maven exits 0 when every test passed and 1 when Surefire ran tests and some failed. Any other
+   * status (image pull failure, mount failure, in-container compile failure, forced destroy) means
+   * no trustworthy result was produced, whatever XML happens to be on disk.
+   */
+  private static final List<Integer> TESTS_RAN_EXIT_CODES = List.of(0, 1);
 
   private final TestPlanRepository testPlanRepository;
   private final TestResultRepository testResultRepository;
   private final SurefireReportParser surefireReportParser;
   private final SseBroadcaster broadcaster;
+  private final TestGenerationAdmissionService admissionService;
 
   /** Run all compiled tests against the preview URL. */
   public TestExecutionSummary executeTests(String runId, Long testPlanId, String previewBaseUrl) {
-    log.info("[TestExec] Executing tests for run {} against {}", runId, previewBaseUrl);
+    String executionId = UUID.randomUUID().toString();
+    log.info(
+        "[TestExec] Executing tests for run {} against {} (execution {})",
+        runId,
+        previewBaseUrl,
+        executionId);
 
     Path testProjectDir = Path.of("workspace-test", runId);
-    Path pomFile = testProjectDir.resolve("pom.xml");
 
     // Update plan status
     TestPlan plan = testPlanRepository.findById(testPlanId).orElseThrow();
@@ -50,18 +67,45 @@ public class TestExecutionService {
     broadcaster.emit(
         runId, RunEvent.log(runId, null, "[TestExec] Running tests against " + previewBaseUrl));
 
+    // RR-1583 — the plan's pass/fail is evidence for the diff it was planned against, nothing else.
+    String plannedFingerprint = plan.getWorkspaceFingerprint();
+    String preFingerprint = admissionService.currentWorkspaceFingerprint(runId);
+    String bindingProblem =
+        TestExecutionProvenance.fingerprintMismatch(plannedFingerprint, preFingerprint);
+    if (bindingProblem != null) {
+      return staleBinding(runId, plan, executionId, bindingProblem);
+    }
+
     Instant start = Instant.now();
 
     try {
+      // RR-1582 — the target dir is bind-mounted rw and survives --rm, and manual re-execution can
+      // re-enter on the same directory. Clear the reports before every attempt so leftover XML from
+      // an earlier attempt cannot be parsed as this attempt's evidence.
+      Path reportsDir = testProjectDir.resolve("target/surefire-reports");
+      if (!TestExecutionProvenance.clearReports(reportsDir)) {
+        return unavailable(
+            runId,
+            plan,
+            executionId,
+            "surefire report directory could not be reset before execution");
+      }
+
+      // Freshness floor with slack for filesystem timestamp granularity and container clock skew.
+      Instant freshnessFloor = start.minusSeconds(2);
+
+      Path absTestDir = testProjectDir.toAbsolutePath();
+      String containerName = TestExecutionProvenance.containerName("es-test-exec", executionId);
       // Run tests inside a Docker container for isolation:
       // --network=host to access preview, --memory=4g, --cpus=2, --read-only (tmpfs for Maven
       // cache)
-      Path absTestDir = testProjectDir.toAbsolutePath();
       ProcessBuilder pb =
           new ProcessBuilder(
               "docker",
               "run",
               "--rm",
+              "--name",
+              containerName,
               "--network=host",
               "--memory=4g",
               "--cpus=2",
@@ -88,22 +132,51 @@ public class TestExecutionService {
               "1C");
       pb.redirectErrorStream(true);
 
-      Process process = pb.start();
-      String output;
-      try (BufferedReader reader =
-          new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-        output = reader.lines().collect(Collectors.joining("\n"));
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, EXECUTION_TIMEOUT);
+      if (!outcome.finished()) {
+        // The JVM-side child is gone but the detached container is not — kill it by name.
+        TestExecutionProvenance.killContainer(containerName);
+        log.warn(
+            "[TestExec] Test execution timed out for run {} (execution {})", runId, executionId);
+        return unavailable(
+            runId,
+            plan,
+            executionId,
+            "test execution exceeded " + EXECUTION_TIMEOUT.toSeconds() + "s and was destroyed");
+      }
+      if (!TESTS_RAN_EXIT_CODES.contains(outcome.exitCode())) {
+        log.warn(
+            "[TestExec] Test runner exited {} for run {} — no trustworthy result",
+            outcome.exitCode(),
+            runId);
+        return unavailable(
+            runId,
+            plan,
+            executionId,
+            "test runner exited " + outcome.exitCode() + " without running tests");
       }
 
-      boolean finished = process.waitFor(EXECUTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
-        log.warn("[TestExec] Test execution timed out for run {}", runId);
+      // RR-1582 — every report must provably belong to this attempt before it is parsed, and the
+      // admitted set is moved under a per-attempt directory so a summary cannot be attributed to
+      // the wrong attempt.
+      SurefireReportParser.ReportAdmission admission =
+          surefireReportParser.admit(reportsDir, freshnessFloor);
+      if (!admission.admitted()) {
+        return unavailable(runId, plan, executionId, admission.reason());
       }
+      List<Path> attemptReports =
+          TestExecutionProvenance.isolateAttempt(
+              testProjectDir, executionId, admission.reportFiles());
 
-      // Parse surefire reports
-      Path reportsDir = testProjectDir.resolve("target/surefire-reports");
-      List<TestResult> results = surefireReportParser.parse(reportsDir, testPlanId);
+      List<TestResult> results = surefireReportParser.parse(attemptReports, testPlanId);
+
+      // RR-1583 — the workspace must not have moved under us while the suite ran.
+      String postFingerprint = admissionService.currentWorkspaceFingerprint(runId);
+      String drift =
+          TestExecutionProvenance.fingerprintMismatch(plannedFingerprint, postFingerprint);
+      if (drift != null) {
+        return staleBinding(runId, plan, executionId, drift);
+      }
 
       // Check for "Connection refused" pattern — preview crashed
       boolean allConnectionRefused =
@@ -144,6 +217,8 @@ public class TestExecutionService {
               .errors(errors)
               .executionDurationMs(durationMs)
               .allConnectionRefused(allConnectionRefused)
+              .executionVerified(Boolean.TRUE)
+              .executionId(executionId)
               .build();
 
       // Update plan status
@@ -151,10 +226,11 @@ public class TestExecutionService {
       testPlanRepository.save(plan);
 
       log.info(
-          "[TestExec] Test execution complete for run {}: {}/{} passed",
+          "[TestExec] Test execution complete for run {}: {}/{} passed (execution {})",
           runId,
           passed,
-          results.size());
+          results.size(),
+          executionId);
 
       return summary;
 
@@ -164,5 +240,25 @@ public class TestExecutionService {
       testPlanRepository.save(plan);
       throw new RuntimeException("Test execution failed: " + e.getMessage(), e);
     }
+  }
+
+  private TestExecutionSummary unavailable(
+      String runId, TestPlan plan, String executionId, String reason) {
+    plan.setStatus(TestPlanStatus.FAILED);
+    testPlanRepository.save(plan);
+    log.warn("[TestExec] No verified test evidence for run {}: {}", runId, reason);
+    broadcaster.emit(
+        runId, RunEvent.log(runId, null, "[TestExec] Test evidence unavailable — " + reason));
+    return TestExecutionSummary.unavailable(executionId, reason);
+  }
+
+  private TestExecutionSummary staleBinding(
+      String runId, TestPlan plan, String executionId, String reason) {
+    plan.setStatus(TestPlanStatus.STALE);
+    testPlanRepository.save(plan);
+    log.warn("[TestExec] Test plan for run {} is stale: {}", runId, reason);
+    broadcaster.emit(
+        runId, RunEvent.log(runId, null, "[TestExec] Test evidence unavailable — " + reason));
+    return TestExecutionSummary.unavailable(executionId, reason);
   }
 }

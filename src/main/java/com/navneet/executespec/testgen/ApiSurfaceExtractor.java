@@ -135,8 +135,13 @@ public class ApiSurfaceExtractor {
   private void addMatches(Matcher m, List<String> paths) {
     while (m.find() && paths.size() < MAX_PATHS) {
       String path = m.group(1);
-      if (path != null && !path.isBlank()) {
+      // RR-1588 — these literals come from LLM-generated source and are later turned into outbound
+      // probe URLs. Only rooted relative paths leave this extractor; anything that could carry an
+      // authority (`//host`, `@host`, `scheme:`) is dropped here rather than sanitised downstream.
+      if (ApiProber.isProbablePath(path)) {
         paths.add(path);
+      } else if (path != null && !path.isBlank()) {
+        log.debug("[ApiSurfaceExtractor] Dropping non-path route literal");
       }
     }
   }
