@@ -115,6 +115,90 @@ class LintAdaptersTest {
     assertThat(r.violations()).hasSize(1);
   }
 
+  // RR-1610 — a crashed or silent lint verifier must NOT read as a passing lint (SUCCESS).
+
+  @Test
+  void eslint_killedWithNoOutput_isFailedNotSuccess() {
+    // exit=137 (SIGKILL/OOM), stdout="", stderr="" — the old three-way conjunction let this pass.
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 137, "", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+    assertThat(r.failureReason()).contains("137");
+  }
+
+  @Test
+  void eslint_exitZeroButBlankStdout_isFailedNotSuccess() {
+    // A non-eslint binary on PATH: exit=0, stdout="" — no report was produced.
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void eslint_wellFormedZeroViolationReport_isSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "[]", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
+    assertThat(r.violations()).isEmpty();
+  }
+
+  @Test
+  void eslint_nonArrayOutput_isFailedNotSuccess() {
+    // Structurally-valid JSON that is not a report array must not be scored as a clean lint.
+    LintProcessRunner stub =
+        stubRunner(new LintProcessRunner.Result(true, 0, "{\"unexpected\":true}", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_killedWithNoOutput_isFailedNotSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 137, "", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+    assertThat(r.failureReason()).contains("137");
+  }
+
+  @Test
+  void checkstyle_exitZeroButBlankStdout_isFailedNotSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_truncatedReport_isFailedNotSuccess() {
+    // Opening tag written, process killed before the closing tag — not a complete audit.
+    LintProcessRunner stub =
+        stubRunner(
+            new LintProcessRunner.Result(true, 137, "<checkstyle version=\"10.0\">", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_wellFormedZeroViolationReport_isSuccess() {
+    LintProcessRunner stub =
+        stubRunner(
+            new LintProcessRunner.Result(
+                true,
+                0,
+                "<?xml version=\"1.0\"?><checkstyle version=\"10.0\"></checkstyle>",
+                "",
+                null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
+    assertThat(r.violations()).isEmpty();
+  }
+
   @Test
   void checkstyle_unavailableWhenCliMissing() {
     LintProcessRunner stub =

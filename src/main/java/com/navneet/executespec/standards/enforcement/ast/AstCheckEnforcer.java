@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.standards.enforcement.EvaluationStatus;
 import com.navneet.executespec.standards.model.Standard;
 
 import org.springframework.stereotype.Component;
@@ -51,8 +52,34 @@ public class AstCheckEnforcer {
 
   public List<AstViolation> enforce(
       Standard.AstCheckEnforcement enforcement, List<Path> sourceFiles, FileReader reader) {
-    if (enforcement == null || enforcement.ruleKind() == null) return List.of();
-    if (sourceFiles == null || sourceFiles.isEmpty()) return List.of();
+    return evaluate(enforcement, sourceFiles, reader).violations();
+  }
+
+  /** Convenience overload that reads files from disk. */
+  public List<AstViolation> enforce(
+      Standard.AstCheckEnforcement enforcement, List<Path> sourceFiles) {
+    return evaluate(enforcement, sourceFiles).violations();
+  }
+
+  /**
+   * RR-1611 — availability-aware evaluation. Returns the violations AND whether the check could
+   * actually run, so a degraded rule (missing parameter, invalid regex, unsupported kind, or an
+   * unreadable/empty inventory) is surfaced as non-{@link EvaluationStatus#EVALUATED} instead of an
+   * empty violation list that looks clean.
+   */
+  public AstOutcome evaluate(Standard.AstCheckEnforcement enforcement, List<Path> sourceFiles) {
+    return evaluate(enforcement, sourceFiles, defaultReader());
+  }
+
+  public AstOutcome evaluate(
+      Standard.AstCheckEnforcement enforcement, List<Path> sourceFiles, FileReader reader) {
+    if (enforcement == null || enforcement.ruleKind() == null) {
+      return AstOutcome.invalidRule();
+    }
+    if (sourceFiles == null || sourceFiles.isEmpty()) {
+      // No inventory to evaluate against — the check did not run, it just had nothing to look at.
+      return AstOutcome.unavailable();
+    }
     return switch (enforcement.ruleKind().toLowerCase()) {
       case "forbidden-import" -> forbiddenImport(enforcement.parameters(), sourceFiles, reader);
       case "naming-pattern" -> namingPattern(enforcement.parameters(), sourceFiles, reader);
@@ -60,34 +87,33 @@ public class AstCheckEnforcer {
           dependencyDirection(enforcement.parameters(), sourceFiles, reader);
       default -> {
         log.debug("[AstCheckEnforcer] unsupported rule kind '{}' — skip", enforcement.ruleKind());
-        yield List.of();
+        yield AstOutcome.invalidRule();
       }
     };
   }
 
-  /** Convenience overload that reads files from disk. */
-  public List<AstViolation> enforce(
-      Standard.AstCheckEnforcement enforcement, List<Path> sourceFiles) {
-    return enforce(
-        enforcement,
-        sourceFiles,
-        p -> {
-          try {
-            return Files.readString(p, StandardCharsets.UTF_8);
-          } catch (Exception ex) {
-            return null;
-          }
-        });
+  private static FileReader defaultReader() {
+    return p -> {
+      try {
+        return Files.readString(p, StandardCharsets.UTF_8);
+      } catch (Exception ex) {
+        return null;
+      }
+    };
   }
 
-  List<AstViolation> forbiddenImport(
+  AstOutcome forbiddenImport(
       Map<String, Object> params, List<Path> sourceFiles, FileReader reader) {
     String forbidden = strOrNull(params, "import");
-    if (forbidden == null || forbidden.isBlank()) return List.of();
+    if (forbidden == null || forbidden.isBlank()) return AstOutcome.invalidRule();
     List<AstViolation> out = new ArrayList<>();
+    int readFailures = 0;
     for (Path p : sourceFiles) {
       String content = reader.read(p);
-      if (content == null) continue;
+      if (content == null) {
+        readFailures++;
+        continue;
+      }
       Lang lang = Lang.of(p);
       if (importMatches(content, lang, forbidden)) {
         out.add(
@@ -98,28 +124,33 @@ public class AstCheckEnforcer {
                 "Forbidden import '" + forbidden + "' present in " + p));
       }
     }
-    return out;
+    // Every file failed to read — the check could not actually inspect anything.
+    if (readFailures == sourceFiles.size()) return AstOutcome.unavailable();
+    return AstOutcome.evaluated(out);
   }
 
-  List<AstViolation> namingPattern(
-      Map<String, Object> params, List<Path> sourceFiles, FileReader reader) {
+  AstOutcome namingPattern(Map<String, Object> params, List<Path> sourceFiles, FileReader reader) {
     String regex = strOrNull(params, "regex");
     String declarationKindRaw = strOrNull(params, "declaration");
-    if (regex == null) return List.of();
+    if (regex == null) return AstOutcome.invalidRule();
     Pattern namePattern;
     try {
       namePattern = Pattern.compile(regex);
     } catch (Exception ex) {
       log.warn(
           "[AstCheckEnforcer] naming-pattern invalid errorClass={}", ex.getClass().getSimpleName());
-      return List.of();
+      return AstOutcome.invalidRule();
     }
     DeclarationKind decl = DeclarationKind.parse(declarationKindRaw);
 
     List<AstViolation> out = new ArrayList<>();
+    int readFailures = 0;
     for (Path p : sourceFiles) {
       String content = reader.read(p);
-      if (content == null) continue;
+      if (content == null) {
+        readFailures++;
+        continue;
+      }
       Lang lang = Lang.of(p);
       for (Declaration d : extractDeclarations(content, lang, decl)) {
         if (!namePattern.matcher(d.name).matches()) {
@@ -132,22 +163,29 @@ public class AstCheckEnforcer {
         }
       }
     }
-    return out;
+    if (readFailures == sourceFiles.size()) return AstOutcome.unavailable();
+    return AstOutcome.evaluated(out);
   }
 
-  List<AstViolation> dependencyDirection(
+  AstOutcome dependencyDirection(
       Map<String, Object> params, List<Path> sourceFiles, FileReader reader) {
     String fromGlob = strOrNull(params, "from");
     String forbiddenTarget = strOrNull(params, "forbidden_target");
-    if (fromGlob == null || forbiddenTarget == null) return List.of();
+    if (fromGlob == null || forbiddenTarget == null) return AstOutcome.invalidRule();
     List<AstViolation> out = new ArrayList<>();
+    int inScope = 0;
+    int readFailures = 0;
     for (Path p : sourceFiles) {
       // Match path against the from-glob via DetectorUtils glob (already
       // imported from E2.2). Only files in the source scope are checked.
       if (!com.navneet.executespec.contracts.detection.DetectorUtils.matchesGlob(
           p.toString(), fromGlob)) continue;
+      inScope++;
       String content = reader.read(p);
-      if (content == null) continue;
+      if (content == null) {
+        readFailures++;
+        continue;
+      }
       Lang lang = Lang.of(p);
       if (importMatches(content, lang, forbiddenTarget)) {
         out.add(
@@ -164,7 +202,9 @@ public class AstCheckEnforcer {
                     + "'"));
       }
     }
-    return out;
+    // Files were in scope but none could be read — the check could not inspect the scope.
+    if (inScope > 0 && readFailures == inScope) return AstOutcome.unavailable();
+    return AstOutcome.evaluated(out);
   }
 
   /** True when the content contains an import that matches the target. */
@@ -281,4 +321,22 @@ public class AstCheckEnforcer {
    * @param message human-readable message
    */
   public record AstViolation(String ruleKind, String file, int line, String message) {}
+
+  /**
+   * RR-1611 — the availability-aware result of one AST-check evaluation: the violations plus
+   * whether the check could actually run against a usable inventory.
+   */
+  public record AstOutcome(EvaluationStatus status, List<AstViolation> violations) {
+    static AstOutcome evaluated(List<AstViolation> violations) {
+      return new AstOutcome(EvaluationStatus.EVALUATED, violations);
+    }
+
+    static AstOutcome unavailable() {
+      return new AstOutcome(EvaluationStatus.UNAVAILABLE, List.of());
+    }
+
+    static AstOutcome invalidRule() {
+      return new AstOutcome(EvaluationStatus.INVALID_RULE, List.of());
+    }
+  }
 }
