@@ -88,6 +88,14 @@ public class CodeReviewService {
   /** Cap on number of files included in the agent prompt. */
   private static final int MAX_FILES_IN_PROMPT = 20;
 
+  /**
+   * RR-435 — when a file is a static-finding hot spot we send bounded line windows around each
+   * finding anchor instead of the whole {@link #MAX_BYTES_PER_FILE} head, so a large flagged file
+   * discloses only the relevant neighbourhood. This is the +/- context radius (in lines) around
+   * each anchor; overlapping windows are merged.
+   */
+  private static final int FINDING_CONTEXT_LINES = 40;
+
   /** Total workspace traversal cap — files above this don't even count toward sampling. */
   private static final int MAX_FILES_SCANNED = 5_000;
 
@@ -497,7 +505,7 @@ public class CodeReviewService {
             "scan",
             "LLM augmentation pass over " + staticCount + " static findings + repo sample…"));
 
-    SampleResult samples = sampleFiles(workspaceRoot, staticResult.findings());
+    SampleResult samples = sampleFiles(workspaceRoot, staticResult.findings(), scanId.toString());
     Set<String> languages = samples.languages();
     int totalLoc = samples.totalLoc();
     int totalFiles = samples.totalFiles();
@@ -761,6 +769,14 @@ public class CodeReviewService {
    * languages + LOC across the whole tree (capped at {@link #MAX_FILES_SCANNED}).
    */
   SampleResult sampleFiles(Path root, List<SemgrepRunner.Finding> staticFindings) {
+    return sampleFiles(root, staticFindings, null);
+  }
+
+  /**
+   * @param auditKey short identifier (scan id) used only in the disclosure audit log line; may be
+   *     null.
+   */
+  SampleResult sampleFiles(Path root, List<SemgrepRunner.Finding> staticFindings, String auditKey) {
     Set<String> languages = new HashSet<>();
     long totalLoc = 0;
     int totalFiles = 0;
@@ -769,13 +785,10 @@ public class CodeReviewService {
     // Boost score for files referenced by static findings — those are likely the hot spots. The
     // bump is applied at admission rather than after the walk (RR-433) so the retained set can be
     // bounded to MAX_FILES_IN_PROMPT while producing the same final ranking.
-    Set<String> hotPaths =
-        staticFindings == null
-            ? Set.of()
-            : staticFindings.stream()
-                .map(SemgrepRunner.Finding::filePath)
-                .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toSet());
+    // RR-435 — the same finding anchors also let us send only bounded line windows around each hit
+    // for those files (anchorsByFile), rather than the whole head.
+    Map<String, List<int[]>> anchorsByFile = anchorsByFile(staticFindings);
+    Set<String> hotPaths = anchorsByFile.keySet();
     // Min-heap of the best MAX_FILES_IN_PROMPT candidates seen so far: worst (lowest score, then
     // latest walk position) sits at the head and is the one evicted.
     java.util.PriorityQueue<FileMeta> best =
@@ -840,21 +853,26 @@ public class CodeReviewService {
               totalFiles);
           break;
         }
-        FileHead head;
+        List<int[]> anchors = anchorsByFile.get(relStr);
+        FileExcerpt excerpt;
         try {
-          head = readBoundedHead(p);
+          excerpt =
+              (anchors == null || anchors.isEmpty())
+                  ? readBoundedHead(p)
+                  : readBoundedWindows(p, anchors);
         } catch (IOException e) {
           continue; // skip unreadable
         }
         totalReadBytes += size;
-        totalLoc += head.lineCount();
+        totalLoc += excerpt.lineCount();
         FileMeta candidate =
             new FileMeta(
                 relStr,
                 lang,
-                head.head(),
-                scoreFile(relStr, head.head()) + (hotPaths.contains(relStr) ? 50 : 0),
-                sequence++);
+                excerpt.content(),
+                scoreFile(relStr, excerpt.content()) + (hotPaths.contains(relStr) ? 50 : 0),
+                sequence++,
+                excerpt.disclosure());
         best.add(candidate);
         if (best.size() > MAX_FILES_IN_PROMPT) best.poll();
       }
@@ -872,12 +890,68 @@ public class CodeReviewService {
     for (FileMeta m : picked) {
       samples.add(new CodeReviewAgent.FileSample(m.path(), m.lang(), m.content()));
     }
+    auditDisclosure(auditKey, picked);
     return new SampleResult(
         samples, languages, (int) Math.min(totalLoc, Integer.MAX_VALUE), totalFiles, coverage);
   }
 
-  /** Bounded head of a file plus the line count of the WHOLE file. */
-  record FileHead(String head, int lineCount) {}
+  /**
+   * RR-435 — record exactly which files and line ranges crossed the boundary to the review model.
+   * This is written to the SERVER LOG only, never into the prompt, so the disclosure is auditable
+   * after the fact (which repository content, and how much of it, was sent to a third-party
+   * provider) without itself becoming a new disclosure channel. Paths and ranges only — no content.
+   */
+  private void auditDisclosure(String auditKey, List<FileMeta> picked) {
+    if (picked.isEmpty()) {
+      log.info("CodeReview disclosure scan={} sent 0 files to the review model", auditKey);
+      return;
+    }
+    StringBuilder sb = new StringBuilder();
+    int totalChars = 0;
+    for (FileMeta m : picked) {
+      if (sb.length() > 0) sb.append("; ");
+      sb.append(m.path())
+          .append(' ')
+          .append(m.disclosure())
+          .append(' ')
+          .append(m.content().length())
+          .append("ch");
+      totalChars += m.content().length();
+    }
+    log.info(
+        "CodeReview disclosure scan={} sent {} file(s) / {} chars to the review model: {}",
+        auditKey,
+        picked.size(),
+        totalChars,
+        sb);
+  }
+
+  /**
+   * Group static-finding anchors by workspace-relative file path, keeping each finding's
+   * [start,end] line span. Findings with no usable line span still register the file (empty list)
+   * so it is scored as a hot spot but read as a bounded head when no window can be centred.
+   */
+  private static Map<String, List<int[]>> anchorsByFile(List<SemgrepRunner.Finding> findings) {
+    Map<String, List<int[]>> byFile = new java.util.HashMap<>();
+    if (findings == null) return byFile;
+    for (SemgrepRunner.Finding f : findings) {
+      if (f == null || f.filePath() == null) continue;
+      String key = f.filePath().replace('\\', '/');
+      List<int[]> ranges = byFile.computeIfAbsent(key, k -> new ArrayList<>());
+      if (f.lineStart() > 0) {
+        int end = Math.max(f.lineStart(), f.lineEnd());
+        ranges.add(new int[] {f.lineStart(), end});
+      }
+    }
+    return byFile;
+  }
+
+  /**
+   * A bounded, already-redacted excerpt of a file plus the WHOLE file's line count and a
+   * server-log-only descriptor of exactly what was retained (RR-435 — {@code disclosure} feeds the
+   * audit line, never the prompt).
+   */
+  record FileExcerpt(String content, int lineCount, String disclosure) {}
 
   /**
    * Stream one candidate file, retaining at most {@link #MAX_BYTES_PER_FILE} characters while
@@ -886,7 +960,7 @@ public class CodeReviewService {
    * prefix). The retained head is redacted before it is returned, so no un-redacted credential
    * material is ever held in the candidate set (RR-435).
    */
-  private FileHead readBoundedHead(Path p) throws IOException {
+  private FileExcerpt readBoundedHead(Path p) throws IOException {
     StringBuilder head = new StringBuilder();
     int lines = 0;
     boolean truncated = false;
@@ -910,7 +984,101 @@ public class CodeReviewService {
       truncated = true;
     }
     if (truncated) head.append("\n\n…(truncated)\n");
-    return new FileHead(secretScanner.redactRecognizedSecrets(head.toString()), lines);
+    int lastLine = truncated ? countLines(head) : lines;
+    String descriptor = lines == 0 ? "HEAD (empty)" : "HEAD L1-" + Math.max(1, lastLine);
+    return new FileExcerpt(
+        secretScanner.redactRecognizedSecrets(head.toString()), lines, descriptor);
+  }
+
+  /**
+   * RR-435 — for a static-finding hot-spot file, retain only bounded line windows around each
+   * finding anchor (merged when overlapping) rather than the whole head. A large flagged file then
+   * discloses only the relevant neighbourhoods to the review model. Every included line keeps its
+   * 1-based number so the model can still anchor issues, the assembled excerpt is capped at {@link
+   * #MAX_BYTES_PER_FILE} and redacted, and the returned descriptor names the exact ranges sent.
+   */
+  private FileExcerpt readBoundedWindows(Path p, List<int[]> anchors) throws IOException {
+    // Expand each anchor by the context radius, then merge overlapping/adjacent windows.
+    List<int[]> windows = new ArrayList<>();
+    for (int[] a : anchors) {
+      int start = Math.max(1, a[0] - FINDING_CONTEXT_LINES);
+      int end = a[1] + FINDING_CONTEXT_LINES;
+      windows.add(new int[] {start, end});
+    }
+    windows.sort(Comparator.comparingInt(w -> w[0]));
+    List<int[]> merged = new ArrayList<>();
+    for (int[] w : windows) {
+      if (!merged.isEmpty() && w[0] <= merged.get(merged.size() - 1)[1] + 1) {
+        int[] last = merged.get(merged.size() - 1);
+        last[1] = Math.max(last[1], w[1]);
+      } else {
+        merged.add(new int[] {w[0], w[1]});
+      }
+    }
+
+    StringBuilder body = new StringBuilder();
+    List<int[]> included = new ArrayList<>();
+    int totalLines = 0;
+    boolean capped = false;
+    int idx = 0; // pointer into merged windows
+    Integer regionStart = null;
+    int regionEnd = 0;
+    try (var reader =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(
+                Files.newInputStream(p, LinkOption.NOFOLLOW_LINKS), StandardCharsets.UTF_8))) {
+      String line;
+      int lineNo = 0;
+      while ((line = reader.readLine()) != null) {
+        lineNo++;
+        totalLines = lineNo;
+        // Advance past windows entirely before this line.
+        while (idx < merged.size() && merged.get(idx)[1] < lineNo) idx++;
+        boolean inWindow = idx < merged.size() && lineNo >= merged.get(idx)[0];
+        if (!inWindow || capped) continue;
+        if (body.length() >= MAX_BYTES_PER_FILE) {
+          capped = true;
+          continue;
+        }
+        if (regionStart == null) {
+          regionStart = lineNo;
+          if (body.length() > 0) body.append("\n");
+          body.append("… [lines ")
+              .append(merged.get(idx)[0])
+              .append('-')
+              .append(merged.get(idx)[1])
+              .append("] …\n");
+        }
+        body.append(lineNo).append(": ").append(line).append('\n');
+        regionEnd = lineNo;
+        // Close the region descriptor when this is the last line of the current window.
+        if (lineNo == merged.get(idx)[1]) {
+          included.add(new int[] {regionStart, regionEnd});
+          regionStart = null;
+        }
+      }
+    }
+    if (regionStart != null) included.add(new int[] {regionStart, regionEnd});
+    if (body.length() > MAX_BYTES_PER_FILE) {
+      body.setLength(MAX_BYTES_PER_FILE);
+      capped = true;
+    }
+    if (capped) body.append("\n…(truncated)\n");
+    String descriptor =
+        included.isEmpty()
+            ? "no-anchor-lines-present"
+            : included.stream().map(r -> "L" + r[0] + "-" + r[1]).collect(Collectors.joining(","));
+    if (capped) descriptor = descriptor + "(+truncated)";
+    return new FileExcerpt(
+        secretScanner.redactRecognizedSecrets(body.toString()), totalLines, descriptor);
+  }
+
+  /** Count newline-delimited lines in an already-built buffer (for a truncated head descriptor). */
+  private static int countLines(CharSequence s) {
+    if (s.length() == 0) return 0;
+    int lines = 1;
+    for (int i = 0; i < s.length(); i++) if (s.charAt(i) == '\n') lines++;
+    return lines;
   }
 
   /** Skip rule for files we don't want walking into the prompt OR the LOC count. */
@@ -1079,7 +1247,8 @@ public class CodeReviewService {
    * final score. {@code sequence} is the walk position, used as the tie-break so a bounded top-K
    * selection reproduces the ordering the old full-list stable sort produced.
    */
-  record FileMeta(String path, String lang, String content, int score, long sequence) {}
+  record FileMeta(
+      String path, String lang, String content, int score, long sequence, String disclosure) {}
 
   record SampleResult(
       List<CodeReviewAgent.FileSample> samples,
