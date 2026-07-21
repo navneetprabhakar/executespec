@@ -463,38 +463,114 @@ public class GitTool {
   }
 
   /**
-   * Stage and commit any pending changes on the current branch. No-ops silently if the working tree
-   * is already clean (nothing to commit). Used by post-merge agents (e.g. ApiTestSuiteAgent) to
-   * persist generated files into git so they are not accidentally picked up by a retried worker's
-   * {@code git add .}.
+   * RR-1283 — outcome of a scoped commit. {@code COMMITTED} carries the resulting SHA; {@code
+   * NOTHING_TO_COMMIT} means the named paths were already identical to HEAD; {@code FAILED} carries
+   * a reason. Callers must not report an artefact as persisted on anything but {@code COMMITTED} or
+   * {@code NOTHING_TO_COMMIT}.
    */
-  public void commitIfDirty(String runId, String message) {
-    Path workDir = getWorkspacePath(runId);
-    try {
-      ProcessBuilder statusPb =
-          new ProcessBuilder("git", "status", "--porcelain")
-              .directory(workDir.toFile())
-              .redirectErrorStream(true);
-      Process statusProc = statusPb.start();
-      String statusOutput = new String(statusProc.getInputStream().readAllBytes());
-      statusProc.waitFor();
-      if (statusOutput.isBlank()) return;
+  public record CommitOutcome(Status status, String sha, String detail) {
 
-      new ProcessBuilder("git", "add", "-A")
-          .directory(workDir.toFile())
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
-      ProcessBuilder commitPb =
-          new ProcessBuilder("git", "commit", "-m", message)
-              .directory(workDir.toFile())
-              .redirectErrorStream(true);
-      Process commitProc = commitPb.start();
-      commitProc.getInputStream().readAllBytes();
-      commitProc.waitFor();
-      log.debug("commitIfDirty: committed on run {} — {}", runId, message);
-    } catch (Exception e) {
-      log.warn("commitIfDirty failed for run {}: {}", runId, e.getMessage());
+    public enum Status {
+      COMMITTED,
+      NOTHING_TO_COMMIT,
+      FAILED
+    }
+
+    public boolean persisted() {
+      return status == Status.COMMITTED || status == Status.NOTHING_TO_COMMIT;
+    }
+
+    static CommitOutcome committed(String sha) {
+      return new CommitOutcome(Status.COMMITTED, sha, "committed");
+    }
+
+    static CommitOutcome nothingToCommit() {
+      return new CommitOutcome(Status.NOTHING_TO_COMMIT, null, "no change in the named paths");
+    }
+
+    static CommitOutcome failed(String detail) {
+      return new CommitOutcome(Status.FAILED, null, detail);
+    }
+  }
+
+  /** Serializes index/commit operations per run workspace — the index is a single shared file. */
+  private static final java.util.concurrent.ConcurrentMap<String, Object> WORKSPACE_GIT_LOCKS =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * RR-1283 — stage and commit ONLY the named workspace-relative paths.
+   *
+   * <p>The previous {@code commitIfDirty} ran {@code git add -A} over the entire run workspace,
+   * which is shared with concurrently running post-merge agents. An "update openapi.yaml" commit
+   * could therefore sweep in another agent's half-written context files, rejected model output, or
+   * unrelated customer files — with the content decided by timing. Staging is now restricted to an
+   * explicit path list, and the commit itself carries the same pathspec so anything another thread
+   * left in the index is excluded too.
+   *
+   * @param relativePaths workspace-relative paths; must be non-empty, relative, and traversal-free
+   */
+  public CommitOutcome commitPaths(String runId, String message, java.util.List<String> relativePaths) {
+    if (relativePaths == null || relativePaths.isEmpty()) {
+      return CommitOutcome.failed("no paths supplied");
+    }
+    Path workDir = getWorkspacePath(runId);
+    Path root = workDir.toAbsolutePath().normalize();
+    for (String relative : relativePaths) {
+      if (relative == null || relative.isBlank()) return CommitOutcome.failed("blank path");
+      Path resolved = root.resolve(relative).normalize();
+      if (!resolved.startsWith(root)) return CommitOutcome.failed("path escapes the workspace");
+      if (!java.nio.file.Files.exists(resolved)) {
+        return CommitOutcome.failed("path does not exist: " + relative);
+      }
+    }
+
+    synchronized (WORKSPACE_GIT_LOCKS.computeIfAbsent(runId, k -> new Object())) {
+      try {
+        java.util.List<String> add = new java.util.ArrayList<>(java.util.List.of("git", "add", "--"));
+        add.addAll(relativePaths);
+        Process addProc =
+            new ProcessBuilder(add).directory(workDir.toFile()).redirectErrorStream(true).start();
+        String addOut = new String(addProc.getInputStream().readAllBytes());
+        if (addProc.waitFor() != 0) return CommitOutcome.failed("git add failed: " + addOut);
+
+        // Nothing staged for these paths → the file already matches HEAD.
+        java.util.List<String> diff =
+            new java.util.ArrayList<>(
+                java.util.List.of("git", "diff", "--cached", "--quiet", "--"));
+        diff.addAll(relativePaths);
+        Process diffProc =
+            new ProcessBuilder(diff).directory(workDir.toFile()).redirectErrorStream(true).start();
+        diffProc.getInputStream().readAllBytes();
+        if (diffProc.waitFor() == 0) return CommitOutcome.nothingToCommit();
+
+        // Pathspec on commit: only the named paths are committed even if a concurrent agent left
+        // unrelated entries staged in the shared index.
+        java.util.List<String> commit =
+            new java.util.ArrayList<>(java.util.List.of("git", "commit", "-m", message, "--"));
+        commit.addAll(relativePaths);
+        Process commitProc =
+            new ProcessBuilder(commit).directory(workDir.toFile()).redirectErrorStream(true).start();
+        String commitOut = new String(commitProc.getInputStream().readAllBytes());
+        if (commitProc.waitFor() != 0) return CommitOutcome.failed("git commit failed: " + commitOut);
+
+        Process revParse =
+            new ProcessBuilder("git", "rev-parse", "HEAD")
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String sha = new String(revParse.getInputStream().readAllBytes()).trim();
+        if (revParse.waitFor() != 0 || sha.isBlank()) {
+          return CommitOutcome.failed("commit succeeded but HEAD could not be read");
+        }
+        log.debug("commitPaths: run {} committed {} as {}", runId, relativePaths, sha);
+        return CommitOutcome.committed(sha);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return CommitOutcome.failed("interrupted");
+      } catch (Exception e) {
+        log.warn("commitPaths failed for run {}: {}", runId, e.getMessage());
+        return CommitOutcome.failed("commit error: " + e.getMessage());
+      }
     }
   }
 
@@ -583,13 +659,19 @@ public class GitTool {
   /**
    * Pushes the main branch in the run's workspace to a remote GitHub repository. Non-fatal —
    * returns GitToolResult.err() on failure.
+   *
+   * <p>RR-900 — this used to pass {@code --force}, so any caller reaching it overwrote the remote
+   * default branch and discarded whatever was there. The only legitimate caller is publication into
+   * a repository ExecuteSpec just created (and which is therefore empty), where a fast-forward push
+   * always succeeds. The force flag is gone: a rejected non-fast-forward now means the remote had
+   * content we were about to destroy, and refusing is the correct outcome.
    */
   public GitToolResult pushToRemote(String runId, String repoUrl, String pat) {
     try {
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
       ProcessBuilder pb =
           com.navneet.executespec.repo.GitProcessAuth.git(
-              pat, java.util.List.of("-C", wsPath, "push", repoUrl, "main", "--force"));
+              pat, java.util.List.of("-C", wsPath, "push", repoUrl, "main"));
       pb.redirectErrorStream(true);
       Process p = pb.start();
       String output = new String(p.getInputStream().readAllBytes());
