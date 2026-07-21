@@ -101,6 +101,16 @@ public class PreviewProxyFilter implements Filter {
           "referrer-policy",
           "permissions-policy");
 
+  /**
+   * RR-160 — hard byte ceilings so anonymous preview traffic cannot exhaust JVM heap / bandwidth.
+   * The request body is buffered (the JDK HttpClient body publisher needs the full array), so it is
+   * capped tighter; the response is streamed, so its cap is a defensive upper bound on a single
+   * proxied download. Exceeding either fails cleanly rather than allocating without limit.
+   */
+  static final long MAX_REQUEST_BODY_BYTES = 25L * 1024 * 1024; // 25 MiB
+
+  static final long MAX_RESPONSE_BODY_BYTES = 100L * 1024 * 1024; // 100 MiB
+
   private final HttpClient http =
       HttpClient.newBuilder()
           .connectTimeout(Duration.ofSeconds(5))
@@ -200,8 +210,15 @@ public class PreviewProxyFilter implements Filter {
         case "HEAD" -> builder.method("HEAD", HttpRequest.BodyPublishers.noBody());
         case "OPTIONS" -> builder.method("OPTIONS", HttpRequest.BodyPublishers.noBody());
         default -> {
-          // POST, PUT, PATCH — forward body
-          byte[] body = req.getInputStream().readAllBytes();
+          // POST, PUT, PATCH — forward body. RR-160: bounded read so an oversized upload cannot
+          // buffer unbounded bytes into heap; over-limit fails cleanly with 413 before dispatch.
+          byte[] body;
+          try {
+            body = readBounded(req.getInputStream(), MAX_REQUEST_BODY_BYTES);
+          } catch (BodyTooLargeException tooLarge) {
+            res.sendError(413, "Preview request body too large");
+            return;
+          }
           builder.method(method, HttpRequest.BodyPublishers.ofByteArray(body));
         }
       }
@@ -246,10 +263,12 @@ public class PreviewProxyFilter implements Filter {
                 }
               });
 
-      // Stream response body
+      // Stream response body. RR-160: copy under a finite byte ceiling so a slow/unbounded
+      // generated response cannot pin threads and heap indefinitely. Status + headers are already
+      // committed, so overflow can only truncate: stop copying and abort the connection.
       try (InputStream in = upstream_res.body();
           OutputStream out = res.getOutputStream()) {
-        in.transferTo(out);
+        copyBounded(in, out, MAX_RESPONSE_BODY_BYTES, upstream);
         out.flush();
       }
 
@@ -259,6 +278,57 @@ public class PreviewProxyFilter implements Filter {
     } catch (Exception e) {
       log.warn("Preview proxy error for {}: {}", upstream, e.getMessage());
       res.sendError(502, "Preview unavailable");
+    }
+  }
+
+  /** Thrown by {@link #readBounded} when an upload exceeds {@link #MAX_REQUEST_BODY_BYTES}. */
+  static final class BodyTooLargeException extends IOException {
+    BodyTooLargeException(long limit) {
+      super("request body exceeds " + limit + " bytes");
+    }
+  }
+
+  /**
+   * Reads at most {@code limit} bytes from {@code in} into a fresh array (RR-160). If the stream
+   * still has data after {@code limit} bytes have been consumed, throws {@link
+   * BodyTooLargeException} instead of allocating without bound.
+   */
+  static byte[] readBounded(InputStream in, long limit) throws IOException {
+    java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+    byte[] chunk = new byte[8192];
+    long total = 0;
+    int n;
+    while ((n = in.read(chunk)) != -1) {
+      total += n;
+      if (total > limit) {
+        throw new BodyTooLargeException(limit);
+      }
+      buf.write(chunk, 0, n);
+    }
+    return buf.toByteArray();
+  }
+
+  /**
+   * Streams {@code in} to {@code out}, stopping after {@code limit} bytes (RR-160). Because the
+   * response status/headers are already committed when this runs, an over-limit body cannot be
+   * turned into an error code — it is truncated and the overflow is logged so operators can see it.
+   */
+  static void copyBounded(InputStream in, OutputStream out, long limit, String upstream)
+      throws IOException {
+    byte[] chunk = new byte[8192];
+    long total = 0;
+    int n;
+    while ((n = in.read(chunk)) != -1) {
+      if (total + n > limit) {
+        int allowed = (int) (limit - total);
+        if (allowed > 0) {
+          out.write(chunk, 0, allowed);
+        }
+        log.warn("Preview response from {} exceeded {} bytes; truncated", upstream, limit);
+        return;
+      }
+      out.write(chunk, 0, n);
+      total += n;
     }
   }
 
