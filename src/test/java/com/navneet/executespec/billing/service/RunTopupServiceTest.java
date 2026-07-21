@@ -40,6 +40,7 @@ class RunTopupServiceTest {
   private final BillingGateway razorpayGateway = mock(BillingGateway.class);
   private final InvoiceService invoiceService = mock(InvoiceService.class);
   private final ManagedAiUsageService managedAiUsageService = mock(ManagedAiUsageService.class);
+  private final ActivityAuditService auditService = mock(ActivityAuditService.class);
   private final RunTopupService service =
       new RunTopupService(
           topupRepo,
@@ -47,12 +48,13 @@ class RunTopupServiceTest {
           razorpayGateway,
           subscriptionRepo,
           mock(AppUserRepository.class),
-          mock(ActivityAuditService.class),
+          auditService,
           mock(BillingNotificationService.class),
           invoiceService,
           managedAiUsageService,
           mock(BillingEntityResolver.class),
-          mock(PaymentGatewayRouter.class));
+          mock(PaymentGatewayRouter.class),
+          new com.fasterxml.jackson.databind.ObjectMapper());
 
   @Test
   void initiatePurchaseStoresPackageReferenceForInvoiceResolution() {
@@ -212,6 +214,56 @@ class RunTopupServiceTest {
     service.creditStripeTopup(topupId.toString(), "cs_1", "pay_1");
 
     verify(managedAiUsageService, times(1)).grantPurchasedCredits("user-1", null, 500);
+  }
+
+  @Test
+  void stripeCreditPathGeneratesInvoice() {
+    // RR-113: the Stripe credit path previously generated no invoice at all.
+    UUID topupId = UUID.randomUUID();
+    RunTopup pending =
+        RunTopup.builder()
+            .id(topupId)
+            .userId("user-1")
+            .quantity(500)
+            .status("PENDING")
+            .source("AI_CREDIT_PURCHASE")
+            .build();
+    when(topupRepo.findById(topupId)).thenReturn(Optional.of(pending));
+    when(topupRepo.claimPendingStripeTopup(eq(topupId), eq("cs_1"), eq("pay_1"), any()))
+        .thenReturn(1);
+
+    service.creditStripeTopup(topupId.toString(), "cs_1", "pay_1");
+
+    verify(invoiceService).generateTopupInvoice(pending, null, "pay_1");
+  }
+
+  @Test
+  void invoiceGenerationFailureRecordsDurableObligationInsteadOfSwallowing() {
+    // RR-113: an invoice failure after a completed payment must leave a recoverable work item
+    // (TOPUP_INVOICE_GENERATION_FAILED), not a swallowed log line.
+    UUID topupId = UUID.randomUUID();
+    RunTopup pending =
+        RunTopup.builder()
+            .id(topupId)
+            .userId("user-1")
+            .quantity(500)
+            .status("PENDING")
+            .source("AI_CREDIT_PURCHASE")
+            .build();
+    when(topupRepo.findById(topupId)).thenReturn(Optional.of(pending));
+    when(topupRepo.claimPendingStripeTopup(eq(topupId), eq("cs_1"), eq("pay_1"), any()))
+        .thenReturn(1);
+    when(invoiceService.generateTopupInvoice(any(), any(), any()))
+        .thenThrow(new RuntimeException("PDF renderer down"));
+
+    // Credit still succeeds (payment already taken); the obligation is recorded.
+    service.creditStripeTopup(topupId.toString(), "cs_1", "pay_1");
+
+    ArgumentCaptor<com.navneet.executespec.auth.entity.ActivityAudit> cap =
+        ArgumentCaptor.forClass(com.navneet.executespec.auth.entity.ActivityAudit.class);
+    verify(auditService, org.mockito.Mockito.atLeastOnce()).record(cap.capture());
+    assertThat(cap.getAllValues())
+        .anyMatch(a -> "TOPUP_INVOICE_GENERATION_FAILED".equals(a.getEventType()));
   }
 
   @Test

@@ -77,9 +77,32 @@ public class ModelRegistry {
       }
     }
 
-    // 4. Free-tier model must exist
-    if (matrixProps.getFreeTier() != null && matrixProps.getFreeTier().getModel() != null) {
-      validateModelExists(models, aliases, matrixProps.getFreeTier().getModel(), "free-tier.model");
+    // 4. Free-tier routing is billing-critical: it MUST resolve to a known, enabled model, and
+    // there is no safe behavioural fallback. RR-115 (2026-07-21) — a missing/blank/unknown
+    // free-tier cell previously fell through to a hardcoded PAID route (gpt-5.4-mini / openai) in
+    // freeTierModel()/freeTierProvider(); a configuration omission would then silently move Free
+    // traffic onto a billed provider while the product still labels it Free-tier locked. Fail
+    // startup instead so the misconfiguration is caught before any customer spend.
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null
+        || freeTier.getProvider() == null
+        || freeTier.getProvider().isBlank()
+        || freeTier.getModel() == null
+        || freeTier.getModel().isBlank()) {
+      throw new IllegalStateException(
+          "[ModelRegistry] model-matrix.free-tier.provider and .model are required — Free-tier"
+              + " routing is billing-critical and has no safe fallback (RR-115).");
+    }
+    String freeCanonical =
+        aliases != null && aliases.containsKey(freeTier.getModel())
+            ? aliases.get(freeTier.getModel())
+            : freeTier.getModel();
+    if (!models.containsKey(freeCanonical)) {
+      throw new IllegalStateException(
+          "[ModelRegistry] free-tier.model '"
+              + freeTier.getModel()
+              + "' is not present in model-matrix.models — refusing to start with an unresolvable"
+              + " Free-tier route (RR-115).");
     }
 
     log.info(
@@ -338,16 +361,33 @@ public class ModelRegistry {
     return entries.stream().map(e -> new String[] {e.getProvider(), e.getModel()}).toList();
   }
 
-  /** Returns the FREE tier locked model name. */
+  /**
+   * Returns the FREE tier locked model name. RR-115 — no behavioural fallback: startup {@link
+   * #validate()} guarantees a configured free-tier cell, so a missing one here is a fail-closed
+   * error rather than a silent paid route.
+   */
   public String freeTierModel() {
-    return matrixProps.getFreeTier() != null
-        ? matrixProps.getFreeTier().getModel()
-        : "gpt-5.4-mini";
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null || freeTier.getModel() == null || freeTier.getModel().isBlank()) {
+      throw new IllegalStateException(
+          "model-matrix.free-tier.model is not configured — Free-tier routing has no safe fallback"
+              + " (RR-115).");
+    }
+    return freeTier.getModel();
   }
 
-  /** Returns the FREE tier locked provider name. */
+  /**
+   * Returns the FREE tier locked provider name. RR-115 — no behavioural fallback (see {@link
+   * #freeTierModel()}).
+   */
   public String freeTierProvider() {
-    return matrixProps.getFreeTier() != null ? matrixProps.getFreeTier().getProvider() : "openai";
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null || freeTier.getProvider() == null || freeTier.getProvider().isBlank()) {
+      throw new IllegalStateException(
+          "model-matrix.free-tier.provider is not configured — Free-tier routing has no safe"
+              + " fallback (RR-115).");
+    }
+    return freeTier.getProvider();
   }
 
   /**

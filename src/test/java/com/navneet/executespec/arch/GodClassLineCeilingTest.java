@@ -222,7 +222,6 @@ class GodClassLineCeilingTest {
           "com/navneet/executespec/agentsession/subagent/SubagentProtocolService.java",
           "com/navneet/executespec/api/controller/RunController.java",
           "com/navneet/executespec/auth/controller/AuthController.java",
-          "com/navneet/executespec/auth/controller/SuperAdminController.java",
           "com/navneet/executespec/auth/service/AuthService.java",
           "com/navneet/executespec/auth/service/InvitationService.java",
           "com/navneet/executespec/auth/service/MailService.java",

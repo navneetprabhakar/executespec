@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
@@ -47,6 +48,7 @@ public class RunTopupService {
   private final ManagedAiUsageService managedAiUsageService;
   private final BillingEntityResolver billingEntityResolver;
   private final PaymentGatewayRouter gatewayRouter;
+  private final ObjectMapper objectMapper;
 
   @Transactional(readOnly = true)
   public List<TopupPackage> getPackages() {
@@ -64,8 +66,6 @@ public class RunTopupService {
     return topupRepo.sumRemainingByOrgId(orgId, Instant.now());
   }
 
-  // Bonus consumption (FIFO)
-
   /**
    * Consume one bonus run from the user's personal top-ups (FIFO order). Returns true if a bonus
    * run was consumed, false if none available.
@@ -79,22 +79,13 @@ public class RunTopupService {
     int updated = topupRepo.decrementRemaining(t.getId(), now);
     if (updated == 0) return false;
 
-    // Check if exhausted
     t = topupRepo.findById(t.getId()).orElse(t);
     if (t.getRemaining() <= 0) {
       t.setStatus("EXHAUSTED");
       topupRepo.save(t);
     }
 
-    auditService.record(
-        ActivityAudit.builder()
-            .eventType("TOPUP_CONSUMED")
-            .entityType("BILLING")
-            .entityId(t.getId().toString())
-            .actorId(userId)
-            .newValue(
-                "{\"topupId\":\"" + t.getId() + "\",\"remainingAfter\":" + t.getRemaining() + "}")
-            .build());
+    recordConsumed(t, userId, null);
 
     log.debug(
         "Consumed bonus run: userId={}, topupId={}, remaining={}",
@@ -124,15 +115,7 @@ public class RunTopupService {
       topupRepo.save(t);
     }
 
-    auditService.record(
-        ActivityAudit.builder()
-            .eventType("TOPUP_CONSUMED")
-            .entityType("BILLING")
-            .entityId(t.getId().toString())
-            .orgId(orgId)
-            .newValue(
-                "{\"topupId\":\"" + t.getId() + "\",\"remainingAfter\":" + t.getRemaining() + "}")
-            .build());
+    recordConsumed(t, null, orgId);
 
     log.debug(
         "Consumed org bonus run: orgId={}, topupId={}, remaining={}",
@@ -338,14 +321,18 @@ public class RunTopupService {
             .entityType("BILLING")
             .entityId(topup.getId().toString())
             .actorId(userId)
+            .orgId(topup.getOrgId())
             .newValue(
-                "{\"quantity\":"
-                    + topup.getQuantity()
-                    + ",\"orderId\":\""
-                    + orderId
-                    + "\",\"amountInr\":"
-                    + topup.getAmountPaidInr()
-                    + "}")
+                auditJson(
+                    Map.of(
+                        "quantity",
+                        topup.getQuantity(),
+                        "orderId",
+                        orderId == null ? "" : orderId,
+                        "amountInr",
+                        topup.getAmountPaidInr(),
+                        "gateway",
+                        "RAZORPAY")))
             .build());
 
     // Send notification email
@@ -355,21 +342,8 @@ public class RunTopupService {
       notificationService.sendTopupCredited(user.getEmail(), topup.getQuantity());
     }
 
-    // Generate invoice
-    try {
-      // Resolve package from order notes if available
-      TopupPackage pkg = null;
-      if (topup.getGrantReason() != null && topup.getGrantReason().startsWith("pkg:")) {
-        try {
-          var pkgId = UUID.fromString(topup.getGrantReason().substring(4));
-          pkg = packageRepo.findById(pkgId).orElse(null);
-        } catch (Exception ignored) {
-        }
-      }
-      invoiceService.generateTopupInvoice(topup, pkg, paymentId);
-    } catch (Exception e) {
-      log.warn("Invoice generation failed for top-up (non-blocking): {}", e.getMessage());
-    }
+    // Generate invoice (durable-obligation semantics — RR-113).
+    generateTopupInvoiceOrRecordObligation(topup, paymentId, "RAZORPAY");
 
     log.info(
         "Top-up credited: userId={}, quantity={}, orderId={}",
@@ -377,6 +351,58 @@ public class RunTopupService {
         topup.getQuantity(),
         orderId);
     return topup;
+  }
+
+  /**
+   * Generate the tax invoice for a credited top-up. RR-113 — generation used to be a swallowed
+   * "non-blocking" catch on Razorpay and absent entirely on Stripe, so a completed payment could
+   * end up with no invoice AND no recoverable work item. It must not fail the already-charged
+   * credit, so a failure instead records a durable, queryable obligation ({@code
+   * TOPUP_INVOICE_GENERATION_FAILED}, keyed by top-up + payment id) that ops can act on. Automatic
+   * outbox retry is deferred.
+   */
+  private void generateTopupInvoiceOrRecordObligation(
+      RunTopup topup, String paymentId, String gateway) {
+    try {
+      TopupPackage pkg = resolvePackage(topup);
+      invoiceService.generateTopupInvoice(topup, pkg, paymentId);
+    } catch (Exception e) {
+      log.error(
+          "Invoice generation failed for top-up {} ({}) — recording durable obligation: {}",
+          topup.getId(),
+          gateway,
+          e.getMessage());
+      auditService.record(
+          ActivityAudit.builder()
+              .eventType("TOPUP_INVOICE_GENERATION_FAILED")
+              .entityType("BILLING")
+              .entityId(topup.getId().toString())
+              .actorId(topup.getUserId())
+              .orgId(topup.getOrgId())
+              .newValue(
+                  auditJson(
+                      Map.of(
+                          "topupId", topup.getId().toString(),
+                          "paymentId", paymentId == null ? "" : paymentId,
+                          "gateway", gateway,
+                          "quantity", topup.getQuantity(),
+                          "error", e.getClass().getSimpleName())))
+              .build());
+    }
+  }
+
+  /** Resolve the purchased package from the {@code pkg:<uuid>} grant-reason marker, if present. */
+  private TopupPackage resolvePackage(RunTopup topup) {
+    if (topup.getGrantReason() == null || !topup.getGrantReason().startsWith("pkg:")) {
+      return null;
+    }
+    try {
+      return packageRepo
+          .findById(UUID.fromString(topup.getGrantReason().substring(4)))
+          .orElse(null);
+    } catch (Exception ignored) {
+      return null;
+    }
   }
 
   /**
@@ -425,14 +451,52 @@ public class RunTopupService {
             .entityType("BILLING")
             .entityId(topup.getId().toString())
             .actorId(topup.getUserId())
+            .orgId(topup.getOrgId())
             .newValue(
-                "{\"quantity\":"
-                    + topup.getQuantity()
-                    + ",\"sessionId\":\""
-                    + sessionId
-                    + "\",\"gateway\":\"STRIPE\"}")
+                auditJson(
+                    Map.of(
+                        "quantity",
+                        topup.getQuantity(),
+                        "sessionId",
+                        sessionId == null ? "" : sessionId,
+                        "gateway",
+                        "STRIPE")))
             .build());
+
+    // Generate invoice (RR-113 — the Stripe credit path previously generated no invoice at all).
+    generateTopupInvoiceOrRecordObligation(topup, paymentId, "STRIPE");
     return topup;
+  }
+
+  /**
+   * RR-009 — serialize audit metadata with the shared Jackson mapper instead of string
+   * concatenation, so a user-controlled value cannot inject control characters or unbalanced quotes
+   * into the append-only audit chain. A plain map of scalars never fails; degrade safely if it
+   * does.
+   */
+  private String auditJson(Map<String, Object> fields) {
+    try {
+      return objectMapper.writeValueAsString(fields);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      return "{}";
+    }
+  }
+
+  /**
+   * Append a structured (RR-009) TOPUP_CONSUMED audit row for a user- or org-scoped consumption.
+   */
+  private void recordConsumed(RunTopup t, String actorId, String orgId) {
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("TOPUP_CONSUMED")
+            .entityType("BILLING")
+            .entityId(t.getId().toString())
+            .actorId(actorId)
+            .orgId(orgId)
+            .newValue(
+                auditJson(
+                    Map.of("topupId", t.getId().toString(), "remainingAfter", t.getRemaining())))
+            .build());
   }
 
   private static String normalizeGateway(String requested, String fallback) {
@@ -495,13 +559,11 @@ public class RunTopupService {
             .actorId(grantedBy)
             .orgId(targetOrgId)
             .newValue(
-                "{\"quantity\":"
-                    + quantity
-                    + ",\"expiryDays\":"
-                    + (expiryDays != null ? expiryDays : 90)
-                    + ",\"reason\":\""
-                    + (reason != null ? reason.replace("\"", "\\\"") : "")
-                    + "\"}")
+                auditJson(
+                    Map.of(
+                        "quantity", quantity,
+                        "expiryDays", expiryDays != null ? expiryDays : 90,
+                        "reason", reason != null ? reason : "")))
             .build());
 
     log.info(
