@@ -259,6 +259,12 @@ public class TierPermissionService {
 
     String orgRole = membership.getOrgRole();
     boolean isOrgAdmin = "ORG_ADMIN".equals(orgRole);
+    // RR-211: BILLING_ADMIN is a canonical org role (SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN /
+    // DEVELOPER / …) whose entire purpose is billing administration. It previously fell through to
+    // the DEVELOPER branch with every finance flag false, so the dedicated billing role could not
+    // read invoices, manage the billing profile, issue credit notes or export GSTR. Grant it the
+    // org-scoped finance capability set here.
+    boolean isBillingAdmin = "BILLING_ADMIN".equals(orgRole);
 
     int limit = tierEnforcementService.effectiveOrgLimit(org);
     int used = org.getMonthlyRunCount();
@@ -291,6 +297,40 @@ public class TierPermissionService {
           false, // canManageCreditNotes (finance + super admin)
           false, // canExportGstr (finance + super admin)
           false, // canManageSellerConfig
+          true, // canManageBillingProfile
+          limit,
+          used,
+          maxMembers,
+          currentMembers,
+          maxApply,
+          maxPreviews,
+          canDeploy,
+          maxDeploys);
+    }
+
+    if (isBillingAdmin) {
+      // RR-211 — org-scoped finance/billing administrator. Billing surfaces unlocked; product/eng
+      // and org-admin surfaces stay locked (that is ORG_ADMIN's remit). This mirrors the global
+      // FINANCE role but scoped to this org's membership.
+      return withQuota(
+          quota,
+          false, // canManageAiKeys
+          true, // canViewPricing — billing admins reason about plans/spend
+          false, // canManageIntegrations
+          true, // canViewMetrics — unlocked for all tiers
+          false, // canViewCostBreakdown (super admin only)
+          true, // canViewTokenUsage
+          true, // canUseChat
+          false, // canCreateOrg
+          false, // canInviteMembers
+          true, // canViewOrgMembers (read-only)
+          false, // canViewAudit
+          true, // canViewLiveLog — unlocked for all tiers
+          true, // canViewInvoices
+          true, // canViewAccounting
+          true, // canManageCreditNotes
+          true, // canExportGstr
+          false, // canManageSellerConfig (super admin only)
           true, // canManageBillingProfile
           limit,
           used,

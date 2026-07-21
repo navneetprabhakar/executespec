@@ -3,8 +3,11 @@ package com.navneet.executespec.project.dashboard;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.StalenessService;
+import com.navneet.executespec.cost.CostVisibilityPolicy;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
@@ -68,6 +71,7 @@ public class ProjectDashboardController {
       generatedDocRepo;
 
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final ProjectRepository projectRepository;
 
   public record TaskSummary(
       String taskId, String runId, String name, String status, Integer score, String createdAt) {}
@@ -129,6 +133,11 @@ public class ProjectDashboardController {
       long totalTokens,
       double totalCostUsd,
       CostBreakdown costBreakdown,
+      // RR-563: true only for billing-role viewers of the project's own org. When false,
+      // totalCostUsd
+      // and every costBreakdown field are zeroed (raw provider-dollar COGS is not a general
+      // project-read figure). tokens/credits remain visible. Clients should branch on this flag.
+      boolean costVisible,
       List<TaskSummary> recentTasks,
       List<PrSummaryDto> recentPrs,
       String architectureDocStatus,
@@ -179,11 +188,22 @@ public class ProjectDashboardController {
     double generatedDocCost = generatedDocRepo.sumCostUsdByProject(projectId);
 
     long totalTokens = pipelineTokens + execTokens + codeReviewTokens + prReviewTokens;
+
+    // RR-563: raw provider-dollar spend is a billing figure hidden from ordinary customer surfaces
+    // (managed AI credits are shown instead). Only a billing-role viewer of the project's own org
+    // sees the USD rollup; for everyone else the dollar figures are zeroed and costVisible=false so
+    // the client renders "hidden"/credits rather than a real COGS number. Tokens stay visible.
+    String projectOrgId = projectRepository.findById(projectId).map(Project::getOrgId).orElse(null);
+    boolean costVisible = CostVisibilityPolicy.canViewRawCost(userDetails, projectOrgId);
     double totalCost =
-        pipelineCost + execCost + codeReviewCost + prReviewCost + archCost + generatedDocCost;
+        costVisible
+            ? pipelineCost + execCost + codeReviewCost + prReviewCost + archCost + generatedDocCost
+            : 0.0;
     CostBreakdown costBreakdown =
-        new CostBreakdown(
-            pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost);
+        costVisible
+            ? new CostBreakdown(
+                pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost)
+            : new CostBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
     List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
     // v2.5.10+: aggregate only verifiedScore (objective build+tests+verdict signal).
@@ -257,6 +277,7 @@ public class ProjectDashboardController {
             totalTokens,
             totalCost,
             costBreakdown,
+            costVisible,
             recentTasks,
             recentPrs,
             archStatus,

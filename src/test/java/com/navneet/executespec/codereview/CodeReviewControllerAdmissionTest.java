@@ -33,9 +33,16 @@ class CodeReviewControllerAdmissionTest {
   private final ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
   private final ProjectRepoService projectRepoService = mock(ProjectRepoService.class);
   private final CodeReviewAutofixService autofixService = mock(CodeReviewAutofixService.class);
+  private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository =
+      mock(com.navneet.executespec.auth.repository.ProjectRepository.class);
   private final CodeReviewController controller =
       new CodeReviewController(
-          service, guard, projectRepoService, autofixService, new GeneratedSecretScanner());
+          service,
+          guard,
+          projectRepoService,
+          autofixService,
+          new GeneratedSecretScanner(),
+          projectRepository);
   private final UUID repoId = UUID.randomUUID();
   private final AppUserDetails principal = principal();
 
