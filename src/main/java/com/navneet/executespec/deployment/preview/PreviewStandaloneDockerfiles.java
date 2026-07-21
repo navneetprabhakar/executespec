@@ -174,7 +174,9 @@ CMD ["nginx", "-g", "daemon off;"]
 """;
   }
 
-  static String cliGo() {
+  /** RR-391: {@code writable} controls whether the terminal accepts input. */
+  static String cliGo(boolean writable) {
+    String w = writable ? " --writable" : "";
     return """
 FROM golang:1.22-alpine
 WORKDIR /app
@@ -185,11 +187,14 @@ RUN go mod download 2>/dev/null || true
 COPY . .
 RUN go build -o app . 2>/dev/null || true
 EXPOSE 8080
-CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080 --writable ./app; else ttyd --port 8080 --writable go run .; fi"]
-""";
+CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080__TTYD_W__ ./app; else ttyd --port 8080__TTYD_W__ go run .; fi"]
+"""
+        .replace("__TTYD_W__", w);
   }
 
-  static String cliRust() {
+  /** RR-391: {@code writable} controls whether the terminal accepts input. */
+  static String cliRust(boolean writable) {
+    String w = writable ? " --writable" : "";
     return """
 FROM rust:1.77-slim
 RUN apt-get update && apt-get install -y pkg-config libssl-dev wget && rm -rf /var/lib/apt/lists/* \\
@@ -202,8 +207,9 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/d
 COPY . .
 RUN cargo build --release 2>/dev/null || true
 EXPOSE 8080
-CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080 --writable \\"$bin\\"; else ttyd --port 8080 --writable cargo run --release; fi"]
-""";
+CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080__TTYD_W__ \\"$bin\\"; else ttyd --port 8080__TTYD_W__ cargo run --release; fi"]
+"""
+        .replace("__TTYD_W__", w);
   }
 
   private static String findJavaMainClass(Path workspace) {

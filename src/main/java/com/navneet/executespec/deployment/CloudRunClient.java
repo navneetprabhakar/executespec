@@ -120,6 +120,7 @@ public class CloudRunClient {
     if (props.cloudRun().allowUnauthenticated()) {
       cmd.add("--allow-unauthenticated");
     }
+    applyRuntimeServiceAccount(cmd);
 
     ProcessBuilder pb = new ProcessBuilder(cmd);
     Process process = pb.start();
@@ -248,6 +249,7 @@ public class CloudRunClient {
                 "--quiet",
                 "--format",
                 "json"));
+    applyRuntimeServiceAccount(cmd);
 
     // Inject env vars via YAML file to avoid shell escaping issues with special chars
     Path envFile = null;
@@ -593,4 +595,35 @@ public class CloudRunClient {
   }
 
   public record DeployResult(String serviceUrl, String revisionName) {}
+
+  /**
+   * Pins the runtime identity of a generated Cloud Run service (RR-998).
+   *
+   * <p>Without {@code --service-account} the service runs as the project's default compute
+   * identity. Generated customer code can read a token for that identity from the metadata server,
+   * and previews are additionally deployed {@code --allow-unauthenticated}, so anyone reaching the
+   * preview reaches code holding it. Fails closed by default: an unconfigured runtime SA aborts the
+   * deploy rather than quietly granting the default identity.
+   *
+   * <p>Configure {@code agent.deployment.cloud-run.service-account} with a dedicated,
+   * minimal-permission account. Setting {@code require-service-account: false} restores the old
+   * behaviour and is an explicit operator decision.
+   */
+  private void applyRuntimeServiceAccount(List<String> cmd) {
+    String sa = props.cloudRun().serviceAccount();
+    if (sa != null && !sa.isBlank()) {
+      cmd.add("--service-account");
+      cmd.add(sa.trim());
+      return;
+    }
+    if (props.cloudRun().serviceAccountRequired()) {
+      throw new IllegalStateException(
+          "Refusing to deploy without a dedicated runtime service account: set"
+              + " agent.deployment.cloud-run.service-account (or explicitly set"
+              + " require-service-account: false to accept the project default identity).");
+    }
+    log.warn(
+        "Cloud Run deploy has no runtime service account configured — the service will inherit the"
+            + " project default compute identity (agent.deployment.cloud-run.service-account)");
+  }
 }

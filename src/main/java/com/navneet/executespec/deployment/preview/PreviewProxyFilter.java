@@ -45,7 +45,7 @@ public class PreviewProxyFilter implements Filter {
   private final PreviewProperties props;
   private final PreviewPortPool portPool;
 
-  /** Headers NOT forwarded to the upstream container. */
+  /** Headers NOT copied back from the upstream container. */
   private static final Set<String> HOP_BY_HOP =
       Set.of(
           "connection",
@@ -57,6 +57,33 @@ public class PreviewProxyFilter implements Filter {
           "transfer-encoding",
           "upgrade",
           "host");
+
+  /**
+   * The ONLY request headers forwarded to the previewed container (RR-159).
+   *
+   * <p>This is an allowlist by design. The upstream is untrusted, customer-generated code with
+   * outbound network access, and the previous behaviour copied every header the browser sent —
+   * including {@code Cookie}, {@code Authorization} and the edge's identity assertions ({@code
+   * CF-Connecting-IP}, {@code CF-Access-Jwt-Assertion}, {@code X-Forwarded-*}). Anything not named
+   * here is dropped, so a header added later at the edge cannot silently start leaking.
+   *
+   * <p>Note that {@code Cookie} being dropped means a preview cannot hold a browser session on the
+   * ExecuteSpec domain — which is the point; a preview needing its own session must be served from
+   * a separate registrable domain, which remains open work.
+   */
+  private static final Set<String> FORWARDED_REQUEST_HEADERS =
+      Set.of(
+          "accept",
+          "accept-encoding",
+          "accept-language",
+          "cache-control",
+          "content-length",
+          "content-type",
+          "if-modified-since",
+          "if-none-match",
+          "pragma",
+          "range",
+          "user-agent");
 
   /**
    * Security headers from upstream preview containers that must be stripped. The container app
@@ -120,15 +147,11 @@ public class PreviewProxyFilter implements Filter {
       return;
     }
 
-    // Extract shortId: "preview-17be5f33" → "17be5f33"
-    String shortId = subdomain.substring("preview-".length());
-    if (shortId.isBlank()) {
-      res.sendError(404, "Preview not found");
-      return;
-    }
-
-    // Look up the port from the pool by matching shortId prefix
-    int port = findPortByShortId(shortId);
+    // Extract the routing capability: "preview-<32 hex>" → "<32 hex>".
+    // RR-158: this is matched EXACTLY against a minted 128-bit label. It is not a runId prefix,
+    // so no amount of guessing short strings reaches another tenant's preview.
+    String hostLabel = subdomain.substring("preview-".length()).toLowerCase(java.util.Locale.ROOT);
+    int port = portPool.findPortByHostLabel(hostLabel);
     if (port < 0) {
       res.sendError(404, "Preview not found or expired");
       return;
@@ -142,21 +165,6 @@ public class PreviewProxyFilter implements Filter {
     proxy(req, res, upstream);
   }
 
-  /**
-   * Find the port allocated for a runId whose first 8 chars match shortId. The PortPool stores full
-   * runId → port, so we scan for a prefix match.
-   */
-  private int findPortByShortId(String shortId) {
-    // PreviewPortPool doesn't expose iteration, so we use PreviewService's active sessions.
-    // However, PortPool.getPort(runId) requires the full runId.
-    // Solution: iterate the port pool's allocations via the public API.
-    // Since PortPool only has getPort(runId), we need to try matching.
-    // For now, use the fact that PreviewService stores active sessions.
-    //
-    // Better approach: ask PortPool to find by prefix.
-    return portPool.findPortByPrefix(shortId);
-  }
-
   private void proxy(HttpServletRequest req, HttpServletResponse res, String upstream)
       throws IOException {
 
@@ -165,20 +173,23 @@ public class PreviewProxyFilter implements Filter {
       HttpRequest.Builder builder =
           HttpRequest.newBuilder().uri(URI.create(upstream)).timeout(Duration.ofSeconds(30));
 
-      // Copy request headers (skip hop-by-hop)
+      // RR-159: forward ONLY the allowlisted headers. Browser credentials (Cookie,
+      // Authorization), edge identity assertions and tracing metadata never reach the previewed
+      // code.
       var headerNames = req.getHeaderNames();
       while (headerNames.hasMoreElements()) {
         String name = headerNames.nextElement();
-        if (!HOP_BY_HOP.contains(name.toLowerCase())) {
+        if (FORWARDED_REQUEST_HEADERS.contains(name.toLowerCase(java.util.Locale.ROOT))) {
           builder.header(name, req.getHeader(name));
         }
       }
 
-      // Set Host to localhost so the container sees the right host
+      // Set Host to localhost so the container sees the right host.
       builder.header("Host", "localhost");
 
-      // Forward X-Forwarded headers
-      builder.header("X-Forwarded-Host", req.getHeader("Host"));
+      // Deliberately NOT forwarding the real X-Forwarded-Host: the preview host label is the
+      // routing capability and handing it to the previewed code lets it print or exfiltrate its
+      // own reachable URL. Scheme is safe and apps commonly need it to build absolute links.
       builder.header("X-Forwarded-Proto", req.getScheme());
 
       // Set the method + body
