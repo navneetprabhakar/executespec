@@ -17,6 +17,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -128,19 +129,18 @@ public class LlmExecutionPolicyFactory {
   }
 
   /**
-   * True for operator-controlled benchmark/SWE-bench workers, whose entire purpose is a fixed-route
-   * measurement. Cross-provider failover is suppressed for these runs because a silently
-   * re-provisioned attempt would still be reported under the requested route by the campaign
-   * artifacts, invalidating any cross-provider comparison built on them.
+   * True for operator-controlled benchmark/SWE-bench/Terminal-Bench workers, whose entire purpose
+   * is a fixed-route measurement. Cross-provider failover is suppressed for these runs because a
+   * silently re-provisioned attempt would still be reported under the requested route by the
+   * campaign artifacts, invalidating any cross-provider comparison built on them.
    *
-   * <p>Uses the same {@code pipeline_run.sourceType} discriminator as {@code
-   * CodeGenEngineImpl.requireTestVerification}, so the two controlled-worker behaviours cannot
-   * drift apart.
+   * <p>Delegates to the shared {@link BenchmarkSourceType#isControlledWorkerSource} classifier —
+   * the exact same set {@code CodeGenEngineImpl.requireTestVerification} consults — so the two
+   * controlled-worker behaviours cannot drift apart (RR-1590: {@code TERMINAL_BENCH} previously
+   * matched the policy-factory's local literal test in neither site).
    */
   static boolean isControlledWorkerRun(String sourceType) {
-    if (sourceType == null || sourceType.isBlank()) return false;
-    String normalized = sourceType.trim().toLowerCase(Locale.ROOT);
-    return normalized.startsWith("benchmark") || normalized.startsWith("swebench");
+    return BenchmarkSourceType.isControlledWorkerSource(sourceType);
   }
 
   /** Returns empty for a non-run identifier; malformed customer policy still fails closed. */

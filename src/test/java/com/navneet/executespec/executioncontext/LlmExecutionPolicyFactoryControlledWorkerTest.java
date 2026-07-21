@@ -135,6 +135,23 @@ class LlmExecutionPolicyFactoryControlledWorkerTest {
   }
 
   @Test
+  void terminalBenchSourcedRunSuppressesCrossProviderFailover() {
+    // RR-1590: TERMINAL_BENCH is the actual sourceType TerminalBenchRunService writes, and it
+    // matched neither of the old benchmark/swebench prefixes, so a TB run took the permissive
+    // route-v1 policy with failover ENABLED. The multi-model TB matrix was therefore comparing
+    // routes, not models. It must now be route-pure like every other benchmark source.
+    run("TERMINAL_BENCH");
+    org("HYBRID");
+    stubContextCreation();
+
+    factory().forRun("run-1");
+
+    assertThat(capturePolicy().allowProviderFailover()).isFalse();
+    assertThat(captureIdempotencyKey())
+        .isEqualTo(LlmExecutionPolicyFactory.CONTROLLED_WORKER_ROUTE_POLICY_KEY);
+  }
+
+  @Test
   void normalProductRunStillAllowsFailover() {
     run("web");
     org("HYBRID");
@@ -219,12 +236,22 @@ class LlmExecutionPolicyFactoryControlledWorkerTest {
   }
 
   @Test
-  void controlledWorkerDiscriminatorMatchesTheCodeGenEngineSourceTypePrefixes() {
+  void controlledWorkerDiscriminatorMatchesEverySourceTypeWrittenByABenchmarkAdapter() {
+    // Every value actually written to pipeline_run.sourceType by a benchmark adapter:
+    // "benchmark" (BenchmarkGenerationService, SWE-bench + ProgramBench) and "TERMINAL_BENCH"
+    // (TerminalBenchRunService), plus the historical/defensive swebench + programbench spellings.
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("benchmark")).isTrue();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("benchmark-pro")).isTrue();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("swebench")).isTrue();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("SWEBENCH-LITE")).isTrue();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("TERMINAL_BENCH")).isTrue();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("terminal_bench")).isTrue();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("programbench")).isTrue();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("program_bench")).isTrue();
+    // Customer / product source types keep failover — they must NOT be pinned.
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("web")).isFalse();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("MANUAL")).isFalse();
+    assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("AGENT_TURN")).isFalse();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("finding:CI_FAILURE")).isFalse();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun(null)).isFalse();
     assertThat(LlmExecutionPolicyFactory.isControlledWorkerRun("  ")).isFalse();
