@@ -95,6 +95,29 @@ unrelated runs on it. Now:
   BEFORE each file is opened, plus a 120s walk deadline. Hitting either stops the
   walk and logs a warning; `totalFiles` / `totalLoc` are then a lower bound.
 
+### Scan-coverage honesty (RR-1685)
+
+A lower bound that is stated as a fact is a false claim, and the review prompt
+stated `File count: N / Total LOC: M` with no qualifier. `SampleResult.coverage`
+now records WHY the bounded walk ended — `COMPLETE`, `TRUNCATED_FILE_LIMIT`,
+`TRUNCATED_READ_BUDGET`, `TRUNCATED_TIME_BUDGET`, `TRUNCATED_WALK_FAILED` — and
+`CodeReviewAgent.AgentRequest.scanCoverage` carries it into `composeUserPrompt`,
+which renders `Scanned file count: N (LOWER BOUND — not the whole repository)`
+plus an explicit `Coverage:` line whenever the walk did not finish. A **null**
+coverage is rendered as `UNKNOWN` and still marked as a lower bound, because "we
+did not record whether the scan finished" is not "the scan finished". A
+non-directory workspace is `TRUNCATED_WALK_FAILED`, so an unreadable clone is
+never reported as a fully measured empty repository. Same family as RR-1657 /
+RR-1658. Pinned by `CodeReviewScanCoverageTest`.
+
+Also note the counts measure different populations: `totalFiles` counts every
+non-skipped file under the per-file size cap, while `totalLoc` counts lines only
+of the language-recognised files actually read — hence the prompt now says
+"Scanned file count" and "Lines of code read" rather than implying a repository
+total. **Not covered:** `code_review_scan.total_files_scanned` /
+`total_loc` and the `CodeReviewController` DTO still persist and expose the bare
+numbers with no coverage marker; that needs a migration and is out of scope here.
+
 ### Credential boundary (RR-435)
 
 Raw config and source used to reach the review model verbatim, and the score
