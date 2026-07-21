@@ -36,6 +36,13 @@
 - `RunTokenAttributor` writes the V305 effective columns from the ledger and falls back to the
   requested route ONLY when the task has no successful attempt, in which case the attribution stays
   `UNATTRIBUTED` so an unproven fallback is never mistaken for ledger proof.
+- `PlannerPhaseSplit` / `PlannerPhaseAttribution` own how pre-executor spend is booked (RR-1561).
+  `RunOrchestrator` used to hand `attributePhase(PLANNER, …)` the WHOLE-RUN snapshot, so the smart
+  classifier — which runs on every run, before the planner — was always booked to
+  `planner_*_tokens`. The planner is now a delta from the snapshot taken when the classifier
+  returns. The pre-planner remainder is NOT discarded: `attributePhase` also moves the run total by
+  whatever it is handed, so the remainder is added back through `addTokens` and
+  `plannerIn + prePlannerIn` still equals the whole-run input count.
 - `RunCostEvidenceService.toCall` exposes `modelTier`, `attemptKind`, `physicalAttemptId`,
   `parentAttemptId` and `logicalCallId` alongside provider/model, so a consumer of
   `/api/runs/{id}/cost` can distinguish a same-provider retry from a cross-provider failover instead

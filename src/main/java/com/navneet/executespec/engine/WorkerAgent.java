@@ -21,6 +21,8 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
+import com.navneet.executespec.tool.ToolCapabilities;
+import com.navneet.executespec.tool.ToolCapability;
 import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
@@ -223,19 +225,6 @@ public class WorkerAgent {
   public static final int TEST_VERIFICATION_RECENCY_ITERS = 5;
 
   /**
-   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}). Used by
-   * the layer-3 verification gate to identify the call that satisfies it.
-   */
-  static final String RUN_TESTS_TOOL_NAME = "runTests";
-
-  /**
-   * Name of the project-build tool ({@link com.navneet.executespec.tool.BuildProjectTool}). Used by
-   * the 2026-05-08 build-verification gate (mirrors the test-verification gate from V182 layer-3)
-   * to identify the call that satisfies it.
-   */
-  static final String BUILD_PROJECT_TOOL_NAME = "buildProject";
-
-  /**
    * 2026-05-08 — within how many iterations of {@code completeTask} must a successful {@code
    * buildProject} call (exit=0) have occurred? When {@link
    * WorkerTaskRequest#requireBuildVerification()} is true, the dispatch loop refuses {@code
@@ -270,29 +259,6 @@ public class WorkerAgent {
    * run a passing command against those tests. Bounded + fail-open like the other completion gates.
    */
   public static final int TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS = 3;
-
-  /**
-   * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
-   * shell don't reset the counter — only file mutations and explicit build attempts.
-   *
-   * <p>{@code buildProject} added 2026-05-08: cmatrix gemini run 84252898 stagnated despite the
-   * agent legitimately alternating between read + write + build cycles, because the build calls
-   * didn't reset the counter. Build attempts ARE deliberate forward motion (especially in
-   * programbench mode where {@link com.navneet.executespec.tool.BuildProjectTool}'s wrapper fails
-   * any no-op compile.sh — so spam-build can't game the guard, every successful build implies real
-   * source compiled).
-   */
-  private static final java.util.Set<String> WRITE_CLASS_TOOLS =
-      java.util.Set.of(
-          "writeFile",
-          "write_file",
-          "editFile",
-          "edit_file",
-          "multiEdit",
-          "multi_edit",
-          "applyPatch",
-          "apply_patch",
-          "buildProject");
 
   /**
    * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
@@ -1339,7 +1305,7 @@ public class WorkerAgent {
         // "tool was invoked" not "tests passed." Now: require the envelope to contain the
         // pytest-pass markers `"failed":[]` AND `"errored":[]` AND `"exit_code":0` to satisfy
         // the gate. Until those are present, completeTask remains REFUSED.
-        if (RUN_TESTS_TOOL_NAME.equals(tc.name())
+        if (isRunTestsTool(tc.name())
             && envelope != null
             && envelope.startsWith("{\"ok\":true")
             && envelope.contains("\\\"failed\\\":[]")
@@ -1352,15 +1318,13 @@ public class WorkerAgent {
         // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
         // avoid false-positive on output text that happens to contain "exit=0" without the
         // newline framing (e.g. compiler messages quoting source).
-        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
+        if (isBuildTool(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
           lastBuildPassIter = iter;
         }
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
         if (isWriteTool(tc.name())) {
           lastEditIter = iter;
-        } else if ((isShellTool(tc.name())
-                || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
-                || RUN_TESTS_TOOL_NAME.equals(tc.name()))
+        } else if ((isShellTool(tc.name()) || isBuildTool(tc.name()) || isRunTestsTool(tc.name()))
             && isOkEnvelope(envelope)) {
           lastVerifyIter = iter;
         }
@@ -2453,12 +2417,20 @@ public class WorkerAgent {
    */
   private String mutationTarget(String toolName, String arguments) {
     if (toolName == null || arguments == null) return "";
-    String normalized = toolName.replace("_", "").toLowerCase(java.util.Locale.ROOT);
-    if (!java.util.Set.of("writefile", "editfile", "multiedit", "applypatch").contains(normalized))
+    // RR-1599 — was a literal lowercase-name set ({writefile, editfile, multiedit, applypatch}),
+    // which silently omitted `ast_edit` / `astEdit`, `move` / `rename` and `delete` / `deletePath`.
+    // Those calls really do change product files, so producing no [target=] marker made a genuine
+    // delivery unattributable in edit-churn evidence and in the goal-DONE intersection with the
+    // admitted product diff.
+    // Deliberately NOT the fail-closed WorkerToolPolicy.isWriteTool: an unclassified tool must
+    // not have its arguments claimed as a delivered product path.
+    if (!ToolCapabilities.of(toolName).map(ToolCapability::mutatesFiles).orElse(false)) {
       return "";
+    }
     try {
       JsonNode node = objectMapper.readTree(arguments);
-      for (String field : List.of("path", "file", "filePath")) {
+      // `dst` before `src` so a move is attributed to the path that now exists.
+      for (String field : List.of("path", "file", "filePath", "dst", "src")) {
         if (node.hasNonNull(field)) return safeMutationTarget(node.get(field).asText());
       }
       String patch = node.path("patch").asText("");
@@ -3295,7 +3267,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   static boolean terminalVerifierCommand(String toolName, String command) {
-    if (RUN_TESTS_TOOL_NAME.equals(toolName) || BUILD_PROJECT_TOOL_NAME.equals(toolName)) {
+    if (isRunTestsTool(toolName) || isBuildTool(toolName)) {
       return true;
     }
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
@@ -3322,7 +3294,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   static boolean terminalVisibleTestCommand(String toolName, String command) {
-    if (RUN_TESTS_TOOL_NAME.equals(toolName)) return true;
+    if (isRunTestsTool(toolName)) return true;
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
     String c = command.toLowerCase(java.util.Locale.ROOT);
     return executesVisibleTestScript(c)
@@ -3361,17 +3333,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     return command.matches(".*(?:^|[;&|]\\s*)(?:sudo\\s+)?/tests/test\\.sh(?:\\s|$).*");
   }
 
-  private static boolean terminalVerifierTool(String toolName) {
-    return isShellTool(toolName)
-        || RUN_TESTS_TOOL_NAME.equals(toolName)
-        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  static boolean terminalVerifierTool(String toolName) {
+    return WorkerToolPolicy.isTerminalVerifierTool(toolName);
   }
 
-  private static boolean terminalRiskyAfterVerifiedPass(String toolName) {
-    return isWriteTool(toolName)
-        || isShellTool(toolName)
-        || RUN_TESTS_TOOL_NAME.equals(toolName)
-        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  static boolean terminalRiskyAfterVerifiedPass(String toolName) {
+    return WorkerToolPolicy.isRiskyAfterVerifiedPass(toolName);
   }
 
   private static String terminalVerifiedPassMessage() {
@@ -3432,22 +3399,26 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     return s.replaceAll("[^A-Za-z0-9._-]", "-");
   }
 
-  private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
-    return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && isShellTool(toolName));
+  // RR-1599 — classification lives in WorkerToolPolicy so every registered alias of a capability
+  // is policed by the same predicate. These wrappers keep the call sites (and their tests) short.
+
+  static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
+    return WorkerToolPolicy.isProgressTool(toolName, terminalTaskMode);
   }
 
-  private static boolean isWriteTool(String toolName) {
-    return "writeFile".equals(toolName)
-        || "write_file".equals(toolName)
-        || "editFile".equals(toolName)
-        || "edit_file".equals(toolName)
-        || "multiEdit".equals(toolName)
-        || "multi_edit".equals(toolName)
-        || "applyPatch".equals(toolName)
-        || "apply_patch".equals(toolName);
+  static boolean isWriteTool(String toolName) {
+    return WorkerToolPolicy.isWriteTool(toolName);
   }
 
-  private static boolean isShellTool(String toolName) {
-    return "shell".equals(toolName) || "bash".equals(toolName);
+  static boolean isShellTool(String toolName) {
+    return WorkerToolPolicy.isShellTool(toolName);
+  }
+
+  static boolean isBuildTool(String toolName) {
+    return WorkerToolPolicy.isBuildTool(toolName);
+  }
+
+  static boolean isRunTestsTool(String toolName) {
+    return WorkerToolPolicy.isRunTestsTool(toolName);
   }
 }

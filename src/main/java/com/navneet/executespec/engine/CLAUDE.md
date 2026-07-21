@@ -25,6 +25,23 @@ rollout, each phase shippable + green:
 | **5+6** | **`ToolOutputCompactor` + prompt-cache discipline** — bulk worker tool output (> 3 KB; `readFile`/`searchFiles`/`listFiles`/`shell`/`buildProject`/`runTests`) is summarised through the LIGHTWEIGHT tier (Haiku / Flash) before being appended to the WORKHORSE worker's history. Only the compacted summary lands in the worker's context. Skip list: writeFile/editFile/gitCommit/completeTask/gitDiff/gitStatus (already short / load-bearing); most-recent-tool-call (preserve verbatim); raw < 3 KB. Fail-safe: any LLM exception → raw output. Default OFF behind `worker.tool-compactor.enabled` (V216, default false). Mirrors Anthropic's Claude Code CLI internal pattern — bulk through Haiku, decision-context through Sonnet. | **landed default-OFF** (RL-2026-05-052, this branch) |
 | 6 | Land the pending harness internals IN the engine: #5 cache discipline · #7 compaction · #8 fork-sub-agents · #9 permission ruleset + hooks. (Static/dynamic system-prompt boundary for true prefix-cache stability is still future scope; the compactor above is the first half of #7.) | partial |
 
+## Capability-keyed tool policy (RR-1599, 2026-07-20)
+
+`WorkerToolPolicy` is the single classifier behind every `WorkerAgent` safety and progress gate.
+The registry mints several NAMES over one implementation (`executeCommand`/`runCommand`/
+`terminalCommand` = shell; `build`/`runBuild` = build; `rename` = `move`; `deletePath` = `delete`;
+`applyPatch`/`ast_edit` = edit), so the previous literal-name predicates silently failed OPEN for
+every alias they had not enumerated: the verified-pass guard did not refuse an alias, and the
+build-verification gate could not be satisfied through `build`/`runBuild`. Policy now keys on
+`tool.ToolCapability`.
+
+Fail-closed direction differs per predicate and is deliberate: safety predicates
+(`isRiskyAfterVerifiedPass`, `isWriteTool`, `isShellTool`) treat an UNCLASSIFIED name as dangerous,
+while `isProgressTool` treats it as NOT progress so an unknown tool cannot hold the stagnation guard
+open. `WorkerAgent.mutationTarget` also uses explicit classification only — an unclassified tool's
+arguments must never be claimed as a delivered product path — and now emits `[target=…]` for
+`move` / `delete` / `ast_edit` too, which previously produced no delivery evidence at all.
+
 ## Files
 
 | File | Purpose |
