@@ -23,25 +23,40 @@ import lombok.extern.slf4j.Slf4j;
  * static import, shrinking the god-class with zero behaviour change.
  */
 @Slf4j
-final class RunPipelineSupport {
+public final class RunPipelineSupport {
 
   private RunPipelineSupport() {}
 
-  /** Inverse of {@code serializeRepoIds} used at submit-time. */
+  /**
+   * Inverse of {@code serializeRepoIds} used at submit-time.
+   *
+   * <p>Fails CLOSED. Downstream code reads an empty list as "every linked repository is in scope",
+   * so silently returning an empty list for malformed JSON or a malformed element would
+   * <em>widen</em> a run's blast radius from the selected subset to the whole project. A stored
+   * value we cannot parse means the scope is unknown, which is an error, not "all".
+   */
   public static List<UUID> deserializeRepoIds(String json) {
     if (json == null || json.isBlank()) return List.of();
+    com.fasterxml.jackson.databind.JsonNode arr;
     try {
-      var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
-      java.util.List<UUID> out = new java.util.ArrayList<>();
-      if (arr.isArray()) {
-        for (var n : arr) {
-          out.add(UUID.fromString(n.asText()));
-        }
-      }
-      return out;
+      arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
     } catch (Exception e) {
-      return List.of();
+      throw new IllegalStateException("Unparseable persisted repository selection", e);
     }
+    if (arr == null || arr.isNull()) return List.of();
+    if (!arr.isArray()) {
+      throw new IllegalStateException("Persisted repository selection is not a JSON array");
+    }
+    java.util.List<UUID> out = new java.util.ArrayList<>();
+    for (var n : arr) {
+      String raw = n.asText();
+      try {
+        out.add(UUID.fromString(raw));
+      } catch (IllegalArgumentException e) {
+        throw new IllegalStateException("Persisted repository selection contains a non-UUID entry");
+      }
+    }
+    return out;
   }
 
   /** Serialise repo IDs to a compact JSON array string, or null when empty. */
