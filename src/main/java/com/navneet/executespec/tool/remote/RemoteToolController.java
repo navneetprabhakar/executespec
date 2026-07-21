@@ -11,6 +11,7 @@ import com.navneet.executespec.agentsession.LocalHandsStateService.PendingCall;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.tool.ToolResult;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -34,6 +35,16 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/runs")
 @RequiredArgsConstructor
 public class RemoteToolController {
+
+  /**
+   * RR-576 — hard ceiling on each normalized envelope field. A local client is untrusted transport:
+   * an oversized {@code content}/{@code message} would be injected verbatim into the worker's model
+   * context and durable recovery state. Server-executed tool outputs are already bounded (readFile
+   * caps at ~60KB), so this 256K cap never truncates a legitimate result but stops a multi-megabyte
+   * frame from exhausting heap / context. This bounds the copy step; an HTTP body / JSON-depth
+   * limit before deserialization remains a separate transport-config control.
+   */
+  static final int MAX_FIELD_CHARS = 256 * 1024;
 
   private final RemoteToolDispatcher dispatcher;
   private final RunAccessGuard guard;
@@ -137,23 +148,44 @@ public class RemoteToolController {
     out.put("ok", ok);
     if (ok) {
       JsonNode content = result.get("content");
-      out.put("content", content == null || content.isNull() ? "" : contentText(content));
+      out.put("content", content == null || content.isNull() ? "" : bounded(contentText(content)));
       return out;
     }
     JsonNode kind = result.get("kind");
     JsonNode message = result.get("message");
-    out.put(
-        "kind",
-        kind == null || kind.isNull() || kind.asText().isBlank() ? "INTERNAL" : kind.asText());
+    // RR-576 — validate the error kind against the protocol enum; an arbitrary client string is
+    // collapsed to INTERNAL rather than propagated verbatim into the worker envelope.
+    out.put("kind", validErrorKind(kind));
     out.put(
         "message",
         message == null || message.isNull() || message.asText().isBlank()
             ? "client tool failed without a message"
-            : message.asText());
+            : bounded(message.asText()));
     return out;
   }
 
   private String contentText(JsonNode content) {
     return content.isTextual() ? content.asText() : content.toString();
+  }
+
+  /** RR-576 — hard length bound on a single copied envelope field. */
+  private static String bounded(String value) {
+    if (value == null) return "";
+    return value.length() > MAX_FIELD_CHARS
+        ? value.substring(0, MAX_FIELD_CHARS) + "…[truncated]"
+        : value;
+  }
+
+  /**
+   * RR-576 — only a declared {@link ToolResult.ErrorKind} is accepted; anything else is INTERNAL.
+   */
+  private static String validErrorKind(JsonNode kind) {
+    if (kind == null || kind.isNull()) return ToolResult.ErrorKind.INTERNAL.name();
+    String text = kind.asText();
+    if (text == null || text.isBlank()) return ToolResult.ErrorKind.INTERNAL.name();
+    for (ToolResult.ErrorKind k : ToolResult.ErrorKind.values()) {
+      if (k.name().equals(text)) return k.name();
+    }
+    return ToolResult.ErrorKind.INTERNAL.name();
   }
 }

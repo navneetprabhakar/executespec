@@ -209,6 +209,141 @@ class StandardsRunnerTest {
     assertThat(block).contains("[LOCKED]");
   }
 
+  // RR-1611 — degraded AST / file-pattern checks must be reported as non-EVALUATED, not clean.
+
+  @Test
+  void filePatternStandard_recordsEvaluatedStatus() {
+    Standard s =
+        new Standard(
+            "no-skip-migrations",
+            null,
+            Standard.Severity.BLOCKING,
+            "no SKIP migrations",
+            new Standard.FilePatternEnforcement(List.of("**/V*__SKIP*.sql"), List.of()),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of("db/x.sql"), List.of());
+    assertThat(r.evaluationStatuses().get("no-skip-migrations"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED);
+  }
+
+  @Test
+  void filePatternStandard_withNoUsablePattern_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "empty-file-pattern",
+            null,
+            Standard.Severity.BLOCKING,
+            "misconfigured",
+            new Standard.FilePatternEnforcement(List.of(), List.of()),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of("a.txt"), List.of());
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("empty-file-pattern"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_invalidRegex_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "bad-naming",
+            null,
+            Standard.Severity.BLOCKING,
+            "naming",
+            new Standard.AstCheckEnforcement(
+                "naming-pattern", java.util.Map.of("regex", "["), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("bad-naming"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_missingRequiredParameter_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "no-import-param",
+            null,
+            Standard.Severity.BLOCKING,
+            "forbidden import",
+            new Standard.AstCheckEnforcement("forbidden-import", java.util.Map.of(), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.evaluationStatuses().get("no-import-param"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_allFilesUnreadable_isUnavailableNotClean() {
+    Standard s =
+        new Standard(
+            "forbidden-bad",
+            null,
+            Standard.Severity.BLOCKING,
+            "forbidden import",
+            new Standard.AstCheckEnforcement(
+                "forbidden-import", java.util.Map.of("import", "com.bad"), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    // The path does not exist on disk, so the default reader returns null for every file.
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1",
+            List.of(effective(s)),
+            Path.of("."),
+            List.of(),
+            List.of(Path.of("does-not-exist-xyz.java")));
+    assertThat(r.evaluationStatuses().get("forbidden-bad"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.UNAVAILABLE);
+  }
+
+  @Test
+  void astStandard_unsupportedRuleKind_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "future-kind",
+            null,
+            Standard.Severity.BLOCKING,
+            "future",
+            new Standard.AstCheckEnforcement("future-rule", java.util.Map.of(), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.evaluationStatuses().get("future-kind"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
   private EffectiveStandardsResolver.Effective effective(Standard s) {
     return new EffectiveStandardsResolver.Effective(
         s, EffectiveStandardsResolver.Source.ORG, false, s.severity(), false);

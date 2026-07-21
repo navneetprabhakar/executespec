@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.standards.enforcement.EvaluationStatus;
 import com.navneet.executespec.standards.enforcement.ast.AstCheckEnforcer;
 import com.navneet.executespec.standards.enforcement.filepattern.FilePatternEnforcer;
 import com.navneet.executespec.standards.enforcement.lint.LintAdapter;
@@ -65,6 +66,9 @@ public class StandardsRunner {
     if (effective == null) return new RunReport(List.of(), Map.of());
 
     Map<String, LintResult> lintResults = new HashMap<>();
+    // RR-1611 — per-standard availability for the AST + file-pattern deterministic types, so a
+    // degraded check is visible to the gate instead of being an implicit clean pass.
+    Map<String, EvaluationStatus> evaluationStatuses = new HashMap<>();
     Map<String, LintAdapter> byTool = new HashMap<>();
     for (LintAdapter la : lintAdapters) byTool.put(la.tool(), la);
 
@@ -98,7 +102,10 @@ public class StandardsRunner {
           }
         }
         case Standard.FilePatternEnforcement fpe -> {
-          for (FilePatternEnforcer.Violation v : filePatternEnforcer.enforce(fpe, repoFilePaths)) {
+          FilePatternEnforcer.FilePatternOutcome outcome =
+              filePatternEnforcer.evaluate(fpe, repoFilePaths);
+          evaluationStatuses.put(s.id(), outcome.status());
+          for (FilePatternEnforcer.Violation v : outcome.violations()) {
             all.add(
                 new AggregatedViolation(
                     s.id(),
@@ -109,7 +116,9 @@ public class StandardsRunner {
           }
         }
         case Standard.AstCheckEnforcement ace -> {
-          for (AstCheckEnforcer.AstViolation v : astCheckEnforcer.enforce(ace, sourceFiles)) {
+          AstCheckEnforcer.AstOutcome outcome = astCheckEnforcer.evaluate(ace, sourceFiles);
+          evaluationStatuses.put(s.id(), outcome.status());
+          for (AstCheckEnforcer.AstViolation v : outcome.violations()) {
             all.add(
                 new AggregatedViolation(
                     s.id(),
@@ -124,7 +133,7 @@ public class StandardsRunner {
         }
       }
     }
-    return new RunReport(all, lintResults);
+    return new RunReport(all, lintResults, evaluationStatuses);
   }
 
   /**
@@ -145,9 +154,23 @@ public class StandardsRunner {
    * @param violations flat list across all standards
    * @param lintResults per-standard-id raw LintResult (for telemetry + surfacing UNAVAILABLE
    *     adapters in the report)
+   * @param evaluationStatuses RR-1611 — per-standard-id availability for the AST + file-pattern
+   *     deterministic types (lint carries its own status via {@code lintResults}). A non-{@code
+   *     EVALUATED} status is a degraded check the gate must surface as unavailable, not a silent
+   *     pass. Never null (empty when nothing deterministic-non-lint ran).
    */
   public record RunReport(
-      List<AggregatedViolation> violations, Map<String, LintResult> lintResults) {
+      List<AggregatedViolation> violations,
+      Map<String, LintResult> lintResults,
+      Map<String, EvaluationStatus> evaluationStatuses) {
+
+    /**
+     * Backward-compatible constructor for callers that do not populate the availability channel
+     * (empty statuses ⇒ no AST/file-pattern unavailability issues emitted).
+     */
+    public RunReport(List<AggregatedViolation> violations, Map<String, LintResult> lintResults) {
+      this(violations, lintResults, Map.of());
+    }
 
     /** Convenience: true when at least one BLOCKING violation present. */
     public boolean hasBlocking() {

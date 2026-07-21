@@ -92,6 +92,60 @@ class RemoteToolControllerTest {
   }
 
   @Test
+  void submitToolResult_boundsOversizedContent() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    String huge = "x".repeat(RemoteToolController.MAX_FIELD_CHARS + 5_000);
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1", om.createObjectNode().put("ok", true).put("content", huge));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    String content = om.readTree(envelope.getValue()).get("content").asText();
+    assertThat(content.length())
+        .isLessThanOrEqualTo(RemoteToolController.MAX_FIELD_CHARS + "…[truncated]".length());
+    assertThat(content).endsWith("…[truncated]");
+  }
+
+  @Test
+  void submitToolResult_collapsesUnknownErrorKindToInternal() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1",
+            om.createObjectNode()
+                .put("ok", false)
+                .put("kind", "TOTALLY_MADE_UP")
+                .put("message", "boom"));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    assertThat(om.readTree(envelope.getValue()).get("kind").asText()).isEqualTo("INTERNAL");
+  }
+
+  @Test
+  void submitToolResult_preservesDeclaredErrorKind() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1",
+            om.createObjectNode()
+                .put("ok", false)
+                .put("kind", "NOT_FOUND")
+                .put("message", "missing"));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    assertThat(om.readTree(envelope.getValue()).get("kind").asText()).isEqualTo("NOT_FOUND");
+  }
+
+  @Test
   void browserJwtCannotSubmitLocalToolResults() {
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE))
