@@ -463,4 +463,60 @@ class CommandToolsTest {
         readState,
         null);
   }
+
+  @Test
+  void reviewerBrownfieldScopeBlocksMoveAndDeleteOutsideAdmittedRoots() throws Exception {
+    // RR-1542 — delete/move (and their rename/deletePath aliases) bypassed ReviewerMutationScope
+    // entirely, so a brownfield reviewer pass confined to `repos/api` could still relocate or
+    // destroy files in a sibling repository it was never admitted to.
+    Files.createDirectories(root.resolve("repos/api"));
+    Files.createDirectories(root.resolve("repos/web"));
+    Files.writeString(root.resolve("repos/api/a.txt"), "api\n");
+    Files.writeString(root.resolve("repos/web/b.txt"), "web\n");
+
+    Tool move = new MovePathTool();
+    Tool delete = new DeletePathTool();
+    Tool renameAlias = new CommandAliasTool("rename", "alias", new MovePathTool());
+    Tool deletePathAlias = new CommandAliasTool("deletePath", "alias", new DeletePathTool());
+
+    var policy =
+        new ReviewerMutationScope.Policy(
+            true, java.util.List.of("repos/api"), java.util.List.of(), false);
+
+    ReviewerMutationScope.withPolicy(
+        policy,
+        () -> {
+          assertThat(delete.execute(json("{\"path\":\"repos/web/b.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          assertThat(deletePathAlias.execute(json("{\"path\":\"repos/web/b.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          assertThat(
+                  move.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/web/a.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          // RR-1543 — a dot-segment escape inside an admitted root must not be admitted either.
+          assertThat(
+                  renameAlias.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/api/../web/a.txt\"}"),
+                      ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          return null;
+        });
+
+    // Nothing was destroyed or relocated.
+    assertThat(Files.exists(root.resolve("repos/web/b.txt"))).isTrue();
+    assertThat(Files.exists(root.resolve("repos/api/a.txt"))).isTrue();
+
+    // Inside the admitted root the same operations still work.
+    ReviewerMutationScope.withPolicy(
+        policy,
+        () -> {
+          assertThat(
+                  move.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/api/c.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Ok.class);
+          return null;
+        });
+    assertThat(Files.exists(root.resolve("repos/api/c.txt"))).isTrue();
+  }
 }
