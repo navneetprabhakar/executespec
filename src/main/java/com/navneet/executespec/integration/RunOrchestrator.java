@@ -2417,6 +2417,22 @@ public class RunOrchestrator implements RunControlPort {
                   && r.getRepoUrl() != null
                   && !r.getRepoUrl().isBlank();
         }
+        // RR-826 — no publication without verification. The COMPLETE/PARTIAL status above is not
+        // enough: a run can terminalize PARTIAL because the deterministic verification never
+        // happened or failed hard (e.g. VALIDATION_REPORT_UNAVAILABLE, FINAL_BUILD_FAILED,
+        // REVIEWER_FAILED, *_ENFORCEMENT_UNAVAILABLE). Auto-publishing those means opening a PR
+        // while saying "we could not verify this run". AutoPushEligibilityPolicy is a DENYLIST of
+        // exactly those unverifiable terminal reasons — measured-but-partial runs (warnings, tests
+        // that ran and partially failed, below-bar-but-measured quality) keep auto-pushing. Only
+        // the automatic push is gated; the workspace, result, and manual push are untouched.
+        if (shouldPush && !AutoPushEligibilityPolicy.allowsAutoPush(finalReason)) {
+          shouldPush = false;
+          log.info(
+              "V2 run={} auto-push skipped — terminal reason {} means the run was not verified"
+                  + " (RR-826); manual push remains available",
+              runId,
+              finalReason);
+        }
         // RR-234 — staged-PR-before-push consent, now DURABLE and FAIL-CLOSED.
         //
         // This gate used to read a Redis-only key whose own contract said a JVM crash loses the

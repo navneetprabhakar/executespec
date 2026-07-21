@@ -8,6 +8,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.testgen.BoundedProcess;
+
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
@@ -444,23 +446,34 @@ public class VendoredPathGuard {
     ProcessBuilder pb =
         new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
     pb.environment().keySet().retainAll(List.of("PATH", "HOME"));
-    Process p = pb.start();
-    List<String> lines = new ArrayList<>();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = br.readLine()) != null) lines.add(line);
-    }
-    boolean done = p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git command timed out: " + cmd);
-    }
-    if (p.exitValue() != 0) {
-      throw new IOException("git " + args + " exit=" + p.exitValue() + " — " + lines);
+    BoundedProcess.Outcome outcome = runBoundedGit(pb, timeoutSeconds, cmd);
+    List<String> lines = outcome.output().lines().toList();
+    if (outcome.exitCode() != 0) {
+      throw new IOException("git " + args + " exit=" + outcome.exitCode() + " — " + lines);
     }
     return lines;
+  }
+
+  /**
+   * RR-651: run a git child through {@link BoundedProcess} so the timed wait is reachable while the
+   * child is still alive — reading its output to EOF on this thread first (the old shape) let a
+   * hung git that kept its descriptor open block the pipeline thread past every deadline. A timeout
+   * is surfaced as an {@link IOException} rather than a silent hang. Package-private for the
+   * hung-child regression test.
+   */
+  static BoundedProcess.Outcome runBoundedGit(ProcessBuilder pb, int timeoutSeconds, Object label)
+      throws IOException {
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, java.time.Duration.ofSeconds(timeoutSeconds));
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException("git " + label + " failed: " + e.getMessage(), e);
+    }
+    if (!outcome.finished()) {
+      throw new IOException("git command timed out: " + label);
+    }
+    return outcome;
   }
 }

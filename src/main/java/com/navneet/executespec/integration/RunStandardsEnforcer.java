@@ -190,6 +190,34 @@ class RunStandardsEnforcer {
                 .build());
       }
     }
+    // RR-1611 — the AST + file-pattern deterministic types now carry an availability channel too; a
+    // degraded check (invalid rule, unavailable inventory) must produce the SAME
+    // SYNTH-STANDARD-UNAVAILABLE-* evidence the lint channel does, so the gate cannot read a
+    // non-evaluated check as a clean pass.
+    if (report.evaluationStatuses() != null) {
+      for (var entry : report.evaluationStatuses().entrySet()) {
+        var status = entry.getValue();
+        if (status != null
+            && status != com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED) {
+          n++;
+          out.add(
+              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+                  .id("SYNTH-STANDARD-UNAVAILABLE-" + n)
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                  .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
+                  .description(
+                      "Engineering standard '"
+                          + entry.getKey()
+                          + "' could not be verified ("
+                          + status
+                          + ").")
+                  .fixInstruction("Fix the standard's rule configuration or inputs and rerun.")
+                  .autoFixed(false)
+                  .fixSucceeded(false)
+                  .build());
+        }
+      }
+    }
     return out;
   }
 

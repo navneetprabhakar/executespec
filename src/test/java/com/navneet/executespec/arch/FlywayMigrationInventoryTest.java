@@ -29,9 +29,13 @@ class FlywayMigrationInventoryTest {
     // authority) for 317, and the orchestrator-remainder lane added V329 (plan-approval contract
     // gate report, RR-819) for 318. The spend-admission lane then added V331 (managed-credit run
     // admission reservation, RR-1664) for 319. The GDPR-erasure lane then added V334
-    // (pending-erasure obligation, RR-090) for 320.
-    assertThat(migrations).hasSize(320);
-    assertThat(migrations.getLast().version()).isEqualTo("334");
+    // (pending-erasure obligation, RR-090) for 320. The notification/error-honesty P1 batch then
+    // renumbered its reserved V332 to V335 (billing-reminder delivery dedupe, RR-518) because V334
+    // was
+    // already the applied head — an out-of-order V332 below V334 fails Flyway validation on any DB
+    // that took V334 first. Count stays 321.
+    assertThat(migrations).hasSize(321);
+    assertThat(migrations.getLast().version()).isEqualTo("335");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -45,8 +49,10 @@ class FlywayMigrationInventoryTest {
     // several
     // found
     // the fix needed no schema change at all, which is a better outcome than a migration written
-    // to justify a reservation. The GDPR-erasure lane was reserved V334 and lands there; V332-V333
-    // were left unused for the same reason.
+    // to justify a reservation. The GDPR-erasure lane was reserved V334 and lands there; the
+    // notification/error-honesty P1 batch was reserved V332 and lands there (RR-518
+    // billing-reminder
+    // dedupe). V333 was left unused for the same reason.
     //
     // The numbers are NOT renumbered to close the gaps: these files may already be applied in a
     // local or dev database, and renaming an applied migration orphans it in

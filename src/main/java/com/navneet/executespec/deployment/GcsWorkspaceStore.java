@@ -186,10 +186,16 @@ public class GcsWorkspaceStore {
     }
 
     log.info("[GcsWorkspaceStore] Downloading gs://{}/{} → {}", bucket(), effectiveKey, tempFile);
-    byte[] bytes = storage.readAllBytes(BlobId.of(bucket(), effectiveKey));
-    Files.write(tempFile, bytes);
+    // RR-161: stream the object straight to the temp file. `storage.readAllBytes` materialised the
+    // whole archive in the application heap first, so a large (or crafted) archived workspace could
+    // exhaust the heap during an ordinary restore/chat/Apply/preview request.
+    Blob blob = storage.get(BlobId.of(bucket(), effectiveKey));
+    if (blob == null) {
+      throw new IOException("GCS object not found: " + effectiveKey);
+    }
+    blob.downloadTo(tempFile);
 
-    log.info("[GcsWorkspaceStore] Download complete: {} bytes", bytes.length);
+    log.info("[GcsWorkspaceStore] Download complete: {} bytes", Files.size(tempFile));
     return tempFile;
   }
 

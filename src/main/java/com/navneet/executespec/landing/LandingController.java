@@ -95,7 +95,7 @@ public class LandingController {
               EXEC_WINDOW_DAYS,
               0L,
               null,
-              0.0,
+              null,
               0L,
               0L,
               Collections.emptyList(),
@@ -105,7 +105,6 @@ public class LandingController {
 
     long totalRuns = toLong(totals[0]);
     Integer successPct = toInt(totals[1]);
-    Double totalSpend = toDouble(totals[2]);
     long activeProjects = toLong(totals[3]);
     long needsAttention = toLong(totals[4]);
 
@@ -115,7 +114,8 @@ public class LandingController {
     for (int i = 0; i < spendRows.size(); i++) {
       Object[] row = spendRows.get(i);
       String letter = "Project " + (char) ('A' + i);
-      spendByProject.add(new ExecSnapshot.ProjectSpend(letter, toLong(row[1]), toDouble(row[2])));
+      // RR-563: raw provider-dollar spend is neutralized on this UNAUTHENTICATED public surface.
+      spendByProject.add(new ExecSnapshot.ProjectSpend(letter, toLong(row[1]), redactedSpendUsd()));
     }
 
     List<Object[]> winRows = reportRepo.topWinsSince(since);
@@ -124,7 +124,7 @@ public class LandingController {
             .map(
                 row ->
                     new ExecSnapshot.TopWin(
-                        redactedSpecLabel(), toInt(row[1]), toDouble(row[2]), formatWhen(row[3])))
+                        redactedSpecLabel(), toInt(row[1]), redactedSpendUsd(), formatWhen(row[3])))
             .toList();
 
     return ResponseEntity.ok(
@@ -132,11 +132,27 @@ public class LandingController {
             EXEC_WINDOW_DAYS,
             totalRuns,
             successPct,
-            totalSpend,
+            // RR-563: totalSpendUsd is raw provider COGS. It was published on an unauthenticated
+            // marketing endpoint (no principal to role-gate against), which leaked internal
+            // aggregate
+            // spend plus per-anonymized-project and per-win dollar figures. The DTO shape is kept
+            // so
+            // the marketing page keeps rendering; the dollar figures are simply withheld (null).
+            redactedSpendUsd(),
             activeProjects,
             needsAttention,
             spendByProject,
             topWins));
+  }
+
+  /**
+   * RR-563 — public marketing surfaces publish NO raw provider-dollar cost. Same rationale as
+   * {@link #redactedSpecLabel()}: the endpoint is unauthenticated, so there is no viewer role to
+   * gate on and the only correct answer is to withhold the figure. Kept as {@code null} rather than
+   * {@code 0.0} so a client can distinguish "withheld" from a genuine zero.
+   */
+  private static Double redactedSpendUsd() {
+    return null;
   }
 
   /**
@@ -171,12 +187,6 @@ public class LandingController {
     if (o == null) return 0L;
     if (o instanceof Number n) return n.longValue();
     return 0L;
-  }
-
-  private static Double toDouble(Object o) {
-    if (o == null) return null;
-    if (o instanceof Number n) return n.doubleValue();
-    return null;
   }
 
   private static Long computeDurationMs(Object startedAt, Object completedAt) {

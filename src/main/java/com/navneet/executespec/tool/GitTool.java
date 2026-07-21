@@ -696,6 +696,67 @@ public class GitTool {
   }
 
   /**
+   * RR-1668 — build the {@code git push} argument tail for a feature-branch push that must not
+   * unconditionally force.
+   *
+   * <p>When {@code expectedRemoteSha} is a non-blank commit id (the SHA this run cloned the target
+   * branch from), the push uses an EXPLICIT {@code --force-with-lease=<branch>:<sha>}. The explicit
+   * expected value is mandatory: a bare {@code --force-with-lease} compares against the local
+   * remote-tracking ref, which any intervening fetch (many flows fetch) can advance so the lease
+   * matches whatever was just fetched and protects nothing. The explicit form pins the exact commit
+   * the remote branch is expected to still be at, so a human commit pushed after the clone makes
+   * the push abort ({@code stale info}) instead of being silently overwritten.
+   *
+   * <p>When {@code expectedRemoteSha} is null/blank the run did NOT clone this branch — it is a
+   * fresh {@code executespec/<runId>} branch created off a different base (or a re-run's {@code
+   * branchNamingPattern} output). There is no cloned SHA to lease against, and pinning an unrelated
+   * SHA would reject even the legitimate create. So a plain, non-forced push is used: it creates
+   * the branch when the remote does not have it and fast-forwards the run's own branch, but a
+   * divergent remote (a re-run over a branch a human advanced) is rejected as non-fast-forward
+   * rather than clobbered. Either way, no {@code --force}.
+   */
+  private static java.util.List<String> pushRefArgs(
+      String dir, String remote, String branch, String expectedRemoteSha) {
+    if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+      return java.util.List.of(
+          "-C",
+          dir,
+          "push",
+          remote,
+          branch,
+          "--force-with-lease=" + branch + ":" + expectedRemoteSha.trim());
+    }
+    return java.util.List.of("-C", dir, "push", remote, branch);
+  }
+
+  /**
+   * RR-1668 — classify a rejected push so the failure reads as a deliberate safety refusal, not a
+   * transient error, and is never retried with {@code --force}. A {@code --force-with-lease}
+   * rejection surfaces as {@code stale info}; a plain non-forced push to a divergent remote
+   * surfaces as {@code non-fast-forward} / {@code fetch first}.
+   */
+  private static String describePushFailure(
+      String branch, String expectedRemoteSha, String output) {
+    String lower = output == null ? "" : output.toLowerCase(java.util.Locale.ROOT);
+    if (lower.contains("stale info") || lower.contains("force-with-lease")) {
+      return "Push refused (branch "
+          + branch
+          + "): the remote branch advanced past the commit this run started from ("
+          + (expectedRemoteSha == null ? "unknown" : expectedRemoteSha.trim())
+          + ") — someone else pushed to it. Refusing to overwrite; not force-pushing. "
+          + output;
+    }
+    if (lower.contains("non-fast-forward") || lower.contains("fetch first")) {
+      return "Push refused (branch "
+          + branch
+          + "): the remote branch already exists with commits this run did not build on. Refusing"
+          + " to overwrite; not force-pushing. "
+          + output;
+    }
+    return output;
+  }
+
+  /**
    * Creates a new branch from main and pushes it to the remote. Used for existing repos where we
    * don't want to push directly to the default branch.
    *
@@ -703,9 +764,14 @@ public class GitTool {
    * @param repoUrl HTTPS clone URL
    * @param pat GitHub PAT for authentication
    * @param branchName name for the new branch (e.g. "executespec/abc123")
+   * @param expectedRemoteSha RR-1668 — the SHA this run cloned {@code branchName} from, or {@code
+   *     null} when the run did not clone that branch. Non-null ⇒ {@code
+   *     --force-with-lease=<branch>:<sha>}; null ⇒ a plain non-forced push (create / fast-forward
+   *     only). Never an unconditional {@code --force}.
    * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
-  public GitToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
+  public GitToolResult pushToBranch(
+      String runId, String repoUrl, String pat, String branchName, String expectedRemoteSha) {
     try {
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
@@ -721,10 +787,11 @@ public class GitTool {
         return GitToolResult.err("Branch creation failed: " + out1);
       }
 
-      // Push the branch to remote
+      // Push the branch to remote — RR-1668: force-with-lease pinned to the cloned SHA, or a plain
+      // non-forced push for a fresh branch. Never an unconditional --force.
       ProcessBuilder push =
           com.navneet.executespec.repo.GitProcessAuth.git(
-              pat, java.util.List.of("-C", wsPath, "push", repoUrl, branchName, "--force"));
+              pat, pushRefArgs(wsPath, repoUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());
@@ -740,8 +807,9 @@ public class GitTool {
         log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
         return GitToolResult.ok("Pushed branch " + branchName + " to " + repoUrl);
       } else {
-        log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, out2);
-        return GitToolResult.err("Push branch failed: " + out2);
+        String detail = describePushFailure(branchName, expectedRemoteSha, out2);
+        log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, detail);
+        return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Push branch failed: {}", e.getMessage());
@@ -751,9 +819,15 @@ public class GitTool {
 
   /**
    * Pilot v3.0 — for multi-repo runs. Each cloned subdirectory under {@code
-   * workspace/<runId>/repos/<name>} is its own git repo. Stages + commits + creates a branch +
-   * force-pushes. Returns OK with the branch name on success, OK with "CLEAN" if no changes, ERR
+   * workspace/<runId>/repos/<name>} is its own git repo. Stages + commits + creates a branch, then
+   * publishes it. Returns OK with the branch name on success, OK with "CLEAN" if no changes, ERR
    * otherwise.
+   *
+   * <p>RR-1668 — {@code expectedRemoteSha} is the SHA this run cloned {@code branchName} from, or
+   * {@code null} when the run did not clone that branch. Non-null ⇒ {@code
+   * --force-with-lease=<branch>:<sha>} (a human commit pushed after the clone aborts the push);
+   * null ⇒ a plain non-forced push (create / fast-forward only). Never an unconditional {@code
+   * --force}.
    */
   public GitToolResult commitAndPushSubdir(
       String runId,
@@ -761,7 +835,8 @@ public class GitTool {
       String remoteUrl,
       String pat,
       String branchName,
-      String commitMessage) {
+      String commitMessage,
+      String expectedRemoteSha) {
     try {
       String repoDir =
           Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
@@ -789,12 +864,14 @@ public class GitTool {
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
       ProcessBuilder push =
           com.navneet.executespec.repo.GitProcessAuth.git(
-              pat, java.util.List.of("-C", repoDir, "push", remoteUrl, branchName, "--force"));
+              pat, pushRefArgs(repoDir, remoteUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
       int pushExit = pp.waitFor();
-      if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
+      if (pushExit != 0)
+        return GitToolResult.err(
+            "push failed: " + describePushFailure(branchName, expectedRemoteSha, pushOut));
       return GitToolResult.ok(branchName);
     } catch (Exception e) {
       log.warn("[GitTool] commitAndPushSubdir failed: {}", e.getMessage());
@@ -874,10 +951,19 @@ public class GitTool {
    * @param username Bitbucket username
    * @param appPassword Bitbucket app password
    * @param branchName name for the new branch (e.g. "executespec/abc123")
+   * @param expectedRemoteSha RR-1668 — the SHA this run cloned {@code branchName} from, or {@code
+   *     null} when the run did not clone that branch. Non-null ⇒ {@code
+   *     --force-with-lease=<branch>:<sha>}; null ⇒ a plain non-forced push. Never an unconditional
+   *     {@code --force}.
    * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
   public GitToolResult pushToBranchBitbucket(
-      String runId, String cloneUrl, String username, String appPassword, String branchName) {
+      String runId,
+      String cloneUrl,
+      String username,
+      String appPassword,
+      String branchName,
+      String expectedRemoteSha) {
     try {
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
@@ -893,12 +979,13 @@ public class GitTool {
         return GitToolResult.err("Branch creation failed: " + out1);
       }
 
-      // Push the branch to remote
+      // Push the branch to remote — RR-1668: force-with-lease pinned to the cloned SHA, or a plain
+      // non-forced push for a fresh branch. Never an unconditional --force.
       ProcessBuilder push =
           com.navneet.executespec.repo.GitProcessAuth.git(
               appPassword,
               "x-bitbucket-api-token-auth",
-              java.util.List.of("-C", wsPath, "push", cloneUrl, branchName, "--force"));
+              pushRefArgs(wsPath, cloneUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());
@@ -914,8 +1001,9 @@ public class GitTool {
         log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);
         return GitToolResult.ok("Pushed branch " + branchName + " to " + cloneUrl);
       } else {
-        log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, out2);
-        return GitToolResult.err("Push branch failed: " + out2);
+        String detail = describePushFailure(branchName, expectedRemoteSha, out2);
+        log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, detail);
+        return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Bitbucket push failed: {}", e.getMessage());
