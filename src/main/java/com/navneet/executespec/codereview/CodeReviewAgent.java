@@ -170,6 +170,34 @@ public class CodeReviewAgent {
     return parsed.withMeta(elapsed, provider, resolved.getModel());
   }
 
+  /**
+   * RR-1685 — marks a count the walk may not have finished producing. Same family as RR-1657 /
+   * RR-1658: never state an unmeasured value as a measured one. An unknown (null) coverage is
+   * marked too, because "we did not record whether the scan finished" is not "the scan finished".
+   */
+  static String scanCountQualifier(ScanCoverage coverage) {
+    if (coverage == ScanCoverage.COMPLETE) return "";
+    return " (LOWER BOUND — not the whole repository)";
+  }
+
+  static String describeCoverage(ScanCoverage coverage) {
+    if (coverage == null) {
+      return "UNKNOWN — it was not recorded whether the repository walk completed, so treat the"
+          + " counts above as lower bounds.";
+    }
+    if (coverage == ScanCoverage.COMPLETE) {
+      return "COMPLETE — the counts above cover every file the scan is eligible to read"
+          + " (generated, vendored, oversized and credential-bearing paths are excluded by"
+          + " policy).";
+    }
+    return "PARTIAL — "
+        + coverage.reason()
+        + ", so the counts above are lower bounds and the repository is larger than they state."
+        + " Do not describe the repository's size, structure or completeness as if it were fully"
+        + " measured, and do not conclude that an issue is absent from the repository merely"
+        + " because it is absent from the sampled files.";
+  }
+
   String composeUserPrompt(AgentRequest req) {
     StringBuilder b = new StringBuilder();
     String repoMetadata =
@@ -179,10 +207,14 @@ public class CodeReviewAgent {
             + req.scannedSha()
             + "\nPrimary language(s): "
             + String.join(", ", req.languages())
-            + "\nFile count: "
+            + "\nScanned file count: "
             + req.fileCount()
-            + "\nTotal LOC: "
-            + req.totalLoc();
+            + scanCountQualifier(req.scanCoverage())
+            + "\nLines of code read: "
+            + req.totalLoc()
+            + scanCountQualifier(req.scanCoverage())
+            + "\nCoverage: "
+            + describeCoverage(req.scanCoverage());
     b.append("# Repo metadata (untrusted)\n\n")
         .append(PromptTrustBoundary.wrap("REPO_METADATA", repoMetadata))
         .append('\n');
@@ -380,6 +412,40 @@ public class CodeReviewAgent {
   /** One source-file excerpt sampled into the user prompt. */
   public record FileSample(String path, String lang, String content) {}
 
+  /**
+   * RR-1685 — whether the whole-repository walk that produced {@code fileCount} / {@code totalLoc}
+   * actually finished. RR-433 bounded that walk with a cumulative read budget and a wall-clock
+   * deadline, so those figures can be lower bounds. A null coverage on a persisted/legacy request
+   * is treated as unknown, not as complete.
+   */
+  public enum ScanCoverage {
+    /** The walk visited every eligible file. The counts are exact for the eligible population. */
+    COMPLETE,
+    /** Stopped at the maximum-files-scanned cap. */
+    TRUNCATED_FILE_LIMIT,
+    /** Stopped at the cumulative read-byte budget. */
+    TRUNCATED_READ_BUDGET,
+    /** Stopped at the sampling wall-clock deadline. */
+    TRUNCATED_TIME_BUDGET,
+    /** The walk aborted on an I/O error, or the root was not a directory. */
+    TRUNCATED_WALK_FAILED;
+
+    public boolean isTruncated() {
+      return this != COMPLETE;
+    }
+
+    /** Short, non-path-revealing explanation for the prompt and the operator log. */
+    public String reason() {
+      return switch (this) {
+        case COMPLETE -> "the whole repository was walked";
+        case TRUNCATED_FILE_LIMIT -> "the scan stopped at its maximum-files limit";
+        case TRUNCATED_READ_BUDGET -> "the scan stopped at its cumulative read budget";
+        case TRUNCATED_TIME_BUDGET -> "the scan stopped at its time budget";
+        case TRUNCATED_WALK_FAILED -> "the repository walk did not complete";
+      };
+    }
+  }
+
   @Builder
   public record AgentRequest(
       String scanId,
@@ -389,6 +455,8 @@ public class CodeReviewAgent {
       List<String> languages,
       int fileCount,
       int totalLoc,
+      /** RR-1685 — provenance of {@code fileCount}/{@code totalLoc}; null means unknown. */
+      ScanCoverage scanCoverage,
       List<StaticFinding> staticFindings,
       List<FileSample> fileSamples,
       String provider,

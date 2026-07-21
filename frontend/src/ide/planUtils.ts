@@ -78,3 +78,29 @@ export function managedAiStatusLabel(input: {
 }): string {
   return hasUnlimitedAiCredits(input) ? 'Unlimited' : input.routingState || 'FULL';
 }
+
+/**
+ * RR-1459 — stable identity of the exact plan the approver was shown, matching the server's
+ * `RunController.planFingerprintOf`: lowercase hex SHA-256 over the UTF-8 bytes of the persisted
+ * plan JSON.
+ *
+ * Returns `undefined` when the run carries no plan, or when the browser exposes no WebCrypto
+ * digest (an insecure context, or a test environment). The server treats an absent fingerprint as
+ * "not supplied" and falls back to the credits check, so an unavailable digest degrades to the
+ * previous behaviour rather than fabricating an identity that would either wrongly pass or
+ * wrongly block.
+ */
+export async function planFingerprint(planJson?: string | null): Promise<string | undefined> {
+  if (!planJson || !planJson.trim()) return undefined;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle || typeof subtle.digest !== 'function') return undefined;
+  try {
+    const bytes = new TextEncoder().encode(planJson);
+    const digest = await subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return undefined;
+  }
+}

@@ -12,6 +12,7 @@ import {
   isPlanTerminalStatus,
   managedAiBadgeKind,
   managedAiStatusLabel,
+  planFingerprint,
   planStatusPhrase,
 } from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -28,16 +29,35 @@ export default function IdePlan() {
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   useDocumentTitle('Plan approval');
-  const [run, setRun] = useState<api.RunDetail | null>(null);
+  const [loadedRun, setLoadedRun] = useState<api.RunDetail | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [feedback, setFeedback] = useState('');
   const [editing, setEditing] = useState(false);
   const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
+
+  // RR-1459 — the router reuses this component across /plan/:runId, so gate state has to be keyed
+  // by runId. Resetting during render (not in an effect) is what makes it synchronous: no frame
+  // can paint run A's plan, credits, feedback draft or in-flight busy state underneath run B's
+  // route. Without this a user could approve B while reading A.
+  const [gateRunId, setGateRunId] = useState(runId);
+  if (gateRunId !== runId) {
+    setGateRunId(runId);
+    setLoadedRun(null);
+    setBusy('');
+    setErr('');
+    setFeedback('');
+    setEditing(false);
+  }
+
   useSse(runId || null);
   const streamedRun = useRunStore((state) =>
     state.activeRun?.runId === runId ? state.activeRun : null,
   );
+
+  // RR-1459 — second gate: even a late-resolving fetch or a store write cannot surface a detail
+  // that belongs to a different run than the route we are on.
+  const run = loadedRun && loadedRun.runId === runId ? loadedRun : null;
 
   useEffect(() => {
     if (!runId) return;
@@ -45,7 +65,7 @@ export default function IdePlan() {
     api
       .getRun(runId)
       .then((r) => {
-        if (!cancelled) setRun(r);
+        if (!cancelled && r && r.runId === runId) setLoadedRun(r);
       })
       .catch(() => {});
     return () => {
@@ -56,7 +76,7 @@ export default function IdePlan() {
   // RUN_DETAIL replay updates the shared run store. Keep the page-local copy so
   // existing plan rendering and approval actions remain unchanged.
   useEffect(() => {
-    if (streamedRun) setRun(streamedRun);
+    if (streamedRun) setLoadedRun(streamedRun);
   }, [streamedRun]);
 
   useEffect(() => {
@@ -72,11 +92,28 @@ export default function IdePlan() {
       .catch(() => setManagedAi(null));
   }, []);
 
+  // RR-1459 — every mutation is refused unless a plan for THIS runId is loaded, and unless no
+  // other gate mutation is already in flight. `run` is null whenever the loaded detail does not
+  // belong to the route, so this cannot spend against a plan the approver was not shown.
+  function gateMutationBlocked(): boolean {
+    return busy !== '' || !run || run.runId !== runId;
+  }
+
   async function approve() {
+    if (gateMutationBlocked()) return;
+    const approving = run;
+    if (!approving) return;
     setBusy('a');
     setErr('');
     try {
-      await api.approveRun(runId, true, run?.creditsCharged ?? undefined);
+      const fingerprint = await planFingerprint(approving.planJson);
+      await api.approveRun(
+        runId,
+        true,
+        approving.creditsCharged ?? undefined,
+        undefined,
+        fingerprint,
+      );
       navigate(`/live/${runId}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Approve failed.');
@@ -84,6 +121,7 @@ export default function IdePlan() {
     }
   }
   async function cancel() {
+    if (gateMutationBlocked()) return;
     setBusy('c');
     setErr('');
     try {
@@ -98,6 +136,7 @@ export default function IdePlan() {
   // loop above picks up the new AWAITING_APPROVAL version.
   async function revise() {
     if (!feedback.trim()) return;
+    if (gateMutationBlocked()) return;
     setBusy('e');
     setErr('');
     try {
@@ -257,7 +296,7 @@ export default function IdePlan() {
               <div style={{display: 'flex', gap: 8, marginTop: 8}}>
                 <button
                   className='ide-btn'
-                  disabled={busy === 'e' || !feedback.trim()}
+                  disabled={busy !== '' || !feedback.trim()}
                   onClick={revise}
                 >
                   {busy === 'e' ? 'Revising…' : 'Submit requested changes'}
@@ -281,7 +320,7 @@ export default function IdePlan() {
             <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '12px 0'}}>{err}</div>
           )}
           <div style={{display: 'flex', gap: 8, marginTop: 16}}>
-            <button className='ide-btn' disabled={busy === 'a'} onClick={approve}>
+            <button className='ide-btn' disabled={busy !== ''} onClick={approve}>
               {busy === 'a'
                 ? 'Approving…'
                 : `Approve and start work · ${run.creditsCharged ?? 1} credit(s)`}
@@ -289,7 +328,7 @@ export default function IdePlan() {
             <button
               className='ide-btn ghost'
               style={{color: 'var(--ide-red)'}}
-              disabled={busy === 'c'}
+              disabled={busy !== ''}
               onClick={cancel}
             >
               Cancel

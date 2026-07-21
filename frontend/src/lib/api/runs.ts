@@ -106,6 +106,12 @@ export const approveRun = (
   approved: boolean,
   creditsConfirmed?: number,
   executionMode?: string,
+  /**
+   * RR-1459 — SHA-256 of the exact plan JSON the approver reviewed. `creditsConfirmed` is a price
+   * check, not an identity check, so it passes whenever two runs happen to cost the same. The
+   * server answers 409 on a mismatch; an omitted value is "not supplied", never "matched".
+   */
+  planFingerprint?: string,
 ) =>
   req<void>(`/runs/${id}/approve`, {
     method: 'POST',
@@ -113,6 +119,7 @@ export const approveRun = (
       approved,
       creditsConfirmed: creditsConfirmed ?? null,
       executionMode: executionMode ?? null,
+      planFingerprint: planFingerprint ?? null,
     }),
   });
 
