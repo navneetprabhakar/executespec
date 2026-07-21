@@ -116,6 +116,27 @@ public class PreviewDeploymentService {
 
   /** Tear down a preview by its ID. */
   public void teardown(String previewId) {
+    int claimed = registryRepo.claimForTeardown(previewId);
+    if (claimed != 1) {
+      PreviewRegistry current =
+          registryRepo
+              .findById(previewId)
+              .orElseThrow(() -> new PreviewDeploymentException("Preview not found: " + previewId));
+      if (List.of("tearing_down", "gc_processing", "torn_down").contains(current.getStatus())) {
+        log.info(
+            "Preview teardown already claimed or complete: {} status={}",
+            previewId,
+            current.getStatus());
+        return;
+      }
+      throw new PreviewDeploymentException(
+          "Preview cannot be torn down from status " + current.getStatus() + ": " + previewId);
+    }
+    teardownClaimed(previewId);
+  }
+
+  /** Execute teardown after the caller atomically claimed the registry row. */
+  void teardownClaimed(String previewId) {
     PreviewRegistry entry =
         registryRepo
             .findById(previewId)

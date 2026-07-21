@@ -22,14 +22,19 @@ import lombok.Builder;
  * @param smokeTestOutput truncated smoke test stdout/stderr (head+tail)
  * @param totalLatencyMs wall-clock for the full task execution (primary + retry + smoke)
  * @param toolCallsDispatched sum across primary + retry worker invocations
- * @param dispatchedProvider the provider actually used for this task's worker call (e.g.
- *     "anthropic"). Captured from {@code SequentialExecutor.tierConfigFor} so per-task DB rows
- *     reflect the tier-resolved provider, not the run-level default. Nullable for SKIPPED tasks.
- * @param dispatchedModel the model actually used for this task's worker call (e.g.
- *     "claude-sonnet-4-6" for HIGH-complexity on anthropic). Captured from {@code
- *     SequentialExecutor.tierConfigFor}. Closes the b171fa52 finding where every task row was
- *     persisted as Haiku because {@code RunTokenAttributor.attributeWorker} wrote the run-level
- *     default into every row, masking the tier-correct workhouse/planning escalation.
+ * @param dispatchedProvider the provider REQUESTED for this task's worker call (e.g. "anthropic"),
+ *     captured from {@code SequentialExecutor.tierConfigFor}. This is the tier-resolved route the
+ *     executor asked for — NOT proof of the provider that served the call. Cross-provider failover
+ *     and managed-AI tier locks rebuild the request after this value is captured, so the two can
+ *     legitimately diverge. The route that actually served the task is projected from the {@code
+ *     run_step_usage} ledger into {@code agent_task.effective_provider} (V305); read that, not this
+ *     field, when you need physical route truth. Nullable for SKIPPED tasks.
+ * @param dispatchedModel the model REQUESTED for this task's worker call (e.g. "claude-sonnet-4-6"
+ *     for HIGH-complexity on anthropic), captured from {@code SequentialExecutor.tierConfigFor}.
+ *     Same caveat as {@code dispatchedProvider}: requested, not served — see {@code
+ *     agent_task.effective_model}. Recording this per task (rather than the run-level default)
+ *     closed the b171fa52 finding where every task row was persisted as Haiku, masking the
+ *     tier-correct workhorse/planning escalation.
  * @param goalDonenessDecision conservative goal-based continuation decision emitted at the terminal
  *     task boundary. Null for synthetic/resume-skipped outcomes.
  * @param continuationDecision bounded next-action advice derived from the goal decision and

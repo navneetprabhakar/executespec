@@ -3,6 +3,7 @@ package com.navneet.executespec.chat;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
@@ -175,7 +176,11 @@ public class ApplyService {
           and note it in your completion summary.
         """;
 
-    String userPrompt = "Suggestion source: " + commitPrefix + "\n\n" + suggestion;
+    String userPrompt =
+        "Suggestion source: "
+            + commitPrefix
+            + "\n\n"
+            + PromptTrustBoundary.wrap("APPLY_SUGGESTION", suggestion);
 
     WorkerTaskRequest req =
         WorkerTaskRequest.builder()

@@ -17,6 +17,8 @@ import com.navneet.executespec.contracts.ContractRegistry;
 import com.navneet.executespec.contracts.ContractRegistryRepository;
 import com.navneet.executespec.folder.ExecutespecFolderWriter;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.entity.ProjectRepoLink;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +39,7 @@ class ContractConsumerControllerTest {
   @Mock ContractRegistryRepository registryRepo;
   @Mock ContractConsumerRepository consumerRepo;
   @Mock ProjectRepoRepository projectRepoRepo;
+  @Mock ProjectRepoLinkRepository projectRepoLinkRepo;
   @Mock ExecutespecFolderWriter folderWriter;
   @Mock com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   @Mock ActivityEventEmitter emitter;
@@ -48,6 +51,7 @@ class ContractConsumerControllerTest {
   String projectId;
   UUID contractId;
   UUID consumerRepoId;
+  UUID producerRepoId;
   ContractRegistry contract;
 
   @BeforeEach
@@ -55,16 +59,44 @@ class ContractConsumerControllerTest {
     projectId = UUID.randomUUID().toString();
     contractId = UUID.randomUUID();
     consumerRepoId = UUID.randomUUID();
+    producerRepoId = UUID.randomUUID();
     contract =
         ContractRegistry.builder()
             .id(contractId)
+            .repoId(producerRepoId)
             .name("payments-api")
             .type(ContractRegistry.ContractType.OPENAPI.name())
             .currentRegistryVersion(1)
             .currentContentHash("h")
             .detectionMethod(ContractRegistry.DetectionMethod.AUTO_FILE.name())
             .build();
+    lenient().when(registryRepo.findById(contractId)).thenReturn(Optional.of(contract));
+    lenient()
+        .when(projectRepoLinkRepo.findByProjectIdAndRepoId(eq(projectId), any(UUID.class)))
+        .thenReturn(Optional.of(mock(ProjectRepoLink.class)));
     lenient().when(emitterProvider.getIfAvailable()).thenReturn(emitter);
+  }
+
+  @Test
+  void declare_rejectsForeignConsumerRepoBeforeWritingOrPersisting() {
+    when(registryRepo.findById(contractId)).thenReturn(Optional.of(contract));
+    when(projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, producerRepoId))
+        .thenReturn(Optional.of(mock(ProjectRepoLink.class)));
+    when(projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, consumerRepoId))
+        .thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () ->
+                controller.declare(
+                    projectId,
+                    contractId,
+                    new ContractConsumerController.DeclareRequest(consumerRepoId, "v1"),
+                    fakeAuth()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.NOT_FOUND);
+    verify(consumerRepo, never()).save(any());
+    verifyNoInteractions(folderWriter);
   }
 
   @Test

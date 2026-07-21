@@ -71,10 +71,15 @@ class InputSanitizerLevelTest {
   }
 
   @Test
-  void nullLevelTreatedAsLow() {
+  void nullLevelFailsSafeAsHigh() {
     String payload = randomBenignText(9_000, 42);
-    // null level → LOW → no cap → no throw
-    assertThatCode(() -> sanitizer.scan(payload, null)).doesNotThrowAnyException();
+    assertThatThrownBy(() -> sanitizer.scan(payload, null))
+        .isInstanceOf(ResponseStatusException.class);
     assertThat(sanitizer).isNotNull();
+  }
+
+  @Test
+  void normalizeRemovesInvisibleCharactersBeforePersistence() {
+    assertThat(sanitizer.normalize("ig\u200Bnore")).isEqualTo("ignore");
   }
 }

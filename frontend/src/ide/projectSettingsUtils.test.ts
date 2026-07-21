@@ -50,6 +50,9 @@ describe('projectSettingsUtils', () => {
         {status: 'EMBEDDING'},
       ] as api.ProjectDocumentRow[]),
     ).toBe(true);
+    expect(isProjectDocumentIndexing([{status: 'RETRY_PENDING'}] as api.ProjectDocumentRow[])).toBe(
+      true,
+    );
   });
 
   it('builds document display labels with path and id fallbacks', () => {
@@ -63,8 +66,9 @@ describe('projectSettingsUtils', () => {
       } as unknown as api.ProjectDocumentRow),
     ).toEqual({
       label: 'Architecture.pdf',
-      status: 'READY',
+      status: 'SEMANTIC READY',
       sizeLabel: '1.5 KB',
+      readiness: null,
     });
     expect(
       projectDocumentDisplay({
@@ -76,8 +80,29 @@ describe('projectSettingsUtils', () => {
       } as unknown as api.ProjectDocumentRow),
     ).toEqual({
       label: 'Document 123456',
-      status: 'READY',
+      status: 'SEMANTIC READY',
       sizeLabel: '—',
+      readiness: null,
+    });
+  });
+
+  it('labels lexical fallback without presenting semantic readiness', () => {
+    expect(
+      projectDocumentDisplay({
+        id: 'lexical1',
+        filename: 'requirements.md',
+        status: 'LEXICAL_READY',
+        sizeBytes: 512,
+        retrievalMode: 'LEXICAL',
+        semanticSearchAvailable: false,
+        lexicalSearchAvailable: true,
+        readinessReason: 'SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL',
+      } as api.ProjectDocumentRow),
+    ).toEqual({
+      label: 'requirements.md',
+      status: 'LEXICAL READY',
+      sizeLabel: '0.5 KB',
+      readiness: 'SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL',
     });
   });
 });

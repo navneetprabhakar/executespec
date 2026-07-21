@@ -21,7 +21,13 @@ class ProviderDispatchGuardCoverageTest {
           .contains("dispatchAuthorization.authorize(");
     }
 
-    assertThat(source("agent/LlmRouter.java")).contains("ProviderTestBudgetGuard.authorize(");
+    // RR-392 — the canonical router must delegate to the SHARED authorization component, not
+    // re-implement the kill switch and reservation guard from its own @Value fields.
+    assertThat(source("agent/LlmRouter.java"))
+        .contains("ProviderDispatchAuthorization")
+        .contains("providerDispatchAuthorization.authorize(");
+    assertThat(source("project/rag/EmbeddingService.java"))
+        .contains("providerDispatchAuthorization.authorize(");
   }
 
   @Test

@@ -1,0 +1,137 @@
+groups:
+  - name: executespec-enterprise-audit
+    rules:
+      - alert: CanonicalLlmUsagePersistenceFailure
+        expr: increase(executespec_v2_llm_usage_persistence_total{result="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM attempt usage is not being persisted"
+          description: >-
+            At least one physical provider attempt could not be written to run_step_usage.
+            Provider spend may have occurred without a canonical tenant-attributed audit row.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+          test_procedure: >-
+            In an isolated environment, deny INSERT on run_step_usage, dispatch a fixture attempt,
+            and verify this alert reaches the platform pager before restoring the grant.
+          silence_policy: >-
+            Silence only during a recorded database maintenance window with submissions paused;
+            reconcile affected provider attempts before clearing the incident.
+      - alert: CanonicalLlmUsageTerminalMissing
+        expr: executespec_v2_llm_usage_stale_intents > 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "LLM provider attempts are missing terminal usage facts"
+          description: >-
+            One or more write-ahead provider-attempt intents have remained without an immutable
+            terminal fact beyond the configured five-minute integrity window.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageRecoveryBacklog
+        expr: executespec_v2_llm_usage_recovery_pending > 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM terminal usage recovery is backlogged"
+          description: >-
+            Exact terminal usage facts remain in the V298 database outbox and have not yet been
+            materialized into run_step_usage. Provider dispatch should be paused if this persists.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageRecoveryDeadLetter
+        expr: executespec_v2_llm_usage_recovery_dead > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM terminal usage recovery contains a dead letter"
+          description: >-
+            A checksum-invalid or malformed terminal usage fact was retained for operator
+            investigation and was not inserted into the canonical ledger.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageIntegrityMonitorUnhealthy
+        expr: executespec_v2_llm_usage_integrity_monitor_healthy < 1
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Canonical LLM usage integrity monitor is unhealthy"
+          description: >-
+            The integrity query has failed, so stale-intent and recovery-backlog gauges must not be
+            treated as fresh until the monitor records another successful sweep.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: CanonicalLlmUsageLocalRecoveryAtRisk
+        expr: executespec_v2_llm_usage_recovery_local_dead > 0 or executespec_v2_llm_usage_recovery_local_oldest_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Node-local LLM usage recovery contains dead or stale evidence"
+          description: >-
+            The last-resort owner-only local spool contains an invalid payload or a terminal fact
+            older than five minutes. Reconcile it before node replacement or provider dispatch.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/source-repository/enterprise-dedicated-environment-bootstrap.md#canonical-llm-usage-persistence-failure
+      - alert: ManagedAiPostSuccessProjectionFailure
+        expr: increase(executespec_v2_llm_post_success_projection_total{projection="managed_ai",result="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Successful provider usage was not projected into managed AI credits"
+          description: >-
+            A provider returned successfully and canonical usage handling continued, but the
+            managed-credit/COGS projection failed. Customer balances may be understated until the
+            durable projection repair path reconciles the physical attempt.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/operations/enterprise-readiness-code-audit-remediation-2026-07-19.md
+      - alert: RunCostPostSuccessProjectionFailure
+        expr: increase(executespec_v2_llm_post_success_projection_total{projection="run_cost",result="failed"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Successful provider usage was not projected into the run cost ledger"
+          description: >-
+            A successful provider call could not update the run-level cost projection. The
+            immutable physical attempt remains the accounting authority and the run projection
+            must be reconciled before cost is reported as complete.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/operations/enterprise-readiness-code-audit-remediation-2026-07-19.md
+      - alert: RunQuotaRefundBacklog
+        expr: executespec_v2_billing_quota_refund_stale > 0
+        for: 5m
+        labels:
+          severity: critical
+          owner: platform
+          notification_channel: platform-pager
+        annotations:
+          summary: "Failed-run quota refunds are not being applied"
+          description: >-
+            At least one durable quota-refund intent has remained pending for more than five
+            minutes. Customer run quota and billing usage may temporarily disagree.
+          runbook_url: >-
+            https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/operations/enterprise-readiness-code-audit-remediation-2026-07-19.md#open-blockers-and-next-action

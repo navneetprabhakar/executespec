@@ -25,45 +25,10 @@ public class ShellSandboxPolicy {
           );
 
   /** HIGH-level strict npm/mvn/gradle verb allowlist. */
-  private static final Set<String> HIGH_STRICT_NPM_VERBS =
-      Set.of("install", "ci", "build", "test", "start", "run-script");
-
-  /**
-   * HIGH-level strict npx verb allowlist — superset of npm that adds the JS tools the RN / Expo
-   * pipeline invokes ({@code expo}, {@code eas}, {@code tsc}, {@code jest}, {@code
-   * create-expo-app}). npx needs its own list because it forwards to arbitrary tools, unlike npm
-   * where the verb is a lifecycle name.
-   */
-  private static final Set<String> HIGH_STRICT_NPX_VERBS =
-      Set.of(
-          "install",
-          "ci",
-          "build",
-          "test",
-          "start",
-          "run-script",
-          "expo",
-          "eas",
-          "tsc",
-          "jest",
-          "create-expo-app",
-          "create-react-app");
-
-  private static final Set<String> HIGH_STRICT_MVN_VERBS =
-      Set.of("compile", "test", "package", "verify", "install", "clean", "spring-boot:run");
-  private static final Set<String> HIGH_STRICT_GRADLE_VERBS =
-      Set.of("build", "test", "check", "clean", "assemble");
-
-  /** HIGH-level strict expo verb allowlist (direct {@code expo <verb>} invocation). */
-  private static final Set<String> HIGH_STRICT_EXPO_VERBS =
-      Set.of("export", "prebuild", "install", "doctor", "run", "run:android", "run:ios");
-
-  /**
-   * HIGH-level strict eas verb allowlist. {@code update} (EAS OTA push) is deliberately excluded —
-   * it's a deploy-equivalent path and must route through the managed {@code /api/deployments}
-   * endpoint, not shell.
-   */
-  private static final Set<String> HIGH_STRICT_EAS_VERBS = Set.of("build", "submit");
+  // RR-1545 considered adding bare `run` here so `npm run <script>` (what ProjectCommandTool's
+  // Node detection emits) would pass at HIGH. It is deliberately NOT added: a package.json script
+  // HIGH-guardrail per-executable verb allowlists live in ShellGuardrailVerbs so this class stays
+  // under the 600-line god-class ceiling. They are a security boundary, not a convenience list.
 
   private final GuardrailLevelResolver guardrailLevelResolver;
 
@@ -199,6 +164,12 @@ public class ShellSandboxPolicy {
           Pattern.compile("curl\\s+.*-d\\s+@"), // curl post file contents
           Pattern.compile("wget\\s+.*--post-file"), // wget post file
 
+          // Credential material must never be printed into the worker/model context. Template
+          // files such as .env.example remain readable so agents can document configuration.
+          Pattern.compile("(?i)(?:^|[\\s'\"/])\\.env(?!\\.(?:example|sample|template)(?:\\s|$))"),
+          Pattern.compile(
+              "(?i)(?:^|[\\s'\"/])(?:\\.npmrc|\\.pypirc|\\.netrc|\\.git-credentials|credentials\\.json|service[-_]account\\.json|id_(?:rsa|dsa|ecdsa|ed25519)|[^\\s'\"]+\\.(?:pem|key|p12|pfx|jks|keystore))(?:[\\s'\"]|$)"),
+
           // Filesystem mount/unmount — word-boundary to avoid false-positives (e.g. Express "mount"
           // in router code)
           Pattern.compile("\\bmount\\b"),
@@ -231,9 +202,14 @@ public class ShellSandboxPolicy {
           Pattern.compile("\\bsed\\b[^|;&\\n]*--in-place"), // sed --in-place
           Pattern.compile("\\bawk\\b[^|;&\\n]*-i\\s+inplace")); // gawk -i inplace
 
-  // Docker subcommands that are safe — all others are blocked
+  // Docker subcommands that are safe — all others are blocked.
+  // 2026-07-20 (RR-120) — `compose` was REMOVED. Scanning the command line for dangerous strings
+  // cannot see a generated compose file that declares `privileged: true`, host PID/network, or a
+  // bind mount of `/` or the Docker socket: none of those values appears in `docker compose up`.
+  // Where the app user can reach the daemon that is host-root-equivalent control. Compose-based
+  // preview/deploy paths are server-owned and do not route through this worker policy.
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =
-      Set.of("build", "compose", "ps", "logs", "images", "inspect");
+      Set.of("build", "ps", "logs", "images", "inspect");
 
   // Commands explicitly allowed (exact first token match)
   private static final Set<String> ALLOWED_PREFIXES =
@@ -317,19 +293,31 @@ public class ShellSandboxPolicy {
           "wget", // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload,
           // exfil) are caught by BLOCKED_PATTERNS
 
-          // 2026-05-07 — chmod was previously left out as "chains unknown binaries". In
-          // practice every binary the worker can chain is already in this allowlist (gcc,
-          // cargo, go, mvn, etc.), and forbidding chmod blocks the legitimate `chmod +x
-          // compile.sh && ./compile.sh` that ProgramBench tasks need to verify their build
-          // before declaring done. With chmod blocked, every cmatrix run on 2026-05-07
-          // stagnated because the worker could not validate its own compile script. The
-          // dangerous variants (`chmod -R 777 /`, chmod against /etc, /usr, /var, /root,
-          // etc.) are caught by BLOCKED_COMMANDS + the chmod-system-path BLOCKED_PATTERN
-          // entry above, so widening the allowlist with chmod does not widen the abuse
-          // surface in any meaningful way — within workspace it can only flip permission
-          // bits on files the worker already owns; in cleanroom + --network none, even
-          // dangerous chmod has no exfiltration path.
-          "chmod");
+          // 2026-05-07 — chmod is needed for the legitimate `chmod +x compile.sh` that
+          // ProgramBench tasks use to verify their build. Dangerous variants (`chmod -R 777 /`,
+          // chmod against /etc, /usr, /root, …) are caught by BLOCKED_COMMANDS + the
+          // chmod-system-path BLOCKED_PATTERN above; within the workspace it can only flip
+          // permission bits on files the worker already owns.
+          "chmod",
+
+          // 2026-07-20 (RR-1545) — toolchain binaries ExecuteSpec's OWN command detection emits
+          // but the allowlist rejected, making testProject / installDependencies / lintProject /
+          // formatProject permanently FORBIDDEN for Gradle-wrapper, Ruff and Go projects.
+          // `gradlew` is the wrapper form of the already-allowed `gradle` (identical risk model:
+          // a Gradle build script executes arbitrary code either way); `ruff` is lint/format
+          // only; `gofmt` ships with the already-allowed `go` toolchain.
+          "gradlew",
+          "ruff",
+          "gofmt",
+
+          // 2026-07-20 (RR-281) — `buildProject` now validates its resolved build command through
+          // this policy. `BuildCommandResolver`'s no-op fallback is literally `true`, so the two
+          // shell no-ops must be nameable or every marker-less workspace would fail its smoke.
+          // `printf` joins the already-allowed `echo` for the same reason and with the same risk.
+          "mvnw",
+          "true",
+          "false",
+          "printf");
 
   /** Matches $(...) subshell syntax. */
   private static final Pattern SUBSHELL_PATTERN = Pattern.compile("\\$\\(");
@@ -424,7 +412,7 @@ public class ShellSandboxPolicy {
       String seg = segment.trim();
       if (seg.isEmpty()) continue;
 
-      ValidationResult segResult = validateSegment(seg, trimmed, effective);
+      ValidationResult segResult = validateSegment(seg, trimmed, effective, workspacePath);
       if (!segResult.permitted()) return segResult;
     }
 
@@ -432,8 +420,15 @@ public class ShellSandboxPolicy {
   }
 
   /**
-   * Splits a command string on &&, ||, ;, |, and raw newlines. Respects quoted strings (single and
-   * double quotes) — does not split inside them.
+   * Splits a command string on &&, ||, ;, |, a lone &amp;, subshell/group delimiters, and raw
+   * newlines. Respects quoted strings (single and double quotes) — does not split inside them.
+   *
+   * <p>A lone {@code &amp;} (background operator) MUST terminate a segment: {@code /bin/sh -c} runs
+   * both sides of {@code echo hi &amp; bash -c '...'} as separate commands, so without splitting
+   * here only the first token would be allowlist-checked and the second command would execute
+   * unguarded (RR-1540). The grouping characters {@code ( ) &#123; &#125;} and form-feed are
+   * likewise treated as separators so a subshell or command group cannot smuggle a non-allowlisted
+   * first token.
    */
   private List<String> splitChainedCommands(String command) {
     List<String> segments = new ArrayList<>();
@@ -471,9 +466,13 @@ public class ShellSandboxPolicy {
         }
       }
 
-      // Split on ;, single |, and raw newlines. /bin/sh treats newlines as command separators, so
-      // they must get the same per-segment allowlist validation as semicolons.
-      if (c == ';' || c == '|' || c == '\n' || c == '\r') {
+      // Split on ;, single |, a lone & (background operator), subshell/command-group delimiters,
+      // and raw newlines. /bin/sh treats all of these as command separators, so each resulting
+      // segment must get the same per-segment allowlist validation as a semicolon-delimited one.
+      // The && / || cases above already consumed their second char via i++, so reaching here with
+      // c == '&' means a lone &. (RR-1540)
+      if (c == ';' || c == '|' || c == '&' || c == '(' || c == ')' || c == '{' || c == '}'
+          || c == '\n' || c == '\r' || c == '\f') {
         segments.add(current.toString());
         current.setLength(0);
         continue;
@@ -490,14 +489,21 @@ public class ShellSandboxPolicy {
 
   /** Validates a single command segment (after splitting on chain operators). */
   private ValidationResult validateSegment(
-      String segment, String originalCommand, GuardrailLevel level) {
-    String[] tokens = segment.split("\\s+");
-    String firstToken = tokens[0];
+      String segment, String originalCommand, GuardrailLevel level, String workspacePath) {
+    String[] tokens = segment.trim().split("\\s+");
 
-    // Strip path prefix (e.g. /usr/bin/mvn → mvn)
-    if (firstToken.contains("/")) {
-      firstToken = firstToken.substring(firstToken.lastIndexOf('/') + 1);
+    // 2026-07-20 (RR-833) — resolve the EXECUTABLE ORIGIN, not just the basename. The old code
+    // stripped every directory prefix and authorized the remainder, so `./git` / `/tmp/npm`
+    // (files the worker had just written) validated as the canonical allowlisted tool while
+    // /bin/sh executed the worker's file. Path-qualified commands are now refused unless they
+    // live in a trusted system executable directory or are a governed workspace build wrapper.
+    ShellCommandConfinement.CommandOrigin origin =
+        ShellCommandConfinement.resolveCommandName(tokens[0]);
+    if (origin.isRejected()) {
+      log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], originalCommand);
+      return ValidationResult.block(origin.rejection());
     }
+    String firstToken = origin.commandName();
 
     if (!ALLOWED_PREFIXES.contains(firstToken)) {
       log.warn(
@@ -506,6 +512,17 @@ public class ShellSandboxPolicy {
           originalCommand);
       return ValidationResult.block(
           "Chained command '" + firstToken + "' is not in the allowed command list");
+    }
+
+    // 2026-07-20 (RR-118) — the policy previously ignored `workspacePath` entirely, so allowed
+    // tools accepted arbitrary absolute paths (`cat /proc/self/environ`, `find / -maxdepth 2`).
+    // Confine unquoted absolute / `~/` arguments to the run workspace plus a small allowlist of
+    // scratch, device, container and toolchain roots. This is textual inspection only — see
+    // ShellCommandConfinement's javadoc for what it cannot see.
+    String unconfined = ShellCommandConfinement.rejectUnconfinedAbsolutePath(tokens, workspacePath);
+    if (unconfined != null) {
+      log.warn("SHELL BLOCKED (workspace confinement): {}", originalCommand);
+      return ValidationResult.block(unconfined);
     }
 
     // 2026-05-02 — dependency-install security enforcement (MEDIUM+).
@@ -552,12 +569,13 @@ public class ShellSandboxPolicy {
 
   private static Set<String> canonicalVerbsFor(String firstToken) {
     return switch (firstToken) {
-      case "npm" -> HIGH_STRICT_NPM_VERBS;
-      case "npx" -> HIGH_STRICT_NPX_VERBS;
-      case "mvn" -> HIGH_STRICT_MVN_VERBS;
-      case "gradle" -> HIGH_STRICT_GRADLE_VERBS;
-      case "expo" -> HIGH_STRICT_EXPO_VERBS;
-      case "eas" -> HIGH_STRICT_EAS_VERBS;
+      case "npm" -> ShellGuardrailVerbs.NPM;
+      case "npx" -> ShellGuardrailVerbs.NPX;
+      case "mvn", "mvnw" -> ShellGuardrailVerbs.MVN;
+      case "gradle", "gradlew" -> ShellGuardrailVerbs.GRADLE;
+      case "ruff" -> ShellGuardrailVerbs.RUFF;
+      case "expo" -> ShellGuardrailVerbs.EXPO;
+      case "eas" -> ShellGuardrailVerbs.EAS;
       default -> null;
     };
   }

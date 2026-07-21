@@ -5,6 +5,10 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmCredential;
+import com.navneet.executespec.repo.ScmRemoteRepository;
+import com.navneet.executespec.repo.ScmRepositoryClient;
+import com.navneet.executespec.repo.ScmSourceInventory;
 
 import org.springframework.stereotype.Service;
 
@@ -65,24 +69,82 @@ public class StackDetector {
     }
   }
 
+  /** Provider-neutral stack detection using the inventory already fetched for source readiness. */
+  public String detect(
+      ScmRemoteRepository repository,
+      ScmSourceInventory inventory,
+      ScmRepositoryClient client,
+      ScmCredential credential) {
+    if (repository == null || inventory == null || !inventory.successful()) return null;
+    List<String> files = inventory.files();
+    if (files.isEmpty()) return null;
+    StackInfo info = infer(files);
+    if (info == null) return null;
+    String version = info.version();
+    if (version == null || version.isBlank()) {
+      version = detectVersion(repository, client, credential, info, files);
+    }
+    try {
+      return json.writeValueAsString(
+          Map.of(
+              "language", info.language(),
+              "framework", info.framework() == null ? "" : info.framework(),
+              "version", version == null ? "" : version));
+    } catch (Exception ex) {
+      return null;
+    }
+  }
+
+  private String detectVersion(
+      ScmRemoteRepository repository,
+      ScmRepositoryClient client,
+      ScmCredential credential,
+      StackInfo info,
+      List<String> files) {
+    try {
+      String marker = null;
+      if ("Java".equals(info.language()) && hasRoot(files, "pom.xml")) marker = "pom.xml";
+      if ("TypeScript/JS".equals(info.language()) && hasRoot(files, "package.json")) {
+        marker = "package.json";
+      }
+      if ("Python".equals(info.language()) && hasRoot(files, "pyproject.toml")) {
+        marker = "pyproject.toml";
+      }
+      if (marker == null) return null;
+      String content = client.readFile(repository, repository.defaultBranch(), marker, credential);
+      java.util.regex.Pattern pattern =
+          switch (marker) {
+            case "pom.xml" -> java.util.regex.Pattern.compile("<version>([^<]+)</version>");
+            case "package.json" ->
+                java.util.regex.Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"");
+            default -> java.util.regex.Pattern.compile("(?m)^version\\s*=\\s*\"([^\"]+)\"");
+          };
+      java.util.regex.Matcher matcher = pattern.matcher(content == null ? "" : content);
+      return matcher.find() ? matcher.group(1) : null;
+    } catch (Exception ex) {
+      log.debug("Provider-neutral version detect failed: {}", ex.getMessage());
+      return null;
+    }
+  }
+
   private String detectVersion(String repoUrl, String pat, StackInfo info, List<String> files) {
     try {
       if ("Java".equals(info.language()) && hasRoot(files, "pom.xml")) {
-        String pom = gitHub.readRepoFile(repoUrl, "pom.xml", pat);
+        String pom = gitHub.readRepoFile(repoUrl, "pom.xml", pat).contentOrNull();
         if (pom != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("<version>([^<]+)</version>").matcher(pom);
           if (m.find()) return m.group(1);
         }
       } else if ("TypeScript/JS".equals(info.language()) && hasRoot(files, "package.json")) {
-        String pkg = gitHub.readRepoFile(repoUrl, "package.json", pat);
+        String pkg = gitHub.readRepoFile(repoUrl, "package.json", pat).contentOrNull();
         if (pkg != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"").matcher(pkg);
           if (m.find()) return m.group(1);
         }
       } else if ("Python".equals(info.language()) && hasRoot(files, "pyproject.toml")) {
-        String py = gitHub.readRepoFile(repoUrl, "pyproject.toml", pat);
+        String py = gitHub.readRepoFile(repoUrl, "pyproject.toml", pat).contentOrNull();
         if (py != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("(?m)^version\\s*=\\s*\"([^\"]+)\"").matcher(py);

@@ -61,6 +61,19 @@ public class BenchmarkTaskResult {
   @Column(name = "outcome_reason", length = 500)
   private String reason;
 
+  /** NONE / TIMEOUT / INFRASTRUCTURE / VERIFIER / AGENT_OR_TEST_FAILURE / UNKNOWN. */
+  @Column(name = "failure_classification", nullable = false, length = 40)
+  @Builder.Default
+  private String failureClassification = "UNKNOWN";
+
+  /** Stable operator-visible location of the attempt trajectory artifact. */
+  @Column(name = "trajectory_location", length = 1000)
+  private String trajectoryLocation;
+
+  /** SHA-256 of the exact trajectory bytes at {@link #trajectoryLocation}. */
+  @Column(name = "trajectory_sha256", length = 64)
+  private String trajectorySha256;
+
   @Column(name = "cost_usd", nullable = false, precision = 12, scale = 6)
   @Builder.Default
   private BigDecimal costUsd = BigDecimal.ZERO;
@@ -74,6 +87,28 @@ public class BenchmarkTaskResult {
   @Column(name = "output_tokens", nullable = false)
   @Builder.Default
   private long outputTokens = 0;
+
+  /**
+   * Physical provider that actually served this attempt, derived server-side from {@code
+   * run_step_usage} via {@link #esRunId} (V304). Null for historical rows and for MIXED attempts.
+   * Never populated from a client-supplied event field.
+   */
+  @Column(name = "provider", length = 40)
+  private String provider;
+
+  /**
+   * Physical model that actually served this attempt. Same derivation rules as {@link #provider}.
+   */
+  @Column(name = "model", length = 120)
+  private String model;
+
+  /**
+   * LEDGER / MIXED / UNATTRIBUTED (V304). MIXED means several distinct routes served one attempt
+   * and must never be collapsed to a single provider — that collapse is exactly what this field
+   * exists to prevent.
+   */
+  @Column(name = "route_attribution", length = 24)
+  private String routeAttribution;
 
   @Column(name = "created_at", nullable = false)
   @Builder.Default

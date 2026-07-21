@@ -15,7 +15,10 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -40,9 +43,17 @@ import lombok.extern.slf4j.Slf4j;
 public class SearchFilesTool implements Tool {
 
   private final RepositorySearchService repositorySearchService;
+  private final ContextSanitizer contextSanitizer;
 
   public SearchFilesTool(RepositorySearchService repositorySearchService) {
+    this(repositorySearchService, new ContextSanitizer());
+  }
+
+  @Autowired
+  public SearchFilesTool(
+      RepositorySearchService repositorySearchService, ContextSanitizer contextSanitizer) {
     this.repositorySearchService = repositorySearchService;
+    this.contextSanitizer = contextSanitizer;
   }
 
   private static final Set<String> HIDDEN_DIRS =
@@ -155,6 +166,8 @@ public class SearchFilesTool implements Tool {
                 .append(relationships.repositoryFingerprint())
                 .append('\n');
         for (RepositorySearchService.RelationshipEdge edge : relationships.edges()) {
+          if (SensitiveWorkspacePathPolicy.isSensitive(edge.sourcePath())
+              || SensitiveWorkspacePathPolicy.isSensitive(edge.targetPath())) continue;
           typed
               .append(edge.relationshipType())
               .append(' ')
@@ -164,7 +177,7 @@ public class SearchFilesTool implements Tool {
               .append(" -> ")
               .append(edge.targetPath() == null ? "?" : edge.targetPath())
               .append(" [")
-              .append(edge.preview())
+              .append(contextSanitizer.sanitizeOutput(edge.preview()))
               .append("]\n");
         }
         return ToolResult.ok(typed.toString().trim());
@@ -182,6 +195,26 @@ public class SearchFilesTool implements Tool {
       mode = parseMode(args.path("mode").asText(null));
     } catch (IllegalArgumentException e) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, e.getMessage());
+    }
+
+    // Exact/regex searches are the worker's hottest large-repository path. The structured Java
+    // index below provides symbol classification and citation fingerprints, but it must discover
+    // and content-hash the whole repository before returning a plain text match. Running that
+    // path first made the documented ripgrep "fast path" unreachable on every successful search.
+    // Keep SYMBOL/RELATIONSHIPS on the structured index; use ripgrep first for the two text modes
+    // and fall back without changing correctness when rg is unavailable or rejects the regex.
+    if (mode == RepositorySearchService.SearchMode.EXACT
+        || mode == RepositorySearchService.SearchMode.REGEX) {
+      ToolResult fast =
+          tryRipgrepTextSearch(
+              patternStr,
+              dir,
+              filePattern,
+              mode == RepositorySearchService.SearchMode.EXACT,
+              maxResults,
+              offset,
+              ctx);
+      if (fast != null) return fast;
     }
     try {
       RepositorySearchService.SearchResult structured =
@@ -204,12 +237,13 @@ public class SearchFilesTool implements Tool {
                   : "")
           .append('\n');
       for (RepositorySearchService.SearchHit hit : structured.hits()) {
+        if (SensitiveWorkspacePathPolicy.isSensitive(hit.path())) continue;
         typed
             .append(hit.path())
             .append(':')
             .append(hit.line())
             .append(':')
-            .append(hit.preview())
+            .append(contextSanitizer.sanitizeOutput(hit.preview()))
             .append(
                 mode == RepositorySearchService.SearchMode.SYMBOL
                     ? " [" + hit.matchType() + "] {reason=" + hit.relevanceReason() + '}'
@@ -249,7 +283,7 @@ public class SearchFilesTool implements Tool {
       // when rg isn't on PATH, the pattern isn't valid Rust-regex, or rg errors (RL-2026-05-062).
       List<String> matches = null;
       if (ripgrepAvailable()) {
-        matches = collectViaRipgrep(patternStr, searchRoot, workspaceReal, filePattern);
+        matches = collectViaRipgrep(patternStr, searchRoot, workspaceReal, filePattern, false);
       }
       if (matches == null) {
         matches = collectViaJavaWalk(searchRoot, fileMatcher, regex, workspaceReal);
@@ -306,6 +340,9 @@ public class SearchFilesTool implements Tool {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
+            if (SensitiveWorkspacePathPolicy.isSensitive(file.toString())) {
+              return FileVisitResult.CONTINUE;
+            }
             // walkFileTree does not follow directory links, but a symlink visited as a file would
             // otherwise be opened by readAllLines. Keep the compatibility fallback subject to the
             // same workspace-realpath boundary as the structured search implementation.
@@ -332,7 +369,8 @@ public class SearchFilesTool implements Tool {
                 String line = lines.get(i);
                 if (regex.matcher(line).find()) {
                   String rel = workspaceReal.relativize(file).toString();
-                  matches.add(rel + ":" + (i + 1) + ":" + clampLine(line));
+                  matches.add(
+                      rel + ":" + (i + 1) + ":" + contextSanitizer.sanitizeOutput(clampLine(line)));
                   if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
                 }
               }
@@ -354,7 +392,11 @@ public class SearchFilesTool implements Tool {
    * leading {@code -} can't be parsed as a flag (no shell = no injection surface).
    */
   private List<String> collectViaRipgrep(
-      String patternStr, Path searchRoot, Path workspaceReal, String filePattern) {
+      String patternStr,
+      Path searchRoot,
+      Path workspaceReal,
+      String filePattern,
+      boolean fixedStrings) {
     List<String> cmd = new ArrayList<>();
     cmd.add("rg");
     cmd.add("--line-number");
@@ -362,6 +404,7 @@ public class SearchFilesTool implements Tool {
     cmd.add("--color");
     cmd.add("never");
     cmd.add("--no-messages");
+    if (fixedStrings) cmd.add("--fixed-strings");
     cmd.add("--max-count");
     cmd.add(String.valueOf(MATCH_CEILING)); // per-file cap; total still bounded below
     if (filePattern != null && !filePattern.isBlank()) {
@@ -386,15 +429,30 @@ public class SearchFilesTool implements Tool {
               .redirectErrorStream(false)
               .start();
       List<String> matches = new ArrayList<>();
+      boolean ceilingHit = false;
       try (java.io.BufferedReader r =
           new java.io.BufferedReader(
               new java.io.InputStreamReader(
                   proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
         String out;
-        while ((out = r.readLine()) != null && matches.size() < MATCH_CEILING) {
+        while ((out = r.readLine()) != null) {
+          String outputPath = out.substring(0, Math.max(0, out.indexOf(':')));
+          if (SensitiveWorkspacePathPolicy.isSensitive(outputPath)) continue;
+          out = contextSanitizer.sanitizeOutput(out);
           String parsed = toMatchLine(out);
           if (parsed != null) matches.add(parsed);
+          if (matches.size() >= MATCH_CEILING) {
+            ceilingHit = true;
+            break;
+          }
         }
+      }
+      // Do not stop reading stdout and then wait for a producer blocked on a full pipe. Once the
+      // contract ceiling is reached the remaining matches are intentionally irrelevant; terminate
+      // rg and return the bounded evidence immediately.
+      if (ceilingHit) {
+        proc.destroyForcibly();
+        return matches;
       }
       boolean done = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS);
       if (!done) {
@@ -411,6 +469,53 @@ public class SearchFilesTool implements Tool {
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
       if (proc != null) proc.destroyForcibly();
+      return null;
+    }
+  }
+
+  /** Returns null when the caller should use the structured Java fallback. */
+  private ToolResult tryRipgrepTextSearch(
+      String pattern,
+      String directory,
+      String filePattern,
+      boolean fixedStrings,
+      int pageSize,
+      int offset,
+      ExecutionContext ctx) {
+    if (!ripgrepAvailable()) return null;
+    try {
+      Path workspaceReal = ctx.workspaceRoot().toRealPath();
+      Path searchRoot =
+          (directory == null || directory.isBlank() || ".".equals(directory))
+              ? workspaceReal
+              : PathSafety.safeResolve(ctx.workspaceRoot(), directory);
+      if (!Files.exists(searchRoot)) {
+        return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "directory not found: " + directory);
+      }
+      List<String> matches =
+          collectViaRipgrep(pattern, searchRoot, workspaceReal, filePattern, fixedStrings);
+      if (matches == null) return null;
+      if (matches.isEmpty()) return ToolResult.ok("(no matches)");
+      int total = matches.size();
+      boolean ceilingHit = total >= MATCH_CEILING;
+      int from = Math.min(offset, total);
+      int to = Math.min(from + pageSize, total);
+      StringBuilder out =
+          new StringBuilder()
+              .append(total)
+              .append(ceilingHit ? "+" : "")
+              .append(" match(es); engine=ripgrep");
+      if (total > pageSize || offset > 0) {
+        out.append("; showing ").append(from + 1).append('\u2013').append(to);
+        if (to < total) {
+          out.append(" — use offset=").append(to).append(" for more, or narrow the pattern");
+        }
+      }
+      return ToolResult.ok(
+          out.append('\n').append(String.join("\n", matches.subList(from, to))).toString());
+    } catch (SecurityException e) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, e.getMessage());
+    } catch (IOException e) {
       return null;
     }
   }

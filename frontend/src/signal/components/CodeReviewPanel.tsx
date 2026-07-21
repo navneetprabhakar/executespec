@@ -54,7 +54,7 @@ export function CodeReviewPanel({
   variant,
 }: {
   projectId: string;
-  repoId?: string;
+  repoId: string;
   repoFullName: string;
   variant: Variant;
 }) {

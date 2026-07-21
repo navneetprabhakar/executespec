@@ -2,6 +2,9 @@ import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {
   adminWriteConfirmation,
@@ -18,9 +21,15 @@ export function IdeIntegrations() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [sources, setSources] = useState<string[] | null>(null);
+  // D4 — a failed integration-status read used to render every provider as
+  // "Not connected", and a failed PAT read as "No personal access tokens."
+  const [sourcesFailure, setSourcesFailure] = useState<LoadFailure | null>(null);
+  const [patsFailure, setPatsFailure] = useState<LoadFailure | null>(null);
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
+  const [pats, setPats] = useState<api.PersonalAccessTokenMeta[] | null>(null);
+  const [revokePat, setRevokePat] = useState<api.PersonalAccessTokenMeta | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -28,11 +37,23 @@ export function IdeIntegrations() {
   const loadSources = () =>
     api
       .getIntegrationStatus()
-      .then((s) => setSources(s.enabledSources ?? []))
-      .catch(() => setSources([]));
+      .then((s) => {
+        setSources(s.enabledSources ?? []);
+        setSourcesFailure(null);
+      })
+      .catch((e: unknown) => setSourcesFailure(toLoadFailure(e)));
+  const loadPats = () =>
+    api
+      .listPats()
+      .then((rows) => {
+        setPats(rows);
+        setPatsFailure(null);
+      })
+      .catch((e: unknown) => setPatsFailure(toLoadFailure(e)));
 
   useEffect(() => {
     loadSources();
+    loadPats();
     api
       .getSlackStatus()
       .then(setSlack)
@@ -143,8 +164,8 @@ export function IdeIntegrations() {
         };
       case 'bitbucket':
         return {
-          title: 'Connect Bitbucket',
-          body: 'Provide a Bitbucket workspace + repo + app password (scopes: repository, pullrequest).',
+          title: 'Connect Bitbucket Cloud',
+          body: 'Provide an Atlassian account email and a scoped Bitbucket API token. The workspace is required for the repository catalogue.',
           fields: [
             {
               name: 'workspace',
@@ -154,23 +175,15 @@ export function IdeIntegrations() {
               required: true,
             },
             {
-              name: 'repoSlug',
-              label: 'Default repo slug',
-              placeholder: 'main-repo',
-              defaultValue: user?.bitbucketRepoSlug ?? '',
-              required: true,
-            },
-            {
               name: 'username',
-              label: 'Username',
-              placeholder: 'you',
+              label: 'Atlassian account email',
+              placeholder: 'you@company.com',
               defaultValue: user?.bitbucketUsername ?? '',
               required: true,
             },
-            {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
+            {name: 'appPassword', label: 'API token', placeholder: 'ATATT…', required: true},
           ],
-          run: (v) =>
-            api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, v.repoSlug),
+          run: (v) => api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, ''),
         };
       default:
         throw new Error(`Unknown integration provider: ${String(p)}`);
@@ -287,7 +300,9 @@ export function IdeIntegrations() {
         </div>
       )}
 
-      {sources === null ? (
+      {sourcesFailure ? (
+        <LoadError failure={sourcesFailure} what='connected integrations' onRetry={loadSources} />
+      ) : sources === null ? (
         <IdeLoader label='Loading integrations…' />
       ) : (
         <div className='ide-card' style={{padding: 0}}>
@@ -322,6 +337,58 @@ export function IdeIntegrations() {
         </div>
       )}
 
+      <div className='ide-h2' style={{marginTop: 22}}>
+        CLI, OpenTUI and CI tokens
+      </div>
+      <div className='ide-sub'>
+        Revocation takes effect on the next authenticated request. Token secrets are never shown
+        again.
+      </div>
+      {patsFailure ? (
+        <LoadError failure={patsFailure} what='access tokens' onRetry={loadPats} />
+      ) : pats === null ? (
+        <IdeLoader label='Loading access tokens…' />
+      ) : pats.length === 0 ? (
+        <div className='ide-empty'>No personal access tokens.</div>
+      ) : (
+        <div className='ide-card' style={{padding: 0}}>
+          {pats.map((token, i) => (
+            <div
+              key={token.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 16px',
+                borderBottom: i < pats.length - 1 ? '1px solid var(--ide-border)' : 'none',
+              }}
+            >
+              <div style={{flex: 1, minWidth: 0}}>
+                <div style={{fontWeight: 500}}>{token.name}</div>
+                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                  {token.tokenPrefix}… · created {new Date(token.createdAt).toLocaleDateString()}
+                  {token.lastUsedAt
+                    ? ` · last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
+                    : ' · never used'}
+                </div>
+              </div>
+              <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
+                {token.revoked ? 'Revoked' : 'Active'}
+              </IdeBadge>
+              {!token.revoked && (
+                <button
+                  className='ide-btn ghost'
+                  style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
+                  onClick={() => setRevokePat(token)}
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {spec && (
         <PromptModal
           key={connect ?? 'closed'}
@@ -336,6 +403,35 @@ export function IdeIntegrations() {
           onSubmit={submitConnect}
         />
       )}
+      <ConfirmModal
+        open={!!revokePat}
+        title='Revoke access token'
+        body={
+          revokePat
+            ? `Revoke “${revokePat.name}”? Connected clients using it will stop working.`
+            : ''
+        }
+        confirmLabel='Revoke'
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          const token = revokePat;
+          if (!token) return;
+          setBusy(true);
+          setErr('');
+          try {
+            await api.revokePat(token.id);
+            setMsg(`${token.name} revoked.`);
+            setRevokePat(null);
+            await loadPats();
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Token revocation failed.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onClose={() => setRevokePat(null)}
+      />
     </div>
   );
 }
@@ -477,6 +573,7 @@ export function IdeAdmin() {
 function AdminOverview() {
   const [funnel, setFunnel] = useState<api.ActivationFunnelReport | null>(null);
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
+  const [tiersError, setTiersError] = useState('');
 
   useEffect(() => {
     api
@@ -487,7 +584,9 @@ function AdminOverview() {
     api
       .fetchTiersLifecycle()
       .then(setTiers)
-      .catch(() => {});
+      .catch((e: unknown) =>
+        setTiersError(e instanceof Error ? e.message : 'Failed to load tier configuration.'),
+      );
   }, []);
 
   const stage = (k: string) => {
@@ -518,6 +617,11 @@ function AdminOverview() {
       </div>
 
       <div className='ide-h2'>Tiers</div>
+      {tiersError && (
+        <div className='ide-card' role='alert' style={{color: 'var(--ide-red)', marginBottom: 10}}>
+          Tier configuration could not be loaded. {tiersError}
+        </div>
+      )}
       <AdminList>
         {tiers.map((t, i) => (
           <div key={t.tier} style={rowStyle(i === tiers.length - 1)}>
@@ -540,11 +644,16 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
+  const [usersFailure, setUsersFailure] = useState<LoadFailure | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
   const load = () =>
     api
       .adminListUsers()
-      .then(setUsers)
-      .catch(() => setUsers([]));
+      .then((rows) => {
+        setUsers(rows);
+        setUsersFailure(null);
+      })
+      .catch((e: unknown) => setUsersFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -583,6 +692,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (usersFailure) return <LoadError failure={usersFailure} what='users' onRetry={load} />;
   if (!users) return <IdeLoader label='Loading users…' />;
   return (
     <>
@@ -673,6 +783,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
 
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
@@ -680,8 +792,11 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const load = () =>
     api
       .adminListOrgs()
-      .then(setOrgs)
-      .catch(() => setOrgs([]));
+      .then((rows) => {
+        setOrgs(rows);
+        setOrgsFailure(null);
+      })
+      .catch((e: unknown) => setOrgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -710,6 +825,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (orgsFailure) return <LoadError failure={orgsFailure} what='orgs' onRetry={load} />;
   if (!orgs) return <IdeLoader label='Loading orgs…' />;
   return (
     <>
@@ -840,35 +956,46 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [members, setMembers] = useState<api.MemberUsage[] | null>(null);
+  const [orgs, setOrgs] = useState<api.OrgDto[]>([]);
+  const [auditOrgId, setAuditOrgId] = useState(orgId ?? '');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!orgId) {
+    setLoading(true);
+    if (orgId) {
+      Promise.allSettled([
+        api.getAnalyticsUsage('org', orgId, 30),
+        api.getAnalyticsBilling('org', orgId),
+        api.getAnalyticsMembers(orgId, 30),
+      ])
+        .then(([u, b, m]) => {
+          if (u.status === 'fulfilled') setUsage(u.value);
+          if (b.status === 'fulfilled') setBilling(b.value);
+          if (m.status === 'fulfilled') setMembers(m.value);
+        })
+        .finally(() => setLoading(false));
+    } else {
       setLoading(false);
-      return;
     }
-    Promise.allSettled([
-      api.getAnalyticsUsage('org', orgId, 30),
-      api.getAnalyticsBilling('org', orgId),
-      api.getAnalyticsMembers(orgId, 30),
-    ])
-      .then(([u, b, m]) => {
-        if (u.status === 'fulfilled') setUsage(u.value);
-        if (b.status === 'fulfilled') setBilling(b.value);
-        if (m.status === 'fulfilled') setMembers(m.value);
+    api
+      .adminListOrgs()
+      .then((items) => {
+        setOrgs(items);
+        setAuditOrgId((current) => current || items[0]?.id || '');
       })
-      .finally(() => setLoading(false));
+      .catch(() => setOrgs([]));
   }, [orgId]);
 
-  if (!orgId) return <div className='ide-empty'>No org context — analytics are org-scoped.</div>;
   if (loading) return <IdeLoader label='Loading analytics…' />;
 
   const costEntries = usage ? Object.entries(usage.costByModel || {}) : [];
   return (
     <>
-      <div className='ide-sub' style={{marginTop: -6}}>
-        Scoped to your org · last 30d.
-      </div>
+      {orgId && (
+        <div className='ide-sub' style={{marginTop: -6}}>
+          Scoped to your org · last 30d.
+        </div>
+      )}
 
       {usage && (
         <>
@@ -879,7 +1006,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
               ['Partial', String(usage.partialRuns)],
-              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(2)}`],
+              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='ide-card' style={{flex: 1, minWidth: 110}}>
                 <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
@@ -908,7 +1035,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
                 <span className='ide-mono' style={{flex: 1}}>
                   {model}
                 </span>
-                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(2)}</span>
+                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(4)}</span>
               </div>
             ))}
           </AdminList>
@@ -958,6 +1085,36 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
             ))}
           </AdminList>
         </>
+      )}
+
+      <div className='ide-h2'>Audit tenant</div>
+      <div className='ide-card'>
+        <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+          Organization
+          <select
+            className='ide-input'
+            aria-label='Usage audit organization'
+            value={auditOrgId}
+            onChange={(event) => setAuditOrgId(event.target.value)}
+          >
+            {orgs.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · {item.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 7}}>
+          SUPER_ADMIN can select any tenant. Every query remains explicitly tenant-scoped; there is
+          no accidental cross-tenant combined export.
+        </div>
+      </div>
+      {auditOrgId && (
+        <LlmUsageAuditPanel
+          key={auditOrgId}
+          orgId={auditOrgId}
+          scopeLabel={`Operator view for ${orgs.find((item) => item.id === auditOrgId)?.name || auditOrgId}`}
+        />
       )}
     </>
   );
@@ -1053,6 +1210,8 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
   const role = useAuthStore((s) => s.user?.globalRole);
   const isSuperAdmin = role === 'SUPER_ADMIN';
   const [flags, setFlags] = useState<api.FeatureFlagDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [flagsFailure, setFlagsFailure] = useState<LoadFailure | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -1060,7 +1219,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
     api
       .adminListFeatureFlags()
       .then(setFlags)
-      .catch(() => setFlags([]));
+      .catch((e: unknown) => setFlagsFailure(toLoadFailure(e)));
   }, []);
 
   function toggle(f: api.FeatureFlagDto) {
@@ -1085,6 +1244,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
       .finally(() => setBusy(null));
   }
 
+  if (flagsFailure) return <LoadError failure={flagsFailure} what='feature flags' />;
   if (flags === null) return <IdeLoader label='Loading feature flags…' />;
   return (
     <>
@@ -1290,6 +1450,8 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
 
 function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [pkgsFailure, setPkgsFailure] = useState<LoadFailure | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
 
@@ -1297,7 +1459,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
     api
       .adminListTopupPackages()
       .then(setPkgs)
-      .catch(() => setPkgs([]));
+      .catch((e: unknown) => setPkgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -1312,6 +1474,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
       .catch(bad);
   }
 
+  if (pkgsFailure) return <LoadError failure={pkgsFailure} what='top-up packages' onRetry={load} />;
   if (!pkgs) return <IdeLoader label='Loading top-up packages…' />;
   return (
     <>

@@ -12,6 +12,9 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -137,11 +140,13 @@ export function IdeApiKeys() {
 
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
   const [deepSeekKey, setDeepSeekKey] = useState('');
   const [fireworksKey, setFireworksKey] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState<UserKeyProvider | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<UserKeyProvider | null>(null);
 
   async function saveProviderKey(provider: UserKeyProvider, key: string) {
     if (!key.trim()) {
@@ -154,20 +159,53 @@ export function IdeApiKeys() {
     try {
       const v = await api.validateAiKey(provider, key.trim());
       if (v?.valid === false) throw new Error(v.message || `Invalid ${provider} key.`);
-      await api.updateAiKeySettings(
+      const updated = await api.updateAiKeySettings(
         provider === 'OPENAI' ? key.trim() : '',
         provider === 'ANTHROPIC' ? key.trim() : '',
         provider === 'GEMINI' ? key.trim() : '',
         provider === 'DEEPSEEK' ? key.trim() : '',
         provider === 'FIREWORKS' ? key.trim() : '',
       );
+      useAuthStore.setState({user: updated});
       setMsg(`${provider} key saved. Work using ${provider} now bypasses the platform cap.`);
       if (provider === 'OPENAI') setOpenaiKey('');
       if (provider === 'ANTHROPIC') setAnthropicKey('');
+      if (provider === 'GEMINI') setGeminiKey('');
       if (provider === 'DEEPSEEK') setDeepSeekKey('');
       if (provider === 'FIREWORKS') setFireworksKey('');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Save failed.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeProviderKey() {
+    if (!confirmRevoke) return;
+    const provider = confirmRevoke;
+    setBusy(provider);
+    setErr('');
+    setMsg('');
+    try {
+      await api.revokeAiKey(provider);
+      useAuthStore.setState((state) => {
+        if (!state.user) return state;
+        const field =
+          provider === 'ANTHROPIC'
+            ? 'hasAnthropicKey'
+            : provider === 'OPENAI'
+              ? 'hasOpenAiKey'
+              : provider === 'GEMINI'
+                ? 'hasGeminiKey'
+                : provider === 'DEEPSEEK'
+                  ? 'hasDeepSeekKey'
+                  : 'hasFireworksKey';
+        return {user: {...state.user, [field]: false}};
+      });
+      setMsg(`${provider} key revoked. New work can no longer use that personal credential.`);
+      setConfirmRevoke(null);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Revoke failed.');
     } finally {
       setBusy(null);
     }
@@ -216,6 +254,16 @@ export function IdeApiKeys() {
           >
             {busy === provider ? 'Validating…' : 'Save & validate'}
           </button>
+          {connected && (
+            <button
+              className='ide-btn ghost'
+              style={{flexShrink: 0, color: 'var(--ide-red)'}}
+              disabled={!canManage || busy === provider}
+              onClick={() => setConfirmRevoke(provider)}
+            >
+              Revoke
+            </button>
+          )}
         </div>
         {canManage && connected && (
           <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 6}}>
@@ -261,9 +309,20 @@ export function IdeApiKeys() {
       <div className='ide-card' style={{padding: 0}}>
         {ProviderRow('Anthropic', 'ANTHROPIC', anthropicKey, setAnthropicKey, false)}
         {ProviderRow('OpenAI', 'OPENAI', openaiKey, setOpenaiKey, false)}
+        {ProviderRow('Gemini', 'GEMINI', geminiKey, setGeminiKey, false)}
         {ProviderRow('DeepSeek', 'DEEPSEEK', deepSeekKey, setDeepSeekKey, false)}
         {ProviderRow('Fireworks', 'FIREWORKS', fireworksKey, setFireworksKey, true)}
       </div>
+      <ConfirmModal
+        open={confirmRevoke !== null}
+        title={`Revoke ${confirmRevoke || ''} key?`}
+        body='New work will immediately stop using this personal credential. Existing executions that try to reuse it will fail closed.'
+        confirmLabel='Revoke key'
+        danger
+        busy={confirmRevoke !== null && busy === confirmRevoke}
+        onClose={() => setConfirmRevoke(null)}
+        onConfirm={() => void revokeProviderKey()}
+      />
     </div>
   );
 }
@@ -275,6 +334,9 @@ export function IdeOrgMembers() {
   const tier = useAuthStore(selectNormalizedTier);
   const [org, setOrg] = useState<api.OrgDto | null>(null);
   const [members, setMembers] = useState<api.OrgMemberDto[]>([]);
+  // Distinct from "members is empty": a rejected load must never render as "No members
+  // found", which is an affirmative claim about the org we did not actually establish.
+  const [membersFailure, setMembersFailure] = useState<LoadFailure | null>(null);
   const [invites, setInvites] = useState<api.OrgInvitation[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -293,7 +355,12 @@ export function IdeOrgMembers() {
       ([o, m, i]) => {
         if (cancelled) return;
         if (o.status === 'fulfilled') setOrg(o.value);
-        if (m.status === 'fulfilled') setMembers(m.value);
+        if (m.status === 'fulfilled') {
+          setMembers(m.value);
+          setMembersFailure(null);
+        } else {
+          setMembersFailure(toLoadFailure(m.reason));
+        }
         if (i.status === 'fulfilled') setInvites(i.value);
         setLoaded(true);
       },
@@ -355,6 +422,15 @@ export function IdeOrgMembers() {
       setErr(e instanceof Error ? e.message : 'Cancel failed.');
     } finally {
       setRowBusy(null);
+    }
+  }
+
+  async function reloadMembers() {
+    try {
+      setMembers(await api.getOrgMembers());
+      setMembersFailure(null);
+    } catch (e: unknown) {
+      setMembersFailure(toLoadFailure(e));
     }
   }
 
@@ -492,6 +568,8 @@ export function IdeOrgMembers() {
       <div className='ide-h2'>Members · {members.length}</div>
       {!loaded ? (
         <IdeLoader label='Loading members…' />
+      ) : membersFailure ? (
+        <LoadError failure={membersFailure} what='members' onRetry={() => void reloadMembers()} />
       ) : members.length === 0 ? (
         <div className='ide-empty'>No members found.</div>
       ) : (
@@ -890,6 +968,7 @@ export function IdeOrgSettings() {
     fireworks: '',
   });
   const [keyBusy, setKeyBusy] = useState<string | null>(null);
+  const [confirmOrgKeyRevoke, setConfirmOrgKeyRevoke] = useState<OrgKeyProvider | null>(null);
   // F3 — per-org model-matrix overrides. `matrix` is the server view (defaults +
   // current overrides + picker options); `matrixOverrides` is the editable copy.
   const [matrix, setMatrix] = useState<api.ModelMatrixView | null>(null);
@@ -1085,6 +1164,23 @@ export function IdeOrgSettings() {
     }
   }
 
+  async function revokeOrgKey() {
+    if (!confirmOrgKeyRevoke) return;
+    const provider = confirmOrgKeyRevoke;
+    setKeyBusy(provider);
+    setErr('');
+    setMsg('');
+    try {
+      setOrg(await api.revokeOrgAiKey(provider));
+      setMsg(`${provider} org key revoked. New and resumed work will fail closed on that route.`);
+      setConfirmOrgKeyRevoke(null);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Revoke failed.');
+    } finally {
+      setKeyBusy(null);
+    }
+  }
+
   if (!orgLoaded) return <IdeLoader label='Loading org…' />;
   if (!org) {
     return (
@@ -1134,6 +1230,13 @@ export function IdeOrgSettings() {
           setSeats(next.seatCount ?? 1);
         }}
       />
+
+      {canEdit && (
+        <LlmUsageAuditPanel
+          orgId={org.id}
+          scopeLabel={`Tenant-only view for ${org.name || org.id}`}
+        />
+      )}
 
       {/* ── Profile ── */}
       <div className='ide-h2'>Profile</div>
@@ -1390,6 +1493,16 @@ export function IdeOrgSettings() {
               >
                 {keyBusy === row.provider ? 'Saving…' : 'Save'}
               </button>
+              {row.connected && (
+                <button
+                  className='ide-btn ghost'
+                  style={{flexShrink: 0, color: 'var(--ide-red)'}}
+                  disabled={!canEdit || keyBusy === row.provider}
+                  onClick={() => setConfirmOrgKeyRevoke(row.provider)}
+                >
+                  Revoke
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -1790,6 +1903,16 @@ export function IdeOrgSettings() {
         busy={matrixBusy}
         onClose={() => setConfirmMatrixSave(false)}
         onConfirm={saveMatrix}
+      />
+      <ConfirmModal
+        open={confirmOrgKeyRevoke !== null}
+        title={`Revoke ${confirmOrgKeyRevoke || ''} org key?`}
+        body='This removes the credential for every member. New work and resumed executions using that route will fail closed until a replacement key is saved.'
+        confirmLabel='Revoke org key'
+        danger
+        busy={confirmOrgKeyRevoke !== null && keyBusy === confirmOrgKeyRevoke}
+        onClose={() => setConfirmOrgKeyRevoke(null)}
+        onConfirm={() => void revokeOrgKey()}
       />
     </div>
   );

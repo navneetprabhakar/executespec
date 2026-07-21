@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -117,9 +118,7 @@ public class ApiTestSuiteAgent {
         new Prompt(
             List.of(
                 new SystemMessage(system),
-                new UserMessage(
-                    "Generate OpenAPI 3.0 YAML for these backend API source files:\n\n"
-                        + controllerContent)));
+                new UserMessage(PromptTrustBoundary.wrap("API_SOURCE_FILES", controllerContent))));
 
     var llmResponse =
         llmRouter.callText(
@@ -156,7 +155,18 @@ public class ApiTestSuiteAgent {
     // This prevents a retried worker's `git add .` from accidentally staging
     // the untracked file onto a task branch, which would cause merge conflicts
     // or silently overwrite the spec during subsequent retry merges.
-    gitTool.commitIfDirty(runId, "chore: update api-docs/openapi.yaml [auto]");
+    //
+    // RR-1283 — stage ONLY the generated spec. The run workspace is shared with concurrently
+    // running post-merge agents, so a whole-workspace `git add -A` here could sweep another
+    // agent's half-written or rejected output into a commit labelled "update openapi.yaml".
+    var commit =
+        gitTool.commitPaths(
+            runId, "chore: update api-docs/openapi.yaml [auto]", List.of("api-docs/openapi.yaml"));
+    if (!commit.persisted()) {
+      log.warn(
+          "ApiTestSuiteAgent: OpenAPI spec not committed for run {} — {}", runId, commit.detail());
+      return;
+    }
 
     stateStore.markApiSpecReady(runId);
     broadcaster.emit(runId, RunEvent.apiSpecReady(runId));

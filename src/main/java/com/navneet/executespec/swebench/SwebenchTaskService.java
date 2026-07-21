@@ -18,9 +18,10 @@ import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -56,8 +57,8 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>{@link #onRunStarted} fires synchronously, performs docker pull → cp /testbed → run with
  *       bind-mount.
  *   <li>Async pipeline runs the worker against the bind-mounted /testbed.
- *   <li>{@link #captureOnTerminalAsync} polls until terminal, then captures the patch + writes
- *       preds.json.
+ *   <li>The dedicated benchmark-capture executor calls {@link #captureOnTerminal}, which polls
+ *       until terminal, then captures the patch + writes preds.json.
  * </ol>
  */
 @Service
@@ -73,6 +74,8 @@ public class SwebenchTaskService {
   private final RunOrchestrator orchestrator;
   private final PipelineRunRepository runRepo;
   private final AgentProperties agentProps;
+
+  @Qualifier("benchmarkCaptureExecutor") private final TaskExecutor captureExecutor;
 
   /**
    * ThreadLocal stash for the in-flight setup recipe. Set in {@link #submit} before {@code
@@ -322,14 +325,17 @@ public class SwebenchTaskService {
     Path workspaceHost =
         Paths.get(agentProps.getWorkspace(), run.getRunId()).toAbsolutePath().normalize();
 
-    captureOnTerminalAsync(run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+    Runnable capture =
+        () ->
+            captureOnTerminal(run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
+    captureExecutor.execute(
+        io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll().wrap(capture));
 
     return new TaskSubmitResult(
         run.getRunId(), instanceId, containerName, workspaceHost, outputDir);
   }
 
-  @Async
-  protected void captureOnTerminalAsync(
+  protected void captureOnTerminal(
       String runId, String instanceId, String containerName, Path workspaceHost, Path outputDir) {
     Instant deadline = Instant.now().plus(Duration.ofMinutes(props.getTaskWallTimeoutMinutes()));
     try {

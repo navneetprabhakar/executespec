@@ -11,6 +11,7 @@ import {IdeCommandPalette, usePaletteHotkey, type PaletteCmd, statusKind} from '
 import {PlanGateIndicator} from '@/ide/PlanGateIndicator';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {AnnouncementBanner} from './AnnouncementBanner';
+import {requestNewAgentSession} from '@/ide/agentSessionActions';
 import {
   WorkspaceIcon,
   RunsIcon,
@@ -53,6 +54,22 @@ function projectLabel(p: api.ProjectDto): string {
   return (p.name || p.id).slice(0, 48);
 }
 
+/** Label for a sandbox session's server-reported latest linked run. */
+function sandboxLabel(s: api.AgentSessionResponse): string {
+  return (s.latestLinkedRunTitle || s.title || s.latestLinkedRunId || s.id).slice(0, 48);
+}
+
+/**
+ * The newest agent session that actually linked a run. Session order from the
+ * API is newest-first; a session with no linked run is not a sandbox the
+ * operator can open.
+ */
+function latestSandboxSession(
+  sessions: api.AgentSessionResponse[],
+): api.AgentSessionResponse | null {
+  return sessions.find((s) => !!s.latestLinkedRunId) ?? null;
+}
+
 export default function ConsoleShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -65,7 +82,15 @@ export default function ConsoleShell() {
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const [apiError, setApiError] = useState(false);
+  // RR-1655 — the three shell loaders used to share one `apiError` boolean and leave their
+  // state at `[]`/`0` on failure, so a projects-only read failure rendered the affirmative
+  // "you have none" copy ("No work yet", the empty-projects "New project" affordance) for a
+  // user who may well have both, while any single failure raised the workspace-wide banner
+  // over two rails that had rendered real data. Each source now tracks its own outcome.
+  const [runsFailed, setRunsFailed] = useState(false);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const [unreadFailed, setUnreadFailed] = useState(false);
+  const apiError = runsFailed || projectsFailed || unreadFailed;
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('es:nav:collapsed') === '1',
   );
@@ -77,7 +102,9 @@ export default function ConsoleShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  const [agentSessions, setAgentSessions] = useState<api.AgentSessionResponse[]>([]);
   const [unread, setUnread] = useState(0);
+  const latestSandbox = latestSandboxSession(agentSessions);
 
   usePaletteHotkey(setPaletteOpen);
 
@@ -86,27 +113,46 @@ export default function ConsoleShell() {
   const refreshRuns = useCallback(() => {
     api
       .getRuns({size: 6})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setApiError(true));
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailed(false);
+      })
+      .catch(() => setRunsFailed(true));
   }, []);
   // Unread notification count for the top-bar bell (founder report #2) — same cadence.
   const refreshUnread = useCallback(() => {
     api
       .getUnreadCount()
-      .then((r) => setUnread(r.count ?? 0))
-      .catch(() => setApiError(true));
+      .then((r) => {
+        setUnread(r.count ?? 0);
+        setUnreadFailed(false);
+      })
+      .catch(() => setUnreadFailed(true));
   }, []);
   const refreshProjects = useCallback(() => {
     api
       .getProjects()
-      .then((items) => setProjects(items.filter((p) => !p.archivedAt)))
-      .catch(() => setApiError(true));
+      .then((items) => {
+        setProjects(items.filter((p) => !p.archivedAt));
+        setProjectsFailed(false);
+      })
+      .catch(() => setProjectsFailed(true));
+  }, []);
+  // Sandbox sessions back the "latest sandbox" command. This is a secondary
+  // palette affordance, so a failure must stay silent rather than raise the
+  // shell-wide API error banner.
+  const refreshAgentSessions = useCallback(() => {
+    api
+      .listAgentSessions(20)
+      .then(setAgentSessions)
+      .catch(() => setAgentSessions([]));
   }, []);
   useEffect(() => {
     refreshRuns();
     refreshUnread();
     refreshProjects();
-  }, [refreshRuns, refreshUnread, refreshProjects]);
+    refreshAgentSessions();
+  }, [refreshRuns, refreshUnread, refreshProjects, refreshAgentSessions]);
   useEffect(() => {
     const id = window.setInterval(() => {
       if (!document.hidden) {
@@ -121,7 +167,8 @@ export default function ConsoleShell() {
     refreshRuns();
     refreshUnread();
     refreshProjects();
-  }, [location.pathname, refreshRuns, refreshUnread, refreshProjects]);
+    refreshAgentSessions();
+  }, [location.pathname, refreshRuns, refreshUnread, refreshProjects, refreshAgentSessions]);
 
   // C2 — route-derived tab titles; C4 — focus the content region on navigation.
   useEffect(() => {
@@ -206,9 +253,16 @@ export default function ConsoleShell() {
     path.startsWith('/plan') ||
     path.startsWith('/live') ||
     path.startsWith('/result');
+  // On /agent the primary CTA must actually create a sandbox session. It used
+  // to navigate to /agent while already on /agent, which is a no-op that reads
+  // as a broken button. Navigation is transport, not creation.
+  const startSandbox = useCallback(() => {
+    requestNewAgentSession({});
+    if (!location.pathname.startsWith('/agent')) navigate('/agent');
+  }, [location.pathname, navigate]);
   const primaryCta = path.startsWith('/agent')
-    ? {label: 'Sandbox', title: 'Start a remote sandbox', path: '/agent'}
-    : {label: 'Start', title: 'Start work', path: '/compose'};
+    ? {label: 'Sandbox', title: 'Start a remote sandbox', run: startSandbox}
+    : {label: 'Start', title: 'Start work', run: () => navigate('/compose')};
   const shellClasses = [
     'ide-root',
     'con-root',
@@ -260,7 +314,7 @@ export default function ConsoleShell() {
       id: 'agent-new-sandbox',
       label: 'Agent: New remote sandbox',
       hint: 'sandbox',
-      run: () => navigate('/agent'),
+      run: startSandbox,
     },
     {
       id: 'agent-approvals',
@@ -271,8 +325,16 @@ export default function ConsoleShell() {
     {
       id: 'agent-latest-sandbox',
       label: 'Agent: Open latest sandbox',
-      hint: runs[0] ? runLabel(runs[0]) : 'none',
-      run: () => navigate(runs[0] ? `/result/${runs[0].runId}` : '/agent'),
+      // Server-owned truth. `runs[0]` is the newest run of ANY origin, so this
+      // command used to open a run the sandbox never touched. `latestLinkedRun*`
+      // on the agent-session read model is the run actually linked to a sandbox.
+      hint: latestSandbox ? sandboxLabel(latestSandbox) : 'none',
+      run: () =>
+        navigate(
+          latestSandbox?.latestLinkedRunId
+            ? `/result/${latestSandbox.latestLinkedRunId}`
+            : '/agent',
+        ),
     },
     {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
@@ -342,7 +404,7 @@ export default function ConsoleShell() {
         <button
           type='button'
           className='con-newrun'
-          onClick={() => navigate(primaryCta.path)}
+          onClick={primaryCta.run}
           title={primaryCta.title}
         >
           <PlusIcon size={15} />
@@ -429,10 +491,11 @@ export default function ConsoleShell() {
             type='button'
             className='con-api-error-retry'
             onClick={() => {
-              setApiError(false);
-              refreshRuns();
-              refreshUnread();
-              refreshProjects();
+              // Retry only the sources that actually failed; a successful reload clears
+              // its own flag, and the banner disappears once none remain set.
+              if (runsFailed) refreshRuns();
+              if (unreadFailed) refreshUnread();
+              if (projectsFailed) refreshProjects();
             }}
           >
             Retry
@@ -512,9 +575,14 @@ export default function ConsoleShell() {
               <RunsIcon size={12} />
               Recent work
               <span style={{flex: 1}} />
-              <span className='con-side-count'>{runs.length}</span>
+              <span className='con-side-count'>{runsFailed ? '—' : runs.length}</span>
             </summary>
-            {runs.length === 0 ? (
+            {runsFailed && runs.length === 0 ? (
+              // RR-1655 — never claim the account has no work when the read failed.
+              <button type='button' className='con-side-empty' onClick={refreshRuns}>
+                Couldn&apos;t load recent work — retry
+              </button>
+            ) : runs.length === 0 ? (
               <div className='con-side-empty'>No work yet</div>
             ) : (
               runs.slice(0, 5).map((r) => (
@@ -537,9 +605,15 @@ export default function ConsoleShell() {
               <ProjectsIcon size={12} />
               Projects
               <span style={{flex: 1}} />
-              <span className='con-side-count'>{projects.length}</span>
+              <span className='con-side-count'>{projectsFailed ? '—' : projects.length}</span>
             </summary>
-            {projects.length === 0 ? (
+            {projectsFailed && projects.length === 0 ? (
+              // RR-1655 — offering "New project" as the only affordance told a user with
+              // projects that they had none. Retry the read instead.
+              <button type='button' className='con-side-empty' onClick={refreshProjects}>
+                Couldn&apos;t load projects — retry
+              </button>
+            ) : projects.length === 0 ? (
               <button type='button' className='con-runitem' onClick={() => navigate('/projects')}>
                 <PlusIcon size={13} />
                 <span className='con-runitem-label'>New project</span>

@@ -33,7 +33,11 @@ public class TerminalBenchController {
    * Terminal-Bench floor uses the service's benchmark default.
    */
   public record StartRequest(
-      String instruction, String provider, String model, Integer maxIterations) {}
+      String instruction,
+      String provider,
+      String model,
+      Integer maxIterations,
+      Long absoluteDeadlineEpochMs) {}
 
   @PostMapping("/start")
   public StartResult start(
@@ -50,7 +54,16 @@ public class TerminalBenchController {
     if (body.model() == null || body.model().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model required");
     }
-    return service.start(
-        userDetails, body.instruction(), body.provider(), body.model(), body.maxIterations());
+    try {
+      return service.start(
+          userDetails,
+          body.instruction(),
+          body.provider(),
+          body.model(),
+          body.maxIterations(),
+          body.absoluteDeadlineEpochMs());
+    } catch (IllegalArgumentException invalidDeadline) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalidDeadline.getMessage());
+    }
   }
 }

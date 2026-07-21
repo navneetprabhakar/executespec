@@ -43,6 +43,7 @@ class EditFileToolTest {
         new EditFileTool(
             new FileSandboxPolicy(),
             new CodeAbuseScanner(),
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
             mock(SseBroadcaster.class),
             readState,
             null);
@@ -129,5 +130,21 @@ class EditFileToolTest {
     assertThat(r).isInstanceOf(ToolResult.Err.class);
     assertThat(((ToolResult.Err) r).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
     assertThat(Files.readString(f)).isEqualTo("echo safe\n");
+  }
+
+  @Test
+  void generated_secret_scan_blocks_credential_edit_without_echoing_or_writing()
+      throws IOException {
+    Path f = writeAndRead("config.env", "API_KEY=replace_me\n");
+    String credential = "sk-ant-" + "a".repeat(40);
+
+    ToolResult r =
+        tool.execute(
+            args("config.env", new String[] {"API_KEY=replace_me", "API_KEY=" + credential}), ctx);
+
+    assertThat(r).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) r).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(((ToolResult.Err) r).message()).doesNotContain(credential);
+    assertThat(Files.readString(f)).isEqualTo("API_KEY=replace_me\n");
   }
 }

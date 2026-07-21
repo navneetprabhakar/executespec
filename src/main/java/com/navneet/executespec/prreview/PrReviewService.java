@@ -2,32 +2,36 @@ package com.navneet.executespec.prreview;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import jakarta.annotation.PreDestroy;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.prreview.entity.PrReview;
 import com.navneet.executespec.prreview.entity.PrReviewComment;
 import com.navneet.executespec.prreview.repository.PrReviewCommentRepository;
 import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.reviewjob.ReviewBackgroundJobStore;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -38,8 +42,8 @@ import lombok.extern.slf4j.Slf4j;
  * <ol>
  *   <li>Tier-gate: caller must be PRO / TEAM / MAX / ENTERPRISE; FREE blocked.
  *   <li>Quota-gate: per-tier monthly cap (PRO=10, TEAM/MAX/ENTERPRISE=unlimited).
- *   <li>Idempotency: if a review for (repo, pr, head_sha) already exists in COMPLETE status, return
- *       the existing row instead of re-running.
+ *   <li>Idempotency: if a review for (project, immutable repo id, PR, head SHA) already exists in
+ *       COMPLETE status, return the existing row instead of re-running.
  *   <li>Persist a row in {@code QUEUED} status.
  *   <li>Submit the actual review work to a small dedicated executor pool — async, doesn't block the
  *       controller. Status flips QUEUED → RUNNING → COMPLETE / FAILED with SSE events at each
@@ -52,7 +56,6 @@ import lombok.extern.slf4j.Slf4j;
  * endpoint subscribes to this channel for live progress.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PrReviewService {
 
@@ -65,28 +68,74 @@ public class PrReviewService {
   private final AppUserRepository userRepo;
   private final TierConfigRepository tierConfigRepo;
   private final ProjectProviderResolver projectProviderResolver;
+  private final ReviewBackgroundJobStore reviewJobStore;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final ModelResolver modelResolver;
+  private final ProjectRepository projectRepository;
+  private final ObjectMapper objectMapper;
 
-  /**
-   * Dedicated executor for PR-review dispatch — sized {@code clamp(4, 12, cores × 2)}. Scoped
-   * narrow because the agent path is a single LLM call (~10-90s) and we want the controller to
-   * return 202 immediately. The 2× multiplier reflects PR reviews being bursty (multiple reviewers
-   * click at once after a CI run); a 4-core dev VM still gets 8 threads, a small CI agent gets 4.
-   * Drains on @PreDestroy so a JVM shutdown doesn't lose in-flight reviews silently.
-   */
-  private final ExecutorService pool =
-      Executors.newFixedThreadPool(
-          com.navneet.executespec.util.PoolSizing.coreMultiple(2, 4, 12),
-          r -> {
-            Thread t = new Thread(r, "pr-review-dispatch");
-            t.setDaemon(true);
-            return t;
-          });
-
-  @PreDestroy
-  void shutdown() {
-    pool.shutdown();
-    log.info("PrReviewService dispatch pool shutdown signaled");
+  @Autowired
+  public PrReviewService(
+      PrReviewRepository reviewRepo,
+      PrReviewCommentRepository commentRepo,
+      PrReviewAgent agent,
+      GitHubRepoService github,
+      RunCostTracker costTracker,
+      SseBroadcaster broadcaster,
+      AppUserRepository userRepo,
+      TierConfigRepository tierConfigRepo,
+      ProjectProviderResolver projectProviderResolver,
+      ReviewBackgroundJobStore reviewJobStore,
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      ModelResolver modelResolver,
+      ProjectRepository projectRepository,
+      ObjectMapper objectMapper) {
+    this.reviewRepo = reviewRepo;
+    this.commentRepo = commentRepo;
+    this.agent = agent;
+    this.github = github;
+    this.costTracker = costTracker;
+    this.broadcaster = broadcaster;
+    this.userRepo = userRepo;
+    this.tierConfigRepo = tierConfigRepo;
+    this.projectProviderResolver = projectProviderResolver;
+    this.reviewJobStore = reviewJobStore;
+    this.executionPolicyFactory = executionPolicyFactory;
+    this.modelResolver = modelResolver;
+    this.projectRepository = projectRepository;
+    this.objectMapper = objectMapper;
   }
+
+  /** Source-compatible constructor retained for narrow legacy unit tests. */
+  PrReviewService(
+      PrReviewRepository reviewRepo,
+      PrReviewCommentRepository commentRepo,
+      PrReviewAgent agent,
+      GitHubRepoService github,
+      RunCostTracker costTracker,
+      SseBroadcaster broadcaster,
+      AppUserRepository userRepo,
+      TierConfigRepository tierConfigRepo,
+      ProjectProviderResolver projectProviderResolver) {
+    this(
+        reviewRepo,
+        commentRepo,
+        agent,
+        github,
+        costTracker,
+        broadcaster,
+        userRepo,
+        tierConfigRepo,
+        projectProviderResolver,
+        null,
+        null,
+        null,
+        null,
+        new ObjectMapper());
+  }
+
+  /** No service-owned queue remains; retained as a no-op for source compatibility. */
+  void shutdown() {}
 
   /**
    * Validates that the supplied user is on a paid tier with the {@code pr_review_enabled} feature
@@ -133,13 +182,18 @@ public class PrReviewService {
    * one is returned so the caller can subscribe to its progress.
    *
    * @param projectId project the PR belongs to (for dashboard scoping)
-   * @param repoFullName e.g. "pplai-app/pplai-api"
+   * @param repoId canonical linked repository id admitted by the controller
+   * @param repoFullName canonical repository full name from the durable repo row
    * @param prNumber PR number
    * @param user the requesting user (must be paid-tier; tier check fires before this is called)
    * @return persisted {@link PrReview} row in QUEUED / RUNNING / COMPLETE state
    */
   @Transactional
-  public PrReview submitReview(String projectId, String repoFullName, int prNumber, AppUser user) {
+  public PrReview submitReview(
+      String projectId, UUID repoId, String repoFullName, int prNumber, AppUser user) {
+    if (repoId == null) {
+      throw new IllegalArgumentException("repoId is required");
+    }
     String pat = user == null ? null : user.getGithubPat();
     GitHubRepoService.PullRequestSnapshot snap =
         github.getPullRequestSnapshot(repoFullName, prNumber, pat, 200_000);
@@ -156,20 +210,18 @@ public class PrReviewService {
 
     // Idempotency — if a recent review exists for this exact head SHA, return it.
     var existing =
-        reviewRepo.findByRepoFullNameAndPrNumberAndHeadSha(repoFullName, prNumber, headSha);
+        reviewRepo.findByProjectIdAndRepoIdAndPrNumberAndHeadSha(
+            projectId, repoId, prNumber, headSha);
     if (existing.isPresent()) {
       PrReview r = existing.get();
-      if ("COMPLETE".equals(r.getStatus()) || "RUNNING".equals(r.getStatus())) {
-        log.info(
-            "PrReview idempotent re-use review={} status={} for repo={} pr=#{} sha={}",
-            r.getId(),
-            r.getStatus(),
-            repoFullName,
-            prNumber,
-            headSha);
-        return r;
-      }
-      // FAILED or QUEUED but never picked up — re-queue this row.
+      log.info(
+          "PrReview idempotent re-use review={} status={} for repo={} pr=#{} sha={}",
+          r.getId(),
+          r.getStatus(),
+          repoFullName,
+          prNumber,
+          headSha);
+      return r;
     }
 
     final String headShaForBuilder = headSha;
@@ -178,11 +230,13 @@ public class PrReviewService {
             () ->
                 PrReview.builder()
                     .projectId(projectId)
+                    .repoId(repoId)
                     .repoFullName(repoFullName)
                     .prNumber(prNumber)
                     .headSha(headShaForBuilder)
                     .build());
     row.setRepoFullName(repoFullName);
+    row.setRepoId(repoId);
     row.setPrNumber(prNumber);
     row.setHeadSha(headSha);
     row.setProjectId(projectId);
@@ -196,43 +250,129 @@ public class PrReviewService {
     String channel = "pr-review-" + saved.getId();
     broadcaster.emit(channel, RunEvent.runStatus(channel, "QUEUED"));
 
-    final UUID reviewId = saved.getId();
-    final GitHubRepoService.PullRequestSnapshot snapshotForDispatch = snap;
-    final String headShaForDispatch = headSha;
-    pool.submit(
-        () -> {
-          try {
-            runReview(
-                reviewId,
-                projectId,
-                repoFullName,
-                prNumber,
-                headShaForDispatch,
-                snapshotForDispatch);
-          } catch (Throwable t) {
-            // Per-row safety net — never let the dispatch thread die silently.
-            log.error("PrReview dispatch threw for review={}", reviewId, t);
-            failReview(reviewId, "dispatch error: " + t.getMessage());
-          }
-        });
+    var project = projectRepository.findById(projectId).orElseThrow();
+    LlmProvider provider = projectProviderResolver.resolve(projectId);
+    String model = modelResolver.resolve("PrReviewAgent", provider).getModel();
+    String actorUserId = user == null ? null : user.getId();
+    LlmExecutionReference reference =
+        executionPolicyFactory.forProject(
+            projectId,
+            "pr-review",
+            "PR_REVIEW",
+            saved.getId().toString(),
+            saved.getId().toString(),
+            provider.name(),
+            model,
+            actorUserId);
+    try {
+      String payload =
+          objectMapper.writeValueAsString(
+              Map.of(
+                  "repoFullName", repoFullName,
+                  "prNumber", prNumber,
+                  "headSha", headSha,
+                  "snapshot", snap));
+      reviewJobStore.createOrGet(
+          new ReviewBackgroundJobStore.Job(
+              UUID.randomUUID(),
+              ReviewBackgroundJobStore.Type.PR_REVIEW,
+              saved.getId(),
+              projectId,
+              project.getOrgId(),
+              repoId,
+              actorUserId,
+              "pr-review:" + projectId + ":" + repoId + ":" + prNumber + ":" + headSha,
+              provider.name(),
+              model,
+              reference.contextId(),
+              reference.scope().mode().name(),
+              reference.scope().orgId(),
+              payload,
+              null,
+              null,
+              ReviewBackgroundJobStore.Status.QUEUED,
+              0,
+              3,
+              Instant.now(),
+              null,
+              0,
+              null,
+              null,
+              null,
+              null,
+              null,
+              Instant.now(),
+              null,
+              null));
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new IllegalStateException("could not encode PR review job", impossible);
+    }
     return saved;
+  }
+
+  /** Executes a V299 job without re-fetching a mutable PR or rebuilding its LLM route. */
+  public DurablePrReviewResult runDurableJob(
+      ReviewBackgroundJobStore.Lease lease,
+      String repoFullName,
+      int prNumber,
+      String headSha,
+      GitHubRepoService.PullRequestSnapshot snapshot,
+      Runnable checkpoint) {
+    ReviewBackgroundJobStore.Job job = lease.job();
+    AppUser actor =
+        userRepo
+            .findById(job.requestedByUserId())
+            .orElseThrow(() -> new IllegalStateException("review actor no longer exists"));
+    var scope =
+        new com.navneet.executespec.executioncontext.LlmExecutionScope(
+            com.navneet.executespec.executioncontext.LlmExecutionScope.ScopeMode.valueOf(
+                job.executionScopeMode()),
+            job.executionScopeOrgId());
+    LlmProvider provider = LlmProvider.valueOf(job.provider());
+    java.util.concurrent.atomic.AtomicReference<DurablePrReviewResult> result =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    RunModelOverrides.runWith(
+        RunModelOverrides.withRunPin(Map.of(), provider, job.model()),
+        () ->
+            result.set(
+                runReview(
+                    lease,
+                    repoFullName,
+                    prNumber,
+                    headSha,
+                    snapshot,
+                    provider,
+                    job.model(),
+                    actor.getId(),
+                    new LlmExecutionReference(job.executionContextId(), scope),
+                    checkpoint)));
+    return result.get();
   }
 
   /**
    * Background runner — invoked from {@link #submitReview} on the dispatch pool. Owns the QUEUED →
    * RUNNING → COMPLETE/FAILED transitions + persists comments.
    */
-  void runReview(
-      UUID reviewId,
-      String projectId,
+  DurablePrReviewResult runReview(
+      ReviewBackgroundJobStore.Lease lease,
       String repoFullName,
       int prNumber,
       String headSha,
-      GitHubRepoService.PullRequestSnapshot snap) {
+      GitHubRepoService.PullRequestSnapshot snap,
+      LlmProvider pinnedProvider,
+      String pinnedModel,
+      String actorUserId,
+      LlmExecutionReference executionReference,
+      Runnable checkpoint) {
+    UUID reviewId = lease.job().subjectId();
+    String projectId = lease.job().projectId();
     String channel = "pr-review-" + reviewId;
     long start = System.currentTimeMillis();
+    checkpoint.run();
 
-    markRunning(reviewId);
+    if (!reviewJobStore.updatePrReviewStatus(lease, "RUNNING")) {
+      throw new ReviewBackgroundJobStore.LeaseFencedException();
+    }
     broadcaster.emit(channel, RunEvent.runStatus(channel, "RUNNING"));
     broadcaster.emit(
         channel,
@@ -253,13 +393,13 @@ public class PrReviewService {
 
     PrReview row = reviewRepo.findById(reviewId).orElse(null);
     if (row == null) {
-      log.warn("PrReview row {} vanished mid-dispatch", reviewId);
-      return;
+      throw new IllegalStateException("PR review row vanished mid-dispatch");
     }
-    String aiProvider = projectProviderResolver.resolve(projectId).name().toLowerCase();
+    String aiProvider = pinnedProvider.name().toLowerCase();
     PrReviewAgent.AgentRequest agentReq =
         PrReviewAgent.AgentRequest.builder()
             .prReviewId(reviewId.toString())
+            .projectId(projectId)
             .repoFullName(repoFullName)
             .prNumber(prNumber)
             .headSha(headSha)
@@ -272,30 +412,49 @@ public class PrReviewService {
             .deletions(snap == null ? 0 : snap.deletions())
             .diff(snap == null ? "" : snap.diffPreview())
             .provider(aiProvider)
+            .model(pinnedModel)
+            .actorUserId(actorUserId)
+            .executionReference(executionReference)
             .build();
 
     final PrReviewAgent.AgentReview result;
     try {
       result = agent.review(agentReq);
+      checkpoint.run();
     } catch (Exception e) {
       log.warn("PrReview agent failed review={}: {}", reviewId, e.getMessage());
-      failReview(reviewId, "agent: " + e.getMessage());
       broadcaster.emit(
           channel, RunEvent.log(channel, "review", "❌ Agent failed: " + e.getMessage()));
-      broadcaster.emit(channel, RunEvent.complete(channel, "FAILED", "agent failed"));
-      return;
+      throw new IllegalStateException("agent failed", e);
     }
 
-    // Persist comments + cost in one transaction.
-    completeReview(reviewId, result, System.currentTimeMillis() - start);
+    return new DurablePrReviewResult(result, System.currentTimeMillis() - start);
+  }
+
+  /** Locks the V299 fence and publishes comments/result + terminal job state atomically. */
+  @Transactional
+  public void publishDurableResult(
+      ReviewBackgroundJobStore.Lease lease, DurablePrReviewResult durableResult) {
+    reviewJobStore.requireLiveLeaseForUpdate(lease);
+    completeReview(
+        lease.job().subjectId(), durableResult.agentReview(), durableResult.durationMs());
+    if (!reviewJobStore.complete(lease)) throw new ReviewBackgroundJobStore.LeaseFencedException();
+    String channel = "pr-review-" + lease.job().subjectId();
     broadcaster.emit(
         channel,
         RunEvent.log(
             channel,
             "review",
-            "✅ Verdict: " + result.verdict() + " · " + result.comments().size() + " comments"));
-    broadcaster.emit(channel, RunEvent.complete(channel, "COMPLETE", result.verdict()));
+            "✅ Verdict: "
+                + durableResult.agentReview().verdict()
+                + " · "
+                + durableResult.agentReview().comments().size()
+                + " comments"));
+    broadcaster.emit(
+        channel, RunEvent.complete(channel, "COMPLETE", durableResult.agentReview().verdict()));
   }
+
+  public record DurablePrReviewResult(PrReviewAgent.AgentReview agentReview, long durationMs) {}
 
   @Transactional
   void markRunning(UUID reviewId) {
@@ -347,32 +506,51 @@ public class PrReviewService {
     costTracker.finalizeRun("pr-review-" + reviewId);
   }
 
+  public boolean requestCancellation(UUID reviewId) {
+    var job = reviewJobStore.requestCancellation(ReviewBackgroundJobStore.Type.PR_REVIEW, reviewId);
+    if (job.isEmpty()
+        || job.get().status().terminal()
+            && job.get().status() != ReviewBackgroundJobStore.Status.CANCELLED) {
+      return false;
+    }
+    return true;
+  }
+
   @Transactional
-  void failReview(UUID reviewId, String reason) {
+  public boolean retryReview(UUID reviewId) {
+    var job = reviewJobStore.retry(ReviewBackgroundJobStore.Type.PR_REVIEW, reviewId);
+    if (job.isEmpty() || job.get().status() != ReviewBackgroundJobStore.Status.QUEUED) return false;
     reviewRepo
         .findById(reviewId)
         .ifPresent(
-            r -> {
-              r.setStatus("FAILED");
-              r.setFailureReason(reason);
-              r.setFinishedAt(Instant.now());
-              if (r.getStartedAt() != null) {
-                r.setDurationMs(ChronoUnit.MILLIS.between(r.getStartedAt(), Instant.now()));
-              }
-              reviewRepo.save(r);
+            row -> {
+              row.setStatus("QUEUED");
+              row.setFinishedAt(null);
+              row.setFailureReason(null);
+              reviewRepo.save(row);
             });
+    return true;
   }
 
   public PrReview findById(UUID id) {
     return reviewRepo.findById(id).orElse(null);
   }
 
-  public List<PrReview> findByPr(String repoFullName, int prNumber) {
-    return reviewRepo.findByRepoFullNameAndPrNumberOrderByStartedAtDesc(repoFullName, prNumber);
+  public org.springframework.data.domain.Slice<PrReview> findByPr(
+      String projectId,
+      UUID repoId,
+      int prNumber,
+      Instant since,
+      org.springframework.data.domain.Pageable pageable) {
+    return reviewRepo
+        .findByProjectIdAndRepoIdAndPrNumberAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+            projectId, repoId, prNumber, since, pageable);
   }
 
-  public List<PrReview> findByProject(String projectId) {
-    return reviewRepo.findByProjectIdOrderByStartedAtDesc(projectId);
+  public org.springframework.data.domain.Slice<PrReview> findByProject(
+      String projectId, Instant since, org.springframework.data.domain.Pageable pageable) {
+    return reviewRepo.findByProjectIdAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+        projectId, since, pageable);
   }
 
   public List<PrReviewComment> commentsFor(UUID reviewId) {

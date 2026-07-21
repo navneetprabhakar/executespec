@@ -60,7 +60,8 @@ public class ContractDriftController {
   @PostMapping("/contracts/{contractId}/check-drift")
   public ResponseEntity<DriftDetectionService.DriftCheckResult> checkContract(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     return ResponseEntity.ok(
         driftService.checkContract(contractId, parseUuidOrNull(projectId), patFor(auth)));
   }
@@ -68,7 +69,7 @@ public class ContractDriftController {
   @PostMapping("/repos/{repoId}/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkRepo(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ensureLinked(projectId, repoId);
     return ResponseEntity.ok(
         driftService.checkAllForRepo(repoId, parseUuidOrNull(projectId), patFor(auth)));
@@ -77,7 +78,7 @@ public class ContractDriftController {
   @PostMapping("/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkProject(
       @PathVariable String projectId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     List<UUID> repoIds =
         linkRepo.findByProjectId(projectId).stream().map(l -> l.getRepoId()).toList();
     return ResponseEntity.ok(
@@ -92,6 +93,7 @@ public class ContractDriftController {
         registryRepo
             .findById(contractId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract"));
+    ensureLinked(projectId, contract.getRepoId());
     ProjectRepo repo =
         projectRepoRepo
             .findById(contract.getRepoId())
@@ -102,14 +104,23 @@ public class ContractDriftController {
     }
     String pat = patFor(auth);
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
-    String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
-    if (sourceContent == null || sourceContent.startsWith("// ")) {
+    var sourceRead = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
+    // RR-1631 — failure is out-of-band now. A proto/GraphQL source file whose first line is
+    // `// Copyright …` is a successful read and stays refreshable; only a real transport/auth/
+    // missing-file failure raises here, and the response carries a code, never file bytes.
+    if (!sourceRead.successful()) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_GATEWAY, "could not read source: " + sourceContent);
+          HttpStatus.BAD_GATEWAY,
+          "could not read source: " + DriftDetectionService.describe(sourceRead));
     }
+    String sourceContent = sourceRead.content();
+    // RR-525 — contract names are source/customer-derived strings, not a constrained filename
+    // type. A name such as `../../../.github/workflows/release` would give this narrow "refresh
+    // one contract" action repository-wide write authority. Derive a bounded slug instead of
+    // interpolating the raw name, and let the folder writer re-validate the final path.
     String folderPath =
         ".executespec/contracts/produced/"
-            + contract.getName()
+            + safeContractFileSlug(contract.getName(), contract.getId().toString())
             + DriftDetectionService.extensionFor(contract.typeEnum());
     Optional<ExecutespecFolderWriter.PullRequestInfo> pr =
         folderWriter.writeFiles(
@@ -179,6 +190,7 @@ public class ContractDriftController {
       @RequestBody DismissRequest body,
       Authentication auth) {
     projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     if (body == null || body.rationale() == null || body.rationale().trim().length() < 10) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rationale required (≥10 chars)");
     }
@@ -218,8 +230,19 @@ public class ContractDriftController {
 
   private void ensureLinked(String projectId, UUID repoId) {
     if (linkRepo.findByProjectIdAndRepoId(projectId, repoId).isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "repo not linked to project");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "contract or repo not found");
     }
+  }
+
+  private void ensureContractLinked(String projectId, UUID contractId) {
+    ContractRegistry contract =
+        registryRepo
+            .findById(contractId)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "contract or repo not found"));
+    ensureLinked(projectId, contract.getRepoId());
   }
 
   private String patFor(Authentication auth) {
@@ -240,4 +263,19 @@ public class ContractDriftController {
   public record DismissResponse(int dismissedCount) {}
 
   public record RefreshResponse(String prUrl, String branchName) {}
+
+  /**
+   * RR-525 — bound a customer/source-derived contract name to a single safe path segment. Anything
+   * outside {@code [A-Za-z0-9._-]} is collapsed; leading dots, empty results and over-long names
+   * fall back to the contract's own immutable id, so the produced filename can never contain a
+   * separator, dot segment or control character.
+   */
+  static String safeContractFileSlug(String contractName, String contractId) {
+    String slug = contractName == null ? "" : contractName.replaceAll("[^A-Za-z0-9._-]", "-");
+    slug = slug.replaceAll("^[.-]+", "");
+    if (slug.length() > 100) slug = slug.substring(0, 100);
+    slug = slug.replaceAll("[.-]+$", "");
+    if (slug.isBlank()) return "contract-" + contractId;
+    return slug;
+  }
 }

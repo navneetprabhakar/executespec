@@ -7,6 +7,7 @@ import {
   isPlanTerminalStatus,
   managedAiBadgeKind,
   managedAiStatusLabel,
+  planFingerprint,
   planStatusPhrase,
 } from './planUtils';
 
@@ -14,7 +15,7 @@ describe('planUtils', () => {
   it('formats optional USD amounts for plan cards', () => {
     expect(formatPlanUsd(null)).toBe('—');
     expect(formatPlanUsd(undefined)).toBe('—');
-    expect(formatPlanUsd(1.234)).toBe('$1.23');
+    expect(formatPlanUsd(1.234)).toBe('$1.2340');
   });
 
   it('classifies statuses for auto-routing and human status copy', () => {
@@ -71,5 +72,27 @@ describe('planUtils', () => {
     expect(managedAiStatusLabel({unlimitedAiCredits: true, routingState: 'FULL'})).toBe(
       'Unlimited',
     );
+  });
+});
+
+// RR-1459 — the approval fingerprint must be the SAME function of the plan bytes that
+// RunController.planFingerprintOf computes server-side, or a legitimate approval 409s.
+describe('planFingerprint', () => {
+  it('is lowercase hex SHA-256 over the plan JSON bytes', async () => {
+    expect(await planFingerprint('abc')).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
+  });
+
+  it('distinguishes two different plans', async () => {
+    expect(await planFingerprint('{"tasks":["a"]}')).not.toBe(
+      await planFingerprint('{"tasks":["b"]}'),
+    );
+  });
+
+  it('returns undefined rather than a fabricated identity when there is no plan', async () => {
+    expect(await planFingerprint(null)).toBeUndefined();
+    expect(await planFingerprint('')).toBeUndefined();
+    expect(await planFingerprint('   ')).toBeUndefined();
   });
 });

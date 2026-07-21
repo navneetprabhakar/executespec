@@ -1,6 +1,7 @@
 package com.navneet.executespec.observability;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Component;
 
@@ -10,7 +11,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 
 /**
  * Central facade for all V2 Micrometer metrics.
@@ -44,6 +44,9 @@ import lombok.RequiredArgsConstructor;
  *       calls per tool name.
  *   <li><b>{@code executespec.v2.llm.latency}</b> (timer) — tagged {provider, model, outcome} —
  *       LlmRouter dispatch latency per provider call.
+ *   <li><b>{@code executespec.v2.llm.usage.persistence}</b> (counter) — tagged {attemptStatus,
+ *       result} — canonical per-attempt ledger write success/failure. A {@code result=failed} alert
+ *       means provider spend may not be attributable even if the customer call succeeded.
  *   <li><b>{@code executespec.v2.reviewer.verdict}</b> (counter) — tagged {verdict} — CLEAN /
  *       FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED.
  *   <li><b>{@code executespec.v2.context.save}</b> (counter) — tagged {result} — ok | skipped |
@@ -55,12 +58,36 @@ import lombok.RequiredArgsConstructor;
  * </ul>
  */
 @Component
-@RequiredArgsConstructor
 public class Metrics {
 
   public static final String NS = "executespec.v2.";
 
   private final MeterRegistry registry;
+  private final AtomicLong staleLlmUsageIntents = new AtomicLong();
+  private final AtomicLong pendingLlmUsageRecovery = new AtomicLong();
+  private final AtomicLong deadLlmUsageRecovery = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryPending = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryDead = new AtomicLong();
+  private final AtomicLong localLlmUsageRecoveryOldestSeconds = new AtomicLong();
+  private final AtomicLong llmUsageIntegrityMonitorHealthy = new AtomicLong();
+  private final AtomicLong llmUsageIntegrityMonitorLastSuccessEpoch = new AtomicLong();
+  private final AtomicLong staleQuotaRefunds = new AtomicLong();
+
+  public Metrics(MeterRegistry registry) {
+    this.registry = registry;
+    registry.gauge(NS + "llm.usage.stale_intents", staleLlmUsageIntents);
+    registry.gauge(NS + "llm.usage.recovery.pending", pendingLlmUsageRecovery);
+    registry.gauge(NS + "llm.usage.recovery.dead", deadLlmUsageRecovery);
+    registry.gauge(NS + "llm.usage.recovery.local.pending", localLlmUsageRecoveryPending);
+    registry.gauge(NS + "llm.usage.recovery.local.dead", localLlmUsageRecoveryDead);
+    registry.gauge(
+        NS + "llm.usage.recovery.local.oldest_seconds", localLlmUsageRecoveryOldestSeconds);
+    registry.gauge(NS + "llm.usage.integrity_monitor.healthy", llmUsageIntegrityMonitorHealthy);
+    registry.gauge(
+        NS + "llm.usage.integrity_monitor.last_success_epoch_seconds",
+        llmUsageIntegrityMonitorLastSuccessEpoch);
+    registry.gauge(NS + "billing.quota_refund.stale", staleQuotaRefunds);
+  }
 
   public void recordRunOutcome(String overall) {
     Counter.builder(NS + "run.outcome")
@@ -166,6 +193,72 @@ public class Metrics {
   public void recordKeySource(String provider, String source) {
     Counter.builder(NS + "llm.key_source")
         .tags(Tags.of(Tag.of("provider", nonNull(provider)), Tag.of("source", nonNull(source))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordLlmUsagePersistence(String attemptStatus, String result) {
+    Counter.builder(NS + "llm.usage.persistence")
+        .tags(
+            Tags.of(
+                Tag.of("attemptStatus", nonNull(attemptStatus)), Tag.of("result", nonNull(result))))
+        .register(registry)
+        .increment();
+  }
+
+  /** Current count of write-ahead intents whose terminal fact has not arrived before the SLA. */
+  public void recordStaleLlmUsageIntents(long count) {
+    staleLlmUsageIntents.set(Math.max(0, count));
+  }
+
+  /** Current V298 terminal-outbox backlog, split into retryable and operator-action states. */
+  public void recordLlmUsageRecoveryBacklog(long pending, long dead) {
+    pendingLlmUsageRecovery.set(Math.max(0, pending));
+    deadLlmUsageRecovery.set(Math.max(0, dead));
+  }
+
+  /** Last-resort node-local spool state; shared DB outbox remains the primary recovery path. */
+  public void recordLlmUsageLocalRecovery(long pending, long dead, long oldestSeconds) {
+    localLlmUsageRecoveryPending.set(Math.max(0, pending));
+    localLlmUsageRecoveryDead.set(Math.max(0, dead));
+    localLlmUsageRecoveryOldestSeconds.set(Math.max(0, oldestSeconds));
+  }
+
+  public void recordLlmUsageIntegrityMonitorSuccess(long epochSeconds) {
+    llmUsageIntegrityMonitorHealthy.set(1);
+    llmUsageIntegrityMonitorLastSuccessEpoch.set(Math.max(0, epochSeconds));
+  }
+
+  public void recordLlmUsageIntegrityMonitorFailure() {
+    llmUsageIntegrityMonitorHealthy.set(0);
+  }
+
+  public void recordQuotaRefundBacklog(long stale) {
+    staleQuotaRefunds.set(Math.max(0, stale));
+  }
+
+  public void recordQuotaRefundAttempt(String result) {
+    Counter.builder(NS + "billing.quota_refund.attempt")
+        .tag("result", nonNull(result))
+        .register(registry)
+        .increment();
+  }
+
+  /**
+   * Records secondary projection health after a provider has already returned successfully. These
+   * failures must be alerted/reconciled, never reclassified as provider failures or retried.
+   */
+  public void recordLlmPostSuccessProjection(String projection, String result) {
+    registry
+        .counter(
+            "executespec.v2.llm.post_success_projection",
+            Tags.of(Tag.of("projection", nonNull(projection)), Tag.of("result", nonNull(result))))
+        .increment();
+  }
+
+  public void recordLlmUsageAttribution(String result) {
+    Counter.builder(NS + "llm.usage.attribution")
+        .tag("result", nonNull(result))
         .register(registry)
         .increment();
   }

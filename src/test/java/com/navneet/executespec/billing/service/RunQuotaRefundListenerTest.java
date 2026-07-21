@@ -7,7 +7,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
-import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -17,10 +16,10 @@ import org.junit.jupiter.api.Test;
 class RunQuotaRefundListenerTest {
 
   private final StateStore stateStore = mock(StateStore.class);
-  private final TierEnforcementService tierEnforcementService = mock(TierEnforcementService.class);
-  private final UsageTrackingService usageTrackingService = mock(UsageTrackingService.class);
+  private final RunQuotaRefundStore refundStore = mock(RunQuotaRefundStore.class);
+  private final RunQuotaRefundWorker refundWorker = mock(RunQuotaRefundWorker.class);
   private final RunQuotaRefundListener listener =
-      new RunQuotaRefundListener(stateStore, tierEnforcementService, usageTrackingService);
+      new RunQuotaRefundListener(stateStore, refundStore, refundWorker);
 
   @Test
   void failedRunRefundsOneDispatchChargeNotEstimatedCreditsCharged() {
@@ -35,9 +34,8 @@ class RunQuotaRefundListenerTest {
 
     listener.onRunFailed(new PipelineEvent.RunFailed("run-1", "failed"));
 
-    verify(tierEnforcementService).decrementRunCount("user-1", 1);
-    verify(usageTrackingService).decrement("user-1", "RUNS", 1);
-    verify(tierEnforcementService, never()).decrementRunCount("user-1", 5);
+    verify(refundStore).enqueue("run-1", "user-1", 1);
+    verify(refundWorker).attempt("run-1");
   }
 
   @Test
@@ -54,13 +52,11 @@ class RunQuotaRefundListenerTest {
 
     listener.onRunFailed(new PipelineEvent.RunFailed("run-1", "partial"));
 
-    verify(tierEnforcementService, never())
-        .decrementRunCount(
-            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt());
-    verify(usageTrackingService, never())
-        .decrement(
+    verify(refundStore, never())
+        .enqueue(
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyInt());
+    verify(refundWorker, never()).attempt(org.mockito.ArgumentMatchers.anyString());
   }
 }

@@ -44,7 +44,11 @@ public class BenchmarkController {
       // RL-2026-05-066 (project-mode eval): optional per-instance project + its repo, so the run
       // gets the project's codemap/arch/RAG injected. Null/absent → blind (the bench project).
       String projectId,
-      java.util.List<String> selectedRepoIds) {}
+      java.util.List<String> selectedRepoIds,
+      Double hardCapUsd,
+      Boolean enforceHardCap,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {}
 
   /** Compatibility alias for the single benchmark codegen path. */
   @PostMapping("/run")
@@ -73,7 +77,14 @@ public class BenchmarkController {
         req.aiProvider(),
         req.modelName());
     return ResponseEntity.ok(
-        generationService.generate(req.instanceId(), req.aiProvider(), req.modelName()));
+        generationService.generate(
+            req.instanceId(),
+            req.aiProvider(),
+            req.modelName(),
+            req.hardCapUsd(),
+            req.enforceHardCap(),
+            req.absoluteDeadlineEpochMs(),
+            req.shutdownReserveMs()));
   }
 
   /** Read-only preview — what image / repo / base commit this instance resolves to. */

@@ -37,6 +37,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TechDebtService {
 
+  static final int MAX_LOOKBACK_DAYS = 366;
+  static final int MAX_REPORTS_ANALYZED = 1000;
+
   private final ValidationReportRepository reportRepo;
   private final ObjectMapper objectMapper;
 
@@ -53,15 +56,15 @@ public class TechDebtService {
       int totalRunsAnalyzed) {}
 
   public Report build(String projectId, Integer sinceDays) {
-    Instant cutoff =
-        sinceDays == null || sinceDays <= 0
-            ? Instant.EPOCH
-            : Instant.now().minus(Duration.ofDays(sinceDays));
+    int safeSinceDays =
+        Math.min(Math.max(sinceDays == null ? MAX_LOOKBACK_DAYS : sinceDays, 1), MAX_LOOKBACK_DAYS);
+    Instant cutoff = Instant.now().minus(Duration.ofDays(safeSinceDays));
 
     List<ValidationReport> reports =
-        reportRepo.findAllByProjectId(projectId).stream()
-            .filter(r -> r.getCreatedAt() != null && !r.getCreatedAt().isBefore(cutoff))
-            .toList();
+        reportRepo.findRecentByProjectId(
+            projectId,
+            cutoff,
+            org.springframework.data.domain.PageRequest.of(0, MAX_REPORTS_ANALYZED));
 
     Map<String, Integer> byCategory = new HashMap<>();
     Map<String, Integer> bySeverity = new HashMap<>();

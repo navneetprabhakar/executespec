@@ -78,6 +78,10 @@ public class BillingService {
   private final BillingStatusUsageService statusUsageService;
   private final BillingPeriodService periodService;
   private final BillingTierBridgeService tierBridgeService;
+
+  /** V310 — durable liabilities for irreversible gateway actions (RR-048, RR-049). */
+  private final BillingGatewayObligationService obligationService;
+
   private final BillingSubscriptionWriter subscriptionWriter;
   private final BillingWebhookEventRecorder webhookEventRecorder;
   private final RunTopupService runTopupService;
@@ -229,7 +233,14 @@ public class BillingService {
               checkout.sessionId());
 
       subscriptionWriter.createPending(
-          userId, user.getOrgId(), plan, "STRIPE", checkout.sessionId(), null, isFounder);
+          userId,
+          user.getOrgId(),
+          plan,
+          "STRIPE",
+          checkout.sessionId(),
+          null,
+          isFounder,
+          effectiveSeats);
 
     } else {
       // Razorpay: use legacy gateway
@@ -245,7 +256,8 @@ public class BillingService {
           "RAZORPAY",
           result.gatewaySubscriptionId(),
           result.gatewayCustomerId(),
-          isFounder);
+          isFounder,
+          effectiveSeats);
     }
 
     log.info(
@@ -726,9 +738,13 @@ public class BillingService {
   }
 
   /**
-   * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe subscription. Falls back
-   * to 1 on any error (TEAM checkout will still succeed, just with wrong seat count — webhook
-   * replay or manual reconciliation can fix later).
+   * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe subscription.
+   *
+   * <p>RR-419 follow-on: this used to return {@code 1} when the Stripe retrieve threw, and the
+   * caller wrote that straight onto {@code totalSeats}. A transient Stripe outage during the
+   * checkout webhook therefore silently collapsed a paid 20-seat TEAM subscription to a single
+   * seat. It now returns {@code 0} to mean "provider quantity unknown", and the caller keeps the
+   * checkout-requested seat count instead of overwriting it with a guess.
    */
   private int fetchStripeSubscriptionSeatCount(String stripeSubscriptionId) {
     try {
@@ -744,11 +760,12 @@ public class BillingService {
       }
     } catch (com.stripe.exception.StripeException e) {
       log.warn(
-          "Stripe seat-quantity fetch failed for subId={}, defaulting to 1: {}",
+          "Stripe seat-quantity fetch failed for subId={} — keeping the checkout-requested seat"
+              + " count: {}",
           stripeSubscriptionId,
           e.getMessage());
     }
-    return 1;
+    return 0;
   }
 
   private void handleStripeCheckoutCompleted(JsonNode session) {
@@ -848,7 +865,12 @@ public class BillingService {
     sub.setStatus("ACTIVE");
     sub.setGatewayCustomerId(stripeCustomerId);
     sub.setCurrentPeriodStart(Instant.now());
-    sub.setTotalSeats(seatQuantity);
+    // RR-419: only let the provider correct the seat count when it actually reported one.
+    // seatQuantity == 0 means the Stripe retrieve failed; the checkout-requested quantity
+    // persisted by BillingSubscriptionWriter.createPending stays authoritative.
+    if (seatQuantity > 0) {
+      sub.setTotalSeats(seatQuantity);
+    }
     AppUser checkoutUser = userRepo.findById(sub.getUserId()).orElse(null);
     if (checkoutUser != null) {
       BillingPlan checkoutPlan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
@@ -967,6 +989,66 @@ public class BillingService {
   }
 
   /**
+   * Cancel the gateway subscription that a paid upgrade supersedes.
+   *
+   * <p><b>RR-049 (double billing).</b> This used to be a bare try/catch that logged a warning and
+   * moved on; the local row was then marked {@code UPGRADED} regardless. A failed cancellation
+   * therefore left the OLD gateway subscription renewing indefinitely while ExecuteSpec displayed
+   * it as retired — the customer is charged for both plans and nothing in the system says so.
+   *
+   * <p>The intent is now committed as a durable obligation <i>before</i> the gateway call, so a
+   * failure (or a rollback of the enclosing upgrade transaction) leaves a visible, retryable work
+   * item. The upgrade still proceeds: the customer has paid for the new tier and must get it. What
+   * changed is that the unfinished cancellation is no longer invisible.
+   */
+  private void cancelSupersededSubscription(BillingSubscription existing) {
+    String gatewaySubscriptionId = existing.getGatewaySubscriptionId();
+    if (gatewaySubscriptionId == null) {
+      return;
+    }
+    String gw = existing.getPaymentGateway();
+
+    BillingGatewayObligation obligation =
+        obligationService.record(
+            BillingGatewayObligation.builder()
+                .kind(BillingGatewayObligation.KIND_CANCEL_OLD_SUBSCRIPTION)
+                .subscriptionId(existing.getId())
+                .userId(existing.getUserId())
+                .orgId(existing.getOrgId())
+                .gateway(gw)
+                .gatewayRef(gatewaySubscriptionId)
+                .detail("Cancel superseded subscription after paid upgrade")
+                .idempotencyKey(
+                    BillingGatewayObligationService.key(
+                        BillingGatewayObligation.KIND_CANCEL_OLD_SUBSCRIPTION,
+                        existing.getId(),
+                        gatewaySubscriptionId))
+                .build());
+
+    if (obligation.isConfirmed()) {
+      return;
+    }
+
+    try {
+      if ("STRIPE".equalsIgnoreCase(gw)) {
+        gatewayRouter.stripe().cancelSubscription(gatewaySubscriptionId);
+      } else {
+        razorpayGateway.cancelImmediately(gatewaySubscriptionId);
+      }
+      obligationService.markSucceeded(obligation.getId(), gatewaySubscriptionId);
+    } catch (Exception e) {
+      obligationService.markFailed(obligation.getId(), e.getMessage());
+      log.error(
+          "Old gateway subscription {} was NOT cancelled after upgrade — it may keep billing the"
+              + " customer. Outstanding obligation={}: {}",
+          gatewaySubscriptionId,
+          obligation.getId(),
+          e.getMessage(),
+          e);
+    }
+  }
+
+  /**
    * Calculate and issue a prorated refund for unused runs on the old subscription when upgrading to
    * a higher tier. Refund = (unusedRuns / totalRunLimit) × amountPaid
    */
@@ -1048,24 +1130,86 @@ public class BillingService {
             runLimit,
             refundAmount == runBasedRefund ? "runs" : "time");
 
-    try {
-      // Issue refund on payment gateway
-      String gw = existing.getPaymentGateway();
-      if ("RAZORPAY".equalsIgnoreCase(gw)
-          && razorpayGateway
-              instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
-        rpGw.refundPartial(paymentId, refundAmount, reason);
-      }
-      // Note: Stripe refunds handled via Stripe dashboard or future implementation
+    String gw = existing.getPaymentGateway();
 
-      // Generate credit note for accounting
+    // RR-048: persist the refund liability BEFORE attempting it, keyed so a retried upgrade
+    // reuses this obligation instead of refunding twice. Committed in its own transaction, so
+    // a later rollback of the upgrade cannot erase the fact that we owe this money.
+    BillingGatewayObligation obligation =
+        obligationService.record(
+            BillingGatewayObligation.builder()
+                .kind(BillingGatewayObligation.KIND_PRORATED_REFUND)
+                .subscriptionId(existing.getId())
+                .userId(existing.getUserId())
+                .orgId(existing.getOrgId())
+                .gateway(gw)
+                .gatewayRef(paymentId)
+                .amountMinor(refundAmount)
+                .currency("INR")
+                .detail(reason)
+                .idempotencyKey(
+                    BillingGatewayObligationService.key(
+                        BillingGatewayObligation.KIND_PRORATED_REFUND,
+                        existing.getId(),
+                        paymentId,
+                        refundAmount))
+                .build());
+
+    if (obligation.isConfirmed()) {
+      log.info(
+          "Prorated refund already settled for sub={} paymentId={} — not refunding again",
+          existing.getId(),
+          paymentId);
+      return;
+    }
+
+    // Attempt the gateway refund. RR-048: everything downstream — the credit note, the
+    // "we refunded you" email, the PRORATED_REFUND audit row — is now gated on this actually
+    // succeeding. Previously all three were emitted for Stripe as well, where no refund call
+    // was ever made, so ExecuteSpec's accounting and its customer communication both stated
+    // that money had moved when it had not.
+    String refundId;
+    try {
+      refundId = attemptGatewayRefund(gw, paymentId, refundAmount, reason);
+    } catch (Exception e) {
+      obligationService.markFailed(obligation.getId(), e.getMessage());
+      log.error(
+          "Prorated refund FAILED and remains outstanding: sub={}, obligation={}, amount={} paise:"
+              + " {}",
+          existing.getId(),
+          obligation.getId(),
+          refundAmount,
+          e.getMessage(),
+          e);
+      return;
+    }
+
+    if (refundId == null) {
+      // No automated refund path on this gateway. This is an outstanding liability requiring an
+      // operator, not a completed refund — so no credit note, no refund email, no audit row
+      // claiming otherwise.
+      obligationService.markUnsupported(
+          obligation.getId(),
+          "No automated refund path for gateway " + gw + "; settle manually and mark resolved");
+      log.warn(
+          "Prorated refund of {} paise for sub={} cannot be issued automatically on gateway {} —"
+              + " recorded as outstanding obligation {}",
+          refundAmount,
+          existing.getId(),
+          gw,
+          obligation.getId());
+      return;
+    }
+
+    obligationService.markSucceeded(obligation.getId(), refundId);
+
+    // The money actually moved — now, and only now, produce the accounting + customer evidence.
+    try {
       Invoice creditNote = invoiceService.generateCreditNote(invoice.getId(), refundAmount, reason);
 
-      // Send refund email with credit note
       notificationService.sendUpgradeRefund(
           user.getEmail(), existingPlan.getName(), unusedRuns, runLimit, refundAmount);
 
-      // Send credit note email
       try {
         if (creditNote != null) {
           invoiceEmailService.sendInvoice(user.getEmail(), user.getFirstName(), creditNote);
@@ -1075,12 +1219,14 @@ public class BillingService {
       }
 
       log.info(
-          "Prorated refund issued: sub={}, amount={} paise, unused={}/{} runs, paymentId={}",
+          "Prorated refund issued: sub={}, amount={} paise, unused={}/{} runs, paymentId={},"
+              + " refundId={}",
           existing.getId(),
           refundAmount,
           unusedRuns,
           runLimit,
-          paymentId);
+          paymentId,
+          refundId);
 
       paymentAuditService.record(
           "USER",
@@ -1097,12 +1243,41 @@ public class BillingService {
           refundAmount,
           existing.getUserId(),
           existing.getOrgId());
-
     } catch (Exception e) {
-      // Refund failure should not block the upgrade
+      // The refund succeeded; only the paperwork failed. Do not roll the refund back and do not
+      // retry it — leave a loud log against the confirmed obligation's external ref.
       log.error(
-          "Failed to issue prorated refund for sub={}: {}", existing.getId(), e.getMessage(), e);
+          "Prorated refund {} SUCCEEDED on gateway but credit-note/notification failed for sub={}:"
+              + " {}",
+          refundId,
+          existing.getId(),
+          e.getMessage(),
+          e);
     }
+  }
+
+  /**
+   * Attempt a partial refund on the owning gateway.
+   *
+   * @return the gateway's refund identifier, or {@code null} when this gateway has no automated
+   *     refund path (the caller must then record an outstanding obligation rather than claiming the
+   *     refund happened). Throws when the gateway rejected an attempt that WAS made.
+   */
+  private String attemptGatewayRefund(
+      String gateway, String paymentId, long amountPaise, String reason) {
+    if ("RAZORPAY".equalsIgnoreCase(gateway)
+        && razorpayGateway
+            instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
+      String refundId = rpGw.refundPartial(paymentId, amountPaise, reason);
+      if (refundId == null || refundId.isBlank()) {
+        throw new BillingException(
+            "Razorpay refund returned no refund id for payment " + paymentId);
+      }
+      return refundId;
+    }
+    // Stripe refunds are still a dashboard/manual action. Returning null keeps that honest
+    // instead of manufacturing accounting evidence for money that never moved.
+    return null;
   }
 
   // HELPERS
@@ -1161,20 +1336,7 @@ public class BillingService {
                   activatingSub.getUserId(),
                   existingTier,
                   activatingPlan.getTier());
-              try {
-                if (existing.getGatewaySubscriptionId() != null) {
-                  String gw = existing.getPaymentGateway();
-                  if ("STRIPE".equalsIgnoreCase(gw)) {
-                    gatewayRouter.stripe().cancelSubscription(existing.getGatewaySubscriptionId());
-                  } else {
-                    razorpayGateway.cancelImmediately(existing.getGatewaySubscriptionId());
-                  }
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "Failed to cancel old subscription on gateway after upgrade payment: {}",
-                    e.getMessage());
-              }
+              cancelSupersededSubscription(existing);
 
               issueProratedRefund(existing, existingPlan, user);
 

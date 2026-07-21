@@ -2,7 +2,6 @@ import {describe, expect, it} from 'vitest';
 
 import {
   billingUsageSummary,
-  FALLBACK_PLAN_CARDS,
   invoiceDisplay,
   managedKind,
   money,
@@ -129,17 +128,24 @@ describe('billingUtils', () => {
     expect(cards.find((card) => card.tier === 'ENTERPRISE')?.monthly).toBeNull();
   });
 
-  it('keeps the degraded fallback ladder explicit', () => {
-    expect(FALLBACK_PLAN_CARDS.map((card) => card.tier)).toEqual([
-      'FREE',
-      'PRO',
-      'TEAM',
-      'ENTERPRISE',
-    ]);
-    expect(FALLBACK_PLAN_CARDS.find((card) => card.tier === 'PRO')).toMatchObject({
-      monthly: 29,
-      yearly: 289,
-    });
+  // RR-357: the previous test here PINNED the stale invented ladder (PRO $29/$289, TEAM
+  // $39/seat, no BYOK) as expected behaviour, while V253's canonical rows are PRO $20,
+  // PRO+ $100, BYOK $50 and TEAM $50/seat. Commerce now fails closed instead: when the
+  // plans API cannot be trusted there are no prices to render and no checkout to enter.
+  it('exposes no hardcoded saleable price ladder', async () => {
+    const mod = (await import('./billingUtils')) as Record<string, unknown>;
+    expect(mod.FALLBACK_PLAN_CARDS).toBeUndefined();
+  });
+
+  // planCardsFrom synthesizes the FREE and ENTERPRISE bookends unconditionally, so an empty
+  // API response still produces two cards with no price. Callers must therefore detect the
+  // pricing-unavailable state from the raw rows, not from the derived card count — IdeBilling
+  // keys `pricingUnavailable` off `planRows.length === 0` for exactly this reason.
+  it('yields only unpriced bookends for an empty plan list', () => {
+    const cards = planCardsFrom([]);
+    expect(cards.map((card) => card.tier)).toEqual(['FREE', 'ENTERPRISE']);
+    expect(cards.every((card) => card.monthly == null || card.monthly === 0)).toBe(true);
+    expect(cards.some((card) => (card.monthly ?? 0) > 0)).toBe(false);
   });
 });
 

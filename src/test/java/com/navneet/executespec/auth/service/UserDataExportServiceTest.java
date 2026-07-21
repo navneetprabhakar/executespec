@@ -249,6 +249,51 @@ class UserDataExportServiceTest {
     assertThat(((List<?>) payload.get("projects"))).isEmpty();
   }
 
+  /**
+   * RR-204 secret canary — the export used to serialise the {@link Org} and {@link
+   * com.navneet.executespec.state.entity.PipelineRun} ENTITIES, which expose Jackson-visible
+   * getters for the decrypted org provider keys, JIRA/Confluence tokens, and the run-scoped GitHub
+   * PAT + Bitbucket app password. The pre-existing redaction test only ever populated {@code
+   * AppUser} secrets, so it passed the whole time the org and run credentials were being written
+   * into {@code payload.json}.
+   *
+   * <p>This test populates EVERY credential field on the org and run rows and asserts that not one
+   * of the values survives anywhere in the bundle.
+   */
+  @Test
+  void payloadJson_neverContainsOrgOrRunCredentials() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+
+    Org org = buildOrg();
+    org.setAnthropicApiKey("CANARY-org-anthropic");
+    org.setOpenAiApiKey("CANARY-org-openai");
+    org.setGeminiApiKey("CANARY-org-gemini");
+    org.setOpenRouterApiKey("CANARY-org-openrouter");
+    org.setDeepSeekApiKey("CANARY-org-deepseek");
+    org.setFireworksApiKey("CANARY-org-fireworks");
+    org.setJiraApiToken("CANARY-org-jira");
+    org.setConfluenceApiToken("CANARY-org-confluence");
+    when(orgRepo.findById("org-1")).thenReturn(Optional.of(org));
+
+    com.navneet.executespec.state.entity.PipelineRun run =
+        new com.navneet.executespec.state.entity.PipelineRun();
+    run.setRunId("run-1");
+    run.setStatus("COMPLETE");
+    run.setCreatedByUserId("user-123");
+    run.setGithubPat("CANARY-run-github-pat");
+    run.setBitbucketAppPassword("CANARY-run-bitbucket-password");
+    when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(anyString(), any()))
+        .thenAnswer(inv -> new PageImpl<>(List.of(run)));
+
+    Map<String, byte[]> entries = readZip(svc.exportForUser("user-123").zipBytes());
+    String payloadStr = new String(entries.get("payload.json"), StandardCharsets.UTF_8);
+
+    assertThat(payloadStr).doesNotContain("CANARY-");
+
+    // The non-secret identity/plan fields the user is entitled to still ship.
+    assertThat(payloadStr).contains("Acme Inc").contains("run-1");
+  }
+
   private Org buildOrg() {
     Org org = new Org();
     org.setId("org-1");

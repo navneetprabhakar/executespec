@@ -7,9 +7,16 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntent
 
 final class AgentIntentPatterns {
 
-  private static final Pattern UUIDISH =
-      Pattern.compile(
-          "\\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\b|\\b[0-9a-fA-F]{8,}\\b");
+  /**
+   * The canonical run identifier shape. Run ids are UUIDs, and a bare hex run of eight or more
+   * characters is not one: it matches commit SHAs, hex-looking words and long digit strings, each
+   * of which used to produce a credit-charging approve/cancel confirmation card for a "run" that
+   * does not exist — or, on collision, for the wrong one.
+   */
+  private static final Pattern RUN_ID =
+      Pattern.compile("\\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\b");
+
+  private static final Pattern QUOTED_TEXT = Pattern.compile("\"[^\"\\n]*\"|`[^`\\n]*`|'[^'\\n]*'");
 
   private AgentIntentPatterns() {}
 
@@ -19,6 +26,18 @@ final class AgentIntentPatterns {
         "do not edit",
         "don't edit",
         "dont edit",
+        "do not modify code",
+        "don't modify code",
+        "dont modify code",
+        "do not modify files",
+        "without modifying code",
+        "do not create a run",
+        "don't create a run",
+        "dont create a run",
+        "no run should be created",
+        "analysis only",
+        "inspection only",
+        "keep this read-only",
         "chat only",
         "no code changes",
         "no edits",
@@ -68,6 +87,12 @@ final class AgentIntentPatterns {
     return containsAny(
         lower,
         "explain",
+        "analyse",
+        "analyze",
+        "inspect",
+        "identify",
+        "locate",
+        "trace",
         "what does",
         "how does",
         "summarize",
@@ -115,23 +140,28 @@ final class AgentIntentPatterns {
   }
 
   static boolean looksLikeCodeChange(String lower) {
-    return containsAny(
-        lower,
-        "fix ",
-        "implement ",
-        "add ",
-        "update ",
-        "change ",
-        "refactor ",
-        "debug ",
-        "failing test",
-        "failing tests",
-        "create ",
-        "run tests",
-        "run the tests",
-        "create codemap",
-        "create codemap.md",
-        "make ");
+    // Quoted identifiers/examples are evidence, not imperatives. Without this boundary a turn
+    // such as `Please handle "fix"` bypasses the structured classifier and creates a cloud run.
+    String actionableText = QUOTED_TEXT.matcher(lower).replaceAll(" ");
+    return containsWordAny(
+            actionableText,
+            "fix",
+            "implement",
+            "add",
+            "update",
+            "change",
+            "refactor",
+            "debug",
+            "create",
+            "make")
+        || containsAny(
+            actionableText,
+            "failing test",
+            "failing tests",
+            "run tests",
+            "run the tests",
+            "create codemap",
+            "create codemap.md");
   }
 
   static String routeForReadOnly(String lower) {
@@ -148,12 +178,16 @@ final class AgentIntentPatterns {
     return false;
   }
 
+  /**
+   * @return the canonical run id present in the message, or null when there is none
+   */
   static String extractRunId(String message) {
-    Matcher m = UUIDISH.matcher(message);
+    if (message == null) return null;
+    Matcher m = RUN_ID.matcher(message);
     return m.find() ? m.group() : null;
   }
 
-  private static boolean containsWordAny(String haystack, String... words) {
+  static boolean containsWordAny(String haystack, String... words) {
     for (String word : words) {
       if (Pattern.compile("\\b" + Pattern.quote(word) + "\\b").matcher(haystack).find()) {
         return true;

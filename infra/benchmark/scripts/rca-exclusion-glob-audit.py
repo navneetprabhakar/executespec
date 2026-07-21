@@ -13,7 +13,7 @@ Usage:
   ./rca-exclusion-glob-audit.py swebench_pro_full.json --json
 
 Zero-dollar, offline; only needs the dataset JSON (array of instances with 'patch').
-See finding #4 in docs/plans/swe-bench-pro-harness-adversarial-assessment-2026-07-04.md.
+See finding #4 in ../executespec-docs/backend/plans/source-repository/swe-bench-pro-harness-adversarial-assessment-2026-07-04.md.
 """
 
 import argparse

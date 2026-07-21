@@ -8,6 +8,22 @@ export type ContractDetectorSummary = {
   driftCandidateIds: string[];
 };
 
+export function uiBound<T>(promise: Promise<T>, timeoutMs = 10_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error('Request timed out.')), timeoutMs);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function looksLikeArtifact(content: string): boolean {
   return content.length > 1200 || /```|^#{2,}\s|\|.+\|/m.test(content);
 }
@@ -112,4 +128,53 @@ export function parseArchDoc(md: string): {preamble: string; sections: ArchDocSe
       body: section.body.join('\n'),
     })),
   };
+}
+
+/**
+ * RR-1658 — roll up a batch of drift checks into the three states the backend actually
+ * reports. The UI used to count only `hasDrift`, but `DriftCheckResult.hasDrift` is false
+ * for BOTH `NO_DRIFT` and `UNAVAILABLE` (retained that way for wire compatibility after
+ * RR-1631), so a contract whose source could not be read — SCM outage, expired PAT —
+ * was presented as clean.
+ *
+ * Rows from a server predating the tri-state carry no `status`; those fall back to the
+ * `hasDrift` boolean, which is exactly as informative as it was before, and are never
+ * counted as unavailable on the basis of a missing field.
+ */
+export function summarizeDriftResults(results: api.DriftCheckResult[] | null | undefined): {
+  drifted: number;
+  clean: number;
+  unavailable: number;
+  total: number;
+} {
+  const rows = results ?? [];
+  let drifted = 0;
+  let unavailable = 0;
+  for (const row of rows) {
+    const status = row.status ?? (row.hasDrift ? 'DRIFT' : 'NO_DRIFT');
+    if (status === 'DRIFT') drifted += 1;
+    else if (status === 'UNAVAILABLE') unavailable += 1;
+  }
+  return {drifted, clean: rows.length - drifted - unavailable, unavailable, total: rows.length};
+}
+
+/** User-facing sentence for a drift rollup that never calls an unperformable check clean. */
+export function driftSummaryMessage(summary: {
+  drifted: number;
+  unavailable: number;
+  total: number;
+}): string {
+  const parts: string[] = [];
+  if (summary.drifted > 0) {
+    parts.push(`${summary.drifted} drift result${summary.drifted === 1 ? '' : 's'} detected`);
+  }
+  if (summary.unavailable > 0) {
+    parts.push(
+      `${summary.unavailable} contract${summary.unavailable === 1 ? '' : 's'} could not be checked`,
+    );
+  }
+  if (parts.length === 0) {
+    return summary.total === 0 ? 'No contracts to check.' : 'No drift detected.';
+  }
+  return `${parts.join('; ')}.`;
 }

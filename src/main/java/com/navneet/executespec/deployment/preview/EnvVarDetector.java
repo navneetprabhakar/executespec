@@ -8,6 +8,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import com.navneet.executespec.security.SafeWorkspacePath;
+
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -347,10 +349,10 @@ public class EnvVarDetector {
     // 1. Check .env.example / .env.sample / .env.template
     for (String envFile :
         List.of(".env.example", ".env.sample", ".env.template", ".env.local.example")) {
-      scanEnvFile(workspacePath.resolve(envFile), result);
+      scanEnvFile(workspacePath, envFile, result);
       // Also check in subdirectories
       for (String subDir : List.of("backend", "server", "api", "frontend", "client")) {
-        scanEnvFile(workspacePath.resolve(subDir).resolve(envFile), result);
+        scanEnvFile(workspacePath, subDir + "/" + envFile, result);
       }
     }
 
@@ -373,12 +375,12 @@ public class EnvVarDetector {
     return sorted;
   }
 
-  private void scanEnvFile(Path envFile, Map<String, DetectedEnvVar> result) {
-    if (!Files.isRegularFile(envFile)) return;
-    String content = readSafe(envFile);
+  private void scanEnvFile(
+      Path workspace, String relativePath, Map<String, DetectedEnvVar> result) {
+    String content = readSafe(workspace, relativePath);
     if (content == null) return;
 
-    String source = envFile.getFileName().toString();
+    String source = Path.of(relativePath).getFileName().toString();
     Matcher matcher = ENV_FILE_LINE.matcher(content);
     while (matcher.find()) {
       String name = matcher.group(1);
@@ -397,9 +399,7 @@ public class EnvVarDetector {
             "src/main/resources/application.yml",
             "src/main/resources/application.yaml",
             "src/main/resources/application.properties")) {
-      Path file = workspace.resolve(configFile);
-      if (!Files.isRegularFile(file)) continue;
-      String content = readSafe(file);
+      String content = readSafe(workspace, configFile);
       if (content == null) continue;
 
       Matcher matcher = SPRING_PLACEHOLDER.matcher(content);
@@ -417,8 +417,12 @@ public class EnvVarDetector {
     // Do NOT follow symlinks — symlink loops (e.g. node_modules/.bin/->../bin/) hang the scan
     // indefinitely. Customer workspaces don't legitimately need link-following for env-var detect.
     // Audit: 2026-05-12 line-by-line review item N #73.
+    // RR-688: `Files::isRegularFile` follows a final symlink, so a workspace-controlled link to a
+    // host file was previously accepted here and parsed for env values. The no-follow attribute
+    // test plus SafeWorkspacePath containment reject that before any read.
     try (Stream<Path> walk = Files.walk(workspace, 4)) {
-      walk.filter(Files::isRegularFile)
+      walk.filter(p -> Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+          .filter(p -> SafeWorkspacePath.isWithin(workspace, p))
           .filter(this::isSourceFile)
           .filter(p -> !isInIgnoredDir(workspace, p))
           .forEach(file -> scanSingleSourceFile(file, workspace, result));
@@ -428,10 +432,9 @@ public class EnvVarDetector {
   }
 
   private void scanSingleSourceFile(Path file, Path workspace, Map<String, DetectedEnvVar> result) {
-    String content = readSafe(file);
-    if (content == null) return;
-
     String relativePath = workspace.relativize(file).toString();
+    String content = readSafe(workspace, relativePath);
+    if (content == null) return;
 
     // JavaScript/TypeScript: process.env.XXX
     extractAll(PROCESS_ENV, content, relativePath, result);
@@ -558,13 +561,32 @@ public class EnvVarDetector {
         || relative.contains(".gradle/");
   }
 
-  private String readSafe(Path file) {
-    if (file == null || !Files.isRegularFile(file)) return null;
+  /**
+   * Reads a workspace-relative file for environment detection.
+   *
+   * <p>RR-688: every read is bound to the run workspace through {@link SafeWorkspacePath}, which
+   * refuses a symbolic link in any existing component and proves canonical containment. Previously
+   * both {@code Files.isRegularFile} and {@code Files.readString} followed a final symlink, so a
+   * repository shipping {@code .env.example} as a link to a readable host file had that file parsed
+   * and its values surfaced as preview configuration.
+   *
+   * <p><b>Residual:</b> this closes the static case. It does not eliminate the check/use race — a
+   * process sharing the workspace could still swap a component between validation and the read.
+   * Closing that needs directory-descriptor-relative I/O or per-run container isolation.
+   */
+  private String readSafe(Path workspace, String relativePath) {
+    if (workspace == null || relativePath == null || relativePath.isBlank()) return null;
     try {
+      Path file = SafeWorkspacePath.resolveWithin(workspace, relativePath);
+      if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
       String content = Files.readString(file);
       return content.length() > 100_000 ? content.substring(0, 100_000) : content;
+    } catch (SecurityException e) {
+      // Deliberately does not log the resolved target: the repository chose where it pointed.
+      log.warn("env detection refused unsafe workspace path: {}", e.getMessage());
+      return null;
     } catch (IOException e) {
-      log.debug("Failed to read {}: {}", file, e.getMessage());
+      log.debug("Failed to read {}: {}", relativePath, e.getMessage());
       return null;
     }
   }

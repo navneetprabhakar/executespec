@@ -15,6 +15,7 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.project.service.ProjectRepoService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ class ExecutespecMigrationControllerTest {
   @Mock ProjectRepoRepository repoRepo;
   @Mock AppUserRepository userRepo;
   @Mock BootstrapService bootstrap;
+  @Mock ProjectRepoService projectRepoService;
 
   @InjectMocks ExecutespecMigrationController controller;
 

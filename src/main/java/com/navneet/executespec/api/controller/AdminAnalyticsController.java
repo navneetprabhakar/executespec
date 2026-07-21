@@ -1,5 +1,6 @@
 package com.navneet.executespec.api.controller;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import com.navneet.executespec.api.dto.BillingOverview;
@@ -10,8 +11,14 @@ import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.billing.service.AnalyticsService;
+import com.navneet.executespec.cost.LlmUsageAuditQuery;
+import com.navneet.executespec.cost.LlmUsageAuditReport;
+import com.navneet.executespec.cost.LlmUsageAuditService;
 
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +49,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AdminAnalyticsController {
 
   private final AnalyticsService analyticsService;
+  private final LlmUsageAuditService llmUsageAuditService;
   private final RunAccessGuard guard;
 
   /** GET /api/admin/analytics/usage?entityType={USER|ORG}&entityId={id}&period=30 */
@@ -95,6 +103,94 @@ public class AdminAnalyticsController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     assertAnalyticsAccess("ORG", orgId, userDetails, true);
     return ResponseEntity.ok(analyticsService.getCostBreakdown(orgId, period));
+  }
+
+  /**
+   * Canonical per-attempt LLM token/cost audit. Dates are inclusive org-calendar dates; the IANA
+   * timezone is converted to an explicit half-open instant interval before SQL executes.
+   */
+  @GetMapping("/llm-usage-audit")
+  public ResponseEntity<LlmUsageAuditReport> llmUsageAudit(
+      @RequestParam String orgId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "UTC") String timezone,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "100") int size,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertLlmAuditAccess(orgId, userDetails);
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+        .body(llmUsageAuditService.report(auditQuery(orgId, from, to, timezone, page, size)));
+  }
+
+  /**
+   * Downloadable JSON form of the same bounded report. This is intentionally not an unbounded
+   * database dump: attempts retain the normal 500-row page ceiling and rollups retain their
+   * independent 500-row ceiling, both advertised in the response body.
+   */
+  @GetMapping(value = "/llm-usage-audit.json", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<LlmUsageAuditReport> llmUsageAuditJson(
+      @RequestParam String orgId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "UTC") String timezone,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "500") int size,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertLlmAuditAccess(orgId, userDetails);
+    LlmUsageAuditQuery query = auditQuery(orgId, from, to, timezone, page, size);
+    String safeOrg = orgId.replaceAll("[^A-Za-z0-9_-]", "_");
+    String filename = "llm-usage-" + safeOrg + "-" + from + "-to-" + to + ".json";
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(llmUsageAuditService.report(query));
+  }
+
+  /** Spreadsheet-safe, UTF-8 CSV detail export capped at 10,000 physical attempts. */
+  @GetMapping(value = "/llm-usage-audit.csv", produces = "text/csv")
+  public ResponseEntity<byte[]> llmUsageAuditCsv(
+      @RequestParam String orgId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "UTC") String timezone,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    assertLlmAuditAccess(orgId, userDetails);
+    var export = llmUsageAuditService.csv(auditQuery(orgId, from, to, timezone, 0, 100));
+    return ResponseEntity.ok()
+        .header(
+            HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.filename() + "\"")
+        .header("X-Export-Row-Limit", String.valueOf(LlmUsageAuditQuery.CSV_ROW_LIMIT))
+        .header("X-Export-Row-Count", String.valueOf(export.rowCount()))
+        .header("X-Export-Truncated", String.valueOf(export.truncated()))
+        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+        .header("X-Content-Type-Options", "nosniff")
+        .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+        .body(export.content());
+  }
+
+  private static LlmUsageAuditQuery auditQuery(
+      String orgId, LocalDate from, LocalDate to, String timezone, int page, int size) {
+    try {
+      return LlmUsageAuditQuery.of(orgId, from, to, timezone, page, size);
+    } catch (IllegalArgumentException invalid) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+    }
+  }
+
+  /** Detailed physical-attempt facts are restricted to tenant admins, not billing-only members. */
+  private void assertLlmAuditAccess(String orgId, AppUserDetails userDetails) {
+    guard.requireAuthenticated(userDetails);
+    AppUser user = userDetails.getUser();
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+    OrgMember member = userDetails.getOrgMember();
+    if (member != null
+        && orgId.equals(user.getOrgId())
+        && orgId.equals(member.getOrgId())
+        && "ORG_ADMIN".equals(member.getOrgRole())) return;
+    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
   }
 
   /**

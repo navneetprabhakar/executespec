@@ -1,5 +1,10 @@
 import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
 import {Markdown} from '@/signal/components/Markdown';
 import {
   CommandIcon,
@@ -11,8 +16,11 @@ import {
   StatusDot,
 } from '@/ide/IdeIcons';
 import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
-import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
+import {extractAgentArtifacts} from '@/ide/agentArtifacts';
+import {ArtifactRail} from '@/ide/agentArtifactRail';
 import {boundedInlineDiff} from '@/ide/agentDiff';
+import {isCloudRunAction, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
   friendlyTool,
@@ -116,7 +124,7 @@ function tokenCount(value: number): string {
 
 function totalTokens(usage?: AgentUsageSummary | null): number {
   if (!usage) return 0;
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+  return usage.inputTokens + usage.outputTokens;
 }
 
 function hasRenderableAssistantContent(content: string): boolean {
@@ -157,6 +165,10 @@ export function AgentTopBar({
   onToggleChats,
   onToggleSettings,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -177,6 +189,10 @@ export function AgentTopBar({
   onToggleChats: () => void;
   onToggleSettings: () => void;
   availableModels?: api.ProviderEntry[];
+  providerReadiness?: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported?: boolean;
+  providerReadinessLoading?: boolean;
+  providerReadinessError?: boolean;
   selectedProvider?: string;
   selectedModel?: string;
   onProviderChange?: (provider: string) => void;
@@ -240,6 +256,10 @@ export function AgentTopBar({
             routingState={routingState}
             capabilities={capabilities}
             availableModels={availableModels ?? []}
+            providerReadiness={providerReadiness ?? new Map()}
+            providerReadinessSupported={providerReadinessSupported ?? false}
+            providerReadinessLoading={providerReadinessLoading ?? false}
+            providerReadinessError={providerReadinessError ?? false}
             selectedProvider={selectedProvider ?? ''}
             selectedModel={selectedModel ?? ''}
             onProviderChange={onProviderChange ?? (() => {})}
@@ -259,6 +279,10 @@ function SettingsPopover({
   capabilities,
   onClose,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -270,13 +294,22 @@ function SettingsPopover({
   capabilities: api.AgentCapabilityTool[];
   onClose: () => void;
   availableModels: api.ProviderEntry[];
+  providerReadiness: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported: boolean;
+  providerReadinessLoading: boolean;
+  providerReadinessError: boolean;
   selectedProvider: string;
   selectedModel: string;
   onProviderChange: (provider: string) => void;
   onModelChange: (model: string) => void;
 }) {
-  const provider = availableModels.find((entry) => entry.id === selectedProvider);
+  const provider = availableModels.find(
+    (entry) => entry.id.toUpperCase() === selectedProvider.toUpperCase(),
+  );
   const models = provider?.models ?? availableModels.flatMap((entry) => entry.models);
+  const selectedReadiness = selectedProvider
+    ? providerReadiness.get(selectedProvider.toUpperCase())
+    : null;
   return (
     <>
       <div
@@ -324,11 +357,36 @@ function SettingsPopover({
           >
             <option value=''>Default</option>
             {availableModels.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label || entry.id}
+              <option
+                key={entry.id}
+                value={entry.id}
+                disabled={
+                  providerReadinessSupported &&
+                  !providerIsDispatchable(providerReadiness.get(entry.id.toUpperCase()))
+                }
+              >
+                {providerOptionLabel(
+                  entry.label || entry.id,
+                  providerReadiness.get(entry.id.toUpperCase()),
+                )}
               </option>
             ))}
           </select>
+          <small
+            role={
+              selectedProvider && !providerIsDispatchable(selectedReadiness) ? 'alert' : 'status'
+            }
+          >
+            {!providerReadinessSupported
+              ? 'Provider readiness is not exposed by this server; dispatch policy still applies.'
+              : !selectedProvider
+                ? 'Account default; the server verifies its effective route.'
+                : providerReadinessError
+                  ? 'Provider readiness unavailable; explicit routing is disabled.'
+                  : providerReadinessLoading
+                    ? 'Checking provider readiness…'
+                    : providerReadinessLabel(selectedReadiness)}
+          </small>
           <label htmlFor='agent-model-select'>Model</label>
           <select
             id='agent-model-select'
@@ -343,7 +401,10 @@ function SettingsPopover({
               </option>
             ))}
           </select>
-          <small>Applies to the next turn.</small>
+          <small>
+            Provider changes use that provider's default route. Choosing a model pins that exact
+            account-eligible model for the next turn.
+          </small>
         </div>
         {managedAi && <ManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>
@@ -396,7 +457,7 @@ function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
           </div>
           {isSuperAdmin && (
             <small>
-              Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
+              Raw spend ${balance.rawCogsUsedUsd.toFixed(4)} of ${balance.rawCogsCapUsd.toFixed(4)}{' '}
               monthly cap.
             </small>
           )}
@@ -621,145 +682,6 @@ function MessageBubble({
   );
 }
 
-function ArtifactRail({
-  artifacts,
-  dispatch,
-}: {
-  artifacts: AgentArtifact[];
-  dispatch: Dispatch<AgentAction>;
-}) {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
-  const [previewErrorId, setPreviewErrorId] = useState<string | null>(null);
-  if (!artifacts.length) return null;
-
-  async function copyArtifact(artifact: AgentArtifact) {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(artifact.content);
-      setCopyErrorId(null);
-      setCopiedId(artifact.id);
-      window.setTimeout(
-        () => setCopiedId((current) => (current === artifact.id ? null : current)),
-        1600,
-      );
-    } catch {
-      setCopiedId(null);
-      setCopyErrorId(artifact.id);
-      window.setTimeout(
-        () => setCopyErrorId((current) => (current === artifact.id ? null : current)),
-        3000,
-      );
-    }
-  }
-
-  function downloadArtifact(artifact: AgentArtifact) {
-    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function previewArtifact(artifact: AgentArtifact) {
-    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
-    const url = URL.createObjectURL(blob);
-    try {
-      const preview = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!preview) throw new Error('Preview popup blocked');
-      setPreviewErrorId(null);
-    } catch {
-      setPreviewErrorId(artifact.id);
-    }
-    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }
-
-  function requestSandbox(artifact: AgentArtifact) {
-    dispatch({
-      type: 'input:set',
-      input: `Create a remote sandbox from the generated artifact ${artifact.filename}. Preserve the artifact content from the previous assistant message and return evidence, changed files, and the handoff path.`,
-    });
-  }
-
-  return (
-    <div className='agent-artifact-rail' aria-label='Generated artifacts'>
-      <div className='agent-artifact-head'>
-        <span>Generated artifacts</span>
-        <span>
-          {artifacts.length} file{artifacts.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      <div className='agent-artifact-list'>
-        {artifacts.map((artifact) => (
-          <div className='agent-artifact-item' key={artifact.id}>
-            <div className='agent-artifact-main'>
-              <code>{artifact.filename}</code>
-              <span>
-                {artifact.language.toUpperCase()} · {artifact.lineCount} line
-                {artifact.lineCount === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className='agent-artifact-actions'>
-              <button className='ide-btn ghost' onClick={() => void copyArtifact(artifact)}>
-                {copiedId === artifact.id
-                  ? 'Copied'
-                  : copyErrorId === artifact.id
-                    ? 'Copy unavailable'
-                    : 'Copy'}
-              </button>
-              <button className='ide-btn ghost' onClick={() => downloadArtifact(artifact)}>
-                Download
-              </button>
-              <button
-                className='ide-btn ghost'
-                onClick={() => previewArtifact(artifact)}
-                disabled={!artifact.previewable}
-                title={
-                  artifact.previewable
-                    ? 'Open a browser preview'
-                    : 'Preview is unavailable for this file type'
-                }
-              >
-                Preview
-              </button>
-              <button className='ide-btn ghost' onClick={() => requestSandbox(artifact)}>
-                Use in sandbox
-              </button>
-            </div>
-            {copyErrorId === artifact.id && (
-              <div className='agent-artifact-action-error' role='alert'>
-                Clipboard access was denied. Use Download instead.
-              </div>
-            )}
-            {previewErrorId === artifact.id && (
-              <div className='agent-artifact-action-error' role='alert'>
-                Preview was blocked. Allow pop-ups or use Download instead.
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className='agent-artifact-handoff'>
-        <span>Remote sandbox keeps local files untouched.</span>
-        <a href='/cli-login'>Open local handoff</a>
-      </div>
-    </div>
-  );
-}
-
-function mimeForArtifact(artifact: AgentArtifact): string {
-  const ext = artifact.filename.split('.').pop()?.toLowerCase();
-  if (ext === 'html' || ext === 'htm') return 'text/html';
-  if (ext === 'svg') return 'image/svg+xml';
-  if (ext === 'json') return 'application/json';
-  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
-  if (ext === 'css') return 'text/css';
-  if (ext === 'js' || ext === 'ts' || ext === 'tsx' || ext === 'jsx') return 'text/javascript';
-  return 'text/plain';
-}
-
 /** Friendly activity chips for tool/run events — no raw JSON. */
 function Activity({items}: {items: StreamTimelineItem[]}) {
   const shown = items.filter(
@@ -904,8 +826,8 @@ function SandboxRunCard({
           {isSuperAdmin && (
             <>
               {' · $'}
-              {cost.toFixed(2)}
-              {est ? ` / ~$${est.toFixed(2)}` : ''}
+              {cost.toFixed(4)}
+              {est ? ` / ~$${est.toFixed(4)}` : ''}
             </>
           )}
         </span>
@@ -1190,10 +1112,12 @@ function ActionCard({
   onDismiss: () => void;
   busy: boolean;
 }) {
-  const isCloudRun = pending.action.type === 'create_cloud_run';
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
-  if (isCloudRun) {
+  // The same predicate the confirmation dispatcher uses. A cloud-run proposal
+  // that is not confirmable renders as a blocked explanation instead of a
+  // confirm button that would be dropped on click.
+  if (isConfirmableCloudRun(pending.action)) {
     return (
       <SandboxProposalCard
         pending={pending}
@@ -1202,6 +1126,9 @@ function ActionCard({
         onDismiss={onDismiss}
       />
     );
+  }
+  if (isCloudRunAction(pending.action)) {
+    return <AgentBlockedActionCard action={pending.action} onDismiss={onDismiss} busy={busy} />;
   }
   if (isLocal) return <LocalHandoffCard pending={pending} onDismiss={onDismiss} />;
   const args = Object.entries(pending.action.arguments || {});
@@ -1259,8 +1186,8 @@ function SandboxProposalCard({
         <span className='agent-card-meta'>plan gate before spend</span>
       </div>
       <div className='agent-card-sub'>
-        ExecuteSpec will create an isolated remote workspace, draft a plan, then stop for your
-        approval before coding or charging run credits.
+        ExecuteSpec will create a remote workspace, draft a plan, then stop for your approval before
+        coding or charging run credits.
       </div>
       {pending.action.confirmationPrompt && (
         <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
@@ -1397,7 +1324,7 @@ function SandboxContractPanel() {
       <div className='agent-contract-grid'>
         <span>
           <b>Workspace</b>
-          isolated remote clone
+          remote clone
         </span>
         <span>
           <b>Branch</b>
@@ -1432,7 +1359,6 @@ function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
       <span>Run events stay in audit trail</span>
       <span>Approval required before code execution</span>
       <span>Retention follows workspace cleanup policy</span>
-      <span>Outbound network follows sandbox policy</span>
     </div>
   );
 }
@@ -1489,7 +1415,7 @@ function EmptyState({onPick}: {onPick: (text: string) => void}) {
       </div>
       <strong>Remote sandbox ready</strong>
       <p>
-        Describe the change, review the generated plan, then let ExecuteSpec work in an isolated
+        Describe the change, review the generated plan, then let ExecuteSpec work in a remote
         sandbox. Browser sessions never get local shell authority.
       </p>
       <div className='agent-empty-chips'>

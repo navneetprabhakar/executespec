@@ -464,7 +464,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Plan, code, test, review, and open a PR');
     expect(host.textContent).toContain('Create a remote sandbox to add audit logging');
     expect(host.textContent).toContain('What will happen before spend');
-    expect(host.textContent).toContain('isolated remote clone');
+    expect(host.textContent).toContain('remote clone');
     expect(host.textContent).toContain('Run events stay in audit trail');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
@@ -878,15 +878,15 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Copy');
     expect(host.textContent).toContain('Download');
     expect(host.textContent).toContain('Preview');
-    expect(host.textContent).toContain('Use in sandbox');
+    expect(host.textContent).toContain('Draft sandbox request');
     expect(host.textContent).toContain('Open local handoff');
     expect(host.textContent).toContain('1.6k tokens');
     expect(host.textContent).toContain('chat included');
 
     const useInSandbox = [...host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Use in sandbox',
+      (button) => button.textContent === 'Draft sandbox request',
     );
-    if (!useInSandbox) throw new Error('Use in sandbox action was not rendered.');
+    if (!useInSandbox) throw new Error('Draft sandbox request action was not rendered.');
     await act(async () => {
       useInSandbox.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
@@ -929,9 +929,18 @@ describe('IdeAgent', () => {
         await Promise.resolve();
       });
       expect(host.textContent).toContain('Clipboard access was denied. Use Download instead.');
-      expect(host.textContent).toContain(
-        'Preview was blocked. Allow pop-ups or use Download instead.',
-      );
+      // RR-623: preview must NOT open a blob: URL in a window. A blob URL inherits the creator's
+      // origin, so model-authored HTML would run as first-party and could read localStorage (where
+      // access_token lives). It renders into a sandboxed iframe with an opaque origin instead.
+      expect(window.open).not.toHaveBeenCalled();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      const frame = host.querySelector('iframe.agent-artifact-preview-frame');
+      if (!frame) throw new Error('Sandboxed preview frame was not rendered.');
+      const sandbox = frame.getAttribute('sandbox') ?? '';
+      expect(sandbox.split(/\s+/)).toContain('allow-scripts');
+      // allow-same-origin alongside allow-scripts would let the document remove its own sandbox.
+      expect(sandbox).not.toContain('allow-same-origin');
+      expect(frame.getAttribute('srcdoc') ?? '').toContain('Content-Security-Policy');
     } finally {
       Object.defineProperty(navigator, 'clipboard', {configurable: true, value: originalClipboard});
       Object.defineProperty(window, 'open', {configurable: true, value: originalOpen});
@@ -1002,7 +1011,7 @@ describe('IdeAgent', () => {
       [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Download'),
     ).toHaveLength(2);
     expect(
-      [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Use in sandbox'),
+      [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Draft sandbox request'),
     ).toHaveLength(2);
   });
 
@@ -1024,10 +1033,17 @@ describe('IdeAgent', () => {
         route: 'CODE_RUN_REQUIRED',
         action: {
           type: 'create_cloud_run',
-          arguments: {spec: 'Add billing audit logs'},
+          arguments: {spec: 'Add billing audit logs', projectId: 'p1'},
           requiresConfirmation: true,
           billingImpact: 'run_credit_on_plan_approval',
           confirmationPrompt: 'Create a remote sandbox?',
+          actionContext: {
+            requiredContext: [],
+            blockingReasons: [],
+            confirmable: true,
+            recommendedAction: 'CONFIRM_ACTION',
+            projectSelectionRequired: false,
+          },
         },
       });
       handlers.onDone?.({
@@ -1088,7 +1104,69 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('Branch');
     expect(host.textContent).toContain('Secrets are not displayed in chat');
-    expect(host.textContent).toContain('Outbound network follows sandbox policy');
+    // The trust panel must NOT claim an outbound-network policy: no such policy
+    // is enforced today. Re-add only when the strict sandbox runtime lands.
+    expect(host.textContent).not.toContain('Outbound network');
+    expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
+  });
+
+  // Phase 4 invariant: a proposal without project scope, or with a server-sent
+  // blocked context, must never render a confirmable sandbox card. Before the
+  // shared predicate, rendering keyed only on action.type, so this payload
+  // produced a confirm button that the dispatcher would have submitted.
+  it('renders a cloud-run proposal without project scope as non-confirmable', async () => {
+    api.streamAgentTurn.mockImplementation(async (_sessionId, _body, handlers) => {
+      handlers.onAck?.({session_id: 's1', turn_id: 't9', sequence: 2});
+      handlers.onProposal?.({
+        session_id: 's1',
+        turn_id: 't9',
+        route: 'CODE_RUN_REQUIRED',
+        action: {
+          type: 'create_cloud_run',
+          arguments: {spec: 'Add billing audit logs'},
+          requiresConfirmation: true,
+          billingImpact: 'run_credit_on_plan_approval',
+          confirmationPrompt: 'Create a remote sandbox?',
+          actionContext: {
+            requiredContext: ['project'],
+            blockingReasons: ['MISSING_PROJECT_CONTEXT'],
+            confirmable: false,
+            recommendedAction: 'SELECT_PROJECT',
+            projectSelectionRequired: true,
+          },
+        },
+      });
+      handlers.onDone?.({
+        session_id: 's1',
+        turn_id: 't9',
+        turn_count: 2,
+        input_tokens: 10,
+        output_tokens: 4,
+        cost_usd: 0.001,
+      });
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+
+    const textarea = host.querySelector('textarea');
+    if (!textarea) throw new Error('Agent composer textarea was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Implement OAuth login');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const send = [...host.querySelectorAll('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Send',
+    );
+    if (!send) throw new Error('Send button was not rendered.');
+    await act(async () => {
+      send.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await flush();
+
+    expect(host.textContent).toContain('Sandbox run not ready');
+    expect(host.textContent).toContain('Select a project or repository first.');
+    expect(host.textContent).not.toContain('Create sandbox plan');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
   });
 

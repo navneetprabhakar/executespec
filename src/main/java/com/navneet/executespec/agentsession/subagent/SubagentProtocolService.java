@@ -26,6 +26,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnReque
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -399,9 +400,9 @@ public class SubagentProtocolService {
   /**
    * Fail-closed budget/cancellation check that an executor calls before each child turn.
    *
-   * <p>The check also advances the child heartbeat when the turn is admitted. A child model call
-   * can legitimately run for longer than the startup-recovery stale window; without this write, a
-   * rolling restart could mistake a still-active child for an abandoned one and cancel it. The
+   * <p>The check also advances the child heartbeat when the turn is admitted. Admission alone is
+   * NOT sufficient liveness evidence: a single model round can outlive the startup-recovery stale
+   * window, so the executor must also renew the lease mid-turn through {@link #heartbeat}. The
    * timestamp is advisory only (the status/budget checks remain the authority) and is persisted in
    * the same transaction as the admission decision.
    */
@@ -435,6 +436,24 @@ public class SubagentProtocolService {
         metadata.maxCostUsd(),
         reason == null,
         reason);
+  }
+
+  /**
+   * Renews a live child's lease mid-turn so a long provider call is not read as abandonment.
+   *
+   * <p>This carries no authority: it never changes status, budget or ownership, and it refuses to
+   * touch a terminal child. It runs in its own transaction because the executing turn holds no
+   * transaction of its own while the provider call is in flight.
+   *
+   * @return true when the lease was renewed; false when the child is gone or already terminal.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public boolean heartbeat(String childSessionId, String actorUserId, String actorOrgId) {
+    AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
+    if (!List.of("READY", "RUNNING").contains(child.getStatus())) return false;
+    child.setUpdatedAt(Instant.now());
+    sessionRepository.save(child);
+    return true;
   }
 
   /** Claims a READY child for execution. Idempotent while the child is already RUNNING. */
@@ -649,6 +668,34 @@ public class SubagentProtocolService {
         : read(events.getLast().getPayloadJson(), ChildMetadata.class).depth();
   }
 
+  /**
+   * RR-557 (2026-07-20) — resolves the ROOT of the subagent tree containing {@code sessionId}.
+   *
+   * <p>The tree turn/cost ceilings are advertised as whole-tree limits, but the spawn check used to
+   * start its accounting at the immediate parent. A depth-1 child's own descendant budget therefore
+   * started at zero, so a root could reserve its documented maximum breadth and every one of those
+   * children could independently reserve the same again — the depth-2 tree could reserve five times
+   * the authorized root budget. Walking to the root makes the ceiling mean what it says.
+   *
+   * <p>The walk is bounded by {@code MAX_DEPTH + 1} hops and a visited set, so a corrupt or cyclic
+   * parent chain terminates instead of looping.
+   */
+  private String rootOf(String sessionId) {
+    String current = sessionId;
+    java.util.Set<String> seen = new java.util.HashSet<>();
+    for (int hop = 0; hop <= MAX_DEPTH + 1; hop++) {
+      if (current == null || !seen.add(current)) break;
+      List<AgentActionEvent> events =
+          eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(current, EVENT_CHILD_CREATED);
+      if (events.isEmpty()) return current;
+      ChildMetadata metadata = read(events.getLast().getPayloadJson(), ChildMetadata.class);
+      String parent = metadata == null ? null : blankToNull(metadata.parentSessionId());
+      if (parent == null || parent.equals(current)) return current;
+      current = parent;
+    }
+    return current == null ? sessionId : current;
+  }
+
   private long countChildren(String sessionId) {
     return eventRepository.countBySessionIdAndType(sessionId, EVENT_CHILD_SPAWNED);
   }
@@ -662,9 +709,15 @@ public class SubagentProtocolService {
    * Calculates the requested budget of every descendant, not the spend so far. Requested budgets
    * are the safe reservation: enforcing them at spawn time prevents a nested tree from becoming
    * unbounded before any model turn has been recorded.
+   *
+   * <p>RR-557 (2026-07-20): accounting starts at the ROOT of {@code parentSessionId}'s tree, not at
+   * that session. Starting at the immediate parent gave every nested child a fresh zero budget, so
+   * the documented whole-tree turn/cost ceiling could be exceeded several times over by nesting.
+   * Both the advisory delegation preview and the enforcing spawn path now read the same root
+   * figure, so the number a caller is shown is the number that will be enforced.
    */
   private TreeBudget treeBudget(String parentSessionId) {
-    return treeBudget(parentSessionId, new java.util.HashSet<>());
+    return treeBudget(rootOf(parentSessionId), new java.util.HashSet<>());
   }
 
   private TreeBudget treeBudget(String sessionId, java.util.Set<String> visited) {

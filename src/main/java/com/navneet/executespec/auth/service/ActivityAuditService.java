@@ -9,6 +9,7 @@ import java.util.UUID;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
+import com.navneet.executespec.api.PageBounds;
 import com.navneet.executespec.auth.dto.AuditLogEntry;
 import com.navneet.executespec.auth.dto.AuditLogPage;
 import com.navneet.executespec.auth.entity.ActivityAudit;
@@ -16,9 +17,9 @@ import com.navneet.executespec.auth.repository.ActivityAuditRepository;
 import com.navneet.executespec.auth.repository.ActivityAuditSpec;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,7 @@ public class ActivityAuditService {
    * write-time. Multi-node deploys would need a Postgres advisory lock; for now we have one app
    * instance.
    */
+  @Transactional
   public synchronized void record(ActivityAudit entry) {
     if (entry.getId() == null) {
       entry.setId(UUID.randomUUID().toString());
@@ -51,6 +53,13 @@ public class ActivityAuditService {
     if (entry.getCreatedAt() == null) {
       entry.setCreatedAt(Instant.now());
     }
+
+    // V292: serialize chain appends across JVMs before reading the tail. The transaction-scoped
+    // advisory lock releases automatically at commit/rollback and does not require a lock row.
+    em.createNativeQuery(
+            "SELECT pg_advisory_xact_lock(hashtext('executespec'),"
+                + " hashtext('activity_audit_chain'))")
+        .getSingleResult();
 
     // Stamp chain triple. Read tail → compute hash → assign next seq.
     String prevHash = repo.findChainTail().map(ActivityAudit::getRowHash).orElse(GENESIS_HASH);
@@ -189,7 +198,7 @@ public class ActivityAuditService {
         ActivityAuditSpec.buildFilter(orgId, entityType, eventType, actorId, entityId, from, to);
 
     return AuditLogPage.from(
-        repo.findAll(spec, PageRequest.of(page, Math.min(size, 100))).map(this::toEntry));
+        repo.findAll(spec, PageBounds.request(page, size, 100)).map(this::toEntry));
   }
 
   private AuditLogEntry toEntry(ActivityAudit a) {

@@ -19,16 +19,27 @@ import lombok.extern.slf4j.Slf4j;
  * <p>severity is ESLint's own scale (1=warn, 2=error). We pass both through; the standard's own
  * severity (BLOCKING / WARNING / ADVISORY) decides whether the violation gates a run — that mapping
  * happens in E3.10 worker integration.
+ *
+ * <p>RR-1051 — this adapter no longer shells out to {@code npx}. {@code npx} resolves the binary
+ * from the repository's own {@code node_modules} or downloads it from the network, so the
+ * repository chose what executed. Every invocation is now admitted by {@link LintExecutionPolicy}
+ * first and runs an operator-pinned executable, or reports UNAVAILABLE with the reason.
+ *
+ * <p>Admission does not make an ESLint run safe: {@code eslint.config.js} is JavaScript and plugins
+ * are repository-selected npm packages, so an admitted run is still arbitrary customer code
+ * executing on the host. That is why host execution defaults to off.
  */
 @Component
 @Slf4j
 public class EslintAdapter implements LintAdapter {
 
   private final LintProcessRunner runner;
+  private final LintExecutionPolicy policy;
   private final ObjectMapper json;
 
-  public EslintAdapter(LintProcessRunner runner, ObjectMapper json) {
+  public EslintAdapter(LintProcessRunner runner, LintExecutionPolicy policy, ObjectMapper json) {
     this.runner = runner;
+    this.policy = policy;
     this.json = json;
   }
 
@@ -39,18 +50,26 @@ public class EslintAdapter implements LintAdapter {
 
   @Override
   public LintResult run(Path repoRoot, Path configPath, List<Path> changedFiles) {
-    List<String> argv = new ArrayList<>(List.of("npx", "eslint", "--format", "json"));
-    if (configPath != null) {
-      argv.add("--config");
-      argv.add(configPath.toString());
+    LintExecutionPolicy.Admission admission =
+        policy.admit(tool(), repoRoot, configPath, changedFiles);
+    if (!admission.allowed()) {
+      return new LintResult(
+          tool(), LintResult.Status.UNAVAILABLE, List.of(), admission.denialReason());
     }
-    if (changedFiles != null && !changedFiles.isEmpty()) {
-      for (Path p : changedFiles) argv.add(p.toString());
+
+    List<String> argv =
+        new ArrayList<>(List.of(admission.executable(), "--format", "json", "--no-color"));
+    if (admission.configArgument() != null) {
+      argv.add("--config");
+      argv.add(admission.configArgument());
+    }
+    if (!admission.targetArguments().isEmpty()) {
+      argv.addAll(admission.targetArguments());
     } else {
       argv.add(".");
     }
 
-    LintProcessRunner.Result res = runner.run(repoRoot, argv, 60);
+    LintProcessRunner.Result res = runner.run(repoRoot, argv, policy.timeoutSeconds());
     if (!res.executed()) {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());

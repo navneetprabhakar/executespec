@@ -4,6 +4,19 @@
 > Terminal-Bench 2.0 via the "remote brain / local hands" model — the proof that the local-hands
 > story works end-to-end (docs/pending.md §J3).
 
+> **2026-07-18 harness hardening:** the bridge classifies sibling `exception.txt` setup failures as infrastructure failures, refuses `RUN_DONE` when trials are missing, and returns non-zero for incomplete runs. Late worker finalization preserves an already terminal/cancelled run.
+
+> **2026-07-18 absolute-deadline contract:** the Harbor adapter mints one epoch deadline before
+> authentication/setup (Harbor does not inject its runner deadline into `AgentContext`), and the
+> server tightens it to its configured maximum. It is propagated through worker provider calls,
+> remote-tool waits, emitted tool frames and Harbor container commands. New work receives only
+> `deadline - now - shutdown reserve`; impossible calls are refused and reconnect cannot extend the
+> absolute deadline. The default 45-second reserve is kept for terminal DB/cost/SSE persistence and
+> ATIF trajectory flush. Agent expiry persists as `ABSOLUTE_DEADLINE_EXCEEDED`; remote refusal is
+> `DEADLINE_EXCEEDED`; the legacy relative cap remains `WALL_CLOCK_EXCEEDED`. Verifier/upload
+> timeouts are Harbor-owned classifications outside this worker path. Official leaderboard timeout
+> settings are unchanged.
+
 ## What this is
 
 A standalone path that runs the V2 `WorkerAgent` in **REMOTE-tool mode** as a real persisted run,
@@ -26,7 +39,7 @@ remote-tool protocol + the run SSE / scoped-token / cost / access infra; it does
 | File | Purpose |
 |------|---------|
 | `TerminalBenchController.java` | `POST /api/v2/test/terminal-bench/start` `{instruction, provider, model, maxIterations?}` → `{runId, sseToken}`. `@Profile({"local","dev","benchmark"})` + under `/api/v2/test/**` which `SecurityConfig` locks to SUPER_ADMIN → operator-only. |
-| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. It appends `prompts/fragments/provider/<provider>/terminal.md` by default for the operator-only benchmark lane (the dedicated `terminal-bench.provider-prompt-tuning.enabled` flag or `ES_TB_PROVIDER_PROMPT_TUNING=false` disables it); BUILD/PATCH keep their existing `worker.provider-prompt-tuning.enabled` flag and default. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. `extractDeliverablePaths` checks absolute `/app/…\.ext` paths, output-verb absolute paths including extensionless executables (for example `Build /app/solver`), and relatively named `name.ext` outputs introduced by an output verb, prepended `/app/`. Extensionless `/app/foo` inputs are still ignored unless the same clause says to write/create/build/save them. The shared worker's verified-pass guard snapshots extracted deliverables after a conservative passing verifier-shaped command, refuses later risky edits/reruns, and force-completes text-only follow-ups. Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
+| `TerminalBenchRunService.java` | Persists a `PipelineRun` (ownership stamped, `harnessVersion="v2"` so `/cost` reads the V2 tracker, `runMode=PATCH`, `sourceType="TERMINAL_BENCH"`) → creates an explicit durable `PLATFORM_INTERNAL` execution context for the operator run → `RemoteToolDispatcher.register(runId)` → launches the worker on a context-propagated virtual thread with a remote `ExecutionContext(runId, …, executionReference)` → on terminal: persists status + finalizes cost + emits the terminal `COMPLETE` SSE event + **`unregister(runId)` in `finally`** (always, so a crash can't leak a session). Holds the terminal-task `TB_SYSTEM_PROMPT`. It appends `prompts/fragments/provider/<provider>/terminal.md` by default for the operator-only benchmark lane (the dedicated `terminal-bench.provider-prompt-tuning.enabled` flag or `ES_TB_PROVIDER_PROMPT_TUNING=false` disables it); BUILD/PATCH keep their existing `worker.provider-prompt-tuning.enabled` flag and default. Sets the worker's harness-stage flags from env: `criticPass(ES_TB_CRITIC)` + `requiredDeliverablePaths(extractDeliverablePaths(instruction))` + `terminalVerifyGate(ES_TB_VERIFY_GATE)`. `extractDeliverablePaths` checks absolute `/app/…\.ext` paths, output-verb absolute paths including extensionless executables (for example `Build /app/solver`), and relatively named `name.ext` outputs introduced by an output verb, prepended `/app/`. Extensionless `/app/foo` inputs are still ignored unless the same clause says to write/create/build/save them. The shared worker's verified-pass guard snapshots extracted deliverables after a conservative passing verifier-shaped command, refuses later risky edits/reruns, and force-completes text-only follow-ups. Note: a server-run *test* gate (VBC) is moot for TB — `tests/` is verifier-side, NOT in the `environment/` container during the agent's run. |
 
 ## Harness stages are COMMON, not a TB fork (RL-2026-06)
 
@@ -34,7 +47,9 @@ The critic/reviewer pass (#1) + deliverable gate (#2) + verify gate (#3) + visib
 
 ## The keystone mechanism (and the fix that made it work)
 
-`register(runId)` before the worker runs flips `RemoteToolDispatcher.isRemote(runId)` true. The V2
+`register(runId, ToolProfile.TERMINAL_BENCH)` before the worker runs flips
+`RemoteToolDispatcher.isRemote(runId)` true and selects the Harbor adapter's 11-tool canonical
+schema (rather than the 51-name CLI compatibility catalogue). The V2
 worker dispatches tools **manually** (`tool.execute()` at `WorkerAgent.dispatchOne`), NOT through
 Spring AI's `ContextBoundToolCallback` — so the remote branch had to be added at the manual-dispatch
 site, not only in `ToolRegistry.ContextBoundToolCallback.call` (which only covers Spring-AI internal
@@ -48,6 +63,9 @@ execution). The fix (RL-2026-06):
   `tool.execute()`. Compaction is skipped in remote mode (compactor flag is OFF by default).
 - `RemoteToolDispatcher.TOOL_TIMEOUT_MS` → constructor-injected `@Value(executespec.remote-tool.timeout-ms)`,
   default raised 120s → **600s** (long TB build/test commands run in the client's container).
+- `RemoteToolDispatcher.ToolProfile` + `ToolRegistry.REMOTE_*_WORKER_TOOLS` separate local-hands
+  capabilities from Terminal-Bench adapter capabilities. Both advertise one canonical name per
+  capability; aliases remain executable for replay compatibility but are not model-visible.
 
 ## The client (Harbor adapter)
 
@@ -154,3 +172,6 @@ DeepSeek V4 Flash native, Sonnet 5, Sonnet 4.6, and GLM 5.2 via OpenRouter. Use
 - `unregister` MUST run on every terminal/exception path (it's in `finally`) — else a dangling session
   leaks + `isRemote` stays true for that runId.
 - No `RunOrchestrator` / pipeline coupling — this is a direct `WorkerAgent.run` invocation.
+- A Harbor abort may cancel the persisted remote run while its worker finally block is unwinding;
+  `TerminalBenchRunService` preserves `COMPLETE`, `FAILED`, `CANCELLED`, and `PAUSED` rows and does
+  not overwrite a terminal status with a late worker result.

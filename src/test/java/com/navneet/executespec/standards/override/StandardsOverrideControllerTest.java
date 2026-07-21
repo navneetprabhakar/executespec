@@ -72,6 +72,8 @@ class StandardsOverrideControllerTest {
         fakeAuth(),
         fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(violationRepo)
         .save(
             argThat(
@@ -164,6 +166,8 @@ class StandardsOverrideControllerTest {
         fakeAuth(),
         fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(overrideRepo)
         .save(
             argThat(
@@ -212,6 +216,8 @@ class StandardsOverrideControllerTest {
 
     controller.removeProjectException(projectId, "std-a", fakeAuth(), fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(overrideRepo).delete(existing);
     verify(emitter)
         .emit(

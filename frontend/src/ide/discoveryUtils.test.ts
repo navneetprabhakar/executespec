@@ -34,7 +34,7 @@ describe('discoveryUtils', () => {
       failed: 2,
       avgScore: '84.3%',
       avgDuration: '2m 5s',
-      spend: '$3.50',
+      spend: '$3.5000',
     });
     expect(insightCards(null).avgScore).toBe('-');
     expect(durationLabel(61000)).toBe('1m 1s');
@@ -43,7 +43,7 @@ describe('discoveryUtils', () => {
         models: [],
         byProvider: [{provider: 'deepseek', spend: 1, cacheHitRate: 0.42}],
       } as unknown as api.ModelComparisonData),
-    ).toEqual([{provider: 'deepseek', value: '$1.00 (42% cache)'}]);
+    ).toEqual([{provider: 'deepseek', value: '$1.0000 (42% cache)'}]);
     expect(outcomePercent(3, 10)).toBe(30);
     expect(outcomePercent(3, 0)).toBe(0);
     expect(

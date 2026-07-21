@@ -95,6 +95,8 @@ class InvariantCheckerTest {
             kind: future-kind
         """;
     assertThat(checker.check(yaml, List.of("a.java"), fakeLoader(Map.of()))).isEmpty();
+    assertThat(checker.checkDetailed(yaml, List.of("a.java"), fakeLoader(Map.of())).status())
+        .isEqualTo(InvariantChecker.CheckStatus.UNSUPPORTED);
   }
 
   @Test
@@ -102,6 +104,28 @@ class InvariantCheckerTest {
     assertThat(checker.check(null, List.of(), fakeLoader(Map.of()))).isEmpty();
     assertThat(checker.check("", List.of(), fakeLoader(Map.of()))).isEmpty();
     assertThat(checker.check("not: { valid yaml", List.of(), fakeLoader(Map.of()))).isEmpty();
+    assertThat(checker.checkDetailed(null, List.of(), fakeLoader(Map.of())).status())
+        .isEqualTo(InvariantChecker.CheckStatus.INVALID);
+    assertThat(checker.checkDetailed("not: { valid yaml", List.of(), fakeLoader(Map.of())).status())
+        .isEqualTo(InvariantChecker.CheckStatus.INVALID);
+  }
+
+  @Test
+  void malformedSupportedRuleIsInvalidRatherThanPassing() {
+    String yaml =
+        """
+        id: broken
+        enforcement:
+          rule:
+            kind: no-direct-call
+            from: api/
+        """;
+
+    InvariantChecker.CheckResult result =
+        checker.checkDetailed(yaml, List.of(), fakeLoader(Map.of()));
+
+    assertThat(result.status()).isEqualTo(InvariantChecker.CheckStatus.INVALID);
+    assertThat(result.diagnostic()).contains("forbidden_target");
   }
 
   @Test

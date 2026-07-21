@@ -14,9 +14,11 @@ import com.navneet.executespec.integration.jira.JiraAdapter;
 import com.navneet.executespec.state.entity.IntegrationRun;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +55,10 @@ public class IntegrationController {
       log.warn("[Webhook] Unknown source: {}", source);
       return ResponseEntity.badRequest().body(Map.of("error", INVALID_REQUEST));
     } catch (Exception e) {
-      log.error("[Webhook] Error processing {} webhook: {}", source, e.getMessage(), e);
+      log.error(
+          "[Webhook] Error processing {} webhook errorType={}",
+          source,
+          e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
@@ -65,7 +70,7 @@ public class IntegrationController {
   @PostMapping("/jira/trigger")
   public ResponseEntity<Map<String, String>> jiraTrigger(
       @RequestBody Map<String, String> body, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireAuthenticated(userDetails);
+    IntegrationManager.IntegrationActor actor = requireTriggerAuthority(userDetails);
     try {
       InboundAdapter adapter = manager.getInboundAdapter("JIRA").orElse(null);
       if (!(adapter instanceof JiraAdapter ja)) {
@@ -77,10 +82,10 @@ public class IntegrationController {
       }
       String goal = body.get("goal");
       IntegrationEvent event = ja.buildFromIssueKey(issueKey, goal);
-      String runId = manager.submitEvent(event);
+      String runId = manager.submitEvent(event, actor);
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
-      log.error("[Webhook] Jira manual trigger error: {}", e.getMessage(), e);
+      log.error("[Webhook] Jira manual trigger errorType={}", e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
@@ -92,7 +97,7 @@ public class IntegrationController {
   @PostMapping("/confluence/trigger")
   public ResponseEntity<Map<String, String>> confluenceTrigger(
       @RequestBody Map<String, String> body, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireAuthenticated(userDetails);
+    IntegrationManager.IntegrationActor actor = requireTriggerAuthority(userDetails);
     try {
       InboundAdapter adapter = manager.getInboundAdapter("CONFLUENCE").orElse(null);
       if (!(adapter instanceof ConfluenceAdapter ca)) {
@@ -105,10 +110,10 @@ public class IntegrationController {
         return ResponseEntity.badRequest().body(Map.of("error", "pageId and goal are required"));
       }
       IntegrationEvent event = ca.buildFromPageId(pageId, goal);
-      String runId = manager.submitEvent(event);
+      String runId = manager.submitEvent(event, actor);
       return ResponseEntity.ok(Map.of("runId", runId));
     } catch (Exception e) {
-      log.error("[Webhook] Confluence manual trigger error: {}", e.getMessage(), e);
+      log.error("[Webhook] Confluence manual trigger errorType={}", e.getClass().getSimpleName());
       return ResponseEntity.internalServerError().body(Map.of("error", INTERNAL_ERROR));
     }
   }
@@ -119,7 +124,33 @@ public class IntegrationController {
       @RequestParam(required = false) String source,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireAuthenticated(userDetails);
-    return manager.listIntegrationRuns(source).stream().map(this::toSummary).toList();
+    // RR-339 — scope to the caller's own org. SUPER_ADMIN keeps the global view; everyone else
+    // sees only rows their org owns, and an org-less principal sees nothing (fail closed).
+    List<IntegrationRun> rows =
+        isSuperAdmin(userDetails)
+            ? manager.listAllIntegrationRuns(source)
+            : manager.listIntegrationRuns(source, userDetails.getUser().getOrgId());
+    return rows.stream().map(this::toSummary).toList();
+  }
+
+  private boolean isSuperAdmin(AppUserDetails userDetails) {
+    return "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
+  }
+
+  /**
+   * RR-340 — a manual trigger fetches globally configured external content and spends AI budget, so
+   * it needs explicit authority AND a bound payer. Requiring org-admin (or super-admin) is the
+   * closest available proxy for a per-integration trigger capability while integration credentials
+   * remain platform-global YAML config; the returned actor is what the run is charged to.
+   */
+  private IntegrationManager.IntegrationActor requireTriggerAuthority(AppUserDetails userDetails) {
+    guard.requireOrgAdmin(userDetails);
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null || orgId.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN, "An owning organization is required to trigger integration runs");
+    }
+    return new IntegrationManager.IntegrationActor(userDetails.getUser().getId(), orgId);
   }
 
   // NOTE: GET /api/integrations/status is handled by IntegrationStatusController

@@ -23,13 +23,14 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  *   <li>Plan intends to modify the contract
- *   <li>Change is BREAKING per the deterministic classifier
+ *   <li>Change is BREAKING per the deterministic classifier, OR the classifier could not reach a
+ *       verdict at all (RR-1630 — {@link ContractDiff.Confidence#UNCLASSIFIED})
  *   <li>Contract has at least one declared consumer in this project
  * </ol>
  *
- * <p>Other cases (breaking but no consumers / non-breaking) are recorded in the run metadata but
- * don't block approval — collapses warning frequency by the ~10–50× factor called out in the source
- * plan, so the rare warnings stay readable.
+ * <p>Other cases (breaking/unverified but no consumers / classified non-breaking) are recorded in
+ * the run metadata but don't block approval — collapses warning frequency by the ~10–50× factor
+ * called out in the source plan, so the rare warnings stay readable.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,7 +64,13 @@ public class PlanBreakingChangeReport {
               contract.typeEnum(),
               ic.previousContent() == null ? "" : ic.previousContent(),
               ic.newContent() == null ? "" : ic.newContent());
-      if (!diff.hasBreaking()) continue;
+      // RR-1630 — an UNCLASSIFIED verdict (no deterministic CLI installed, CLI timeout, or no
+      // classifier registered for the type at all, e.g. ASYNCAPI / EVENT_SCHEMA) always carries an
+      // EMPTY change list, so hasBreaking() is false and the contract used to be dropped silently.
+      // That made "we could not classify this" indistinguishable from "we verified it is safe".
+      // Unverified contracts now always surface, with an explicit summary.
+      boolean unverified = diff.confidence() == ContractDiff.Confidence.UNCLASSIFIED;
+      if (!unverified && !diff.hasBreaking()) continue;
 
       // Consumer presence decides gate friction vs metadata-only record
       List<String> consumerRepos =
@@ -82,7 +89,9 @@ public class PlanBreakingChangeReport {
               ic.contractId(),
               contract.getName(),
               contract.typeEnum(),
-              diff.summary(),
+              unverified
+                  ? "unverified — could not classify this change: " + diff.summary()
+                  : diff.summary(),
               consumerRepos,
               isFriction,
               diff.confidence().name()));
@@ -111,7 +120,8 @@ public class PlanBreakingChangeReport {
    * @param summary one-line summary of the breaking change
    * @param affectedConsumers full names of consumer repos declared in this project
    * @param requiresFriction true → triggers gate friction; false → metadata-only
-   * @param confidence classifier confidence (DETERMINISTIC / LLM_DERIVED)
+   * @param confidence classifier confidence (DETERMINISTIC / LLM_DERIVED / UNCLASSIFIED —
+   *     UNCLASSIFIED means the change could not be verified either way, not that it is safe)
    */
   public record BreakingChangeRow(
       UUID contractId,

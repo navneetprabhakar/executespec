@@ -1,5 +1,7 @@
 package com.navneet.executespec.engine;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -9,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
@@ -18,6 +21,8 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
+import com.navneet.executespec.tool.ToolCapabilities;
+import com.navneet.executespec.tool.ToolCapability;
 import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
@@ -75,6 +80,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class WorkerAgent {
+
+  /** 120s finalizer LLM turn + up to 60s for its single closing tool before shutdown reserve. */
+  private static final int TERMINAL_FINALIZER_LEAD_SECONDS = 180;
 
   /**
    * Default iteration cap (per V2 plan P3.1 — was 28 in V1 MEDIUM, raised to compensate for
@@ -142,7 +150,13 @@ public class WorkerAgent {
   @Value("${execution.continuation.parallel-read-tools-enabled:true}")
   private boolean parallelReadToolsEnabled = true;
 
-  /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
+  /**
+   * Bug #2 fix — check budget every N iterations, not just at task boundaries.
+   *
+   * <p>RR-255 (2026-07-20): retained only for the tests/consumers that reference it. The worker now
+   * evaluates the hard cap on EVERY iteration; sampling every third one let two further full
+   * provider calls land after the cap had already been crossed.
+   */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
   /**
@@ -217,19 +231,6 @@ public class WorkerAgent {
   public static final int TEST_VERIFICATION_RECENCY_ITERS = 5;
 
   /**
-   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}). Used by
-   * the layer-3 verification gate to identify the call that satisfies it.
-   */
-  static final String RUN_TESTS_TOOL_NAME = "runTests";
-
-  /**
-   * Name of the project-build tool ({@link com.navneet.executespec.tool.BuildProjectTool}). Used by
-   * the 2026-05-08 build-verification gate (mirrors the test-verification gate from V182 layer-3)
-   * to identify the call that satisfies it.
-   */
-  static final String BUILD_PROJECT_TOOL_NAME = "buildProject";
-
-  /**
    * 2026-05-08 — within how many iterations of {@code completeTask} must a successful {@code
    * buildProject} call (exit=0) have occurred? When {@link
    * WorkerTaskRequest#requireBuildVerification()} is true, the dispatch loop refuses {@code
@@ -264,29 +265,6 @@ public class WorkerAgent {
    * run a passing command against those tests. Bounded + fail-open like the other completion gates.
    */
   public static final int TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS = 3;
-
-  /**
-   * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
-   * shell don't reset the counter — only file mutations and explicit build attempts.
-   *
-   * <p>{@code buildProject} added 2026-05-08: cmatrix gemini run 84252898 stagnated despite the
-   * agent legitimately alternating between read + write + build cycles, because the build calls
-   * didn't reset the counter. Build attempts ARE deliberate forward motion (especially in
-   * programbench mode where {@link com.navneet.executespec.tool.BuildProjectTool}'s wrapper fails
-   * any no-op compile.sh — so spam-build can't game the guard, every successful build implies real
-   * source compiled).
-   */
-  private static final java.util.Set<String> WRITE_CLASS_TOOLS =
-      java.util.Set.of(
-          "writeFile",
-          "write_file",
-          "editFile",
-          "edit_file",
-          "multiEdit",
-          "multi_edit",
-          "applyPatch",
-          "apply_patch",
-          "buildProject");
 
   /**
    * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
@@ -500,6 +478,11 @@ public class WorkerAgent {
         req.wallClockSeconds() != null && req.wallClockSeconds() > 0
             ? req.wallClockSeconds() * 1000L
             : 0L;
+    // Phase-12 benchmark contract: an absolute deadline includes time spent before this worker
+    // thread started. The reserve is never offered to provider/tool work; it is kept for terminal
+    // persistence, cost/SSE completion, and the adapter's ATIF trajectory flush.
+    final boolean absoluteDeadline =
+        req.absoluteDeadlineEpochMs() != null && req.absoluteDeadlineEpochMs() > 0;
 
     if (!isResume) {
       log.info(
@@ -548,6 +531,27 @@ public class WorkerAgent {
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
+      if (absoluteDeadline) {
+        long usableMillis =
+            AbsoluteDeadlineBudget.usableMillis(
+                req.absoluteDeadlineEpochMs(), req.shutdownReserveMs(), System.currentTimeMillis());
+        // Enter the one-shot finalizer while a normal provider call can still fit. If it cannot
+        // produce a closing tool call, stop immediately instead of spending the shutdown reserve.
+        if (terminalTaskMode
+            && !terminalForcedFinalizerAttempted
+            && usableMillis <= TERMINAL_FINALIZER_LEAD_SECONDS * 1000L) {
+          terminalForcedFinalizerAttempted = true;
+          WorkerResult finalized =
+              runTerminalFinalizerCall(req, history, toolsDispatched, toolLog, start, iter, false);
+          if (finalized != null) return finalized;
+          return deadlineExceededResult(
+              req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+        }
+        if (usableMillis < 1000L) {
+          return deadlineExceededResult(
+              req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+        }
+      }
       // 2026-05-10 — wall-clock cap check. Top-of-iter so we never start a new LLM call once
       // we've blown past the budget. In-flight LLM calls are not interrupted (the stop happens
       // on the next iter boundary), so the actual termination time is "wall-clock cap +
@@ -588,9 +592,12 @@ public class WorkerAgent {
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
-      if (hardCapUsd != null
-          && hardCapUsd > 0
-          && (iter == 1 || iter % BUDGET_CHECK_EVERY_N_ITERATIONS == 0)) {
+      // RR-255 (2026-07-20) — the hard cap is now evaluated on EVERY iteration, before the next
+      // provider call is issued. The previous `iter == 1 || iter % 3 == 0` sampling meant the
+      // worker could issue up to two further full provider calls after the authorized ceiling had
+      // already been crossed, and the over-cap salvage call below deliberately spent one or two
+      // more. A cap the code knowingly spends past is not a cap.
+      if (hardCapUsd != null && hardCapUsd > 0) {
         double spent = costTracker.snapshot(runId).costUsd();
         if (spent >= hardCapUsd) {
           log.warn(
@@ -601,31 +608,14 @@ public class WorkerAgent {
               String.format("%.4f", spent),
               String.format("%.4f", hardCapUsd),
               totalWriteCalls);
-          // 2026-05-08 — extend Lever B salvage to BUDGET_EXCEEDED path. Previously only
-          // ITERATION_LIMIT_EXCEEDED triggered runSalvageCall; a BUDGET_EXCEEDED with zero
-          // writes also produced an empty patch (observed Gemini sqlfluff-1733/1517 hitting
-          // $4 cap with 0 edits). One extra LLM call is ~$0.10-0.50, acceptable spend over
-          // the cap to convert "empty patch = automatic failure" into "best-guess patch =
-          // possible resolve." For BYOK runs cap is null so this branch never fires anyway.
-          if (totalWriteCalls == 0) {
-            try {
-              WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
-              if (salvage != null) {
-                // Mark salvage outcome distinct from clean BUDGET_EXCEEDED so downstream sees
-                // we DID produce output despite hitting cap. Reuses the iter-limit salvage
-                // path which returns COMPLETED on a successful write.
-                log.info(
-                    "WorkerAgent BUDGET_EXCEEDED salvage produced output run={}",
-                    req.context().runId());
-                return salvage;
-              }
-            } catch (Exception e) {
-              log.warn(
-                  "WorkerAgent BUDGET salvage failed run={}: {}",
-                  req.context().runId(),
-                  e.getMessage());
-            }
-          }
+          // RR-255 — the Lever-B salvage call that used to fire here is REMOVED. It made one (and,
+          // through forced-tool-choice fallback, potentially two) additional physical provider
+          // attempts AFTER the code had observed that spend authorization was exhausted, and the
+          // source called that "$0.10-0.50 acceptable" over-cap spend. Converting an empty patch
+          // into a best-guess patch is a quality lever, not a spending authorization; a run that
+          // previously salvaged past the cap now terminates BUDGET_EXCEEDED with whatever it has.
+          // The iteration-limit salvage path is untouched, because that path has not exhausted its
+          // dollar budget.
           recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
           // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
           // sees the budget signal directly. Previously this path called errorResult(...) which
@@ -678,6 +668,11 @@ public class WorkerAgent {
       final boolean forcedThisCall = progressV2 && forceToolChoiceNextCall;
       forceToolChoiceNextCall = false;
       ChatResponse resp;
+      java.util.OptionalInt iterationTimeout = deadlineTimeoutSeconds(req);
+      if (iterationTimeout.isEmpty()) {
+        return deadlineExceededResult(
+            req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+      }
       try {
         resp =
             router.call(
@@ -703,7 +698,7 @@ public class WorkerAgent {
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
                     // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
                     // their HTTP timeouts).
-                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                    .readTimeoutSeconds(iterationTimeout.getAsInt())
                     .build());
       } catch (Exception e) {
         if (forcedThisCall) {
@@ -1302,7 +1297,7 @@ public class WorkerAgent {
         // "tool was invoked" not "tests passed." Now: require the envelope to contain the
         // pytest-pass markers `"failed":[]` AND `"errored":[]` AND `"exit_code":0` to satisfy
         // the gate. Until those are present, completeTask remains REFUSED.
-        if (RUN_TESTS_TOOL_NAME.equals(tc.name())
+        if (isRunTestsTool(tc.name())
             && envelope != null
             && envelope.startsWith("{\"ok\":true")
             && envelope.contains("\\\"failed\\\":[]")
@@ -1315,15 +1310,13 @@ public class WorkerAgent {
         // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
         // avoid false-positive on output text that happens to contain "exit=0" without the
         // newline framing (e.g. compiler messages quoting source).
-        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
+        if (isBuildTool(tc.name()) && isSuccessfulBuildEnvelope(envelope)) {
           lastBuildPassIter = iter;
         }
         // #3 verify-before-done tracking: file edits vs "ran something to check the fix".
         if (isWriteTool(tc.name())) {
           lastEditIter = iter;
-        } else if ((isShellTool(tc.name())
-                || BUILD_PROJECT_TOOL_NAME.equals(tc.name())
-                || RUN_TESTS_TOOL_NAME.equals(tc.name()))
+        } else if ((isShellTool(tc.name()) || isBuildTool(tc.name()) || isRunTestsTool(tc.name()))
             && isOkEnvelope(envelope)) {
           lastVerifyIter = iter;
         }
@@ -1722,6 +1715,11 @@ public class WorkerAgent {
       long start,
       List<ToolCallback> tools,
       String toolChoice) {
+    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+    if (callTimeout.isEmpty()) {
+      log.info("WorkerAgent SALVAGE refused: absolute deadline shutdown reserve reached");
+      return null;
+    }
     ChatResponse resp;
     try {
       resp =
@@ -1739,7 +1737,7 @@ public class WorkerAgent {
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .build());
     } catch (Exception e) {
       log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
@@ -1896,6 +1894,11 @@ public class WorkerAgent {
       int iter,
       List<ToolCallback> tools,
       String toolChoice) {
+    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+    if (callTimeout.isEmpty()) {
+      log.info("WorkerAgent TERMINAL_FINALIZER refused: shutdown reserve reached");
+      return null;
+    }
     ChatResponse resp;
     try {
       resp =
@@ -1915,7 +1918,7 @@ public class WorkerAgent {
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(tools)
                   .toolChoice(toolChoice)
-                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .build());
     } catch (Exception e) {
       log.warn(
@@ -2177,6 +2180,41 @@ public class WorkerAgent {
     return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
+  static java.util.OptionalInt deadlineTimeoutSeconds(WorkerTaskRequest req) {
+    return AbsoluteDeadlineBudget.timeoutSeconds(
+        req.absoluteDeadlineEpochMs(),
+        req.shutdownReserveMs(),
+        System.currentTimeMillis(),
+        WORKER_HTTP_READ_TIMEOUT_SECONDS);
+  }
+
+  private WorkerResult deadlineExceededResult(
+      WorkerTaskRequest req,
+      int iter,
+      int toolsDispatched,
+      String lastText,
+      int repeatedAssistantTextCount,
+      List<String> toolLog,
+      long start) {
+    log.warn(
+        "WorkerAgent ABSOLUTE_DEADLINE run={} task={} iter={} deadline={} reserveMs={}",
+        req.context().runId(),
+        req.context().taskId(),
+        iter,
+        req.absoluteDeadlineEpochMs(),
+        req.shutdownReserveMs());
+    recordTerminal(WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED, req, iter);
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED)
+        .iterations(iter)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText(lastText)
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
+  }
+
   private String dispatchOne(
       AssistantMessage.ToolCall tc, WorkerTaskRequest req, boolean isImmediatelyPriorToolCall) {
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
@@ -2202,7 +2240,12 @@ public class WorkerAgent {
     // is skipped in remote mode (the compactor flag is OFF by default; the envelope is byte-shaped
     // identically to the local okEnvelope/errEnvelope path).
     if (toolRegistry.isRemoteRun(req.context())) {
-      return toolRegistry.dispatchRemote(req.context(), tc.name(), tc.arguments());
+      return toolRegistry.dispatchRemote(
+          req.context(),
+          tc.name(),
+          tc.arguments(),
+          req.absoluteDeadlineEpochMs(),
+          req.shutdownReserveMs());
     }
     JsonNode args;
     try {
@@ -2234,9 +2277,9 @@ public class WorkerAgent {
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception unexpected) {
-      log.error("Tool '{}' threw unexpectedly", tc.name(), unexpected);
-      return errEnvelope(
-          "INTERNAL", unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+      log.error(
+          "Tool '{}' threw unexpectedly: {}", tc.name(), unexpected.getClass().getSimpleName());
+      return errEnvelope("INTERNAL", "tool execution failed; inspect the correlation trace");
     }
   }
 
@@ -2265,7 +2308,7 @@ public class WorkerAgent {
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception e) {
-      return errEnvelope("INTERNAL", e.getClass().getSimpleName() + ": " + e.getMessage());
+      return errEnvelope("INTERNAL", "tool execution failed; inspect the correlation trace");
     }
   }
 
@@ -2335,14 +2378,71 @@ public class WorkerAgent {
     return (id == null || id.isBlank()) ? "call_" + Long.toHexString(System.nanoTime()) : id;
   }
 
-  private static String previewArgs(String args) {
-    if (args == null) return "";
-    return args.length() > 80 ? args.substring(0, 80) + "..." : args;
+  static String argumentSignature(String args) {
+    if (args == null || args.isBlank()) return "none";
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(args.getBytes(StandardCharsets.UTF_8));
+      return java.util.HexFormat.of().formatHex(digest, 0, 8);
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
   }
 
-  private static String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
+  private String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
     String status = "ok".equals(envelopeStatus(envelope)) ? "OK" : "ERR";
-    return tc.name() + "(" + previewArgs(tc.arguments()) + ") -> " + status;
+    String target = mutationTarget(tc.name(), tc.arguments());
+    return tc.name()
+        + "("
+        + "sig="
+        + argumentSignature(tc.arguments())
+        + ")"
+        + (target.isBlank() ? "" : " [target=" + target + "]")
+        + " -> "
+        + status;
+  }
+
+  /**
+   * Preserve the exact mutation target outside the bounded argument preview. Provider JSON key
+   * order is not stable, so a path that occurs after byte 80 must not disappear from durable goal
+   * evidence.
+   */
+  private String mutationTarget(String toolName, String arguments) {
+    if (toolName == null || arguments == null) return "";
+    // RR-1599 — was a literal lowercase-name set ({writefile, editfile, multiedit, applypatch}),
+    // which silently omitted `ast_edit` / `astEdit`, `move` / `rename` and `delete` / `deletePath`.
+    // Those calls really do change product files, so producing no [target=] marker made a genuine
+    // delivery unattributable in edit-churn evidence and in the goal-DONE intersection with the
+    // admitted product diff.
+    // Deliberately NOT the fail-closed WorkerToolPolicy.isWriteTool: an unclassified tool must
+    // not have its arguments claimed as a delivered product path.
+    if (!ToolCapabilities.of(toolName).map(ToolCapability::mutatesFiles).orElse(false)) {
+      return "";
+    }
+    try {
+      JsonNode node = objectMapper.readTree(arguments);
+      // `dst` before `src` so a move is attributed to the path that now exists.
+      for (String field : List.of("path", "file", "filePath", "dst", "src")) {
+        if (node.hasNonNull(field)) return safeMutationTarget(node.get(field).asText());
+      }
+      String patch = node.path("patch").asText("");
+      for (String line : patch.lines().toList()) {
+        String trimmed = line.trim();
+        for (String marker : List.of("*** Add File:", "*** Update File:")) {
+          if (trimmed.startsWith(marker)) {
+            return safeMutationTarget(trimmed.substring(marker.length()).trim());
+          }
+        }
+      }
+    } catch (Exception ignored) {
+      // Malformed arguments fail closed: no target is attributed to the task.
+    }
+    return "";
+  }
+
+  private static String safeMutationTarget(String path) {
+    if (path == null) return "";
+    return path.replace('\n', ' ').replace('\r', ' ').replace(']', '_').trim();
   }
 
   private WorkerResult errorResult(
@@ -2374,8 +2474,8 @@ public class WorkerAgent {
   /**
    * Per-tool-call log line. Filters out the high-volume read-only tools (readFile / listFiles /
    * searchFiles / gitStatus / gitDiff) so the LiveLog shows REAL progress (mutations + builds +
-   * shell) instead of the worker's introspective reads. Tool-arg preview kept short (~60 chars
-   * after a per-tool prefix) so each line fits one banner row.
+   * shell) instead of the worker's introspective reads. Only a safe mutation path is displayed;
+   * commands and tool payloads never enter SSE logs.
    */
   private void emitToolCallLog(WorkerTaskRequest req, AssistantMessage.ToolCall tc) {
     String name = tc.name() == null ? "" : tc.name();
@@ -2393,21 +2493,20 @@ public class WorkerAgent {
         return; // read-only tools — skip
       }
     }
-    String preview = extractPathOrCommand(tc.arguments());
+    String preview = extractSafeProgressTarget(tc.arguments());
     emitWorkerLog(req, emoji + " " + name + (preview.isEmpty() ? "" : " · " + preview));
   }
 
   /**
-   * Pull a short, human-friendly preview from a tool-call's JSON args. Looks for {@code path},
-   * {@code filePath}, {@code command}, then falls back to the {@link #previewArgs} truncation.
+   * Pull a short path-only preview from mutation arguments. Shell commands and malformed payloads
+   * deliberately produce no preview.
    */
-  private String extractPathOrCommand(String argsJson) {
+  private String extractSafeProgressTarget(String argsJson) {
     if (argsJson == null || argsJson.isEmpty()) return "";
     try {
       JsonNode node = objectMapper.readTree(argsJson);
       if (node.hasNonNull("path")) return truncate(node.get("path").asText(), 80);
       if (node.hasNonNull("filePath")) return truncate(node.get("filePath").asText(), 80);
-      if (node.hasNonNull("command")) return truncate(node.get("command").asText(), 80);
       // editFile uses an array of {oldStr, newStr} — show the path + edit count.
       if (node.hasNonNull("file")) {
         String file = truncate(node.get("file").asText(), 60);
@@ -2417,7 +2516,7 @@ public class WorkerAgent {
     } catch (Exception ignore) {
       /* fallthrough */
     }
-    return previewArgs(argsJson);
+    return "";
   }
 
   /**
@@ -2627,13 +2726,27 @@ public class WorkerAgent {
    * command exits successfully. Legacy envelopes without the marker remain accepted.
    */
   static boolean isSuccessfulBuildEnvelope(String envelope) {
-    if (envelope == null
-        || !envelope.startsWith("{\"ok\":true")
-        || !envelope.contains("\\nexit=0\\n")) {
+    if (envelope == null || !envelope.startsWith("{\"ok\":true")) {
       return false;
     }
-    return !envelope.contains("\\nsmokeSignal=UNAVAILABLE\\n")
-        && !envelope.contains("\\nnoOp=true\\n");
+    return com.navneet.executespec.smoketest.BuildVerificationResult.parse(envelope).passed();
+  }
+
+  /**
+   * RR-258 — does this Ok envelope carry the runner's own exit-zero verdict?
+   *
+   * <p>Deliberately three-state collapsed to false: a missing exit marker is NOT proof of success.
+   * {@code shell} and {@code runTests} embed {@code exit=N} / {@code "exit_code": N} in their
+   * content; {@code buildProject} is delegated to the stricter build parser, which also rejects the
+   * resolver's explicit no-op marker. An envelope with no readable verdict proves nothing and
+   * therefore cannot mark a terminal verified pass.
+   */
+  static boolean envelopeProvesExitZero(String toolName, String envelope) {
+    if (envelope == null || !envelope.startsWith("{\"ok\":true")) return false;
+    if (isBuildTool(toolName)) return isSuccessfulBuildEnvelope(envelope);
+    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
+    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
+    return m.find() && "0".equals(m.group(1));
   }
 
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
@@ -3022,8 +3135,13 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
    */
   private String runCriticPass(WorkerTaskRequest req, List<String> paths) {
     try {
+      java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
+      if (callTimeout.isEmpty()) return null;
       String deliverable = readDeliverableContext(req.context(), paths);
-      String userMsg = "TASK:\n" + req.userPrompt() + "\n\nCANDIDATE DELIVERABLE:\n" + deliverable;
+      String userMsg =
+          PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
+              + "\n\n"
+              + PromptTrustBoundary.wrap("CANDIDATE_DELIVERABLE", deliverable);
       ChatResponse resp =
           router.call(
               LlmRequest.builder()
@@ -3036,6 +3154,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   .stepId("worker.critic-pass")
                   .temperature(0.0)
                   .maxTokens(1500)
+                  .readTimeoutSeconds(callTimeout.getAsInt())
                   .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
                   .toolsOverride(List.of()) // no tools — a plain completion
                   .build());
@@ -3132,6 +3251,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
       List<String> requiredDeliverables,
       ExecutionContext ctx) {
     if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
+    // RR-258 — `{"ok":true}` only means the TRANSPORT succeeded. ShellTool deliberately wraps
+    // non-zero process exits in an Ok envelope so the model can read stderr, so a verifier command
+    // that FAILED looked identical to one that passed. The resulting verified-pass flag then blocks
+    // further edits and can force a text-only worker to COMPLETED — protecting a failing candidate
+    // from repair. Require the runner's own structured exit-zero verdict, not transport success.
+    if (!envelopeProvesExitZero(toolName, envelope)) return false;
     String command = commandFromArgs(argsJson);
     if (!terminalVerifierCommand(toolName, command)) return false;
     if (visibleTestsExist(ctx) && !terminalVisibleTestCommand(toolName, command)) return false;
@@ -3157,7 +3282,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   static boolean terminalVerifierCommand(String toolName, String command) {
-    if (RUN_TESTS_TOOL_NAME.equals(toolName) || BUILD_PROJECT_TOOL_NAME.equals(toolName)) {
+    if (isRunTestsTool(toolName) || isBuildTool(toolName)) {
       return true;
     }
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
@@ -3184,7 +3309,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   static boolean terminalVisibleTestCommand(String toolName, String command) {
-    if (RUN_TESTS_TOOL_NAME.equals(toolName)) return true;
+    if (isRunTestsTool(toolName)) return true;
     if (!isShellTool(toolName) || command == null || command.isBlank()) return false;
     String c = command.toLowerCase(java.util.Locale.ROOT);
     return executesVisibleTestScript(c)
@@ -3223,17 +3348,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     return command.matches(".*(?:^|[;&|]\\s*)(?:sudo\\s+)?/tests/test\\.sh(?:\\s|$).*");
   }
 
-  private static boolean terminalVerifierTool(String toolName) {
-    return isShellTool(toolName)
-        || RUN_TESTS_TOOL_NAME.equals(toolName)
-        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  static boolean terminalVerifierTool(String toolName) {
+    return WorkerToolPolicy.isTerminalVerifierTool(toolName);
   }
 
-  private static boolean terminalRiskyAfterVerifiedPass(String toolName) {
-    return isWriteTool(toolName)
-        || isShellTool(toolName)
-        || RUN_TESTS_TOOL_NAME.equals(toolName)
-        || BUILD_PROJECT_TOOL_NAME.equals(toolName);
+  static boolean terminalRiskyAfterVerifiedPass(String toolName) {
+    return WorkerToolPolicy.isRiskyAfterVerifiedPass(toolName);
   }
 
   private static String terminalVerifiedPassMessage() {
@@ -3294,22 +3414,26 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     return s.replaceAll("[^A-Za-z0-9._-]", "-");
   }
 
-  private static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
-    return WRITE_CLASS_TOOLS.contains(toolName) || (terminalTaskMode && isShellTool(toolName));
+  // RR-1599 — classification lives in WorkerToolPolicy so every registered alias of a capability
+  // is policed by the same predicate. These wrappers keep the call sites (and their tests) short.
+
+  static boolean isProgressTool(String toolName, boolean terminalTaskMode) {
+    return WorkerToolPolicy.isProgressTool(toolName, terminalTaskMode);
   }
 
-  private static boolean isWriteTool(String toolName) {
-    return "writeFile".equals(toolName)
-        || "write_file".equals(toolName)
-        || "editFile".equals(toolName)
-        || "edit_file".equals(toolName)
-        || "multiEdit".equals(toolName)
-        || "multi_edit".equals(toolName)
-        || "applyPatch".equals(toolName)
-        || "apply_patch".equals(toolName);
+  static boolean isWriteTool(String toolName) {
+    return WorkerToolPolicy.isWriteTool(toolName);
   }
 
-  private static boolean isShellTool(String toolName) {
-    return "shell".equals(toolName) || "bash".equals(toolName);
+  static boolean isShellTool(String toolName) {
+    return WorkerToolPolicy.isShellTool(toolName);
+  }
+
+  static boolean isBuildTool(String toolName) {
+    return WorkerToolPolicy.isBuildTool(toolName);
+  }
+
+  static boolean isRunTestsTool(String toolName) {
+    return WorkerToolPolicy.isRunTestsTool(toolName);
   }
 }

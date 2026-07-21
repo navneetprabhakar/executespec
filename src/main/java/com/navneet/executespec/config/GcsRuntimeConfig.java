@@ -4,7 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.annotation.PostConstruct;
@@ -12,10 +15,12 @@ import jakarta.annotation.PostConstruct;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.cloud.storage.*;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -38,10 +43,24 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GcsRuntimeConfig {
 
   private static final String CONFIG_OBJECT_KEY = "config/runtime-config.json";
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final Set<String> ALLOWED_EXACT_KEYS =
+      Set.of("CORS_ALLOWED_ORIGINS", "app.cors.allowed-origins");
+  private static final List<String> ALLOWED_PREFIXES =
+      List.of(
+          "preview.",
+          "agent.concurrency.",
+          "execution.continuation.",
+          "management.tracing.",
+          "management.otlp.");
+  private static final List<String> SECRET_KEY_MARKERS =
+      List.of("secret", "password", "token", "api-key", "api_key", "credential", "private-key");
+
+  private final GeneratedSecretScanner secretScanner;
 
   @Value("${DEPLOY_BUCKET:}")
   private String deployBucket;
@@ -90,6 +109,12 @@ public class GcsRuntimeConfig {
       for (var entry : loaded.entrySet()) {
         String key = entry.getKey();
         String newValue = entry.getValue();
+        try {
+          validateNonSecretEntry(key, newValue);
+        } catch (IllegalArgumentException rejected) {
+          log.error("[GcsRuntimeConfig] Ignoring disallowed runtime-config key '{}'", key);
+          continue;
+        }
         String oldValue = currentConfig.get(key);
 
         if (!newValue.equals(oldValue)) {
@@ -117,17 +142,23 @@ public class GcsRuntimeConfig {
   }
 
   /** Update a single config entry and persist to GCS. */
-  public void put(String key, String value) {
+  public synchronized void put(String key, String value) {
+    validateNonSecretEntry(key, value);
+    Map<String, String> candidate = new LinkedHashMap<>(currentConfig);
+    candidate.put(key, value);
+    persistToGcs(candidate);
     currentConfig.put(key, value);
     System.setProperty(key, value);
-    persistToGcs();
   }
 
   /** Remove a config entry and persist to GCS. */
-  public void remove(String key) {
+  public synchronized void remove(String key) {
+    validateAllowedKey(key);
+    Map<String, String> candidate = new LinkedHashMap<>(currentConfig);
+    candidate.remove(key);
+    persistToGcs(candidate);
     currentConfig.remove(key);
     System.clearProperty(key);
-    persistToGcs();
   }
 
   /** Returns the GCS bucket name for config storage. */
@@ -135,27 +166,57 @@ public class GcsRuntimeConfig {
     return deployBucket;
   }
 
-  private void persistToGcs() {
+  private void persistToGcs(Map<String, String> toWrite) {
     if (storage == null || deployBucket.isBlank()) {
-      log.warn("[GcsRuntimeConfig] Cannot persist — no GCS storage available");
-      return;
+      throw new IllegalStateException("GCS runtime-config storage is unavailable");
     }
 
     try {
-      // Add metadata
-      Map<String, String> toWrite = new LinkedHashMap<>(currentConfig);
-
       String json = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(toWrite);
+      BlobId blobId = BlobId.of(deployBucket, CONFIG_OBJECT_KEY);
+      Blob existing = storage.get(blobId);
       BlobInfo blobInfo =
-          BlobInfo.newBuilder(BlobId.of(deployBucket, CONFIG_OBJECT_KEY))
+          BlobInfo.newBuilder(blobId)
               .setContentType("application/json")
               .setMetadata(Map.of("updated-at", Instant.now().toString()))
               .build();
-      storage.create(blobInfo, json.getBytes(StandardCharsets.UTF_8));
+      Storage.BlobTargetOption generationGuard =
+          existing == null
+              ? Storage.BlobTargetOption.doesNotExist()
+              : Storage.BlobTargetOption.generationMatch(existing.getGeneration());
+      storage.create(blobInfo, json.getBytes(StandardCharsets.UTF_8), generationGuard);
       log.info("[GcsRuntimeConfig] Persisted {} config entries to GCS", toWrite.size());
 
     } catch (Exception e) {
-      log.error("[GcsRuntimeConfig] Failed to persist config to GCS: {}", e.getMessage());
+      log.error(
+          "[GcsRuntimeConfig] Failed to persist config to GCS type={}",
+          e.getClass().getSimpleName());
+      throw new IllegalStateException("GCS runtime-config persistence failed", e);
     }
+  }
+
+  private void validateNonSecretEntry(String key, String value) {
+    validateAllowedKey(key);
+    if (value == null) throw new IllegalArgumentException("Runtime-config value is required");
+    if (value.length() > 4096)
+      throw new IllegalArgumentException("Runtime-config value is too large");
+    if (secretScanner.scan(value).isPresent()) {
+      throw new IllegalArgumentException("Secrets are not allowed in runtime config");
+    }
+  }
+
+  private static void validateAllowedKey(String key) {
+    if (key == null || key.isBlank())
+      throw new IllegalArgumentException("Runtime-config key is required");
+    String normalized = key.strip();
+    String lower = normalized.toLowerCase(Locale.ROOT);
+    if (SECRET_KEY_MARKERS.stream().anyMatch(lower::contains)) {
+      throw new IllegalArgumentException("Secret-like keys are not allowed in runtime config");
+    }
+    boolean allowed =
+        ALLOWED_EXACT_KEYS.contains(normalized)
+            || ALLOWED_PREFIXES.stream().anyMatch(normalized::startsWith);
+    if (!allowed)
+      throw new IllegalArgumentException("Unsupported runtime-config key: " + normalized);
   }
 }

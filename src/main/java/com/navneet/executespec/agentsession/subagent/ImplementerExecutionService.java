@@ -59,6 +59,7 @@ public class ImplementerExecutionService {
   private final AgentTurnRepository turnRepository;
   private final AgentActionEventRepository eventRepository;
   private final ImplementerMutationService mutationService;
+  private final ImplementerWorkspaceScope workspaceScope;
   private final SubagentProtocolService protocolService;
   private final ToolRegistry toolRegistry;
   private final SpecChatService specChatService;
@@ -98,9 +99,9 @@ public class ImplementerExecutionService {
     if (!isLocalSurface(session)) {
       throw new SecurityException("IMPLEMENTER requires a CLI or VS Code session");
     }
-    Path root = Path.of(scope).toAbsolutePath().normalize();
-    if (!Files.isDirectory(root))
-      throw new IllegalArgumentException("writer scope must be a directory");
+    // Server-authoritative scope. The loop below binds SERVER read/write/build/test tools, so the
+    // directory must come from server state; a caller-named absolute host path is refused.
+    Path root = workspaceScope.resolve(session, scope);
 
     // Validate before any model call. Every mutation callback repeats this check.
     protocolService.authorizeWriter(
@@ -115,8 +116,8 @@ public class ImplementerExecutionService {
             context,
             TOOLS,
             (tool, args) ->
-                mutationService.mutate(
-                    parentSessionId, reservationId, root.toString(), tool, args, user, orgId));
+                mutationService.mutateResolved(
+                    parentSessionId, reservationId, root, tool, args, user, orgId));
     String systemPrompt = systemPrompt(root, rounds);
     try {
       specChatService.runTurnBoundedWithTools(

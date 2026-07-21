@@ -116,6 +116,22 @@ public class WorkspaceTestRunner {
       }
     }
 
+    // RR-284 — JUnit XML on disk carries no attempt identity and the workspace outlives the
+    // command. Reset the report directories before launching so a command that dies before writing
+    // any report cannot have the previous attempt's green XML scored as its own. Only the
+    // frameworks whose counts we recover from XML need this; keeping the blast radius narrow means
+    // a pytest/jest/cargo/go run is byte-identical to before.
+    boolean reportsReset = true;
+    if (cmd.framework() == TestCommandResolver.Framework.SUREFIRE) {
+      reportsReset = WorkspaceTestProvenance.clearReports(workspaceRoot);
+      if (!reportsReset) {
+        log.warn(
+            "WorkspaceTestRunner run={} could not reset test report directories — XML recovery"
+                + " will be treated as unproven",
+            runId);
+      }
+    }
+
     Instant start = Instant.now();
     try {
       ProcessBuilder pb;
@@ -146,15 +162,57 @@ public class WorkspaceTestRunner {
       int exit = proc.exitValue();
 
       Optional<TestExecutionSummary> parsed = TestOutputParser.parse(cmd.framework(), output, exit);
+      boolean fromXmlRecovery = false;
+      boolean xmlProvenanceProven = false;
       if (parsed.isEmpty() && cmd.framework() == TestCommandResolver.Framework.SUREFIRE) {
         // `mvn -q test` suppresses the stdout "Tests run:" summary; the surefire/gradle XML reports
         // are written regardless, so recover the real pass/fail from them. Without this, a run
         // whose
         // tests FAILED was scored UNKNOWN (no penalty, no failed-tests cap). RL-2026-06-049.
-        parsed = parseXmlReports(workspaceRoot);
+        //
+        // RR-284 — only reports that provably belong to THIS attempt are admitted, and only when
+        // the pre-launch reset succeeded. Otherwise the recovered counts describe some other run.
+        fromXmlRecovery = true;
+        WorkspaceTestProvenance.Admission admission =
+            WorkspaceTestProvenance.admitFreshReports(workspaceRoot, start);
+        if (admission.staleReportsPresent()) {
+          log.warn(
+              "WorkspaceTestRunner run={} discarded test reports that predate this attempt", runId);
+        }
+        parsed = TestOutputParser.parseJunitXmlReports(admission.reports());
+        xmlProvenanceProven = reportsReset && !admission.staleReportsPresent();
       }
+
+      // RR-283 — the process exit code is the framework's own verdict and outranks whatever the
+      // summary line says. A suite can print "all passed" and still exit non-zero because of a
+      // coverage threshold, a plugin/compilation error, a package-level failure or a teardown
+      // error. Publishing that as a green deterministic count is the exact false-positive this
+      // scorer exists to prevent, so an exit/summary contradiction is UNAVAILABLE, not green.
+      if (parsed.isPresent()
+          && !WorkspaceTestProvenance.countsExplainExitStatus(
+              exit, parsed.get().getFailed(), parsed.get().getErrors())) {
+        log.warn(
+            "WorkspaceTestRunner run={} command exited {} while reporting zero failures —"
+                + " discarding the count as unproven: {}",
+            runId,
+            exit,
+            cmd.command());
+        return Optional.empty();
+      }
+
+      final boolean executionProven = fromXmlRecovery ? xmlProvenanceProven : true;
       parsed.ifPresent(
-          s -> s.setExecutionDurationMs(Duration.between(start, Instant.now()).toMillis()));
+          s -> {
+            s.setExecutionDurationMs(Duration.between(start, Instant.now()).toMillis());
+            // RR-1660 — the freshness/provenance token the evidence ledger reads. TRUE only when
+            // this attempt's exit status was checked and every parsed report provably belongs to
+            // it. Never FALSE-by-omission: an unproven recovery is recorded as such.
+            s.setExecutionVerified(executionProven);
+            s.setUnverifiedReason(
+                executionProven
+                    ? null
+                    : "test report freshness could not be proven for this attempt");
+          });
       log.info(
           "WorkspaceTestRunner run={} framework={} source={} → {}",
           runId,
@@ -176,36 +234,6 @@ public class WorkspaceTestRunner {
       Thread.currentThread().interrupt();
       return Optional.empty();
     }
-  }
-
-  /**
-   * XML-report fallback: scan the workspace for surefire/gradle {@code TEST-*.xml} reports and sum
-   * their counts. The reliable signal when {@code mvn -q test} suppressed the stdout summary.
-   * Bounded (depth 8, ≤2000 files) and fail-safe (any IO issue → empty). RL-2026-06-049.
-   */
-  private static Optional<TestExecutionSummary> parseXmlReports(Path root) {
-    java.util.List<String> xmls = new java.util.ArrayList<>();
-    try (java.util.stream.Stream<Path> walk = java.nio.file.Files.walk(root, 8)) {
-      walk.filter(
-              p -> {
-                String s = p.toString();
-                return p.getFileName().toString().startsWith("TEST-")
-                    && s.endsWith(".xml")
-                    && (s.contains("surefire-reports") || s.contains("test-results"));
-              })
-          .limit(2000)
-          .forEach(
-              p -> {
-                try {
-                  xmls.add(java.nio.file.Files.readString(p));
-                } catch (IOException ignored) {
-                  // skip an unreadable report rather than fail the whole recovery
-                }
-              });
-    } catch (IOException | RuntimeException e) {
-      return Optional.empty();
-    }
-    return TestOutputParser.parseJunitXmlReports(xmls);
   }
 
   /**

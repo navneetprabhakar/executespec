@@ -14,28 +14,32 @@ import lombok.RequiredArgsConstructor;
  * Resolves the provider used by project-scoped LLM features.
  *
  * <p>The project setting is authoritative. Legacy rows may have a null provider, in which case the
- * creator's account preference is used, followed by the canonical product default. Keeping this
- * policy in one seam prevents architecture, docs, memory, and review features from silently
- * drifting to different providers.
+ * creator's account preference is used. Missing or invalid provider policy fails closed instead of
+ * silently spending against a platform default. Keeping this policy in one seam prevents
+ * architecture, docs, memory, and review features from drifting to different providers.
  */
 @Service
 @RequiredArgsConstructor
 public class ProjectProviderResolver {
 
-  public static final LlmProvider CANONICAL_DEFAULT = LlmProvider.ANTHROPIC;
-
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
 
   public LlmProvider resolve(Project project) {
-    if (project == null) return CANONICAL_DEFAULT;
+    if (project == null)
+      throw new IllegalArgumentException("project required for provider routing");
     if (project.getAiProvider() != null) return project.getAiProvider();
     return resolveAccountPreference(project.getCreatedBy());
   }
 
   public LlmProvider resolve(String projectId) {
-    if (projectId == null || projectId.isBlank()) return CANONICAL_DEFAULT;
-    return projectRepository.findById(projectId).map(this::resolve).orElse(CANONICAL_DEFAULT);
+    if (projectId == null || projectId.isBlank()) {
+      throw new IllegalArgumentException("projectId required for provider routing");
+    }
+    return projectRepository
+        .findById(projectId)
+        .map(this::resolve)
+        .orElseThrow(() -> new IllegalArgumentException("project not found for provider routing"));
   }
 
   /** Explicit run/provider overrides take precedence over project policy. */
@@ -44,21 +48,25 @@ public class ProjectProviderResolver {
   }
 
   private LlmProvider resolveAccountPreference(String userId) {
-    if (userId == null || userId.isBlank()) return CANONICAL_DEFAULT;
+    if (userId == null || userId.isBlank()) {
+      throw new IllegalStateException("project has no provider and no creator preference subject");
+    }
     return appUserRepository
         .findById(userId)
         .map(user -> normalize(user.getPreferredAiProvider()))
-        .orElse(CANONICAL_DEFAULT);
+        .orElseThrow(() -> new IllegalStateException("project creator not found for routing"));
   }
 
   private static LlmProvider normalize(String value) {
-    if (value == null || value.isBlank()) return CANONICAL_DEFAULT;
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("project provider is unset and account preference is blank");
+    }
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     if ("GOOGLE".equals(normalized)) normalized = "GEMINI";
     try {
       return LlmProvider.valueOf(normalized);
     } catch (IllegalArgumentException ignored) {
-      return CANONICAL_DEFAULT;
+      throw new IllegalStateException("invalid account provider preference: " + value);
     }
   }
 }

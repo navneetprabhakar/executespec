@@ -95,7 +95,10 @@ public class ContractCoverageController {
     // Inject the GH-backed file lister + content loader; the detection
     // service has no GH dependency of its own, which keeps it testable.
     ContractDetectionService.FileLister lister = () -> gitHub.listRepoFiles(repoUrl, actorPat);
-    FileBasedContractDetector.ContentLoader loader = p -> gitHub.readRepoFile(repoUrl, p, actorPat);
+    // RR-1631 — ContentLoader's contract is "null on missing/error"; a failed read must NOT be
+    // handed to a detector as if it were file content.
+    FileBasedContractDetector.ContentLoader loader =
+        p -> gitHub.readRepoFile(repoUrl, p, actorPat).contentOrNull();
 
     UUID projectUuid = parseUuid(projectId);
     List<ContractDetectionService.DetectionResult> results =

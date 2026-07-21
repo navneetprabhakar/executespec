@@ -37,6 +37,12 @@ final class BuildAliasTool implements Tool {
     return ProjectCommandSchemas.OPTIONAL_COMMAND_SCHEMA;
   }
 
+  /** Build aliases carry the delegate's build authority regardless of spelling (RR-1599). */
+  @Override
+  public ToolCapability capability() {
+    return ToolCapability.BUILD_PROJECT;
+  }
+
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     ObjectNode forwarded = JSON.createObjectNode();

@@ -5,6 +5,18 @@ import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import {isActiveRunStatus} from '@/lib/runStatus';
+import {explicitLinkedRepoSelection, repoSupports} from '@/ide/projectRepoUi';
+import {
+  PRODUCT_PROVIDER_OPTIONS,
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
+import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 
 type Repo = Record<string, unknown>;
 // Relative timestamps everywhere (review/11 #8) — absolute locale strings were
@@ -23,8 +35,15 @@ export default function IdeProject() {
   // pass {compose:true} via Link state) skips the landing→Overview redirect below,
   // so the composer stays reachable on projects with work history.
   const composeIntent = Boolean((location.state as {compose?: boolean} | null)?.compose);
+  const providerReadiness = useProviderReadiness();
+  const tier = useAuthStore(selectNormalizedTier);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
+  // D4 — this effect coordinates three loads against a shared `loading` /
+  // `runsLoaded` gate, so it keeps manual state and uses the shared classifier
+  // rather than the `useAsyncData` hook.
+  const [reposFailure, setReposFailure] = useState<LoadFailure | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [runsLoaded, setRunsLoaded] = useState(false);
@@ -34,30 +53,74 @@ export default function IdeProject() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<'not-found' | 'forbidden' | 'error' | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
     api
       .getProject(projectId)
-      .then(setProject)
-      .catch(() => {})
+      .then((loadedProject) => {
+        setProject(loadedProject);
+        if (tier === 'FREE') setProvider('DEEPSEEK');
+        else if (loadedProject.aiProvider) setProvider(loadedProject.aiProvider.toUpperCase());
+      })
+      .catch((e: unknown) => {
+        const status = typeof e === 'object' && e ? Number((e as {status?: number}).status) : 0;
+        setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
+      })
       .finally(() => setLoading(false));
     api
       .getProjectRepos(projectId)
-      .then((list) => setRepos((list as unknown as Repo[]) ?? []))
-      .catch(() => setRepos([]));
+      .then((list) => {
+        const loadedRepos = (list as unknown as Repo[]) ?? [];
+        setRepos(loadedRepos);
+        setReposFailure(null);
+        // Project runs are explicit about their code boundary. The previous UI displayed every
+        // linked repo as selected while leaving this array empty, so the request omitted
+        // selectedRepoIds and the backend created a seed-only workspace.
+        setSelected(
+          explicitLinkedRepoSelection(
+            loadedRepos.filter((repo) => repoSupports(repo, 'CLOUD_RUN')),
+          ),
+        );
+      })
+      // D4: an empty repo list is a claim about the project's code boundary and
+      // it also drives `selected`. Failing to a bare `[]` here silently allowed
+      // a run to be composed against no repositories at all.
+      .catch((e: unknown) => setReposFailure(toLoadFailure(e)));
     api
       .getRuns({projectId, size: 6})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]))
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailure(null);
+      })
+      .catch((e: unknown) => setRunsFailure(toLoadFailure(e)))
       .finally(() => setRunsLoaded(true));
-    if (project?.aiProvider) setProvider(project.aiProvider.toUpperCase());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    if (tier === 'FREE') setProvider('DEEPSEEK');
+  }, [tier]);
 
   async function submit() {
     if (!spec.trim()) {
       setErr('Describe what to build first.');
+      return;
+    }
+    const readiness = providerReadiness.byProvider.get(provider.toUpperCase());
+    if (
+      providerReadiness.loading ||
+      providerReadiness.error ||
+      !providerIsDispatchable(readiness)
+    ) {
+      setErr(
+        providerReadiness.error
+          ? 'Provider readiness could not be verified. Retry after the service is available.'
+          : providerReadiness.loading
+            ? 'Provider readiness is still being checked.'
+            : providerReadinessLabel(readiness),
+      );
       return;
     }
     setBusy(true);
@@ -69,6 +132,9 @@ export default function IdeProject() {
         executionMode: mode,
         projectId,
       };
+      if (repos.length > 0 && selected.length === 0) {
+        throw new Error('Select at least one linked repository before starting work.');
+      }
       if (selected.length) body.selectedRepoIds = selected;
       const res = await api.createRun(body);
       navigate(`/live/${res.runId}`);
@@ -88,6 +154,32 @@ export default function IdeProject() {
     );
   }
 
+  if (loadError || !project) {
+    const forbidden = loadError === 'forbidden';
+    const unavailable = loadError === 'error';
+    return (
+      <div className='ide-pane'>
+        <div className='ide-empty' role='alert'>
+          <strong>
+            {forbidden
+              ? 'Project access denied'
+              : unavailable
+                ? 'Project unavailable'
+                : 'Project not found'}
+          </strong>
+          <div>
+            {forbidden
+              ? 'You do not have access to this project.'
+              : unavailable
+                ? 'The project could not be loaded. Try again shortly.'
+                : 'This project does not exist or was removed.'}
+          </div>
+          <Link to='/projects'>Back to projects</Link>
+        </div>
+      </div>
+    );
+  }
+
   // §3.4 (P1 IA) — most arrivals at /projects/:id are status checks: land on
   // Overview once the project has work history. Brand-new projects keep
   // the compose-first landing.
@@ -95,17 +187,18 @@ export default function IdeProject() {
     return <Navigate to={`/projects/${projectId}/pulse`} replace />;
   }
 
-  const activeRuns = runs.filter((r) =>
-    [
-      'CLASSIFYING',
-      'PLANNING',
-      'EXECUTING',
-      'RUNNING',
-      'IN_PROGRESS',
-      'AWAITING_APPROVAL',
-    ].includes((r.status || '').toUpperCase()),
-  );
+  // RR-1521 — this used to hardcode six statuses and omitted APPROVAL_RESUMING, WORKING,
+  // REVIEWING and the halted states, i.e. most of a run's wall-clock. A project with a run
+  // mid-execution therefore reported "Active 0". Active now means "not terminal", derived
+  // from the one shared vocabulary.
+  const activeRuns = runs.filter((r) => isActiveRunStatus(r.status));
   const lastRun = runs[0];
+  const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
+  const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
+  const projectProviderOptions =
+    tier === 'FREE'
+      ? PRODUCT_PROVIDER_OPTIONS.filter((p) => p.id === 'DEEPSEEK')
+      : PRODUCT_PROVIDER_OPTIONS;
 
   return (
     <div className='ide-pane'>
@@ -116,7 +209,10 @@ export default function IdeProject() {
         {project?.name || 'Project'}
       </h1>
       <div className='ide-sub'>
-        {repos.length} repo{repos.length === 1 ? '' : 's'} · {project?.status || 'ACTIVE'}
+        {reposFailure
+          ? 'Repositories not loaded'
+          : `${repos.length} repo${repos.length === 1 ? '' : 's'}`}{' '}
+        · {project?.status || 'ACTIVE'}
       </div>
 
       <div className='ide-project-context-grid'>
@@ -126,11 +222,11 @@ export default function IdeProject() {
           </div>
           <div className='ide-kv'>
             <span>Repos connected</span>
-            <span>{repos.length}</span>
+            <span>{reposFailure ? 'Unknown' : repos.length}</span>
           </div>
           <div className='ide-kv' style={{borderBottom: 'none'}}>
             <span>Repos selected</span>
-            <span>{selected.length || repos.length || 0}</span>
+            <span>{reposFailure ? 'Unknown' : selected.length}</span>
           </div>
         </div>
         <div className='ide-card'>
@@ -169,12 +265,21 @@ export default function IdeProject() {
         rows={8}
         placeholder='Describe what you want, in plain English. Reference repos or files to keep the agent inside specific boundaries.'
         value={spec}
-        onChange={(e) => setSpec(e.target.value)}
+        onChange={(e) => {
+          setSpec(e.target.value);
+          if (err === 'Describe what to build first.') setErr('');
+        }}
       />
       <div style={{marginTop: 10}}>
         <SpecChat projectId={projectId} draftSpec={spec} onApply={setSpec} />
       </div>
 
+      {reposFailure && (
+        <>
+          <div className='ide-h2'>Repos the agent may touch</div>
+          <LoadError failure={reposFailure} what='linked repositories' />
+        </>
+      )}
       {repos.length > 0 && (
         <>
           <div className='ide-h2'>Repos the agent may touch</div>
@@ -182,19 +287,29 @@ export default function IdeProject() {
             {repos.map((r) => {
               const id = repoIdFor(r);
               const on = selected.includes(id);
+              const canRun = repoSupports(r, 'CLOUD_RUN');
               return (
                 <button
                   key={id}
                   className='ide-badge interactive'
+                  disabled={!canRun}
+                  title={
+                    canRun
+                      ? undefined
+                      : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
+                  }
                   style={{
                     cursor: 'pointer',
                     borderColor: on ? 'var(--ide-accent)' : undefined,
                     color: on ? 'var(--ide-accent)' : undefined,
                   }}
-                  onClick={() => setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))}
+                  onClick={() =>
+                    canRun && setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))
+                  }
                 >
                   {on ? '✓ ' : ''}
                   {repoDisplayName(r)}
+                  {!canRun ? ' · browse only' : ''}
                 </button>
               );
             })}
@@ -213,10 +328,26 @@ export default function IdeProject() {
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
           >
-            <option value='ANTHROPIC'>Anthropic</option>
-            <option value='OPENAI'>OpenAI</option>
-            <option value='DEEPSEEK'>DeepSeek</option>
+            {projectProviderOptions.map((option) => (
+              <option
+                key={option.id}
+                value={option.id}
+                disabled={!providerIsDispatchable(providerReadiness.byProvider.get(option.id))}
+              >
+                {providerOptionLabel(option.label, providerReadiness.byProvider.get(option.id))}
+              </option>
+            ))}
           </select>
+          <div
+            role={selectedProviderReady ? 'status' : 'alert'}
+            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+          >
+            {providerReadiness.error
+              ? 'Provider readiness unavailable; starting work is disabled.'
+              : providerReadiness.loading
+                ? 'Checking provider readiness…'
+                : providerReadinessLabel(selectedProviderReadiness)}
+          </div>
         </div>
         <div style={{flex: 1, minWidth: 160}}>
           <div className='ide-h2' style={{marginTop: 0}}>
@@ -234,12 +365,20 @@ export default function IdeProject() {
         </div>
       </div>
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
-      <button className='ide-btn' onClick={submit} disabled={busy}>
+      <button
+        className='ide-btn'
+        onClick={submit}
+        disabled={
+          busy || providerReadiness.loading || providerReadiness.error || !selectedProviderReady
+        }
+      >
         {busy ? 'Submitting…' : 'Start work'}
       </button>
 
       <div className='ide-h2'>Recent work in this project</div>
-      {runs.length === 0 ? (
+      {runsFailure ? (
+        <LoadError failure={runsFailure} what='work in this project' />
+      ) : runs.length === 0 ? (
         <div className='ide-empty'>No work yet.</div>
       ) : (
         <div className='ide-grid'>

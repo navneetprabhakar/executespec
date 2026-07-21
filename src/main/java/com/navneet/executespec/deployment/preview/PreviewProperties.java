@@ -43,6 +43,10 @@ public class PreviewProperties {
 
   private ConcurrencyConfig concurrency = new ConcurrencyConfig();
 
+  private CleanupConfig cleanup = new CleanupConfig();
+
+  private InteractiveConfig interactive = new InteractiveConfig();
+
   /**
    * Route previews through the external preview-engine service instead of running docker-compose
    * locally. When ON + eligible, main app builds the image, pushes to {@link
@@ -62,6 +66,44 @@ public class PreviewProperties {
     private int freeMax = 1;
     private int proMax = 3;
     private int enterpriseMax = 10;
+  }
+
+  @Data
+  public static class CleanupConfig {
+    /**
+     * Destructive discovery of resources that are absent from this JVM's in-memory map. This is
+     * unsafe in a multi-node deployment and therefore stays off until a durable resource registry
+     * is authoritative for Docker and Cloud Run previews.
+     */
+    private boolean orphanDiscoveryEnabled = false;
+
+    /**
+     * Tear down previews during JVM shutdown. Disabled by default so rolling deployment does not
+     * destroy customer previews; TTL cleanup remains authoritative.
+     */
+    private boolean teardownOnShutdown = false;
+  }
+
+  /**
+   * Interactive preview surfaces (RR-391).
+   *
+   * <p>A preview URL is a bearer capability with no application authentication behind it. That is
+   * acceptable for a passive page and not acceptable for a surface that accepts input and executes
+   * it, so both interactive modes are opt-in and default OFF.
+   */
+  @Data
+  public static class InteractiveConfig {
+    /**
+     * Run the CLI terminal preview with {@code ttyd --writable}, i.e. anyone holding the preview
+     * URL can type into the generated program's stdin. OFF: the terminal streams output only.
+     */
+    private boolean writableTerminalEnabled = false;
+
+    /**
+     * Serve generated MCP servers through the MCP Inspector, which can invoke the server's tools
+     * with no authentication. OFF: the project falls back to the ordinary web preview.
+     */
+    private boolean mcpInspectorEnabled = false;
   }
 
   @Data

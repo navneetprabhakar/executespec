@@ -10,6 +10,7 @@ import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
+import com.navneet.executespec.sharing.entity.ProjectShareLinkAudit;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 
 import org.springframework.http.HttpStatus;
@@ -37,7 +38,7 @@ public class ProjectShareLinkController {
    * @param scopeId required for run / scan / pr-review / report surfaces; ignored for project-wide
    *     ones
    * @param label optional human-readable label
-   * @param expiresInDays optional — if null the link doesn't expire (admin-revocation only)
+   * @param expiresInDays optional — defaults to 7 and must be between 1 and 90
    */
   public record CreateShareLinkRequest(
       String surface, String scopeId, String label, Integer expiresInDays) {}
@@ -61,24 +62,29 @@ public class ProjectShareLinkController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "unknown surface: " + req.surface());
     }
-    Instant expiresAt =
+    int expiryDays =
         req.expiresInDays() == null
-            ? null
-            : Instant.now().plusSeconds(req.expiresInDays() * 24L * 3600L);
+            ? ProjectShareLinkService.DEFAULT_EXPIRY_DAYS
+            : req.expiresInDays();
+    if (expiryDays < 1 || expiryDays > ProjectShareLinkService.MAX_EXPIRY_DAYS) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "expiresInDays must be between 1 and " + ProjectShareLinkService.MAX_EXPIRY_DAYS);
+    }
+    Instant expiresAt = Instant.now().plusSeconds(expiryDays * 24L * 3600L);
     ProjectShareLink link =
         linkService.createLink(
             projectId, surface, req.scopeId(), req.label(), expiresAt, userDetails.getUser());
-    return ResponseEntity.status(HttpStatus.CREATED).body(ShareLinkDto.from(link, true));
+    return ResponseEntity.status(HttpStatus.CREATED).body(ShareLinkDto.from(link, link.getToken()));
   }
 
   @GetMapping("/api/projects/{projectId}/share-links")
   public ResponseEntity<ShareLinkListResponse> list(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
     Project project = accessGuard.assertCanRead(projectId, userDetails);
-    boolean includeToken = canManageShareLinks(project, userDetails);
     List<ShareLinkDto> all =
         linkService.listForProject(projectId).stream()
-            .map(l -> ShareLinkDto.from(l, includeToken))
+            .map(l -> ShareLinkDto.from(l, null))
             .toList();
     long active = linkService.activeCountForProject(projectId);
     return ResponseEntity.ok(new ShareLinkListResponse(all, active));
@@ -94,6 +100,17 @@ public class ProjectShareLinkController {
     assertCanManageShareLinks(project, userDetails);
     linkService.revoke(projectId, linkId, userDetails.getUser());
     return ResponseEntity.noContent().build();
+  }
+
+  @GetMapping("/api/projects/{projectId}/share-links/{linkId}/audit")
+  public ResponseEntity<List<ShareLinkAuditDto>> audit(
+      @PathVariable String projectId,
+      @PathVariable UUID linkId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    Project project = accessGuard.assertCanRead(projectId, userDetails);
+    assertCanManageShareLinks(project, userDetails);
+    return ResponseEntity.ok(
+        linkService.auditForLink(projectId, linkId).stream().map(ShareLinkAuditDto::from).toList());
   }
 
   private void assertCanManageShareLinks(Project project, AppUserDetails userDetails) {
@@ -136,6 +153,7 @@ public class ProjectShareLinkController {
       UUID id,
       String projectId,
       String token,
+      String tokenPrefix,
       ProjectShareLink.Surface surface,
       String scopeId,
       String label,
@@ -146,11 +164,12 @@ public class ProjectShareLinkController {
       Instant lastViewedAt,
       Instant createdAt,
       boolean active) {
-    static ShareLinkDto from(ProjectShareLink l, boolean includeToken) {
+    static ShareLinkDto from(ProjectShareLink l, String oneTimeToken) {
       return new ShareLinkDto(
           l.getId(),
           l.getProjectId(),
-          includeToken ? l.getToken() : null,
+          oneTimeToken,
+          l.getTokenPrefix(),
           l.getSurface(),
           l.getScopeId(),
           l.getLabel(),
@@ -165,4 +184,26 @@ public class ProjectShareLinkController {
   }
 
   public record ShareLinkListResponse(List<ShareLinkDto> links, long activeCount) {}
+
+  public record ShareLinkAuditDto(
+      UUID id,
+      String eventType,
+      String outcome,
+      ProjectShareLink.Surface surface,
+      String actorUserId,
+      String clientIpHash,
+      String userAgentHash,
+      Instant occurredAt) {
+    static ShareLinkAuditDto from(ProjectShareLinkAudit event) {
+      return new ShareLinkAuditDto(
+          event.getId(),
+          event.getEventType(),
+          event.getOutcome(),
+          ProjectShareLink.Surface.valueOf(event.getSurface()),
+          event.getActorUserId(),
+          event.getClientIpHash(),
+          event.getUserAgentHash(),
+          event.getOccurredAt());
+    }
+  }
 }

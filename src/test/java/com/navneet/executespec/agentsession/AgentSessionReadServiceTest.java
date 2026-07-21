@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -140,7 +141,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replaysOnlyEventsAfterCursorAndReturnsLastSequence() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 4))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(4L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder()
@@ -160,7 +162,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replayPreservesSemanticPostSseFramesForBrowserReconnect() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 4))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(4L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 semanticEvent("route", 5L, "ROUTE_DECISION"),
@@ -176,6 +179,38 @@ class AgentSessionReadServiceTest {
         .containsExactly("ROUTE_DECISION", "TOOL_CALL", "TOOL_RESULT", "TURN_TEXT", "TURN_DONE");
     assertThat(replay.lastSequence()).isEqualTo(9L);
     assertThat(replay.snapshot()).isFalse();
+  }
+
+  @Test
+  void cursorReplayIsBoundedAndReturnsContinuationSequence() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    List<AgentActionEvent> page = new ArrayList<>();
+    for (long sequence = 11; sequence <= 511; sequence++) {
+      page.add(
+          AgentActionEvent.builder()
+              .id("evt-" + sequence)
+              .sessionId("s1")
+              .streamSequence(sequence)
+              .type("TURN_TEXT")
+              .build());
+    }
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
+        .thenReturn(page);
+
+    var replay = service.replayEvents("s1", 10L, user());
+
+    assertThat(replay.events()).hasSize(500);
+    assertThat(replay.lastSequence()).isEqualTo(510L);
+    assertThat(replay.snapshot()).isFalse();
+    assertThat(replay.truncated()).isTrue();
+    assertThat(replay.hasMore()).isTrue();
+    assertThat(replay.nextSequence()).isEqualTo(510L);
+    var pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(eventRepo)
+        .findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), pageable.capture());
+    assertThat(pageable.getValue().getPageSize()).isEqualTo(501);
   }
 
   private static AgentActionEvent semanticEvent(String id, long sequence, String type) {
@@ -228,7 +263,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replayRejectsStaleRowsAndNeverRegressesCursor() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder().id("stale").streamSequence(9L).build(),
@@ -253,7 +289,8 @@ class AgentSessionReadServiceTest {
   @Test
   void legacyReplayMarksTruncatedSnapshotWhenHistoryExceedsSafePage() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
         .thenReturn(List.of());
     when(eventRepo.countBySessionIdAndStreamSequenceIsNull("s1")).thenReturn(1L);
     when(eventRepo.countBySessionId("s1")).thenReturn(501L);

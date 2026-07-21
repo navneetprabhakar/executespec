@@ -155,6 +155,40 @@ public class SmartClassifierAgent {
       String projectType,
       LlmProvider aiProvider,
       String projectMemorySnippet) {
+    return classify(
+        spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet, null);
+  }
+
+  /** Production pipeline overload carrying the exact durable run policy into the verifier call. */
+  public ClassificationResult classify(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference) {
+    return classify(
+        spec,
+        repoFullNames,
+        projectId,
+        projectType,
+        aiProvider,
+        projectMemorySnippet,
+        executionReference,
+        null);
+  }
+
+  /** Production overload carrying both durable policy and the real cost/usage run identity. */
+  public ClassificationResult classify(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
+      String usageRunId) {
     String cacheKey = cacheKey(spec, repoFullNames, projectId);
     if (cacheKey != null) {
       try {
@@ -207,7 +241,9 @@ public class SmartClassifierAgent {
             projectMemorySnippet,
             heuristic,
             aiProvider,
-            projectId);
+            projectId,
+            executionReference,
+            usageRunId);
     cachePut(cacheKey, verified);
     return verified;
   }
@@ -289,7 +325,9 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       HeuristicVerdict heuristic,
       LlmProvider aiProvider,
-      String projectId) {
+      String projectId,
+      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
+      String usageRunId) {
     ResolvedModel resolved;
     try {
       resolved =
@@ -326,15 +364,20 @@ public class SmartClassifierAgent {
                   "REPO_COUNT",
                   String.valueOf(repoFullNames == null ? 1 : repoFullNames.size()),
                   "REPO_NAMES",
-                  repoFullNames == null || repoFullNames.isEmpty()
-                      ? "(none)"
-                      : String.join(", ", repoFullNames),
+                  untrustedClassifierEvidence(
+                      "REPO_NAMES",
+                      repoFullNames == null || repoFullNames.isEmpty()
+                          ? "(none)"
+                          : String.join(", ", repoFullNames)),
                   "PROJECT_TYPE",
-                  projectType == null ? "unknown" : projectType,
+                  untrustedClassifierEvidence(
+                      "PROJECT_TYPE", projectType == null ? "unknown" : projectType),
                   "PROJECT_MEMORY",
-                  projectMemorySnippet == null || projectMemorySnippet.isBlank()
-                      ? "(no project memory yet)"
-                      : projectMemorySnippet,
+                  untrustedClassifierEvidence(
+                      "PROJECT_MEMORY",
+                      projectMemorySnippet == null || projectMemorySnippet.isBlank()
+                          ? "(no project memory yet)"
+                          : projectMemorySnippet),
                   "SPEC",
                   spec));
     } catch (Exception e) {
@@ -356,9 +399,12 @@ public class SmartClassifierAgent {
 
     ExecutionContext ctx =
         new ExecutionContext(
-            "classify-" + (projectId == null ? "anon" : projectId),
+            usageRunId == null || usageRunId.isBlank()
+                ? "classify-" + (projectId == null ? "anon" : projectId)
+                : usageRunId,
             "__planner_classifier__",
-            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
+            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath(),
+            executionReference);
 
     try {
       ChatResponse resp =
@@ -401,6 +447,10 @@ public class SmartClassifierAgent {
       metrics.recordClassifierVerifier("SKIPPED_LLM_CALL");
       return fallback(heuristic, "LLM call failed: " + truncForCopy(e.getMessage()));
     }
+  }
+
+  static String untrustedClassifierEvidence(String label, String content) {
+    return PromptTrustBoundary.wrap(label, content);
   }
 
   /** Truncate exception messages so the persisted classifierReasoning stays readable. */

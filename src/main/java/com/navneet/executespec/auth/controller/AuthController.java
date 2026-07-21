@@ -1,11 +1,5 @@
 package com.navneet.executespec.auth.controller;
 
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 
@@ -21,6 +15,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.AuthService;
+import com.navneet.executespec.auth.service.ExternalConnectionValidator;
 import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
@@ -53,6 +48,7 @@ public class AuthController {
   private final PersonalAccessTokenService personalAccessTokenService;
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final TierEnforcementService tierEnforcementService;
+  private final ExternalConnectionValidator externalConnectionValidator;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -259,7 +255,17 @@ public class AuthController {
     recordSettingsAudit(
         userDetails.getUser(),
         "USER_PAT_CREATED",
-        "{\"tokenId\":\"" + created.token().getId() + "\"}");
+        "{\"tokenId\":\""
+            + created.token().getId()
+            + "\",\"scopes\":\""
+            + created.token().getScopes()
+            + "\"}");
+    for (String revokedTokenId : created.autoRevokedTokenIds()) {
+      recordSettingsAudit(
+          userDetails.getUser(),
+          "USER_PAT_AUTO_REVOKED",
+          "{\"tokenId\":\"" + revokedTokenId + "\",\"reason\":\"DEVICE_CAP_LRU\"}");
+    }
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(new CreatePatResponse(created.plaintext(), PatDto.from(created.token())));
   }
@@ -369,7 +375,7 @@ public class AuthController {
     user.setBitbucketRepoSlug(blankToNull(req.bitbucketRepoSlug()));
     userRepo.save(user);
     log.info(
-        "User {} updated Bitbucket settings — workspace={}, hasAppPassword={}",
+        "User {} updated Bitbucket settings — workspace={}, hasApiToken={}",
         user.getId(),
         user.getBitbucketWorkspace(),
         user.getBitbucketAppPassword() != null);
@@ -404,11 +410,24 @@ public class AuthController {
           "AI key management requires a PRO or ENTERPRISE plan with org admin access");
     }
     AppUser user = userDetails.getUser();
-    user.setOpenAiApiKey(blankToNull(req.openAiApiKey()));
-    user.setAnthropicApiKey(blankToNull(req.anthropicApiKey()));
-    user.setGeminiApiKey(blankToNull(req.geminiApiKey()));
-    user.setDeepSeekApiKey(blankToNull(req.deepSeekApiKey()));
-    user.setFireworksApiKey(blankToNull(req.fireworksApiKey()));
+    // Patch semantics: the Web settings surface saves one provider at a time. Omitted/blank
+    // fields therefore mean "leave unchanged". Destructive removal has a separate authenticated
+    // DELETE route below so a UI serialization detail can never erase unrelated credentials.
+    if (blankToNull(req.openAiApiKey()) != null) {
+      user.setOpenAiApiKey(req.openAiApiKey().strip());
+    }
+    if (blankToNull(req.anthropicApiKey()) != null) {
+      user.setAnthropicApiKey(req.anthropicApiKey().strip());
+    }
+    if (blankToNull(req.geminiApiKey()) != null) {
+      user.setGeminiApiKey(req.geminiApiKey().strip());
+    }
+    if (blankToNull(req.deepSeekApiKey()) != null) {
+      user.setDeepSeekApiKey(req.deepSeekApiKey().strip());
+    }
+    if (blankToNull(req.fireworksApiKey()) != null) {
+      user.setFireworksApiKey(req.fireworksApiKey().strip());
+    }
     userRepo.save(user);
     log.info(
         "User {} updated AI key settings — openai={}, anthropic={}, gemini={}, deepseek={},"
@@ -436,6 +455,38 @@ public class AuthController {
             + "}");
 
     return ResponseEntity.ok(currentUserDto(user, userDetails));
+  }
+
+  @DeleteMapping("/settings/ai-keys/{provider}")
+  public ResponseEntity<Void> revokeAiKey(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String provider) {
+    var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+    if (!perms.canManageAiKeys()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "AI key management requires a PRO or ENTERPRISE plan with org admin access");
+    }
+    String normalized = normalizeAiProvider(provider);
+    AppUser user = userDetails.getUser();
+    boolean existed =
+        switch (normalized) {
+          case "openai" -> clearPresent(user.getOpenAiApiKey(), () -> user.setOpenAiApiKey(null));
+          case "anthropic" ->
+              clearPresent(user.getAnthropicApiKey(), () -> user.setAnthropicApiKey(null));
+          case "gemini" -> clearPresent(user.getGeminiApiKey(), () -> user.setGeminiApiKey(null));
+          case "deepseek" ->
+              clearPresent(user.getDeepSeekApiKey(), () -> user.setDeepSeekApiKey(null));
+          case "fireworks" ->
+              clearPresent(user.getFireworksApiKey(), () -> user.setFireworksApiKey(null));
+          default ->
+              throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported provider");
+        };
+    userRepo.save(user);
+    recordSettingsAudit(
+        user,
+        "USER_AI_KEY_REVOKED",
+        "{\"provider\":\"" + normalized + "\",\"previouslyPresent\":" + existed + "}");
+    return ResponseEntity.noContent().build();
   }
 
   record JiraSettingsRequest(String jiraBaseUrl, String jiraEmail, String jiraApiToken) {}
@@ -533,7 +584,8 @@ public class AuthController {
 
   /**
    * Phase 1.2 #24 — BYOK Test buttons. Pings the named provider with the supplied key and surfaces
-   * the provider's verbatim error if the key is invalid. Mirrors the GitHub PAT validate pattern.
+   * a bounded status-only result if the key is invalid. Provider credentials and raw errors never
+   * enter the URL or response.
    *
    * <p>Provider → endpoint:
    *
@@ -541,7 +593,8 @@ public class AuthController {
    *   <li>OPENAI → {@code GET https://api.openai.com/v1/models}
    *   <li>ANTHROPIC → {@code GET https://api.anthropic.com/v1/models} (requires {@code
    *       anthropic-version} header)
-   *   <li>GEMINI → {@code GET https://generativelanguage.googleapis.com/v1beta/models?key=...}
+   *   <li>GEMINI → {@code GET https://generativelanguage.googleapis.com/v1beta/models} with {@code
+   *       x-goog-api-key}
    * </ul>
    */
   @PostMapping("/settings/ai-keys/validate")
@@ -571,8 +624,8 @@ public class AuthController {
                   + " model access");
       case "GEMINI", "GOOGLE" ->
           validateExternalConnection(
-              "https://generativelanguage.googleapis.com/v1beta/models?key=" + key,
-              Map.of(),
+              "https://generativelanguage.googleapis.com/v1beta/models",
+              Map.of("x-goog-api-key", key),
               "Gemini key is valid",
               "Gemini rejected the key (status %d) — check it's an active AI Studio key");
       case "OPENROUTER" ->
@@ -626,7 +679,7 @@ public class AuthController {
         || req.appPassword() == null
         || req.appPassword().isBlank()) {
       return ResponseEntity.ok(
-          new ValidationResult(false, "Username and app password are required"));
+          new ValidationResult(false, "Atlassian account email and API token are required"));
     }
     if (req.workspace() == null
         || req.workspace().isBlank()
@@ -684,11 +737,28 @@ public class AuthController {
         "Confluence returned %d — check your credentials");
   }
 
-  private static final HttpClient HTTP_CLIENT =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
+  }
+
+  private static String normalizeAiProvider(String provider) {
+    if (provider == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Provider is required");
+    }
+    String normalized = provider.strip().toLowerCase(java.util.Locale.ROOT);
+    if ("google".equals(normalized)) normalized = "gemini";
+    if (!java.util.Set.of("anthropic", "openai", "gemini", "deepseek", "fireworks")
+        .contains(normalized)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Unsupported personal-key provider: " + provider);
+    }
+    return normalized;
+  }
+
+  private static boolean clearPresent(String current, Runnable clear) {
+    boolean present = current != null && !current.isBlank();
+    clear.run();
+    return present;
   }
 
   private void recordSettingsAudit(AppUser user, String eventType, String newValueJson) {
@@ -711,67 +781,21 @@ public class AuthController {
       Map<String, String> headers,
       String successMessage,
       String failureMessageTemplate) {
-    if (isDisallowedTarget(url)) {
-      return ResponseEntity.ok(
-          new ValidationResult(false, "Connection target is not an allowed external address"));
-    }
-    try {
-      HttpRequest.Builder reqBuilder =
-          HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET();
-      headers.forEach(reqBuilder::header);
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, successMessage));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(false, String.format(failureMessageTemplate, resp.statusCode())));
-    } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-    }
-  }
-
-  /**
-   * SSRF guard for {@link #validateExternalConnection}: the JIRA/Confluence validators build the
-   * target from a user-supplied base URL, so an authenticated user could otherwise point us at
-   * {@code http://169.254.169.254/…} (cloud metadata) or an internal host. Require HTTPS and reject
-   * any host that resolves to a loopback / link-local / private / CGNAT / unique-local address.
-   * Returns {@code true} when the URL must NOT be fetched. C1 — audit 2026-05-29.
-   */
-  private static boolean isDisallowedTarget(String url) {
-    try {
-      URI uri = URI.create(url);
-      String scheme = uri.getScheme();
-      if (scheme == null || !scheme.equalsIgnoreCase("https")) {
-        return true;
-      }
-      String host = uri.getHost();
-      if (host == null || host.isBlank()) {
-        return true;
-      }
-      for (InetAddress addr : InetAddress.getAllByName(host)) {
-        if (addr.isAnyLocalAddress()
-            || addr.isLoopbackAddress()
-            || addr.isLinkLocalAddress()
-            || addr.isSiteLocalAddress()
-            || addr.isMulticastAddress()) {
-          return true;
-        }
-        byte[] b = addr.getAddress();
-        if (b.length == 4) {
-          int b0 = b[0] & 0xff;
-          int b1 = b[1] & 0xff;
-          if (b0 == 100 && b1 >= 64 && b1 <= 127) {
-            return true; // 100.64.0.0/10 carrier-grade NAT
-          }
-        } else if (b.length == 16 && (b[0] & 0xfe) == 0xfc) {
-          return true; // fc00::/7 IPv6 unique-local
-        }
-      }
-      return false;
-    } catch (Exception e) {
-      return true; // unparseable / unresolvable → do not fetch
-    }
+    ExternalConnectionValidator.ProbeResult probe = externalConnectionValidator.probe(url, headers);
+    return switch (probe.status()) {
+      case OK -> ResponseEntity.ok(new ValidationResult(true, successMessage));
+      case TARGET_NOT_ALLOWED ->
+          ResponseEntity.ok(
+              new ValidationResult(false, "Connection target is not an allowed external address"));
+      case HTTP_ERROR ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, String.format(failureMessageTemplate, probe.statusCode())));
+      case UNREACHABLE ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, "Connection failed; verify the key and provider availability"));
+    };
   }
 
   private void setRefreshCookie(HttpServletResponse response, String refreshToken) {
@@ -793,7 +817,13 @@ public class AuthController {
       @AuthenticationPrincipal com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     if (userDetails == null)
       throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED);
-    int deleted = dataRetentionService.eraseUserData(userDetails.getUser().getId());
-    return ResponseEntity.ok(Map.of("runsScheduledForDeletion", deleted));
+    var result = dataRetentionService.eraseUserData(userDetails.getUser().getId());
+    // RR-090: live runs are REFUSED, not tombstoned. Report that honestly so the caller knows the
+    // erasure is incomplete and which runs still need to terminalise or be cancelled.
+    return ResponseEntity.ok(
+        Map.of(
+            "runsScheduledForDeletion", result.runsSoftDeleted(),
+            "liveRunsSkipped", result.liveRunsSkipped(),
+            "complete", result.liveRunsSkipped() == 0));
   }
 }

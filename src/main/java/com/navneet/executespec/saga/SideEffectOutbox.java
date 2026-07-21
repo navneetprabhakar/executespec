@@ -16,21 +16,18 @@ import lombok.extern.slf4j.Slf4j;
  * Outbox for side effects that must be delivered reliably.
  *
  * <p>Each effect is persisted to {@code side_effect_outbox} before execution. {@link
- * SideEffectExecutor} picks up PENDING entries every 30 seconds and retries failures with
- * exponential backoff (max {@code max_attempts}).
+ * SideEffectExecutor} commits a fenced database lease before invoking a versioned idempotent
+ * handler and retries failures with exponential backoff (max {@code max_attempts}).
  *
- * <h3>Effect types</h3>
+ * <h3>Executable effect types</h3>
  *
  * <ul>
- *   <li>{@code GITHUB_PR} — create GitHub pull request
- *   <li>{@code CLOUD_RUN_DEPLOY} — deploy to Cloud Run
- *   <li>{@code JIRA_COMMENT} — post completion comment to JIRA
- *   <li>{@code CONFLUENCE_PAGE} — create/update Confluence page
  *   <li>{@code GCS_ARCHIVE} — archive workspace to GCS
  *   <li>{@code COMPENSATE_GITHUB_BRANCH} — delete GitHub branch on run failure
- *   <li>{@code COMPENSATE_CLOUD_RUN} — delete Cloud Run service on run failure
- *   <li>{@code COMPENSATE_JIRA_COMMENT} — post failure comment to JIRA
  * </ul>
+ *
+ * <p>Adding an effect name without first defining a {@link SideEffectHandlerContract} fails fast;
+ * unknown work is never acknowledged as a successful no-op.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,13 +44,13 @@ public class SideEffectOutbox {
   @Transactional
   public SideEffectOutboxEntry enqueue(
       String runId, String effectType, Map<String, Object> payload) {
+    SideEffectHandlerContract contract = SideEffectHandlerContract.require(effectType);
     String payloadJson;
     try {
       payloadJson = mapper.writeValueAsString(payload);
     } catch (JsonProcessingException e) {
-      payloadJson = "{}";
-      log.warn(
-          "[Outbox] Failed to serialize payload for {}/{}: {}", runId, effectType, e.getMessage());
+      throw new IllegalArgumentException(
+          "Could not serialize side-effect payload for " + effectType, e);
     }
 
     SideEffectOutboxEntry entry =
@@ -64,6 +61,8 @@ public class SideEffectOutbox {
             .status("PENDING")
             .attempt(0)
             .maxAttempts(3)
+            .idempotencyKey("side-effect:" + java.util.UUID.randomUUID())
+            .handlerContractVersion(contract.version())
             .nextRetryAt(Instant.now())
             .build();
 

@@ -62,6 +62,30 @@ public class ManagedAiUsageService {
     ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
     String state = routingPolicy.recomputeState(period);
     periodService.syncState(period, state);
+    // Tier model lock (F2, founder decision 2026-07-18): a locked tier (FREE) is routed
+    // exclusively to its locked provider/model (native DeepSeek Flash), overriding whatever
+    // provider/model was requested, so a managed tier cannot spend platform credits on a premium
+    // provider. The managed hard-stop still applies to the locked model.
+    String lockedModel = policy.getLockedModel();
+    if (lockedModel != null && !lockedModel.isBlank()) {
+      String lockedProvider =
+          (policy.getLockedProvider() != null && !policy.getLockedProvider().isBlank())
+              ? policy.getLockedProvider()
+              : provider;
+      String lockedCostClass = modelClassifier.costClass(lockedModel);
+      if (!routingPolicy.isAllowed(state, lockedCostClass, agentRole)) {
+        throw routingPolicy.blocked(state, lockedCostClass);
+      }
+      if (!lockedModel.equals(model) || !lockedProvider.equalsIgnoreCase(provider)) {
+        return new CallAuthorization(
+            lockedProvider,
+            lockedModel,
+            state,
+            true,
+            "Managed AI tier lock: " + user.tier() + " routes to " + lockedModel);
+      }
+      return CallAuthorization.allowed(lockedProvider, lockedModel, state);
+    }
     String costClass = modelClassifier.costClass(model);
     if (routingPolicy.shouldStepUp(state, costClass, agentRole, period)) {
       return modelClassifier
@@ -100,8 +124,56 @@ public class ManagedAiUsageService {
         .orElseThrow(() -> routingPolicy.blocked(state, costClass));
   }
 
+  /**
+   * Pre-authorize a fixed-model provider capability such as embeddings. Unlike chat routing this
+   * method never substitutes a different model: doing so would corrupt a persisted vector corpus.
+   * Platform-key calls still obey the same managed-credit hard stop; BYOK calls remain exempt.
+   */
+  @Transactional
+  public void authorizeFixedCapabilityCall(
+      String runId,
+      String provider,
+      String model,
+      String agentRole,
+      RunKeyContext keys,
+      RunKeyContext.Source source) {
+    if (!properties.isEnabled() || !modelClassifier.managedAiEnabled(model)) return;
+    ManagedAiUserContext user = periodService.resolveUser(runId, keys);
+    if (user == null || !isPlatform(source)) return;
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
+    if (!isManaged(policy)) return;
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
+    String state = routingPolicy.recomputeState(period);
+    periodService.syncState(period, state);
+    String costClass = modelClassifier.costClass(model);
+    if (!routingPolicy.isAllowed(state, costClass, agentRole)) {
+      throw routingPolicy.blocked(state, costClass);
+    }
+  }
+
   @Transactional
   public void recordSuccessfulCall(
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String provider,
+      String model,
+      RunCostTracker.CallUsage usage,
+      RunKeyContext keys,
+      RunKeyContext.Source source) {
+    recordSuccessfulCall(
+        null, runId, taskId, agentRole, stepId, provider, model, usage, keys, source);
+  }
+
+  /**
+   * Projects one immutable canonical provider-attempt fact into the managed-credit ledger. The
+   * exact usage-event id makes reconciliation deterministic and prevents a retry/failover with the
+   * same run/model/timestamp from being charged against the wrong attempt.
+   */
+  @Transactional
+  public void recordSuccessfulCall(
+      String usageEventId,
       String runId,
       String taskId,
       String agentRole,
@@ -141,6 +213,7 @@ public class ManagedAiUsageService {
             user.userId(),
             user.orgId(),
             period,
+            usageEventId,
             runId,
             taskId,
             agentRole,

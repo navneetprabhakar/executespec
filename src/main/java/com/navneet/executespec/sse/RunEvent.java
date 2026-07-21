@@ -363,7 +363,7 @@ public record RunEvent(
   }
 
   /** Live per-call token usage: payload encoded as "in=X,out=Y,total=Z". */
-  public static RunEvent tokenUsage(String runId, int inputTokens, int outputTokens) {
+  public static RunEvent tokenUsage(String runId, long inputTokens, long outputTokens) {
     String payload =
         "in=" + inputTokens + ",out=" + outputTokens + ",total=" + (inputTokens + outputTokens);
     return new RunEvent("TOKEN_USAGE", runId, null, payload, Instant.now());
@@ -375,8 +375,8 @@ public record RunEvent(
       String provider,
       String model,
       RunCostTracker.Snapshot snapshot) {
-    int inputTokens = snapshot == null ? 0 : snapshot.inputTokens();
-    int outputTokens = snapshot == null ? 0 : snapshot.outputTokens();
+    long inputTokens = snapshot == null ? 0 : snapshot.inputTokens();
+    long outputTokens = snapshot == null ? 0 : snapshot.outputTokens();
     String payload =
         "in=" + inputTokens + ",out=" + outputTokens + ",total=" + (inputTokens + outputTokens);
     return withData(

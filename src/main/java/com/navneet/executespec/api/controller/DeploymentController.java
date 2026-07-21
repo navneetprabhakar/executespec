@@ -11,6 +11,7 @@ import com.navneet.executespec.api.dto.DeploymentSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierPermissionService;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
@@ -56,11 +57,16 @@ public class DeploymentController {
   private final CredentialService credentialService;
   private final DeployEngineOrchestrator deployEngine;
   private final TierPermissionService tierPermissionService;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   @PostMapping
   public ResponseEntity<DeploymentSummary> deploy(
       @RequestBody DeployRequest request, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(request.runId(), userDetails);
+    requireDeploymentCreationEnabled();
+    // RR-571: creating paid infrastructure for a run is a mutation of that run's resources, so it
+    // requires run WRITE authority. Read access is deliberately broader (same-org developers,
+    // billing admins, project viewers, external project members) and must not authorize a deploy.
+    guard.requireRunWriteAccess(request.runId(), userDetails);
     // [F-31] (audit Sprint 2, 2026-04-30) — server-side tier gate.
     // Was: only `RunAccessGuard.requireRunAccess` ran, which only
     // checks run ownership. With `freeUserPermissions` returning
@@ -146,7 +152,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.deleteDeployment(id);
       return ResponseEntity.noContent().build();
@@ -165,7 +171,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.rollback(id);
       return ResponseEntity.ok().build();
@@ -203,7 +209,10 @@ public class DeploymentController {
   @PostMapping("/analyze")
   public ResponseEntity<?> analyze(
       @RequestParam String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
+    requireDeploymentCreationEnabled();
+    // RR-571: analyse restores the run workspace from GCS onto local disk before inspecting it,
+    // so it is a state-changing precondition of deploy, not a pure read.
+    guard.requireRunWriteAccess(runId, userDetails);
 
     PipelineRun run =
         stateStore
@@ -251,7 +260,8 @@ public class DeploymentController {
   public ResponseEntity<DeploymentSummary> confirm(
       @RequestBody DeployConfirmRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(request.runId(), userDetails);
+    requireDeploymentCreationEnabled();
+    guard.requireRunWriteAccess(request.runId(), userDetails);
     String userId = userDetails.getUser().getId();
 
     try {
@@ -304,7 +314,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.rollback(id, userDetails.getUser().getId());
@@ -331,7 +341,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.destroy(id, userDetails.getUser().getId());
@@ -341,6 +351,14 @@ public class DeploymentController {
     } catch (Exception e) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "Destroy failed: " + e.getMessage());
+    }
+  }
+
+  private void requireDeploymentCreationEnabled() {
+    if (!operationalReleasePolicy.deploymentCreationEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Deployment creation is disabled until durable recovery is configured.");
     }
   }
 }

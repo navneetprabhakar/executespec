@@ -1,10 +1,8 @@
 package com.navneet.executespec.api.controller;
 
 import java.io.IOException;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,7 +39,6 @@ import com.navneet.executespec.state.repository.RunRecoveryRepository;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -76,11 +73,14 @@ public class RunController {
   private final RunVisibilitySpec runVisibilitySpec;
   private final RunAccessGuard guard;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
   private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
   private final com.navneet.executespec.billing.service.ManagedAiUsageService managedAiUsageService;
 
   /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
   private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
+
+  private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
   private final com.navneet.executespec.run.sync.RunSyncService runSyncService;
   private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
@@ -88,9 +88,13 @@ public class RunController {
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
   private final com.navneet.executespec.agent.CostEstimator costEstimator;
   private final com.navneet.executespec.cost.RunCostTracker v2CostTracker;
+  private final com.navneet.executespec.cost.RunCostEvidenceService runCostEvidenceService;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
+
+  /** RR-241 — rejects customer submits that impersonate a server-internal automation source. */
+  private final com.navneet.executespec.integration.PlanGateBypassPolicy planGateBypassPolicy;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
@@ -126,12 +130,25 @@ public class RunController {
 
     // Content-level security scan (prompt injection, shell embedding, abuse patterns)
     inputSanitizer.scan(req.userRequest());
+    if (req.localRepositoryInventory() != null) {
+      validateLocalRepositoryInventory(req.localRepositoryInventory());
+      inputSanitizer.scan(req.localRepositoryInventory());
+    }
 
     // Check if submissions are paused (maintenance mode)
     if (featureFlagService.isEnabled("submissions.paused")) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE,
           "Run submissions are temporarily paused for maintenance. Please try again later.");
+    }
+
+    // RR-241 — `source` is caller-supplied and is what PlanGateBypassPolicy keys plan-gate bypass
+    // authority on. Reject any attempt to claim one of the server-internal automation surfaces from
+    // the public submit API, so the allowlist cannot be spoofed by a request body.
+    if (planGateBypassPolicy.isReservedAutomationSource(req.source())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Run source '" + req.source() + "' is reserved for server-internal automation.");
     }
 
     boolean localExecutionRequested = Boolean.TRUE.equals(req.localExecution());
@@ -148,109 +165,157 @@ public class RunController {
               + " runs execute remotely.");
     }
 
-    // Idempotent submit (RL-2026-06-005): a retried POST /api/runs carrying the same
-    // Idempotency-Key returns the ORIGINAL run instead of creating a duplicate. Checked BEFORE the
-    // quota/usage increments below, so a client retry (after a transient 5xx whose response was
-    // lost) never double-charges the user's monthly quota. Scoped + ownership-checked so a key can
-    // only ever resolve to the caller's own run; fail-open if Redis is down.
-    final String userId = userDetails.getUser().getId();
-    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      java.util.Optional<String> priorRunId = runIdempotencyService.lookup(userId, idempotencyKey);
-      if (priorRunId.isPresent()) {
-        java.util.Optional<PipelineRun> prior = stateStore.findRun(priorRunId.get());
-        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
-          log.info(
-              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
-              prior.get().getRunId());
-          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
-        }
+    // Brownfield admission happens before quota accounting and before the asynchronous pipeline.
+    // A project with linked repositories must submit an exact, fully-linked code boundary. Local
+    // runs go through the same write guard plus the V278 LOCAL-source binding contract: a LOCAL
+    // source is admitted only for the connector installation that holds an ONLINE lease.
+    // RR-236 — hold on to the authorized host project. Its org, not the caller's home org, is the
+    // tenant that owns this run: an external collaborator's run used to carry the host projectId
+    // with their personal orgId, so the work and its tenant disagreed.
+    com.navneet.executespec.auth.entity.Project hostProject = null;
+    if (req.projectId() != null && !req.projectId().isBlank()) {
+      hostProject = projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
+      if (localExecutionRequested) {
+        projectRepoService.resolveForLocalRunStrict(
+            req.projectId(),
+            req.selectedRepoIds(),
+            req.localInstallationId(),
+            userDetails.getUser().getId());
+      } else {
+        projectRepoService.resolveForRunStrict(req.projectId(), req.selectedRepoIds());
       }
     }
 
-    // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
-    // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
-    // rejected model never burns the user's monthly quota.
-    modelAccessService.assertModelAllowed(userId, req.modelName());
+    // Idempotent submit (RL-2026-06-005, made durable + atomic by V303). The claim is taken BEFORE
+    // the quota/usage increments below, so a client retry — or a genuinely parallel duplicate —
+    // never creates a second run nor double-charges the user's quota. Exactly one caller can own a
+    // key at a time across every JVM sharing this database; losers resolve to the winner's run.
+    // Scoped by userId, so one user's key can never reference another user's run.
+    final String userId = userDetails.getUser().getId();
+    final com.navneet.executespec.run.RunIdempotencyClaim idempotencyClaim =
+        runIdempotencyService.claim(
+            userId,
+            idempotencyKey,
+            com.navneet.executespec.run.RunRequestFingerprint.of(
+                new java.util.ArrayList<>(fingerprintOf(req).values())));
+    var alreadySubmitted = resolveIdempotentSubmit(idempotencyClaim, userId);
+    if (alreadySubmitted != null) return alreadySubmitted;
 
-    // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly run
-    // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
-    // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
-    // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
-    // the mid-run source of truth.
-    managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
-    tierEnforcementService.incrementRunCountForAnalytics(userId);
-    // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
-    apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
+    // Everything from here to run creation runs under the idempotency claim. Any failure must
+    // publish a terminal claim state, otherwise the key would stay locked until its lease elapses.
+    final com.navneet.executespec.auth.entity.Project authorizedProject = hostProject;
+    PipelineRun run;
+    try {
+      // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
+      // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
+      // rejected model never burns the user's monthly quota.
+      modelAccessService.assertModelAllowed(userId, req.modelName());
+      String effectiveAiProvider =
+          req.aiProvider() != null && !req.aiProvider().isBlank()
+              ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
+              : aiProviderPreferenceService.preferredProvider(userDetails);
+      if ((effectiveAiProvider == null || effectiveAiProvider.isBlank())
+          && req.modelName() != null
+          && !req.modelName().isBlank()) {
+        effectiveAiProvider = modelAccessService.providerForModel(req.modelName());
+      }
+      modelAccessService.assertProviderModelPair(effectiveAiProvider, req.modelName());
 
-    // Extract per-user GitHub credentials to pass into the run
-    String githubPat = userDetails.getUser().getGithubPat();
-    String githubOwner = userDetails.getUser().getGithubOwner();
-    String effectiveAiProvider =
-        req.aiProvider() != null && !req.aiProvider().isBlank()
-            ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
-            : aiProviderPreferenceService.preferredProvider(userDetails);
+      // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly
+      // run
+      // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
+      // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
+      // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
+      // the mid-run source of truth.
+      managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
+      tierEnforcementService.incrementRunCountForAnalytics(userId);
+      // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
+      apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
 
-    // Pass ALL pre-async fields INTO submitRun so they're set on the entity
-    // BEFORE the async pipeline thread starts (avoids race condition where the
-    // pipeline thread re-loads and re-saves the run without ownership fields).
-    String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
+      // Extract per-user GitHub credentials to pass into the run
+      String githubPat = userDetails.getUser().getGithubPat();
+      String githubOwner = userDetails.getUser().getGithubOwner();
+      // Pass ALL pre-async fields INTO submitRun so they're set on the entity
+      // BEFORE the async pipeline thread starts (avoids race condition where the
+      // pipeline thread re-loads and re-saves the run without ownership fields).
+      String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
 
-    // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
-    PipelineRun run =
-        v2Orchestrator.submitRunWithLocalExecution(
-            req.userRequest(),
-            req.source() != null ? req.source() : "REST",
-            req.repoUrl(),
-            req.repoMode(),
-            githubPat,
-            githubOwner,
-            Boolean.TRUE.equals(req.skipApproval()),
-            Boolean.TRUE.equals(req.autoMerge()),
-            req.modelName(),
-            effectiveAiProvider,
-            userDetails.getUser().getId(),
-            userDetails.getUser().getOrgId(),
-            req.projectId(),
-            executionMode,
-            req.selectedRepoIds(),
-            req.figmaUrl(),
-            Boolean.TRUE.equals(req.tddMode()),
-            req.branch(),
-            req.prReviewComments(),
-            com.navneet.executespec.state.RunMode.BUILD,
-            req.requireConfirmationBeforeExpensiveContinuation(),
-            req.requireBenchmarkPriorForAutomaticContinuation(),
-            req.lowComplexityWorkerStartTier(),
-            localExecutionRequested);
+      // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
+      String planningRequest =
+          localExecutionRequested
+                  && req.localRepositoryInventory() != null
+                  && !req.localRepositoryInventory().isBlank()
+              ? req.userRequest()
+                  + "\n\n--- LOCAL REPOSITORY INVENTORY (untrusted path-only evidence) ---\n"
+                  + req.localRepositoryInventory()
+                  + "\n--- END LOCAL REPOSITORY INVENTORY ---"
+              : req.userRequest();
+      run =
+          v2Orchestrator.submitRunWithLocalExecution(
+              planningRequest,
+              req.source() != null ? req.source() : "REST",
+              req.repoUrl(),
+              req.repoMode(),
+              githubPat,
+              githubOwner,
+              Boolean.TRUE.equals(req.skipApproval()),
+              Boolean.TRUE.equals(req.autoMerge()),
+              req.modelName(),
+              effectiveAiProvider,
+              userDetails.getUser().getId(),
+              userDetails.getUser().getOrgId(),
+              req.projectId(),
+              executionMode,
+              req.selectedRepoIds(),
+              req.figmaUrl(),
+              Boolean.TRUE.equals(req.tddMode()),
+              req.branch(),
+              req.prReviewComments(),
+              com.navneet.executespec.state.RunMode.BUILD,
+              req.requireConfirmationBeforeExpensiveContinuation(),
+              req.requireBenchmarkPriorForAutomaticContinuation(),
+              req.lowComplexityWorkerStartTier(),
+              localExecutionRequested,
+              // RR-233 / RR-234 / RR-236 — every control that governs this run is stamped
+              // atomically with run creation. Writing any of them after submit returns is a race
+              // against the pipeline thread that consumes them.
+              new com.navneet.executespec.integration.RunOrchestrator.SubmitPolicy(
+                  req.userCostCap(),
+                  Boolean.TRUE.equals(req.skipAutoPush()),
+                  authorizedProject == null ? null : authorizedProject.getOrgId()));
 
-    // Record (user, key) → runId so a retried submit with the same Idempotency-Key returns THIS run
-    // instead of creating a duplicate (RL-2026-06-005). Recorded immediately after creation so it's
-    // present when the client's backoff retry arrives; best-effort (no-op if Redis is down).
-    if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-      runIdempotencyService.record(userId, idempotencyKey, run.getRunId());
+    } catch (ResponseStatusException e) {
+      // A 4xx is deterministic for this exact body: retrying it would fail identically, so the key
+      // is closed rather than left open for a retry storm. Anything else may succeed on retry.
+      if (e.getStatusCode().is4xxClientError()) {
+        runIdempotencyService.failFinal(idempotencyClaim, e.getStatusCode() + " " + e.getReason());
+      } else {
+        runIdempotencyService.releaseForRetry(idempotencyClaim, String.valueOf(e.getStatusCode()));
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      runIdempotencyService.releaseForRetry(idempotencyClaim, e.getClass().getSimpleName());
+      throw e;
     }
+
+    // Publish the run against the claim immediately after creation, so a concurrent loser (which is
+    // waiting on this key) and any later retry both resolve to THIS run instead of creating
+    // another.
+    runIdempotencyService.complete(idempotencyClaim, run.getRunId());
 
     // Run count incremented atomically inside `assertAndIncrementRunCount` above. The
     // usageTrackingService increment below tracks the BILLING surface (not the quota counter),
     // which is independent and used by `assertWithinLimits` for the plan-tier billing limits.
     usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
-    // GA-readiness P3.2 — stamp the customer-supplied cost cap onto the new run row so
-    // RunOrchestrator.persistEstimate picks it up when the planner returns a plan and clamps
-    // hard_cap_usd to min(platformCap, userCostCap). Validation (DTO @DecimalMin/@DecimalMax)
-    // already rejected unbounded or negative values before reaching here.
-    if (req.userCostCap() != null) {
-      stateStore.setUserCostCap(run.getRunId(), req.userCostCap());
-    }
-
-    // Audit r5 (#5, 2026-05-06) — staged-PR-before-push. The flag rides
-    // a per-run Redis key (24h TTL); RunOrchestrator's auto-push gate
-    // consumes it once on terminal-success. JVM crash during the run
-    // → flag dies with the Redis key's TTL or with the next consume()
-    // call, default behaviour (auto-push) resumes naturally.
-    if (Boolean.TRUE.equals(req.skipAutoPush())) {
-      runSkipPushFlag.mark(run.getRunId());
-    }
+    // RR-233 — the customer's hard cost cap was written HERE, after submitRunWithLocalExecution
+    // had already started the async pipeline. RunOrchestrator.persistEstimate reads userCostCap at
+    // planner completion, so a fast planner clamped hard_cap_usd to the platform cap before the
+    // customer's tighter ceiling was ever visible. It is now stamped inside run creation.
+    //
+    // RR-234 — the "do not auto-publish" consent was likewise marked here, into a Redis-only key
+    // whose documented failure mode reverts to auto-push after a crash. It is now a durable column
+    // stamped in the same builder, and the auto-push gate fails closed.
 
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
     // RunOrchestrator
@@ -261,6 +326,108 @@ public class RunController {
 
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .body(mapper.toSummary(run, localExecutionRequested, localExecutionRequested));
+  }
+
+  /**
+   * The values that decide what a run builds and what it costs. A reused Idempotency-Key carrying
+   * any different value here is a conflict, never a silent replay of the earlier run.
+   *
+   * <p>RR-1553 — this list must cover EVERY {@link RunRequest} component. It previously omitted
+   * {@code requireConfirmationBeforeExpensiveContinuation} and {@code
+   * requireBenchmarkPriorForAutomaticContinuation} (both real continuation spend guards), {@code
+   * skipAutoPush} (publication policy), {@code prReviewComments} and {@code
+   * localRepositoryInventory} (planner input) and {@code localInstallationId} (the LOCAL source
+   * binding). A user who submitted, noticed a spend guard was off, and retried with the same key
+   * and the guard on was silently handed back the earlier UNGUARDED run with HTTP 202. Keyed by
+   * component name so {@code RunControllerSubmitFingerprintTest} can assert reflectively that a new
+   * DTO field cannot be forgotten here.
+   */
+  static java.util.LinkedHashMap<String, String> fingerprintOf(RunRequest req) {
+    java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+    values.put("userRequest", req.userRequest());
+    values.put("source", req.source());
+    values.put("repoUrl", req.repoUrl());
+    values.put("repoMode", req.repoMode());
+    values.put("projectId", req.projectId());
+    values.put("modelName", req.modelName());
+    values.put("aiProvider", req.aiProvider());
+    values.put("executionMode", req.executionMode());
+    values.put("branch", req.branch());
+    values.put("figmaUrl", req.figmaUrl());
+    values.put("prReviewComments", req.prReviewComments());
+    values.put("skipApproval", String.valueOf(req.skipApproval()));
+    values.put("autoMerge", String.valueOf(req.autoMerge()));
+    values.put("skipAutoPush", String.valueOf(req.skipAutoPush()));
+    values.put("tddMode", String.valueOf(req.tddMode()));
+    values.put("localExecution", String.valueOf(req.localExecution()));
+    values.put("localInstallationId", String.valueOf(req.localInstallationId()));
+    values.put("localRepositoryInventory", req.localRepositoryInventory());
+    values.put("userCostCap", String.valueOf(req.userCostCap()));
+    values.put("selectedRepoIds", canonicalRepoIds(req.selectedRepoIds()));
+    values.put("lowComplexityWorkerStartTier", String.valueOf(req.lowComplexityWorkerStartTier()));
+    values.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        String.valueOf(req.requireConfirmationBeforeExpensiveContinuation()));
+    values.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        String.valueOf(req.requireBenchmarkPriorForAutomaticContinuation()));
+    return values;
+  }
+
+  /**
+   * Repo selection is a set, not a sequence — {@code List.toString} made a reordered but
+   * semantically identical selection hash differently and produced a spurious CONFLICT. Sorting
+   * canonicalizes it; a genuinely different membership still changes the hash.
+   */
+  private static String canonicalRepoIds(java.util.List<java.util.UUID> ids) {
+    if (ids == null) return "null";
+    return ids.stream()
+        .map(id -> id == null ? "" : id.toString())
+        .sorted()
+        .collect(java.util.stream.Collectors.joining(","));
+  }
+
+  /**
+   * Translate a lost idempotency claim into a response, or null when this caller owns the claim and
+   * must proceed with the submission.
+   */
+  private ResponseEntity<RunSummary> resolveIdempotentSubmit(
+      com.navneet.executespec.run.RunIdempotencyClaim claim, String userId) {
+    switch (claim.status()) {
+      case DISABLED, CLAIMED -> {
+        return null;
+      }
+      case DUPLICATE -> {
+        java.util.Optional<PipelineRun> prior = stateStore.findRun(claim.runId());
+        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
+          log.info(
+              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
+              prior.get().getRunId());
+          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
+        }
+        // The claim resolved to a run this caller does not own, or one that no longer exists.
+        // Failing closed is the only safe answer: never fabricate a second run for a claimed key.
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "This Idempotency-Key is already bound to a run that is not available to you.");
+      }
+      case CONFLICT ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "This Idempotency-Key was already used with a different request body. Use a new"
+                  + " key.");
+      case FAILED_FINAL ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "This Idempotency-Key already failed permanently ("
+                  + claim.detail()
+                  + "). Use a new key.");
+      case IN_PROGRESS ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "A submission with this Idempotency-Key is still in flight. Retry shortly.");
+    }
+    return null;
   }
 
   /**
@@ -277,8 +444,7 @@ public class RunController {
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
     guard.requireAuthenticated(userDetails);
-    page = Math.max(0, page);
-    size = Math.max(1, Math.min(100, size));
+    var requestedPage = com.navneet.executespec.api.PageBounds.request(page, size, 100);
     var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
     boolean realProjectFilter =
         projectId != null && !projectId.isBlank() && !"__none__".equals(projectId);
@@ -301,7 +467,7 @@ public class RunController {
     }
 
     Page<PipelineRun> runs =
-        stateStore.listRuns(status, projectId, archived, PageRequest.of(page, size), visSpec);
+        stateStore.listRuns(status, projectId, archived, requestedPage, visSpec);
     // RL-2026-06-019 — batch variant hydrates each row's verifiedScore (one query per page) so
     // the runs list can lead with the score instead of provider internals.
     List<RunSummary> content = mapper.toSummaries(runs.getContent());
@@ -338,8 +504,23 @@ public class RunController {
   /** Compute the live cost for a run. Cached: terminal runs forever, in-progress runs for 15s. */
   @GetMapping("/{runId}/cost")
   public ResponseEntity<java.util.Map<String, Object>> getLiveCost(
-      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+      @PathVariable String runId,
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestParam(value = "stepCallsPage", defaultValue = "0") int stepCallsPage,
+      @RequestParam(
+              value = "stepCallsSize",
+              defaultValue =
+                  ""
+                      + com.navneet.executespec.cost.RunCostEvidenceService
+                          .DEFAULT_STEP_CALLS_PAGE_SIZE)
+          int stepCallsSize) {
     var run = guard.requireRunAccess(runId, userDetails);
+    // RR-1552 — the per-attempt ledger carries key-source, exact routing and per-attempt spend.
+    // cost/CLAUDE.md restricts that detail to own-org ORG_ADMIN / SUPER_ADMIN; the run read guard
+    // is broader (BILLING_ADMIN, org developers, cross-org project viewers).
+    boolean attemptDetail =
+        com.navneet.executespec.cost.RunCostEvidenceService.canViewPhysicalAttemptDetail(
+            userDetails, run);
 
     // Terminal run with stored cost → return immediately with DB totals.
     // The stored total_input_tokens / total_output_tokens are authoritative
@@ -354,6 +535,7 @@ public class RunController {
       body.put("reasoningTokens", null);
       body.put("calls", null);
       body.put("source", "stored_total");
+      runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
       return ResponseEntity.ok(body);
     }
 
@@ -366,8 +548,8 @@ public class RunController {
     // cost accumulator).
     if ("v2".equals(run.getHarnessVersion())) {
       var snap = v2CostTracker.snapshot(runId);
-      int liveIn = Math.max(snap.inputTokens(), safeTok(run.getTotalInputTokens()));
-      int liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
+      long liveIn = Math.max(snap.inputTokens(), safeTok(run.getTotalInputTokens()));
+      long liveOut = Math.max(snap.outputTokens(), safeTok(run.getTotalOutputTokens()));
       Map<String, Object> body = baseCostBody(runId, snap.costUsd());
       body.put("inputTokens", liveIn);
       body.put("outputTokens", liveOut);
@@ -376,6 +558,7 @@ public class RunController {
       body.put("reasoningTokens", snap.reasoningTokens());
       body.put("calls", snap.calls());
       body.put("source", "live_tracker");
+      runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
       return ResponseEntity.ok(body);
     }
 
@@ -400,6 +583,7 @@ public class RunController {
     body.put("reasoningTokens", null);
     body.put("calls", null);
     body.put("source", "legacy_estimator");
+    runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
     return ResponseEntity.ok(body);
   }
 
@@ -420,7 +604,31 @@ public class RunController {
         request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE));
   }
 
+  static void rejectRepositoryDestinationOverride(String repoUrl) {
+    if (repoUrl != null && !repoUrl.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Repository destination is bound to the run and cannot be overridden during push.");
+    }
+  }
+
   /** Approve or reject the plan-approval gate. */
+  /**
+   * RR-819 — what the approver must be shown before approving. Returns the durable gate report
+   * composed while the run parked at AWAITING_APPROVAL, or 204 when this plan touches no registered
+   * contract. Read-only; run-read guarded.
+   */
+  @GetMapping("/{runId}/plan-contract-gate")
+  public ResponseEntity<com.navneet.executespec.contracts.gate.PlanContractGateReport>
+      planContractGate(
+          @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    return planContractGate
+        .find(runId)
+        .map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
   @PostMapping("/{runId}/approve")
   public ResponseEntity<Void> approvePlan(
       @PathVariable String runId,
@@ -440,6 +648,19 @@ public class RunController {
     // executor. Reject new approvals explicitly instead of persisting BATCH and silently running
     // realtime workers with batch-only preview/notification behavior.
     rejectRetiredBatchApproval(req.approved(), req.executionMode());
+
+    // RR-1459 — bind the approval to the exact plan the approver reviewed. The credits check below
+    // is a price check, not an identity check: a client that is still displaying run A's plan while
+    // the route has already moved to run B passes it whenever the two estimates happen to match.
+    if (req.approved() && req.planFingerprint() != null && !req.planFingerprint().isBlank()) {
+      String actual = planFingerprintOf(approveRun.getPlanJson());
+      if (!req.planFingerprint().trim().equalsIgnoreCase(actual)) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "The plan you reviewed is not the plan currently on this run. Reload the plan and"
+                + " review it again before approving.");
+      }
+    }
 
     // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
     if (req.approved() && req.creditsConfirmed() != null) {
@@ -464,6 +685,37 @@ public class RunController {
                           + ". Cost estimate may have changed — please review.");
                 }
               });
+    }
+
+    // RR-819 — the breaking-change gate. PlanBreakingChangeReport's own contract says approval must
+    // be disabled until the approver types BREAKING when a touched contract has declared consumers.
+    // That was never enforced anywhere: the classifier ran AFTER the worker wrote the change and
+    // its verdict became a MINOR issue with a "[REQUIRES ACK]" suffix, so consumer-breaking API and
+    // schema changes could be approved and auto-published with no friction and no record. The gate
+    // report is composed while the run parks at AWAITING_APPROVAL; here it is enforced.
+    if (req.approved()) {
+      var ack =
+          planContractGate.acknowledge(
+              runId,
+              req.breakingChangeAck(),
+              req.breakingChangeReportDigest(),
+              userDetails == null ? null : userDetails.getUser().getId());
+      switch (ack) {
+        case MISSING ->
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This plan changes a contract that other repositories consume. Review the"
+                    + " breaking-change report and type BREAKING to acknowledge it before"
+                    + " approving.");
+        case STALE_REPORT ->
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "The breaking-change report you acknowledged is not the one currently on this run."
+                    + " Reload the plan and review the change again before approving.");
+        default -> {
+          /* NOT_REQUIRED or ACKNOWLEDGED — proceed. */
+        }
+      }
     }
 
     // M-032 + M-033 (Wave 3) — governance gates run before we ever
@@ -607,12 +859,20 @@ public class RunController {
             : source.getUserRequest();
     // Re-scan in case the user edited the spec in the fork dialog.
     inputSanitizer.scan(userRequest);
-    String execMode =
-        overrides != null && overrides.executionMode() != null
+    // RR-1217 — two different axes were being confused here. `executionMode` is the
+    // PRODUCTION/PROTOTYPE governance axis that decides whether the plan gate runs;
+    // `approvedExecutionMode` is the REALTIME/BATCH scheduling axis. The fork used to read the
+    // latter into the former, so a default source value of "REALTIME" was persisted as the run's
+    // executionMode — and because the gate opens only on an exact "PRODUCTION" match, every
+    // ordinary fork silently skipped the human plan gate and went straight to worker/provider
+    // spend. Inherit the correct field, validate any override, and fail closed to PRODUCTION.
+    String requestedExecMode =
+        overrides != null
+                && overrides.executionMode() != null
+                && !overrides.executionMode().isBlank()
             ? overrides.executionMode()
-            : (source.getApprovedExecutionMode() != null
-                ? source.getApprovedExecutionMode()
-                : "REALTIME");
+            : source.getExecutionMode();
+    String execMode = normalizeForkExecutionMode(requestedExecMode);
 
     log.info("Forking run {} as new run for user {}", runId, forkerId);
     PipelineRun forked =
@@ -631,11 +891,44 @@ public class RunController {
             userDetails.getUser().getOrgId(),
             source.getProjectId(),
             execMode,
-            null, // selectedRepoIds — source's projectId carries the repo set
+            // RR-1217 — preserve the source run's exact repository selection. Passing null meant
+            // "every linked repo", so a multi-repo fork could touch repositories the source run
+            // never selected (and that the project may have gained since).
+            com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds(
+                source.getSelectedRepoIds()),
             source.getFigmaUrl(),
-            false // tddMode — opt-in per fork
+            source.isTddMode() // RR-1217 — inherit, was hardcoded false
             );
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(forked));
+  }
+
+  /**
+   * RR-1459 — stable identity of a run's persisted plan. Returns null when the run has no plan, in
+   * which case no client-supplied fingerprint can match and the approval is rejected.
+   */
+  static String planFingerprintOf(String planJson) {
+    if (planJson == null || planJson.isBlank()) return null;
+    try {
+      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+      byte[] hash = md.digest(planJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder(hash.length * 2);
+      for (byte b : hash) sb.append(String.format("%02x", b));
+      return sb.toString();
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+  }
+
+  /**
+   * RR-1217 — a fork's execution mode is the PRODUCTION/PROTOTYPE governance axis. Only those two
+   * values are legal; anything else (including a REALTIME/BATCH value leaking in from the
+   * scheduling axis, or an unknown override) fails closed to PRODUCTION so the fork keeps its human
+   * plan gate.
+   */
+  static String normalizeForkExecutionMode(String requested) {
+    if (requested == null) return "PRODUCTION";
+    String normalized = requested.trim().toUpperCase(java.util.Locale.ROOT);
+    return "PROTOTYPE".equals(normalized) ? "PROTOTYPE" : "PRODUCTION";
   }
 
   /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
@@ -728,7 +1021,8 @@ public class RunController {
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "NEW") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
-    log.info("POST /api/runs/{}/push-github — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+    rejectRepositoryDestinationOverride(repoUrl);
+    log.info("POST /api/runs/{}/push-github — repoMode={}", runId, repoMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -736,8 +1030,6 @@ public class RunController {
               + run.getStatus()
               + ")");
     }
-    // Override run's repo config with request params
-    if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
     run.setRepoMode(repoMode);
     // Ensure PAT is available (from user or run or system)
     if (run.getGithubPat() == null || run.getGithubPat().isBlank()) {
@@ -800,7 +1092,17 @@ public class RunController {
           HttpStatus.CONFLICT,
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
-    var outcome = runSyncService.sync(runId, branch);
+    // RR-1555 — `branch` reaches `git fetch` / `git reset --hard` as an argv token. Git parses
+    // options anywhere before `--`, so a value beginning with `-` would be consumed as a git
+    // option rather than a refspec. Reject the shape here; the service validates again.
+    if (branch != null
+        && !branch.isBlank()
+        && !com.navneet.executespec.run.sync.RunSyncService.isValidBranch(branch)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "branch must be a plain branch name (letters, digits, '.', '_', '-', '/')");
+    }
+    var outcome = runSyncService.sync(runId, branch, syncCredentialFor(run, userDetails));
     // SDET 2026-05-16 (BUG-019) — distinguish "everything synced" from "nothing synced (all
     // failed)" / "partial sync". The previous response said `status: "synced"` whether or not any
     // repo actually moved; with `reposSynced=0 + details=[FAILED ...]` the UI happily displayed
@@ -833,7 +1135,7 @@ public class RunController {
           HttpStatus.CONFLICT,
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
-    var outcome = runSyncService.syncToOriginalCommit(runId);
+    var outcome = runSyncService.syncToOriginalCommit(runId, syncCredentialFor(run, userDetails));
     // SDET 2026-05-16 (BUG-019) — same outcome aggregation as /sync above so the UI doesn't
     // surface a misleading success when every repo failed to reset.
     boolean anyFailed = outcome.details().stream().anyMatch(d -> d.contains("FAILED"));
@@ -848,6 +1150,34 @@ public class RunController {
             "details", outcome.details()));
   }
 
+  /**
+   * RR-1554 — resolve the git credential the sync children must authenticate with. Mirrors the
+   * run-then-user precedence {@code push-scm} already uses, so a sync uses exactly the credential
+   * that cloned the workspace. Returns {@link
+   * com.navneet.executespec.run.sync.RunSyncService.GitCredential#NONE} for public repositories,
+   * which still work unauthenticated.
+   */
+  private com.navneet.executespec.run.sync.RunSyncService.GitCredential syncCredentialFor(
+      PipelineRun run, AppUserDetails userDetails) {
+    var user = userDetails == null ? null : userDetails.getUser();
+    String githubPat = firstNonBlank(run.getGithubPat(), user == null ? null : user.getGithubPat());
+    if (githubPat != null) {
+      return com.navneet.executespec.run.sync.RunSyncService.GitCredential.github(githubPat);
+    }
+    String bitbucket =
+        firstNonBlank(
+            run.getBitbucketAppPassword(), user == null ? null : user.getBitbucketAppPassword());
+    if (bitbucket != null) {
+      return com.navneet.executespec.run.sync.RunSyncService.GitCredential.bitbucket(bitbucket);
+    }
+    return com.navneet.executespec.run.sync.RunSyncService.GitCredential.NONE;
+  }
+
+  private static String firstNonBlank(String a, String b) {
+    if (a != null && !a.isBlank()) return a;
+    return b != null && !b.isBlank() ? b : null;
+  }
+
   @PostMapping("/{runId}/push-scm")
   public ResponseEntity<Map<String, String>> pushToScm(
       @AuthenticationPrincipal AppUserDetails userDetails,
@@ -855,14 +1185,13 @@ public class RunController {
       @RequestParam(required = false) String repoUrl,
       @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
-    log.info("POST /api/runs/{}/push-scm — repoMode={} repoUrl={}", runId, repoMode, repoUrl);
+    rejectRepositoryDestinationOverride(repoUrl);
+    log.info("POST /api/runs/{}/push-scm — repoMode={}", runId, repoMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
           "Only COMPLETE or PARTIAL runs can be pushed to SCM (current: " + run.getStatus() + ")");
     }
-    // Override run's repo config with request params
-    if (repoUrl != null && !repoUrl.isBlank()) run.setRepoUrl(repoUrl);
     run.setRepoMode(repoMode);
 
     var user = userDetails.getUser();
@@ -1220,6 +1549,16 @@ public class RunController {
   public ResponseEntity<List<java.util.Map<String, Object>>> getEventLog(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
+    return ResponseEntity.ok(broadcaster.getReplayLog(runId).events());
+  }
+
+  /**
+   * Metadata-bearing replay contract used by reconnecting clients; legacy event-log stays a list.
+   */
+  @GetMapping("/{runId}/event-log/replay")
+  public ResponseEntity<com.navneet.executespec.sse.SseBroadcaster.ReplayLog> getEventReplay(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
     return ResponseEntity.ok(broadcaster.getReplayLog(runId));
   }
 
@@ -1242,17 +1581,9 @@ public class RunController {
             .body(repoZip);
       }
 
-      // Path 1: GCS archive — redirect to signed URL
-      if (run.getGcsWorkspaceKey() != null) {
-        URL signedUrl =
-            gcsWorkspaceStore.signedDownloadUrl(run.getGcsWorkspaceKey(), Duration.ofMinutes(5));
-        log.debug("Redirecting download for run {} to GCS signed URL", id);
-        return ResponseEntity.status(HttpStatus.FOUND)
-            .header(HttpHeaders.LOCATION, signedUrl.toString())
-            .build();
-      }
-
-      // Path 2: Local workspace — zip on the fly and stream
+      // Local workspaces are zipped and scanned on the fly. Archived workspaces are downloaded
+      // through the same service and every ZIP member is scanned before bytes are returned. A
+      // direct GCS redirect would bypass that final publication gate for historical archives.
       try {
         Path zipPath = workspaceExportService.exportWorkspace(id);
         String runId8 = id.substring(0, Math.min(8, id.length()));
@@ -1535,6 +1866,26 @@ public class RunController {
           HttpStatus.GONE,
           "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
               + " REALTIME");
+    }
+  }
+
+  static void validateLocalRepositoryInventory(String inventory) {
+    if (inventory == null || inventory.isBlank()) return;
+    for (String line : inventory.split("\\R")) {
+      if (line.isBlank()) continue;
+      if (!line.startsWith("- ")) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Local repository inventory must contain path entries only");
+      }
+      String path = line.substring(2).trim().replace('\\', '/');
+      if ("(inventory truncated)".equals(path)) continue;
+      if (path.isBlank()
+          || path.startsWith("/")
+          || path.matches("^[A-Za-z]:/.*")
+          || java.util.Arrays.asList(path.split("/")).contains("..")) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Local repository inventory contains an unsafe path");
+      }
     }
   }
 

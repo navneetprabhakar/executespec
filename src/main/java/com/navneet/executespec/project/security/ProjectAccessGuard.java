@@ -19,9 +19,10 @@ import lombok.RequiredArgsConstructor;
  * don't break current callers: the caller must be a member of the project's organisation (their
  * {@code orgId} equals {@code project.orgId}). SUPER_ADMIN short-circuits any check.
  *
- * <p>Project-member-level granularity (e.g. PROJECT_DEVELOPER vs ORG_ADMIN) is a follow-up — the
- * current bar is "don't leak to strangers in unrelated orgs", which is what the adversarial test
- * exposed.
+ * <p>Read access remains organisation-first because projects are an organisation-visible grouping
+ * surface. Write access is least-privilege: SUPER_ADMIN, the host organisation's ORG_ADMIN, or an
+ * explicit PROJECT_ADMIN / PROJECT_DEVELOPER membership. Mere organisation membership is never a
+ * project mutation capability.
  */
 @Component
 @RequiredArgsConstructor
@@ -82,11 +83,10 @@ public class ProjectAccessGuard {
   }
 
   /**
-   * Assert the caller may WRITE / MUTATE this project. Same in-org / cross-org admission rules as
-   * {@link #assertCanRead}, but additionally rejects PROJECT_VIEWER members (V175 read-only role).
-   * Use this on every endpoint that creates, updates, or deletes per-project state — invites, share
-   * links, memory compactions, autofix dispatches, architecture (re)generation, override /
-   * exception submissions, credential storage, etc.
+   * Assert the caller may WRITE / MUTATE this project. Use this on every endpoint that creates,
+   * updates, or deletes per-project state — invites, share links, memory compactions, autofix
+   * dispatches, architecture (re)generation, override / exception submissions, credential storage,
+   * etc.
    *
    * <p>Audit 2026-05-12 review item B #9-#18 — closes the "{@code assertCanRead} used as
    * write-gate" cluster.
@@ -99,9 +99,8 @@ public class ProjectAccessGuard {
     }
 
     String callerOrgId = userDetails.getUser().getOrgId();
-    if (callerOrgId != null && callerOrgId.equals(project.getOrgId())) {
-      // In-org members are admitted for writes by default; cross-org collaborators MUST pass the
-      // per-project_member role check below.
+    boolean sameOrg = callerOrgId != null && callerOrgId.equals(project.getOrgId());
+    if (sameOrg && isOrgAdmin(userDetails)) {
       return project;
     }
 
@@ -114,11 +113,54 @@ public class ProjectAccessGuard {
           throw new ResponseStatusException(
               HttpStatus.FORBIDDEN, "PROJECT_VIEWER cannot modify this project");
         }
-        return project;
+        if ("PROJECT_ADMIN".equals(role) || "PROJECT_DEVELOPER".equals(role)) {
+          return project;
+        }
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN, "Unknown project role cannot modify this project");
       }
     }
 
     throw new ResponseStatusException(
         HttpStatus.FORBIDDEN, "You don't have write access to this project");
+  }
+
+  /**
+   * Assert the caller has an administrative capability for this project.
+   *
+   * <p>This is deliberately stronger than {@link #assertCanWrite}: project developers may mutate
+   * ordinary project resources, but they must not read administrative activity such as policy and
+   * auto-detection changes. The capability is granted only to SUPER_ADMIN, the host organisation's
+   * ORG_ADMIN, or an explicit PROJECT_ADMIN member (including an authorised external admin).
+   */
+  public Project assertCanAdmin(String projectId, AppUserDetails userDetails) {
+    Project project = assertCanRead(projectId, userDetails);
+
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return project;
+    }
+
+    String callerOrgId = userDetails.getUser().getOrgId();
+    boolean sameOrg = callerOrgId != null && callerOrgId.equals(project.getOrgId());
+    if (sameOrg && isOrgAdmin(userDetails)) {
+      return project;
+    }
+
+    String callerUserId = userDetails.getUser().getId();
+    if (callerUserId != null
+        && projectMemberRepo
+            .findByProjectIdAndUserId(projectId, callerUserId)
+            .map(member -> "PROJECT_ADMIN".equals(member.getProjectRole()))
+            .orElse(false)) {
+      return project;
+    }
+
+    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project admin access is required");
+  }
+
+  private static boolean isOrgAdmin(AppUserDetails userDetails) {
+    if ("ORG_ADMIN".equals(userDetails.getUser().getGlobalRole())) return true;
+    return userDetails.getOrgMember() != null
+        && "ORG_ADMIN".equals(userDetails.getOrgMember().getOrgRole());
   }
 }

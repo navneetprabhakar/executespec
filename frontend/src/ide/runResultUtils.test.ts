@@ -45,6 +45,7 @@ describe('runResultUtils', () => {
     expect(verdictFor(92, 'COMPLETE')).toEqual({label: 'Shippable', kind: 'ok'});
     expect(verdictFor(72, 'COMPLETE')).toEqual({label: 'Needs review', kind: 'warn'});
     expect(verdictFor(null, 'COMPLETE')).toEqual({label: 'Complete', kind: 'warn'});
+    expect(verdictFor(null, 'PARTIAL')).toEqual({label: 'Needs review', kind: 'warn'});
     expect(verdictFor(96, 'FAILED')).toEqual({label: 'Failed', kind: 'bad'});
   });
 
@@ -264,7 +265,7 @@ describe('runResultUtils', () => {
     expect(latestContinuationAction(task)).toContain('model steps 1/2');
     expect(goalStateKind('IN_PROGRESS')).toBe('warn');
     expect(taskBudgetFacts(task)).toEqual([
-      {k: 'Cost', v: '$0.1256 / $1.00'},
+      {k: 'Cost', v: '$0.1256 / $1.0000'},
       {k: 'Tokens', v: '1,250 / 2,000'},
       {k: 'Time', v: '1m 5s / 2m 0s'},
       {k: 'Ceiling', v: 'task limit'},
@@ -456,7 +457,8 @@ describe('runResultUtils', () => {
   it('keeps small formatting helpers stable', () => {
     expect(fmtDur(59_400)).toBe('59s');
     expect(fmtDur(61_000)).toBe('1m 1s');
-    expect(usd(1.234)).toBe('$1.23');
+    expect(usd(1.234)).toBe('$1.2340');
+    expect(usd(0.00009)).toBe('$0.0001');
     expect(num(12345)).toBe('12,345');
     expect(evidenceKind('PASS')).toBe('ok');
     expect(evidenceKind('FAIL')).toBe('bad');

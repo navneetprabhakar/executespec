@@ -84,7 +84,7 @@ public class WorkspaceGcsUploadListener {
 
     // Idempotent: skip if already uploaded
     PipelineRun run = stateStore.findRun(runId).orElse(null);
-    if (run == null || run.getGcsWorkspaceKey() != null) return;
+    if (!shouldUpload(run)) return;
 
     Path workspace = Path.of(agentProps.getWorkspace(), runId);
     if (!Files.isDirectory(workspace)) {
@@ -120,5 +120,9 @@ public class WorkspaceGcsUploadListener {
                       : "",
               "error", e.getMessage() != null ? e.getMessage() : "unknown"));
     }
+  }
+
+  static boolean shouldUpload(PipelineRun run) {
+    return run != null && run.getGcsWorkspaceKey() == null && !run.isLocalExecutionRequested();
   }
 }

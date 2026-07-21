@@ -8,6 +8,7 @@ import com.navneet.executespec.codeintel.StalenessService;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportValidityService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Pilot R1 — aggregates project-level metrics for the dashboard header. Single endpoint; all five
@@ -26,6 +28,7 @@ import lombok.RequiredArgsConstructor;
  */
 @RestController
 @RequiredArgsConstructor
+@Slf4j
 public class ProjectDashboardController {
 
   private static final Set<String> ACTIVE_STATUSES =
@@ -33,6 +36,7 @@ public class ProjectDashboardController {
 
   private final PipelineRunRepository runRepo;
   private final ValidationReportRepository reportRepo;
+  private final ValidationReportValidityService reportValidityService;
   private final PullRequestRecordRepository prRepo;
   private final ProjectArchitectureService archService;
   private final StalenessService stalenessService;
@@ -121,6 +125,7 @@ public class ProjectDashboardController {
       int completedRuns,
       int failedRuns,
       double avgScore,
+      int excludedScoreReports,
       long totalTokens,
       double totalCostUsd,
       CostBreakdown costBreakdown,
@@ -184,13 +189,11 @@ public class ProjectDashboardController {
     // v2.5.10+: aggregate only verifiedScore (objective build+tests+verdict signal).
     // Legacy accuracyScore is an LLM self-assessment and must never be promoted into
     // a dashboard aggregate when deterministic evidence is absent.
-    double avgScore =
-        reports.stream()
-            .map(ProjectDashboardController::preferredScore)
-            .filter(s -> s != null)
-            .mapToInt(Integer::intValue)
-            .average()
-            .orElse(0.0);
+    ValidationReportValidityService.Aggregate scoreAggregate =
+        reportValidityService.aggregate(reports);
+    List<ValidationReport> canonicalReports = scoreAggregate.canonicalReports();
+    int excludedScoreReports = scoreAggregate.excludedCount();
+    double avgScore = scoreAggregate.averageScore();
 
     List<TaskSummary> recentTasks =
         recentRuns.stream()
@@ -201,7 +204,7 @@ public class ProjectDashboardController {
                         r.getRunId(),
                         r.getRunTitle() != null ? r.getRunTitle() : r.getUserRequest(),
                         r.getStatus(),
-                        latestScoreForRun(reports, r.getRunId()),
+                        latestScoreForRun(canonicalReports, r.getRunId()),
                         r.getStartedAt() != null ? r.getStartedAt().toString() : null))
             .toList();
 
@@ -219,9 +222,27 @@ public class ProjectDashboardController {
     } else {
       try {
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-        archStatus = stalenessService.report(projectId, pat).stale() ? "STALE" : "GENERATED";
+        var staleness = stalenessService.report(projectId, pat);
+        // RR-1657: "GENERATED" is an affirmative claim that the architecture matches the current
+        // repository state, so it must only be made when the probe actually verified that. A
+        // project whose repos could not be read (SCM outage, expired PAT) or that has only
+        // LOCAL/non-GitHub sources is UNVERIFIED, not current. Collapsing those into GENERATED was
+        // the user-visible half of the fail-open that RR-1585 closed inside StalenessService.
+        if (staleness.stale()) {
+          archStatus = "STALE";
+        } else if (staleness.verified()) {
+          archStatus = "GENERATED";
+        } else {
+          archStatus = "UNVERIFIED";
+        }
       } catch (Exception e) {
-        archStatus = "GENERATED";
+        // RR-1657: a failed staleness probe proves nothing about freshness. It previously reported
+        // GENERATED, which is the strongest possible claim on the weakest possible evidence.
+        log.warn(
+            "[Dashboard] Staleness probe failed for project {}; reporting UNVERIFIED: {}",
+            projectId,
+            e.toString());
+        archStatus = "UNVERIFIED";
       }
     }
     Integer archVersion = arch.map(a -> a.getVersion()).orElse(null);
@@ -232,6 +253,7 @@ public class ProjectDashboardController {
             (int) completed,
             (int) failed,
             avgScore,
+            excludedScoreReports,
             totalTokens,
             totalCost,
             costBreakdown,
@@ -283,16 +305,22 @@ public class ProjectDashboardController {
                   value = "requirement",
                   required = false)
               String requirement,
+          @org.springframework.web.bind.annotation.RequestParam(
+                  value = "provider",
+                  required = false)
+              String provider,
+          @org.springframework.web.bind.annotation.RequestParam(value = "model", required = false)
+              String model,
           @org.springframework.security.core.annotation.AuthenticationPrincipal
               com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
+    return ResponseEntity.ok(estimationService.estimate(projectId, requirement, provider, model));
   }
 
   /**
    * v2.5.2 — Tech Debt rollup: issues-by-category/severity, top-5 file hotspots, dimension-score
    * trend. All derived from existing ValidationReport rows; no LLM call. {@code since} filters to
-   * the last N days (default: all history).
+   * the last N days (default and operational maximum: 366 days; at most 1,000 reports).
    */
   @GetMapping("/api/projects/{projectId}/tech-debt")
   public ResponseEntity<com.navneet.executespec.project.techdebt.TechDebtService.Report> techDebt(

@@ -49,6 +49,14 @@ import lombok.RequiredArgsConstructor;
 public class SubagentExecutionService {
 
   private static final int MAX_EXECUTION_ROUNDS = 4;
+
+  /**
+   * Lease-renewal period for an executing child. Must stay comfortably below {@code
+   * AgentSessionStartupRecovery.STALE_AFTER_SECONDS} so a couple of missed ticks still cannot make
+   * a live child look abandoned.
+   */
+  private static final long HEARTBEAT_INTERVAL_MILLIS = 30_000L;
+
   private static final Pattern CITATION =
       Pattern.compile("(?m)([A-Za-z0-9_./-]+\\.[A-Za-z0-9_-]+):(\\d+)");
 
@@ -93,6 +101,10 @@ public class SubagentExecutionService {
             .findById(handle.childSessionId())
             .orElseThrow(() -> new IllegalStateException("Persisted child session disappeared"));
 
+    // A single WORKHORSE round routinely outlives the startup-recovery stale window, and turn
+    // admission is the only other heartbeat. Without this renewal a peer JVM booting mid-call
+    // cancels a child that is actively spending, so keep the lease fresh for the whole execution.
+    Thread heartbeat = startHeartbeat(child.getId(), userId, orgId);
     try {
       var route =
           orchestratorTurnService.orchestrate(
@@ -181,7 +193,33 @@ public class SubagentExecutionService {
         // Preserve the original execution failure; terminal/racing cancellation is harmless.
       }
       throw e;
+    } finally {
+      heartbeat.interrupt();
     }
+  }
+
+  /**
+   * Starts a bounded lease-renewal ticker for one executing child.
+   *
+   * <p>The ticker is advisory: a failed renewal is logged by the protocol service and never fails
+   * the turn, and the returned thread is interrupted on every terminal path.
+   */
+  private Thread startHeartbeat(String childSessionId, String userId, String orgId) {
+    return Thread.ofVirtual()
+        .name("subagent-heartbeat-" + childSessionId)
+        .start(
+            () -> {
+              while (!Thread.currentThread().isInterrupted()) {
+                try {
+                  Thread.sleep(HEARTBEAT_INTERVAL_MILLIS);
+                  protocolService.heartbeat(childSessionId, userId, orgId);
+                } catch (InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                } catch (RuntimeException renewalFailure) {
+                  // Keep ticking: one failed renewal must not silently end the lease.
+                }
+              }
+            });
   }
 
   /**

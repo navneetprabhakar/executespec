@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRecorder;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,7 +15,11 @@ class GeminiNativeToolClientSchemaTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   private final GeminiNativeToolClient client =
-      new GeminiNativeToolClient(mapper, mock(FeatureFlagService.class));
+      new GeminiNativeToolClient(
+          mapper,
+          mock(FeatureFlagService.class),
+          mock(RunCostTracker.class),
+          mock(RunStepUsageRecorder.class));
 
   @Test
   void addsGeminiRequiredItemsToGenericArrayProperties() throws Exception {

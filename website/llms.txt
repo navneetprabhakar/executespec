@@ -23,7 +23,6 @@ The positioning line: **"AI that ships pull requests your team will actually mer
 - Product screenshots and the website walkthrough use synthetic demo data. They demonstrate the current UI surface, not customer results, production metrics, or benchmark scores.
 - The verified score is an internal evidence summary. Deterministic build/test signals and reviewer assessments are shown separately in the run report; it is not an independent benchmark or guarantee of mergeability.
 - Provider availability, model routing, and pricing are configuration- and plan-dependent; the public provider list is the set shown in the current plan and model surfaces.
-- FastContext integration is optional and fail-soft. The core pipeline does not require it.
 
 ## Pricing (2026)
 

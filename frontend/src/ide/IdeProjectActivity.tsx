@@ -1,31 +1,34 @@
-import {useEffect, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 
 export function IdeProjectActivity() {
   const {projectId = ''} = useParams();
-  const [feed, setFeed] = useState<Array<Record<string, unknown>> | null>(null);
-
-  useEffect(() => {
-    if (!projectId) return;
-    api
-      .getActivityFeed(projectId, {sinceDays: 30})
-      .then((f) =>
-        setFeed(
-          ((f as unknown as {entries?: unknown[]}).entries as Array<Record<string, unknown>>) ??
+  // D4 — "No recent activity." is a claim about the project's history.
+  const feedState = useAsyncData(
+    () =>
+      api
+        .getActivityFeed(projectId, {sinceDays: 30})
+        .then(
+          (f) =>
+            ((f as unknown as {entries?: unknown[]}).entries as Array<Record<string, unknown>>) ??
             (Array.isArray(f) ? (f as Array<Record<string, unknown>>) : []),
         ),
-      )
-      .catch(() => setFeed([]));
-  }, [projectId]);
+    [projectId],
+    !!projectId,
+  );
+  const feed = feedState.data;
 
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <h1 className='ide-h1'>Activity</h1>
-      {feed === null ? (
+      {feedState.failure ? (
+        <LoadError failure={feedState.failure} what='activity' onRetry={feedState.reload} />
+      ) : feed === null ? (
         <IdeLoader label='Loading activity…' />
       ) : feed.length === 0 ? (
         <div className='ide-empty'>No recent activity.</div>

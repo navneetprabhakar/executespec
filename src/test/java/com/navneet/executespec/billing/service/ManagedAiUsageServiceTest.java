@@ -274,6 +274,37 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void fixedEmbeddingCapabilityStaysOnItsModelAndObeysTheManagedCreditGate() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1500); // CHEAP_ONLY
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    when(modelClassifier.costClass("text-embedding-3-small")).thenReturn("CHEAP");
+
+    service.authorizeFixedCapabilityCall(
+        "embedding:document-1",
+        "openai",
+        "text-embedding-3-small",
+        "ProjectDocumentEmbedding",
+        keys(),
+        RunKeyContext.Source.PLATFORM);
+
+    verify(modelClassifier, never()).sameProviderStepDown(anyString(), anyString());
+
+    period.setAiCreditsUsed(2000); // EXHAUSTED
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                service.authorizeFixedCapabilityCall(
+                    "embedding:document-1",
+                    "openai",
+                    "text-embedding-3-small",
+                    "ProjectDocumentEmbedding",
+                    keys(),
+                    RunKeyContext.Source.PLATFORM))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("EXHAUSTED");
+  }
+
+  @Test
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);
@@ -325,6 +356,66 @@ class ManagedAiUsageServiceTest {
     assertThat(auth.provider()).isEqualTo("deepseek");
     assertThat(auth.model()).isEqualTo("deepseek-v4-flash-native");
     assertThat(auth.reason()).contains("stepped down");
+  }
+
+  @Test
+  void freeTierLockForcesDeepSeekFlashRegardlessOfRequestedProvider() {
+    // F2 (founder decision 2026-07-18): FREE is native-DeepSeek-Flash only. A FREE user requesting
+    // a premium Anthropic model must be forced onto deepseek-v4-flash-native, not stepped down
+    // within Anthropic.
+    ManagedAiProperties props = new ManagedAiProperties();
+    ManagedAiProperties.TierPolicy free = new ManagedAiProperties.TierPolicy();
+    free.setIncludedCredits(200);
+    free.setRawCogsCapUsd(2.0);
+    free.setHardStopAfterRawUsd(2.0);
+    free.setLockedProvider("deepseek");
+    free.setLockedModel("deepseek-v4-flash-native");
+    props.setTiers(Map.of("FREE", free));
+    when(tierResolver.resolveUserTier("u1")).thenReturn("FREE");
+    when(modelClassifier.costClass("deepseek-v4-flash-native")).thenReturn("CHEAP");
+    ManagedAiUsagePeriod freePeriod =
+        ManagedAiUsagePeriod.builder()
+            .id("p-free")
+            .userId("u1")
+            .orgId("o1")
+            .tier("FREE")
+            .periodStart(Instant.parse("2026-06-01T00:00:00Z"))
+            .periodEnd(Instant.parse("2026-07-01T00:00:00Z"))
+            .includedAiCredits(200)
+            .aiCreditsUsed(0)
+            .rawCogsCapUsd(2.0)
+            .rawCogsUsedUsd(0.0)
+            .hardStopAfterRawUsd(2.0)
+            .routingState(ManagedAiUsageService.FULL)
+            .build();
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(freePeriod));
+    ManagedAiUsageService freeService =
+        new ManagedAiUsageService(
+            props,
+            eventRepo,
+            new ManagedAiCreditCalculator(),
+            modelClassifier,
+            new ManagedAiRoutingPolicy(),
+            new ManagedAiUsageMapper(),
+            new ManagedAiUsagePeriodService(
+                periodRepo, tierResolver, mock(PipelineRunRepository.class), notificationService),
+            tierResolver);
+
+    ManagedAiUsageService.CallAuthorization auth =
+        freeService.authorizeCall(
+            "run-1",
+            "anthropic",
+            "claude-sonnet-5",
+            "OutlinePlannerAgent",
+            keys(),
+            RunKeyContext.Source.PLATFORM);
+
+    assertThat(auth.modelChanged()).isTrue();
+    assertThat(auth.provider()).isEqualTo("deepseek");
+    assertThat(auth.model()).isEqualTo("deepseek-v4-flash-native");
+    assertThat(auth.reason()).contains("tier lock");
+    // The premium model must never be stepped-within-Anthropic for a locked tier.
+    verify(modelClassifier, never()).sameProviderStepUp(anyString(), anyString());
   }
 
   // ---- Run-count retirement (2026-06-22): submission-time credit gate + entitlements summary ----

@@ -2,6 +2,7 @@ package com.navneet.executespec.deployment;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -124,6 +125,36 @@ public class GcsWorkspaceStore {
 
     log.info("[GcsWorkspaceStore] Upload complete: gs://{}/{}", bucket(), key);
     return key;
+  }
+
+  /**
+   * Stream an already-built non-workspace artifact into the configured private bucket. The caller
+   * owns the object key; credentials and signed URLs never enter the database.
+   */
+  public String uploadArtifact(
+      String objectKey, Path source, String contentType, Map<String, String> metadata)
+      throws IOException {
+    if (storage == null) {
+      throw new IOException("GCS unavailable");
+    }
+    String effectiveKey = environment + "/" + objectKey;
+    BlobInfo blobInfo =
+        BlobInfo.newBuilder(BlobId.of(bucket(), effectiveKey))
+            .setContentType(contentType)
+            .setMetadata(metadata == null ? Map.of() : Map.copyOf(metadata))
+            .build();
+    try (InputStream in = Files.newInputStream(source)) {
+      storage.createFrom(blobInfo, in);
+    }
+    return effectiveKey;
+  }
+
+  /** Stream an object without materialising it as a byte array in the application heap. */
+  public void copyObjectTo(String objectKey, OutputStream destination) throws IOException {
+    if (storage == null) throw new IOException("GCS unavailable");
+    Blob blob = storage.get(BlobId.of(bucket(), objectKey));
+    if (blob == null) throw new IOException("artifact not found");
+    blob.downloadTo(destination);
   }
 
   /**

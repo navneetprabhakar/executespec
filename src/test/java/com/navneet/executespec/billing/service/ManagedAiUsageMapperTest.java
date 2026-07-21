@@ -25,6 +25,7 @@ class ManagedAiUsageMapperTest {
             "u1",
             "o1",
             period(),
+            "usage-1",
             "agent-session-1",
             "task-1",
             "WorkerAgent",
@@ -43,6 +44,7 @@ class ManagedAiUsageMapperTest {
     assertThat(event.getPeriodId()).isEqualTo("period-1");
     assertThat(event.getUserId()).isEqualTo("u1");
     assertThat(event.getOrgId()).isEqualTo("o1");
+    assertThat(event.getUsageEventId()).isEqualTo("usage-1");
     assertThat(event.getRunId()).isEqualTo("agent-session-1");
     assertThat(event.getAgentSessionId()).isEqualTo("agent-session-1");
     assertThat(event.getSourceType()).isEqualTo("BYOK");
@@ -103,6 +105,7 @@ class ManagedAiUsageMapperTest {
             "u1",
             "o1",
             period(),
+            "usage-2",
             "run-1",
             "task-1",
             "ReviewerAgent",

@@ -19,6 +19,14 @@ export const authLogin = (body: {email: string; password: string}) =>
 
 export const authLogout = () => req<void>('/auth/logout', {method: 'DELETE'});
 
+/**
+ * Exchanges the HttpOnly `refresh_token` cookie for a fresh access token + user.
+ *
+ * Used by the OAuth callback page: the backend no longer places any credential in the redirect URL
+ * (RR-130 / RR-1334), it sets the refresh cookie and lets the SPA rotate it here.
+ */
+export const authRefreshSession = () => req<LoginResponse>('/auth/refresh', {method: 'POST'});
+
 export const getMyPermissions = () =>
   req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
 
@@ -49,7 +57,7 @@ export const authChangePassword = (currentPassword: string | null, newPassword: 
     body: JSON.stringify({currentPassword, newPassword}),
   });
 
-/** Saves per-user AI provider API keys. Pass empty string to clear. */
+/** Patch-style save: blank fields leave existing provider keys unchanged. */
 export const updateAiKeySettings = (
   openAiApiKey: string,
   anthropicApiKey: string,
@@ -67,6 +75,11 @@ export const updateAiKeySettings = (
       fireworksApiKey,
     }),
   });
+
+/** Explicit destructive removal; raw key material is never returned. */
+export const revokeAiKey = (
+  provider: 'ANTHROPIC' | 'OPENAI' | 'GEMINI' | 'DEEPSEEK' | 'FIREWORKS',
+) => req<void>(`/auth/settings/ai-keys/${provider.toLowerCase()}`, {method: 'DELETE'});
 
 /** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
 export const validateAiKey = (
@@ -102,6 +115,9 @@ export const updateOrgAiKeySettings = (
       fireworksApiKey,
     }),
   });
+export const revokeOrgAiKey = (
+  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'deepseek' | 'fireworks',
+) => req<OrgDto>(`/org/me/settings/ai-keys/${provider}`, {method: 'DELETE'});
 export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
   req<OrgDto>(`/admin/orgs/${id}/api-keys`, {method: 'PUT', body: JSON.stringify({provided})});
 
@@ -113,5 +129,26 @@ export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
 export const createPat = (name: string) =>
   req<{token: string; meta: {id: string; name: string}}>('/auth/me/tokens', {
     method: 'POST',
-    body: JSON.stringify({name}),
+    body: JSON.stringify({
+      name,
+      scopes: ['api:read', 'runs:write', 'projects:write', 'agent:write', 'settings:write'],
+    }),
   });
+
+export type PersonalAccessTokenMeta = {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string;
+  createdAt: string;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  revoked: boolean;
+};
+
+/** Secret-free inventory of this user's CLI / VS Code / CI tokens. */
+export const listPats = () => req<PersonalAccessTokenMeta[]>('/auth/me/tokens');
+
+/** Idempotently revoke one token owned by the authenticated user. */
+export const revokePat = (tokenId: string) =>
+  req<void>(`/auth/me/tokens/${encodeURIComponent(tokenId)}`, {method: 'DELETE'});

@@ -13,6 +13,9 @@ import java.util.Optional;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -22,7 +25,11 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -38,6 +45,10 @@ class RunLedgerAgentTest {
     MemoryCompactionService compactionService = mock(MemoryCompactionService.class);
     AgentProperties agentProperties = new AgentProperties();
     PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    LlmExecutionPolicyFactory executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionReference executionReference =
+        new LlmExecutionReference("ctx-1", LlmExecutionScope.customer("org-1"));
+    when(executionPolicyFactory.forRun("run-1")).thenReturn(executionReference);
     when(promptAssembler.assemble(eq("run-ledger.txt"), any())).thenReturn("ledger prompt");
 
     PipelineRun run =
@@ -65,7 +76,8 @@ class RunLedgerAgentTest {
             anyList(),
             eq("run-1"),
             eq("run-ledger"),
-            eq("generate")))
+            eq("generate"),
+            eq(executionReference)))
         .thenReturn(ok("API work and test coverage."));
 
     RunLedgerAgent agent =
@@ -77,18 +89,30 @@ class RunLedgerAgentTest {
             taskRepo,
             compactionService,
             agentProperties,
-            promptAssembler);
+            promptAssembler,
+            executionPolicyFactory);
 
     agent.generateLedgerEntry("run-1");
 
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
     verify(llmRouter)
         .callText(
             eq("openai"),
             eq("gpt-5.4-mini"),
-            anyList(),
+            messages.capture(),
             eq("run-1"),
             eq("run-ledger"),
-            eq("generate"));
+            eq("generate"),
+            eq(executionReference));
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(0))
+        .isInstanceOf(SystemMessage.class);
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(1))
+        .isInstanceOf(UserMessage.class);
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(0).getText())
+        .doesNotContain("ledger prompt");
+    org.assertj.core.api.Assertions.assertThat(messages.getValue().get(1).getText())
+        .contains("<<<UNTRUSTED_RUN_LEDGER_EVIDENCE", "ledger prompt");
     verify(ledgerRepo).save(any(ProjectRunLedger.class));
   }
 

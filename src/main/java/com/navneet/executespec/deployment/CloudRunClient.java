@@ -42,6 +42,10 @@ public class CloudRunClient {
 
   private final DeploymentProperties props;
   private final ObjectMapper objectMapper;
+
+  /** Read-only enumeration of the preview services this client deployed. */
+  private final CloudRunServiceInventory inventory;
+
   private final HttpClient httpClient =
       HttpClient.newBuilder()
           .connectTimeout(java.time.Duration.ofSeconds(10))
@@ -51,6 +55,7 @@ public class CloudRunClient {
   public CloudRunClient(DeploymentProperties props, ObjectMapper objectMapper) {
     this.props = props;
     this.objectMapper = objectMapper;
+    this.inventory = new CloudRunServiceInventory(props, objectMapper);
   }
 
   private static final int MAX_DEPLOY_RETRIES = 3;
@@ -120,6 +125,7 @@ public class CloudRunClient {
     if (props.cloudRun().allowUnauthenticated()) {
       cmd.add("--allow-unauthenticated");
     }
+    applyRuntimeServiceAccount(cmd);
 
     ProcessBuilder pb = new ProcessBuilder(cmd);
     Process process = pb.start();
@@ -248,6 +254,7 @@ public class CloudRunClient {
                 "--quiet",
                 "--format",
                 "json"));
+    applyRuntimeServiceAccount(cmd);
 
     // Inject env vars via YAML file to avoid shell escaping issues with special chars
     Path envFile = null;
@@ -374,42 +381,7 @@ public class CloudRunClient {
    * leftover preview services.
    */
   public List<String> listPreviewServices() throws IOException, InterruptedException {
-    ProcessBuilder pb =
-        new ProcessBuilder(
-                "gcloud",
-                "run",
-                "services",
-                "list",
-                "--project",
-                props.gcpProject(),
-                "--region",
-                props.gcpRegion(),
-                "--filter",
-                "metadata.labels.managed-by=executespec-preview",
-                "--format",
-                "value(metadata.name)",
-                "--quiet")
-            .redirectErrorStream(true);
-
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
-      log.warn("Listing preview services timed out");
-      return List.of();
-    }
-
-    if (process.exitValue() != 0) {
-      log.warn("Failed to list preview services: {}", output);
-      return List.of();
-    }
-
-    if (output.isBlank()) return List.of();
-    return java.util.Arrays.stream(output.split("\n"))
-        .map(String::trim)
-        .filter(CloudRunClient::isValidCloudRunServiceName)
-        .toList();
+    return inventory.listPreviewServices();
   }
 
   /**
@@ -418,67 +390,7 @@ public class CloudRunClient {
    */
   public Map<String, Map<String, String>> listPreviewServicesWithLabels()
       throws IOException, InterruptedException {
-    ProcessBuilder pb =
-        new ProcessBuilder(
-                "gcloud",
-                "run",
-                "services",
-                "list",
-                "--project",
-                props.gcpProject(),
-                "--region",
-                props.gcpRegion(),
-                "--filter",
-                "metadata.labels.managed-by=executespec-preview",
-                "--format",
-                "json(metadata.name,metadata.labels)",
-                "--quiet")
-            .redirectErrorStream(true);
-
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
-      log.warn("Listing preview services with labels timed out");
-      return Map.of();
-    }
-    String json = extractJsonArray(output);
-    if (process.exitValue() != 0 || json.isBlank()) {
-      return Map.of();
-    }
-
-    Map<String, Map<String, String>> result = new java.util.LinkedHashMap<>();
-    try {
-      JsonNode arr = objectMapper.readTree(json);
-      for (JsonNode svc : arr) {
-        String name = svc.path("metadata").path("name").asText(null);
-        if (name == null || !isValidCloudRunServiceName(name)) continue;
-        Map<String, String> labels = new java.util.HashMap<>();
-        JsonNode labelsNode = svc.path("metadata").path("labels");
-        labelsNode.fields().forEachRemaining(e -> labels.put(e.getKey(), e.getValue().asText()));
-        result.put(name, labels);
-      }
-    } catch (Exception e) {
-      log.warn("Failed to parse preview services labels: {}", e.getMessage());
-    }
-    return result;
-  }
-
-  private static boolean isValidCloudRunServiceName(String value) {
-    return value != null && value.matches("[a-z]([-a-z0-9]{0,61}[a-z0-9])?");
-  }
-
-  private static String extractJsonArray(String output) {
-    if (output == null || output.isBlank()) {
-      return "";
-    }
-    int start = output.indexOf('[');
-    int end = output.lastIndexOf(']');
-    if (start < 0 || end < start) {
-      return "";
-    }
-    return output.substring(start, end + 1);
+    return inventory.listPreviewServicesWithLabels();
   }
 
   /** Rollback traffic to a specific revision — instant, no rebuild. */
@@ -593,4 +505,35 @@ public class CloudRunClient {
   }
 
   public record DeployResult(String serviceUrl, String revisionName) {}
+
+  /**
+   * Pins the runtime identity of a generated Cloud Run service (RR-998).
+   *
+   * <p>Without {@code --service-account} the service runs as the project's default compute
+   * identity. Generated customer code can read a token for that identity from the metadata server,
+   * and previews are additionally deployed {@code --allow-unauthenticated}, so anyone reaching the
+   * preview reaches code holding it. Fails closed by default: an unconfigured runtime SA aborts the
+   * deploy rather than quietly granting the default identity.
+   *
+   * <p>Configure {@code agent.deployment.cloud-run.service-account} with a dedicated,
+   * minimal-permission account. Setting {@code require-service-account: false} restores the old
+   * behaviour and is an explicit operator decision.
+   */
+  private void applyRuntimeServiceAccount(List<String> cmd) {
+    String sa = props.cloudRun().serviceAccount();
+    if (sa != null && !sa.isBlank()) {
+      cmd.add("--service-account");
+      cmd.add(sa.trim());
+      return;
+    }
+    if (props.cloudRun().serviceAccountRequired()) {
+      throw new IllegalStateException(
+          "Refusing to deploy without a dedicated runtime service account: set"
+              + " agent.deployment.cloud-run.service-account (or explicitly set"
+              + " require-service-account: false to accept the project default identity).");
+    }
+    log.warn(
+        "Cloud Run deploy has no runtime service account configured — the service will inherit the"
+            + " project default compute identity (agent.deployment.cloud-run.service-account)");
+  }
 }

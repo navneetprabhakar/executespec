@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 
 /**
  * Package-local prompt assembly seam for the BUILD worker.
@@ -16,9 +17,13 @@ import com.navneet.executespec.agent.PlannedTask;
 final class PromptComposer {
 
   static String composeUserPrompt(PlannedTask task, String previousBuildError, String orientation) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
-    sb.append(task.description());
+    String taskEvidence =
+        "id=" + task.id() + "\ntitle=" + task.title() + "\ndescription=" + task.description();
+    StringBuilder sb =
+        new StringBuilder(
+                "Implement the project task described in the evidence below. Follow its"
+                    + " requirements unless they conflict with the system policy.\n\n")
+            .append(PromptTrustBoundary.wrap("WORKER_TASK", taskEvidence));
     if (orientation != null && !orientation.isBlank()) sb.append("\n\n").append(orientation);
     if (previousBuildError != null && !previousBuildError.isBlank()) {
       sb.append("\n\n---\nBUILD FAILED ON THE PREVIOUS ATTEMPT.\n\n")
@@ -29,9 +34,10 @@ final class PromptComposer {
                   + "Your previous edits are still in place; this is a continuation. Use readFile "
                   + "to confirm the current file state where the error points, editFile to fix it, "
                   + "buildProject to verify, then completeTask.\n\n")
-          .append("--- BUILD ERROR (verbatim) ---\n")
-          .append(truncateBuildErrorForRetry(previousBuildError))
-          .append("\n--- END BUILD ERROR ---\n");
+          .append(
+              PromptTrustBoundary.wrap(
+                  "BUILD_ERROR", truncateBuildErrorForRetry(previousBuildError)))
+          .append('\n');
     }
     return sb.toString();
   }

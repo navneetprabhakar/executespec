@@ -1,10 +1,6 @@
 package com.navneet.executespec.auth.controller;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -24,15 +20,16 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.auth.service.ExternalConnectionValidator;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.FireworksModelMapper;
-import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.OpenRouterModelMapper;
 import com.navneet.executespec.router.OrgModelOverrideService;
+import com.navneet.executespec.router.ProviderReadinessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -54,6 +51,8 @@ public class OrgController {
   private final OrgMemberRepository orgMemberRepo;
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
+  private final ProviderReadinessService providerReadinessService;
+  private final ExternalConnectionValidator externalConnectionValidator;
 
   @PostMapping
   public ResponseEntity<OrgDto> createOrg(
@@ -284,6 +283,17 @@ public class OrgController {
             userDetails.getUser().getId()));
   }
 
+  /** Destructive key removal is intentionally separate from patch-style key replacement. */
+  @DeleteMapping("/me/settings/ai-keys/{provider}")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<OrgDto> revokeOrgAiKey(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String provider) {
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    return ResponseEntity.ok(
+        orgService.revokeAiKey(orgId, provider, userDetails.getUser().getId()));
+  }
+
   // Org-level model-matrix overrides (F3, BYOK/TEAM/ENTERPRISE)
 
   record ModelOverridesRequest(Map<String, String> overrides) {}
@@ -310,7 +320,7 @@ public class OrgController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     String orgId = userDetails.getUser().getOrgId();
     if (orgId == null) return ResponseEntity.badRequest().build();
-    return ResponseEntity.ok(buildMatrixView(orgId));
+    return ResponseEntity.ok(buildMatrixView(orgId, userDetails.getUser().getId()));
   }
 
   @PutMapping("/me/model-matrix")
@@ -320,17 +330,25 @@ public class OrgController {
     String orgId = userDetails.getUser().getOrgId();
     if (orgId == null) return ResponseEntity.badRequest().build();
     orgModelOverrideService.updateOverrides(orgId, req.overrides(), userDetails.getUser().getId());
-    return ResponseEntity.ok(buildMatrixView(orgId));
+    return ResponseEntity.ok(buildMatrixView(orgId, userDetails.getUser().getId()));
   }
 
-  private ModelMatrixView buildMatrixView(String orgId) {
+  private ModelMatrixView buildMatrixView(String orgId, String userId) {
     Org org = orgRepo.findById(orgId).orElse(null);
     String tier = org != null ? org.getTier() : null;
     boolean editable = orgModelOverrideService.canEditMatrix(tier);
 
     List<String> providers = new ArrayList<>();
-    for (LlmProvider p : LlmProvider.values()) {
-      if (!ModelAccessService.isDisabledProvider(p.name())) providers.add(p.name().toLowerCase());
+    for (ProviderReadinessService.ProviderReadiness readiness :
+        providerReadinessService.resolve(userId)) {
+      // The org matrix is an effective-policy surface. Unkeyed and policy-blocked providers must
+      // not retain active cells merely because they exist in global YAML. CIRCUIT_OPEN remains
+      // visible because the route is credentialed and policy-allowed; the outage is transient.
+      if ((readiness.dispatchable()
+              || readiness.state() == ProviderReadinessService.State.CIRCUIT_OPEN)
+          && !ModelAccessService.isDisabledProvider(readiness.provider())) {
+        providers.add(readiness.provider().toLowerCase(java.util.Locale.ROOT));
+      }
     }
     List<String> tiers = new ArrayList<>();
     for (AgentTier t : AgentTier.values()) tiers.add(t.name().toLowerCase());
@@ -352,15 +370,19 @@ public class OrgController {
       }
     }
 
+    Map<String, String> activeOverrides = new LinkedHashMap<>();
+    orgModelOverrideService
+        .currentOverrides(orgId)
+        .forEach(
+            (key, model) -> {
+              int separator = key.indexOf(':');
+              if (separator > 0 && providers.contains(key.substring(0, separator).toLowerCase())) {
+                activeOverrides.put(key, model);
+              }
+            });
+
     return new ModelMatrixView(
-        tier,
-        editable,
-        providers,
-        tiers,
-        defaults,
-        orgModelOverrideService.currentOverrides(orgId),
-        modelsByProvider,
-        modelLabels);
+        tier, editable, providers, tiers, defaults, activeOverrides, modelsByProvider, modelLabels);
   }
 
   private static void putIfPresent(Map<String, String> m, String k, String v) {
@@ -418,30 +440,9 @@ public class OrgController {
       return ResponseEntity.ok(
           new ValidationResult(false, "Base URL, email, and API token are all required"));
     }
-    try {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-      String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(
-              HttpRequest.newBuilder()
-                  .uri(URI.create(url))
-                  .header("Authorization", "Basic " + auth)
-                  .header("Accept", "application/json")
-                  .timeout(Duration.ofSeconds(10))
-                  .GET()
-                  .build(),
-              HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, "JIRA credentials are valid"));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(
-              false, "JIRA returned " + resp.statusCode() + " — check your credentials"));
-    } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-    }
+    String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
+    return validateAtlassian(
+        url, req.email(), req.apiToken(), "JIRA credentials are valid", "JIRA");
   }
 
   // Org-level Confluence settings (ORG_ADMIN only)
@@ -468,34 +469,42 @@ public class OrgController {
       return ResponseEntity.ok(
           new ValidationResult(false, "Base URL, email, and API token are all required"));
     }
-    try {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-      String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(
-              HttpRequest.newBuilder()
-                  .uri(URI.create(url))
-                  .header("Authorization", "Basic " + auth)
-                  .header("Accept", "application/json")
-                  .timeout(Duration.ofSeconds(10))
-                  .GET()
-                  .build(),
-              HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, "Confluence credentials are valid"));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(
-              false, "Confluence returned " + resp.statusCode() + " — check your credentials"));
-    } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-    }
+    String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
+    return validateAtlassian(
+        url, req.email(), req.apiToken(), "Confluence credentials are valid", "Confluence");
   }
 
-  private static final HttpClient HTTP_CLIENT =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+  /**
+   * RR-001 / RR-002 / RR-003 — org credential validation now runs through the same SSRF-guarded,
+   * bounded-response seam as the personal validators in {@code AuthController}. It previously
+   * fetched an arbitrary caller-supplied base URL with no target policy, buffered the whole
+   * response body, and echoed the raw exception message back to the caller.
+   */
+  private ResponseEntity<ValidationResult> validateAtlassian(
+      String url, String email, String apiToken, String successMessage, String productLabel) {
+    String auth =
+        Base64.getEncoder()
+            .encodeToString(
+                (email.strip() + ":" + apiToken.strip()).getBytes(StandardCharsets.UTF_8));
+    ExternalConnectionValidator.ProbeResult probe =
+        externalConnectionValidator.probe(
+            url, Map.of("Authorization", "Basic " + auth, "Accept", "application/json"));
+    return switch (probe.status()) {
+      case OK -> ResponseEntity.ok(new ValidationResult(true, successMessage));
+      case TARGET_NOT_ALLOWED ->
+          ResponseEntity.ok(
+              new ValidationResult(false, "Connection target is not an allowed external address"));
+      case HTTP_ERROR ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false,
+                  productLabel + " returned " + probe.statusCode() + " — check your credentials"));
+      case UNREACHABLE ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, "Connection failed; verify the base URL and credentials"));
+    };
+  }
 
   // Seat management (v2.6.0 TEAM tier)
 

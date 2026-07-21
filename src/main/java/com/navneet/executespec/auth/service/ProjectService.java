@@ -9,18 +9,22 @@ import com.navneet.executespec.analytics.EventName;
 import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
+import com.navneet.executespec.auth.dto.ProjectMemberCapabilitiesDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
 import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.router.ProviderReadinessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -42,24 +46,16 @@ public class ProjectService {
   private final ActivityAuditService auditService;
   private final EventTrackingService eventTracking;
   private final TierEnforcementService tierEnforcement;
+  private final ProviderReadinessService providerReadinessService;
+  private final OrgRepository orgRepo;
 
   @Transactional
   public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
     // V140 — block before save when the org is at its tier project cap.
     tierEnforcement.assertCanCreateProject(createdBy, orgId);
 
-    LlmProvider provider = LlmProvider.ANTHROPIC;
-    if (req.aiProvider() != null) {
-      try {
-        String raw = req.aiProvider().trim().toUpperCase();
-        if ("GOOGLE".equals(raw)) raw = "GEMINI";
-        provider = LlmProvider.valueOf(raw);
-        ModelAccessService.assertProviderEnabled(provider.name());
-        rememberPreferredProvider(createdBy, provider);
-      } catch (IllegalArgumentException ignored) {
-        /* default ANTHROPIC */
-      }
-    }
+    LlmProvider provider = resolveDispatchableProjectProvider(createdBy, req.aiProvider());
+    rememberPreferredProvider(createdBy, provider);
 
     Project project =
         Project.builder()
@@ -345,27 +341,112 @@ public class ProjectService {
   @Transactional
   public void addMember(String projectId, String userId, String role, String actorId) {
     requireProjectAdmin(projectId, actorId);
-    if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
-      String effectiveRole = role != null ? role : "PROJECT_DEVELOPER";
-      projectMemberRepo.save(
-          ProjectMember.builder()
-              .id(UUID.randomUUID().toString())
-              .projectId(projectId)
-              .userId(userId)
-              .projectRole(effectiveRole)
-              .build());
-
-      Project project = projectRepo.findById(projectId).orElse(null);
-      auditService.record(
-          ActivityAudit.builder()
-              .eventType("PROJECT_MEMBER_ADDED")
-              .entityType("PROJECT")
-              .entityId(projectId)
-              .orgId(project != null ? project.getOrgId() : null)
-              .actorId(actorId)
-              .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + effectiveRole + "\"}")
-              .build());
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    if (userId == null || userId.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId is required");
     }
+    AppUser target =
+        userRepo
+            .findById(userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    // Direct member administration is intentionally host-org only. Cross-org collaborators must
+    // use the expiring, email-bound invite/accept flow so external-sharing policy, consent and the
+    // is_external audit marker cannot be bypassed by posting a guessed user id here.
+    if (target.getOrgId() == null || !target.getOrgId().equals(project.getOrgId())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Cross-organization members must be added through a project invitation");
+    }
+    String effectiveRole = role == null || role.isBlank() ? "PROJECT_DEVELOPER" : role.trim();
+    if (!java.util.Set.of("PROJECT_ADMIN", "PROJECT_DEVELOPER", "PROJECT_VIEWER")
+        .contains(effectiveRole)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project role");
+    }
+    // RR-1513 — this used to silently no-op on an existing membership while still returning 201,
+    // so any caller reusing addMember for a role change reported success and changed nothing.
+    // Changing an existing member's role goes through updateMemberRole.
+    if (projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "User is already a member of this project — change their role instead of re-adding"
+              + " them.");
+    }
+    projectMemberRepo.save(
+        ProjectMember.builder()
+            .id(UUID.randomUUID().toString())
+            .projectId(projectId)
+            .userId(userId)
+            .projectRole(effectiveRole)
+            .build());
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_MEMBER_ADDED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project != null ? project.getOrgId() : null)
+            .actorId(actorId)
+            .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + effectiveRole + "\"}")
+            .build());
+  }
+
+  /**
+   * RR-1513 — change an existing member's project role. Before this, promoting a PROJECT_VIEWER or
+   * demoting a PROJECT_ADMIN was impossible in the product: there was no route, and the
+   * remove-then-re-add workaround is blocked for external collaborators because cross-org direct
+   * adds are rejected. Guarded exactly like add/remove, with the same last-admin guard applied on
+   * demotion that {@link #removeMember} applies on removal.
+   */
+  @Transactional
+  public void updateMemberRole(String projectId, String userId, String role, String actorId) {
+    requireProjectAdmin(projectId, actorId);
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    String newRole = role == null ? "" : role.trim();
+    if (!java.util.Set.of("PROJECT_ADMIN", "PROJECT_DEVELOPER", "PROJECT_VIEWER")
+        .contains(newRole)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project role");
+    }
+    ProjectMember member =
+        projectMemberRepo
+            .findByProjectIdAndUserId(projectId, userId)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Member not found in project"));
+    String previousRole = member.getProjectRole();
+    if (newRole.equals(previousRole)) {
+      return;
+    }
+    // Last-admin guard on demotion — mirrors removeMember so the project cannot be locked out.
+    if ("PROJECT_ADMIN".equals(previousRole)) {
+      int adminCount = projectMemberRepo.countByProjectIdAndProjectRole(projectId, "PROJECT_ADMIN");
+      if (adminCount <= 1) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "Cannot demote the only project admin — promote another admin first.");
+      }
+    }
+    member.setProjectRole(newRole);
+    projectMemberRepo.save(member);
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_MEMBER_ROLE_CHANGED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project.getOrgId())
+            .actorId(actorId)
+            .oldValue("{\"userId\":\"" + userId + "\",\"role\":\"" + previousRole + "\"}")
+            .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + newRole + "\"}")
+            .build());
   }
 
   @Transactional
@@ -451,6 +532,7 @@ public class ProjectService {
       try {
         LlmProvider provider = LlmProvider.valueOf(raw);
         ModelAccessService.assertProviderEnabled(provider.name());
+        assertProviderDispatchable(actorId, provider);
         project.setAiProvider(provider);
         rememberPreferredProvider(actorId, provider);
       } catch (IllegalArgumentException e) {
@@ -528,15 +610,171 @@ public class ProjectService {
             });
   }
 
+  /**
+   * Resolve a new project's route from the effective, secret-free readiness contract. An explicit
+   * selection must be policy-allowed and credentialed. With no explicit selection, the account
+   * preference is used only when it is eligible; otherwise a single eligible provider is selected
+   * without ambiguity. Multiple eligible routes require the caller to choose, and zero eligible
+   * routes fail before a project row is written.
+   *
+   * <p>This deliberately has no Anthropic fallback. Under {@code OWN_KEYS}, platform credentials
+   * are absent from readiness, so a DeepSeek-only Enterprise org cannot accidentally create an
+   * Anthropic-routed project that later fails or spends outside policy.
+   */
+  private LlmProvider resolveDispatchableProjectProvider(String userId, String requestedProvider) {
+    if (requestedProvider != null && !requestedProvider.isBlank()) {
+      LlmProvider explicit = parseProvider(requestedProvider);
+      assertProviderDispatchable(userId, explicit);
+      return explicit;
+    }
+
+    List<LlmProvider> eligible =
+        providerReadinessService.resolve(userId).stream()
+            .filter(ProjectService::isProjectSelectable)
+            .map(readiness -> LlmProvider.valueOf(readiness.provider()))
+            .toList();
+
+    String preference = userRepo.findById(userId).map(AppUser::getPreferredAiProvider).orElse(null);
+    if (preference != null && !preference.isBlank()) {
+      LlmProvider preferred = parseProvider(preference);
+      if (eligible.contains(preferred)) return preferred;
+    }
+    if (eligible.size() == 1) return eligible.get(0);
+    if (eligible.isEmpty()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "No AI provider is permitted and credentialed for this account. Configure an org or"
+              + " user key before creating the project.");
+    }
+    throw new ResponseStatusException(
+        HttpStatus.BAD_REQUEST,
+        "aiProvider is required because more than one provider is available for this account.");
+  }
+
+  private void assertProviderDispatchable(String userId, LlmProvider provider) {
+    boolean eligible =
+        providerReadinessService.resolve(userId).stream()
+            .anyMatch(
+                readiness ->
+                    isProjectSelectable(readiness)
+                        && readiness.provider().equalsIgnoreCase(provider.name()));
+    if (!eligible) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "AI provider "
+              + provider.name()
+              + " is not permitted and credentialed for this account.");
+    }
+  }
+
+  private static boolean isProjectSelectable(ProviderReadinessService.ProviderReadiness readiness) {
+    // A circuit-open provider is still policy-allowed and credentialed; a transient outage must
+    // not rewrite durable project policy. Dispatch itself remains blocked by the health tracker.
+    return readiness.dispatchable()
+        || readiness.state() == ProviderReadinessService.State.CIRCUIT_OPEN;
+  }
+
+  private static LlmProvider parseProvider(String rawProvider) {
+    String raw = rawProvider == null ? "" : rawProvider.trim().toUpperCase();
+    if ("GOOGLE".equals(raw)) raw = "GEMINI";
+    try {
+      LlmProvider provider = LlmProvider.valueOf(raw);
+      ModelAccessService.assertProviderEnabled(provider.name());
+      return provider;
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Invalid AI provider: "
+              + rawProvider
+              + ". Valid: ANTHROPIC, GEMINI, OPENAI, DEEPSEEK, OPENROUTER, FIREWORKS");
+    }
+  }
+
+  /**
+   * RR-1510 — the projection now carries the persisted {@code external} marker and the
+   * collaborator's home-org name, so a cross-org collaborator is distinguishable from an employee.
+   */
   public List<ProjectMemberDto> listMembers(String projectId) {
+    java.util.Map<String, String> orgNames = new java.util.HashMap<>();
     return projectMemberRepo.findByProjectId(projectId).stream()
         .map(
             m -> {
               AppUser user = userRepo.findById(m.getUserId()).orElse(null);
               if (user == null) return null;
-              return ProjectMemberDto.from(user, m);
+              String homeOrgName =
+                  user.getOrgId() == null
+                      ? null
+                      : orgNames.computeIfAbsent(
+                          user.getOrgId(),
+                          orgId -> orgRepo.findById(orgId).map(Org::getName).orElse(null));
+              return ProjectMemberDto.from(user, m, homeOrgName);
             })
         .filter(m -> m != null)
         .collect(Collectors.toList());
+  }
+
+  /**
+   * RR-1507 / RR-1509 — the effective per-action authority for this caller on this project, so
+   * clients stop re-deriving membership authority from a single role guess. Membership
+   * administration and share-link administration are genuinely different server guards, and the
+   * invite gate has three independent causes; each is reported separately with its own cause code.
+   */
+  public ProjectMemberCapabilitiesDto memberCapabilities(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    AppUser actor = userRepo.findById(actorId).orElse(null);
+    boolean isSuperAdmin = actor != null && "SUPER_ADMIN".equals(actor.getGlobalRole());
+    boolean isHostOrgAdmin =
+        actor != null
+            && actor.getOrgId() != null
+            && actor.getOrgId().equals(project.getOrgId())
+            && orgMemberRepo
+                .findByOrgIdAndUserId(project.getOrgId(), actorId)
+                .map(m -> "ORG_ADMIN".equals(m.getOrgRole()))
+                .orElse(false);
+    ProjectMember membership =
+        projectMemberRepo.findByProjectIdAndUserId(projectId, actorId).orElse(null);
+    String projectRole = membership == null ? null : membership.getProjectRole();
+
+    boolean canManageMembership =
+        isSuperAdmin || isHostOrgAdmin || "PROJECT_ADMIN".equals(projectRole);
+    boolean canManageShareLinks = canManageMembership || "PROJECT_DEVELOPER".equals(projectRole);
+
+    // Invite authority mirrors ProjectInviteService.assertCanInvite, cause by cause.
+    String inviteBlockedReason = null;
+    if (!isSuperAdmin) {
+      String tier = tierEnforcement.resolveUserTier(actorId);
+      boolean orgAdminOfOwnOrg =
+          actor != null
+              && actor.getOrgId() != null
+              && orgMemberRepo
+                  .findByOrgIdAndUserId(actor.getOrgId(), actorId)
+                  .map(m -> "ORG_ADMIN".equals(m.getOrgRole()))
+                  .orElse(false);
+      boolean orgFlagEnabled =
+          actor != null
+              && actor.getOrgId() != null
+              && orgRepo
+                  .findById(actor.getOrgId())
+                  .map(Org::isExternalSharingEnabled)
+                  .orElse(false);
+      if (!TierEnforcementService.isPaidTier(tier)) {
+        inviteBlockedReason = "TIER";
+      } else if (!orgAdminOfOwnOrg) {
+        inviteBlockedReason = "ROLE";
+      } else if (!orgFlagEnabled) {
+        inviteBlockedReason = "ORG_EXTERNAL_SHARING_DISABLED";
+      }
+    }
+
+    return new ProjectMemberCapabilitiesDto(
+        projectRole,
+        canManageMembership,
+        canManageShareLinks,
+        inviteBlockedReason == null,
+        inviteBlockedReason);
   }
 }

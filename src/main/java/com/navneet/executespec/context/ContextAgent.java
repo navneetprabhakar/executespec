@@ -16,10 +16,12 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.GitTool;
@@ -121,7 +123,11 @@ public class ContextAgent {
     ResolvedModel resolved = modelResolver.resolve("ContextAgent", run.getAiProviderEnum());
 
     Prompt prompt =
-        new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userMessage)));
+        new Prompt(
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage(
+                    PromptTrustBoundary.wrap("CONTEXT_DOCUMENT_EVIDENCE", userMessage))));
 
     var response =
         llmRouter.callText(
@@ -183,8 +189,12 @@ public class ContextAgent {
    */
   void writeContextDoc(Path projectPath, String currentDoc, String llmResponse, String runId)
       throws IOException {
-    Path p = projectPath.resolve(".agent-context/CODEBASE_CONTEXT.md");
+    // Sibling of RR-465/RR-1253 (not in the ledger): this WRITES into a customer-controlled
+    // checkout, so `.agent-context` or the file itself may be a repository symlink pointing at a
+    // host path. Prove containment before createDirectories and before every write below.
+    Path p = SafeWorkspacePath.resolveWithin(projectPath, ".agent-context/CODEBASE_CONTEXT.md");
     Files.createDirectories(p.getParent());
+    SafeWorkspacePath.requireWithin(projectPath, p.getParent());
 
     // Strip markdown code fences if the model wrapped the JSON in ```json ... ```
     String stripped = llmResponse.strip();
@@ -222,7 +232,9 @@ public class ContextAgent {
       Files.writeString(p, currentDoc, StandardOpenOption.CREATE_NEW);
     }
     Path rejected =
-        projectPath.resolve(".agent-context/CODEBASE_CONTEXT.rejected." + runId + ".txt");
+        SafeWorkspacePath.resolveWithin(
+            projectPath,
+            ".agent-context/CODEBASE_CONTEXT.rejected." + safeRunIdSegment(runId) + ".txt");
     Files.writeString(
         rejected, llmResponse, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
   }
@@ -380,8 +392,9 @@ public class ContextAgent {
 
   private void appendDecisionsEntry(Path projectPath, ContextAgentInput input, PipelineRun run)
       throws IOException {
-    Path p = projectPath.resolve(".agent-context/decisions.md");
+    Path p = SafeWorkspacePath.resolveWithin(projectPath, ".agent-context/decisions.md");
     Files.createDirectories(p.getParent());
+    SafeWorkspacePath.requireWithin(projectPath, p.getParent());
 
     String ts =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
@@ -420,5 +433,13 @@ public class ContextAgent {
         || !input.newFilesDetected().isEmpty()
         || !"Git diff unavailable".equals(input.gitDiffSummary())
         || !input.workerReportSummaries().isEmpty();
+  }
+
+  /** Bound a run id to one safe filename segment before it is interpolated into a sidecar name. */
+  static String safeRunIdSegment(String runId) {
+    if (runId == null || runId.isBlank()) return "unknown";
+    String slug = runId.replaceAll("[^A-Za-z0-9._-]", "-").replaceAll("^[.-]+", "");
+    if (slug.length() > 80) slug = slug.substring(0, 80);
+    return slug.isBlank() ? "unknown" : slug;
   }
 }

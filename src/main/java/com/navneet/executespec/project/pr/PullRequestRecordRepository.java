@@ -1,10 +1,14 @@
 package com.navneet.executespec.project.pr;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface PullRequestRecordRepository extends JpaRepository<PullRequestRecord, UUID> {
 
@@ -43,4 +47,18 @@ public interface PullRequestRecordRepository extends JpaRepository<PullRequestRe
   /** Open system PRs for a project (BOOTSTRAP / ARCHITECTURE / CONTRACT / CHAT_TOOL kinds). */
   List<PullRequestRecord> findByProjectIdAndKindNotAndStatusOrderByCreatedAtDesc(
       String projectId, PullRequestRecord.Kind excludeKind, PullRequestRecord.Status status);
+
+  /** Bounded candidate page for stale-open-PR cleanup; filtering happens in PostgreSQL. */
+  List<PullRequestRecord> findByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+      PullRequestRecord.Status status, Instant cutoff, Pageable pageable);
+
+  /** Bounded terminal ExecuteSpec branch candidates for SCM cleanup. */
+  @Query(
+      "SELECT p FROM PullRequestRecord p WHERE p.status <> :openStatus "
+          + "AND p.headBranch LIKE 'executespec/%' AND p.createdAt < :cutoff "
+          + "ORDER BY p.createdAt ASC, p.id ASC")
+  List<PullRequestRecord> findStaleTerminalExecutespecBranches(
+      @Param("openStatus") PullRequestRecord.Status openStatus,
+      @Param("cutoff") Instant cutoff,
+      Pageable pageable);
 }

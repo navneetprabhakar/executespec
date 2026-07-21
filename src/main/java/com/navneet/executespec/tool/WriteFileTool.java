@@ -6,6 +6,7 @@ import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.security.CodeAbuseScanner;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -30,6 +31,7 @@ public class WriteFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
   private final CodeAbuseScanner codeAbuseScanner;
+  private final GeneratedSecretScanner generatedSecretScanner;
 
   /**
    * PR-C (2026-05-13) — used to push {@code FILE_WRITTEN} SSE events to subscribed RunDetail
@@ -100,8 +102,21 @@ public class WriteFileTool implements Tool {
     if (content == null) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "content is required");
     }
+    // RR-1018 — unconditional reserved-namespace deny, at every guardrail level including the
+    // production LOW default. See ReservedWorkspacePaths for what this does and does not cover.
+    String reservedError = ReservedWorkspacePaths.rejectionFor(path);
+    if (reservedError != null) {
+      log.warn("writeFile blocked reserved control-plane path={}", path);
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reservedError);
+    }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+      boolean overwrite = args.path("overwrite").asBoolean(false);
+      String reviewerPolicyError =
+          ReviewerMutationScope.validateWriteFile(path, Files.exists(resolved), overwrite);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       // Guardrail-level file-sandbox gate — no-op at LOW; at MEDIUM/HIGH
       // rejects writes outside the allowed dir+dotfile set.
       FileSandboxPolicy.Decision sandbox =
@@ -111,7 +126,6 @@ public class WriteFileTool implements Tool {
             "writeFile blocked by FileSandboxPolicy path={} reason={}", path, sandbox.reason());
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, sandbox.reason());
       }
-      boolean overwrite = args.path("overwrite").asBoolean(false);
       if (Files.exists(resolved)) {
         if (!overwrite) {
           return ToolResult.err(
@@ -142,6 +156,17 @@ public class WriteFileTool implements Tool {
                   + " changed on disk since you last read it — readFile it again, then re-issue"
                   + " the overwrite.");
         }
+      }
+      var secretFinding = generatedSecretScanner.scan(content);
+      if (secretFinding.isPresent()) {
+        log.warn(
+            "writeFile blocked generated credential path={} category={}",
+            path,
+            secretFinding.get().category());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "generated content contains a high-confidence credential pattern and cannot be"
+                + " written");
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, content);
       if (scanResult.flagged()) {

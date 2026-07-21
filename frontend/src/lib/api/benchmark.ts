@@ -25,7 +25,30 @@ export interface BenchmarkRun {
   createdAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
+  activeAttemptCount?: number;
+  completedAttempts?: number;
+  lastProgressAt?: string | null;
+  elapsedSeconds?: number;
+  etaSeconds?: number | null;
+  submissionRequired?: boolean;
+  submissionReadiness?: string;
+  submissionReadinessReason?: string | null;
   error?: string | null;
+}
+
+/** One concurrently active benchmark attempt, durably reloadable after backend restart. */
+export interface BenchmarkActiveAttempt {
+  id: string;
+  benchmarkRunId: string;
+  taskName: string;
+  attempt: number;
+  startedAt: string;
+  lastProgressAt: string;
+  staleAfter: string;
+  stale?: boolean;
+  etaSeconds?: number | null;
+  trajectoryLocation?: string | null;
+  trajectorySha256?: string | null;
 }
 
 /** One scored attempt of one task (mirrors `benchmark/BenchmarkTaskResult`). */
@@ -37,6 +60,9 @@ export interface BenchmarkTaskResult {
   reward: number; // 1 = passed the verifier, 0 = failed
   outcome?: string | null; // PASSED | FAILED | TIMEOUT | INFRA_FAILED | …
   reason?: string | null;
+  failureClassification?: string | null;
+  trajectoryLocation?: string | null;
+  trajectorySha256?: string | null;
   esRunId?: string | null;
   costUsd: number | string;
   inputTokens?: number;
@@ -58,6 +84,7 @@ export interface BenchmarkEvent {
 /** `GET /{id}` detail — run + per-task scores + full event stream. */
 export interface BenchmarkDetail {
   run: BenchmarkRun;
+  activeAttempts: BenchmarkActiveAttempt[];
   tasks: BenchmarkTaskResult[];
   events: BenchmarkEvent[];
 }

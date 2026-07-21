@@ -95,12 +95,27 @@ export interface AgentCapabilityTool {
   surfaces: string[];
 }
 
+/**
+ * Typed blocking contract for an agent action proposal (backend
+ * `agentsession/dto/AgentActionContext`). Optional because turns persisted
+ * before the contract existed replay without it — treat `undefined`/`null` as
+ * "unknown", never as "confirmable".
+ */
+export interface AgentActionContext {
+  requiredContext: string[];
+  blockingReasons: string[];
+  confirmable: boolean;
+  recommendedAction: string | null;
+  projectSelectionRequired: boolean;
+}
+
 export interface AgentTypedAction {
   type: string;
   arguments: Record<string, unknown>;
   requiresConfirmation: boolean;
   billingImpact: string;
   confirmationPrompt: string | null;
+  actionContext?: AgentActionContext | null;
 }
 
 export interface AgentIntentDecision {

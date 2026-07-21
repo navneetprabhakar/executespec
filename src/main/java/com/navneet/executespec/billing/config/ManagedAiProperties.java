@@ -59,6 +59,16 @@ public class ManagedAiProperties {
     private boolean rateLimitsEnabled = false;
     private List<Integer> notificationThresholdsPct = List.of(50, 75, 90, 100);
 
+    /**
+     * Optional tier model lock. When {@code lockedModel} is set, every managed platform-key call
+     * for this tier is forced to this provider/model regardless of the requested route (still
+     * subject to the managed hard-stop). FREE uses this to guarantee native-DeepSeek-Flash only — a
+     * managed tier cannot spend platform credits on a premium provider.
+     */
+    private String lockedProvider;
+
+    private String lockedModel;
+
     public double effectiveHardStopUsd() {
       if (hardStopAfterRawUsd > 0) return hardStopAfterRawUsd;
       return rawCogsCapUsd;

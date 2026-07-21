@@ -1,5 +1,6 @@
 package com.navneet.executespec.billing.service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -9,7 +10,7 @@ import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,14 +23,28 @@ public class PlanSeederService {
   private final RazorpayRestClient razorpayClient;
   private final RazorpayConfig razorpayConfig;
   private final BillingPlanRepository planRepo;
+  private final TransactionTemplate transactionTemplate;
 
   /**
    * Seeds Razorpay plan IDs for INR billing plans that don't have one yet. USD plans are skipped
    * (they need Stripe price IDs set separately). Idempotent: only creates Razorpay plans for rows
    * with null razorpay_plan_id.
+   *
+   * <p><b>RR-400 (billing idempotency).</b> This method used to be a single {@code @Transactional}
+   * unit that looped through external Razorpay {@code createPlan} calls before saving any local id.
+   * A failure on plan N rolled back the ids saved for plans 1..N-1 while the corresponding Razorpay
+   * plans — which cannot roll back — stayed created. The next retry saw null ids and created them
+   * all over again, so one partial failure orphaned and then repeatedly duplicated chargeable
+   * gateway plans, leaving the local-to-gateway pricing mapping ambiguous. The admin endpoint
+   * exposes this operation directly, so it is retried by hand.
+   *
+   * <p>The outer method is now non-transactional and each plan is committed on its own in {@link
+   * #persistSeededPlanId} with {@code REQUIRES_NEW} <i>immediately</i> after its gateway call
+   * returns. A failure therefore loses at most the one plan it was working on, and a retry only
+   * creates the plans that genuinely have no id. Per-plan failures no longer abort the rest of the
+   * sweep; the outcome is returned so the caller can surface partial state.
    */
-  @Transactional
-  public void seedAllPlans() {
+  public SeedResult seedAllPlans() {
     // Log key mode (test vs live) for visibility
     String keyId = razorpayConfig.getKeyId();
     boolean isLive = keyId != null && keyId.startsWith("rzp_live_");
@@ -49,25 +64,43 @@ public class PlanSeederService {
 
     if (inrPlans.isEmpty()) {
       log.info("All INR plans already have Razorpay plan IDs, skipping seed");
-      return;
+      return new SeedResult(0, 0, List.of());
     }
 
+    int seeded = 0;
+    int failed = 0;
+    List<String> errors = new ArrayList<>();
+
     for (BillingPlan plan : inrPlans) {
-      String rzpPeriod = "ANNUAL".equals(plan.getPeriod()) ? "yearly" : "monthly";
+      String rzpPeriod = annualPeriod(plan.getPeriod()) ? "yearly" : "monthly";
       int rzpInterval = 1;
-
       int amountPaise = (int) inrAmountPaise(plan);
-      JsonNode rzpPlan =
-          razorpayClient.createPlan(plan.getName(), amountPaise, rzpPeriod, rzpInterval);
-      String rzpPlanId = rzpPlan.get("id").asText();
-      plan.setRazorpayPlanId(rzpPlanId);
-      planRepo.save(plan);
+      try {
+        JsonNode rzpPlan =
+            razorpayClient.createPlan(plan.getName(), amountPaise, rzpPeriod, rzpInterval);
+        String rzpPlanId = rzpPlan.get("id").asText();
 
-      log.info(
-          "Seeded Razorpay plan: {} ({} paise/unit) → razorpay_plan_id={}",
-          plan.getName(),
-          amountPaise,
-          rzpPlanId);
+        // Commit this id on its own, immediately. An error on a LATER plan must never roll
+        // back a Razorpay plan that already exists upstream.
+        persistSeededPlanId(plan.getId(), rzpPlanId);
+        seeded++;
+
+        log.info(
+            "Seeded Razorpay plan: {} ({} paise/unit) → razorpay_plan_id={}",
+            plan.getName(),
+            amountPaise,
+            rzpPlanId);
+      } catch (Exception e) {
+        failed++;
+        errors.add(plan.getName() + ": " + e.getMessage());
+        log.error(
+            "Razorpay plan seeding failed for plan={} ({} paise/unit) — continuing with the"
+                + " remaining plans: {}",
+            plan.getName(),
+            amountPaise,
+            e.getMessage(),
+            e);
+      }
     }
 
     // Remind about USD/Stripe plans
@@ -96,7 +129,55 @@ public class PlanSeederService {
               + " Webhooks");
     }
 
-    log.info("Plan seeding complete");
+    log.info("Plan seeding complete: seeded={} failed={}", seeded, failed);
+    return new SeedResult(seeded, failed, List.copyOf(errors));
+  }
+
+  /** Outcome of one seeding sweep. Partial success is a real, reportable state. */
+  public record SeedResult(int seeded, int failed, List<String> errors) {}
+
+  /**
+   * Persist one plan's Razorpay id in its own committed transaction, driven by an explicit {@link
+   * TransactionTemplate} rather than a self-invoked {@code @Transactional} method (self-calls
+   * bypass the Spring proxy and would silently give no transaction at all).
+   *
+   * <p>Re-reads the row so a concurrent seeding sweep that already claimed this plan is not
+   * overwritten — the first committed id wins and the duplicate is logged rather than silently
+   * replacing a live gateway mapping.
+   */
+  void persistSeededPlanId(java.util.UUID planId, String razorpayPlanId) {
+    transactionTemplate.executeWithoutResult(
+        status -> {
+          BillingPlan fresh = planRepo.findById(planId).orElse(null);
+          if (fresh == null) {
+            log.warn(
+                "Plan {} disappeared during seeding; razorpay_plan_id={} is orphaned",
+                planId,
+                razorpayPlanId);
+            return;
+          }
+          if (fresh.getRazorpayPlanId() != null) {
+            log.warn(
+                "Plan {} already carries razorpay_plan_id={}; newly created {} is a duplicate and"
+                    + " needs manual cleanup in the Razorpay dashboard",
+                planId,
+                fresh.getRazorpayPlanId(),
+                razorpayPlanId);
+            return;
+          }
+          fresh.setRazorpayPlanId(razorpayPlanId);
+          planRepo.save(fresh);
+        });
+  }
+
+  /**
+   * RR-418 — the runtime only ever recognised {@code ANNUAL}, but every annual migration inserted
+   * {@code YEARLY}, so annual plans were seeded as MONTHLY Razorpay plans. V310 forward-migrates
+   * the stored rows; this alias keeps the seeder correct for any row that predates or bypasses it.
+   */
+  static boolean annualPeriod(String period) {
+    String normalized = period == null ? "" : period.trim().toUpperCase();
+    return "ANNUAL".equals(normalized) || "YEARLY".equals(normalized);
   }
 
   /**

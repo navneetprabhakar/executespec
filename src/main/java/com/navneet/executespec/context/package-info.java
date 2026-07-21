@@ -76,8 +76,7 @@
  * low-cardinality Micrometer evidence through {@code executespec.context.headroom.decisions} and
  * {@code executespec.context.headroom.available_tokens}; provider is bounded and model names are
  * deliberately excluded from metric tags so enterprise model overrides cannot create unbounded time
- * series. This is a local deterministic optimization; it does not require a FastContext/Microsoft
- * runtime dependency. {@code FastContextExperiment} remains an isolated, measured adapter seam
- * until a paired recall/latency/cost evaluation justifies using an external index.
+ * series. This is a local deterministic optimization and requires no external explorer runtime.
+ * Experimental explorer comparisons remain outside the production context assembly path.
  */
 package com.navneet.executespec.context;

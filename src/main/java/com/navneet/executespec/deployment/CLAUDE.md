@@ -1,13 +1,15 @@
 # `deployment/` — Preview + deploy
 
-> Last reviewed: 2026-07-15 (2.0.0 release preparation).
+> Last reviewed: 2026-07-17 (2.0.0 enterprise hardening).
 
 Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
 
+LOCAL-hands runs are excluded from GCS workspace upload queries and the event listener because the authoritative working tree is on the client and the server directory is only an empty execution stub. Archiving that stub would create false recovery/evidence semantics.
+
 ## Key files
 
-- `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews from in-memory `active` map. **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
-- `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings.
+- `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews owned by this process. **Distributed safety:** absence from the JVM-local `active` map is never treated as proof that a Docker/Cloud Run resource is orphaned unless the operator explicitly sets `PREVIEW_ORPHAN_DISCOVERY_ENABLED=true`; the default is false. JVM shutdown also preserves active previews by default so rolling deployment cannot destroy them (`PREVIEW_TEARDOWN_ON_SHUTDOWN=false`). **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
+- `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings, and fail-safe cleanup gates. Docker/Cloud Run orphan discovery remains disabled until a durable cross-JVM resource registry is authoritative.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first via `DeclaredPreviewProjectTypeResolver`, then falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
 - `preview/DeclaredPreviewProjectTypeResolver.java` — Package-local planner-declared project-type normalization/validation helper. Maps planner aliases (`java-spring-boot`, `node-js-frontend`, `cli`, `static`) to `PreviewProjectType`, refuses inconsistent declarations, and upgrades planner Spring/Node backend declarations to FULL_STACK when separate frontend/backend directories exist.
@@ -23,15 +25,43 @@ Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for 
 - `preview/ComposeFileGenerator.java` — Generates docker-compose.yml for Docker previews. Port mapping uses `PreviewProjectType.getContainerPort()`. Blocks cloud metadata endpoints via `extra_hosts` (metadata.google.internal + 169.254.169.254 → 127.0.0.1). App containers hardened with `no-new-privileges`, `cap_drop: ALL`.
 - `preview/vm/PreviewDeploymentService.java` — VM-mode preview orchestration. SSH/SCP to preview-gw VM, invokes `/opt/preview-engine/bin/deploy-preview.sh`, parses `PREVIEW_JSON:{...}` output. 5-min process timeout.
 - `preview/vm/PreviewVmProperties.java` — VM config: gateway IP, SSH key, TTL (minutes), VM list with load balancing.
-- `preview/vm/PreviewGarbageCollector.java` — DB-backed GC for VM previews. Runs every 10 min, tears down previews past `expiresAt`. Safety net for app restarts (in-memory map lost).
+- `preview/vm/PreviewGarbageCollector.java` — DB-backed GC for VM previews. Runs every 10 min, reads at most 100 expired previews, and atomically claims each row before teardown so only one node can perform the destructive action. Safety net for app restarts (in-memory map lost).
 - `preview/vm/PreviewRegistry.java` — JPA entity for `preview_registry` table. Tracks status, VM assignment, port, TTL, deploy duration.
 - `preview/vm/PreviewVmController.java` — REST: teardown, extend TTL, list active, stats, per-VM stats.
 - `DeploymentService.java` — Full Cloud Run deployment. 9-language support. Tier-based deployment limits enforced via `tier_config.max_deployments` (FREE=1, PRO=3, TEAM/ENTERPRISE=-1).
+- `config/OperationalReleasePolicy.java` — release containment for deployment creation. `prod` and
+  `benchmark` mask the Web capability and reject create/analyse/confirm with 503 before quota or
+  deployment-state mutation unless `agent.deployment.recovery-safe-enabled=true`. Existing
+  read/rollback/destroy paths stay available so operators can clean up prior resources. This is an
+  operator attestation, not a recovery implementation; do not enable it until in-flight deployment
+  phases can reconcile Cloud Run and Artifact Registry after a JVM loss.
 - `CloudRunClient.java` — GCP Cloud Run API client. All subprocess calls have timeouts.
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
 - `DockerfileGenerator.java` — Generates language-specific Dockerfiles (9 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
-- `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h.
-- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end) instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
+- `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h. Its generic streaming
+  `uploadArtifact` / `copyObjectTo` methods also back V289 private project-export objects. Generic
+  keys are environment-prefixed; project exports must separately opt in through
+  `project.exports.gcs-enabled=true`, so configuring workspace archival alone cannot redirect
+  export bytes to GCS.
+- `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
+  included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
+  the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+- `WorkspaceArchiveJob.java` — Hourly archive + local cleanup. RR-163: `requireRemoteArchive`
+  proves a nonblank object key AND a live `GcsWorkspaceStore.exists` hit before any local deletion,
+  so a skipped upload (`uploadZip` returns `null` when the Storage client was disabled at startup)
+  or a vanished archive leaves the workspace on disk and fails the run for the next pass instead of
+  destroying the only copy of customer code.
+- `WorkspaceFileService.java` — Read-only run-file and run-chat source boundary. Lists omit
+  credential-like paths and symlinks; direct reads reject absolute/traversal/sensitive/symlinked
+  paths and prove the resolved file remains under the real workspace root. GitHub fallback applies
+  the same sensitive-path policy before remote content is requested or returned to a model.
+  `readFileDiff` applies the identical sensitive-path policy plus
+  `SafeWorkspacePath.requireSafeRelativePosixPath` (exact segments, not a `contains("..")`
+  substring) before the head read, the GitHub fallback and `git show <baseSha>:<path>` (RR-859).
+- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). It applies the
+  same final `ArtifactPublicationGuard` before creating a remote repository or pushing to an
+  existing one. Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end)
+  instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
 
 ### `preview/verify/` — verifyBoot (RL-2026-05-066, preview Phase 1)
 
@@ -138,7 +168,7 @@ App VM (executespec)                    Preview GW VM (preview-gw)
 **VM preview GC (3 layers):**
 
 1. **App-side** (`PreviewService.cleanupExpired()`): every 60s, checks in-memory `active` map against `expiresAt`
-2. **DB-backed** (`PreviewGarbageCollector`): every 10 min, queries `preview_registry` for expired entries — catches orphans after app restart
+2. **DB-backed** (`PreviewGarbageCollector`): every 10 min, queries a bounded batch from `preview_registry` and uses an atomic `active → gc_processing` claim before teardown — catches orphans after app restart without cross-node duplicate teardown
 3. **VM cron** (`cleanup-expired.sh`): every 5 min, checks directory age on preview-gw — last-resort safety net
 
 **VM config:** `preview.vm.*` in `application.yml` — gateway IP, SSH key, TTL, VM list with `maxConcurrent` for load balancing.

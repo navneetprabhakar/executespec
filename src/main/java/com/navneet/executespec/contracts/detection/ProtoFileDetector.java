@@ -59,7 +59,9 @@ public class ProtoFileDetector implements FileBasedContractDetector {
                 DetectorUtils.sha256(content),
                 DetectorUtils.pullProtoVersion(content)));
       } catch (Exception ex) {
-        log.warn("[ProtoFileDetector] failed to read {}: {}", path, ex.getMessage());
+        log.warn(
+            "[ProtoFileDetector] candidate read failed errorClass={}",
+            ex.getClass().getSimpleName());
       }
     }
     return out;
