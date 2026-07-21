@@ -33,9 +33,11 @@ class FlywayMigrationInventoryTest {
     // renumbered its reserved V332 to V335 (billing-reminder delivery dedupe, RR-518) because V334
     // was
     // already the applied head — an out-of-order V332 below V334 fails Flyway validation on any DB
-    // that took V334 first. Count stays 321.
-    assertThat(migrations).hasSize(321);
-    assertThat(migrations.getLast().version()).isEqualTo("335");
+    // that took V334 first. The billing-webhook temporal-correctness lane then added V336
+    // (billing-activation idempotency + provider-event high-water mark, RR-054/RR-055/RR-056) for
+    // 322.
+    assertThat(migrations).hasSize(322);
+    assertThat(migrations.getLast().version()).isEqualTo("336");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -27,6 +28,7 @@ import com.navneet.executespec.billing.dto.VerifyPaymentRequest;
 import com.navneet.executespec.billing.entity.BillingGatewayObligation;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.entity.BillingWebhookEvent;
 import com.navneet.executespec.billing.entity.RunTopup;
 import com.navneet.executespec.billing.exception.BillingException;
 import com.navneet.executespec.billing.gateway.BillingEntity;
@@ -35,6 +37,7 @@ import com.navneet.executespec.billing.gateway.BillingGateway;
 import com.navneet.executespec.billing.gateway.CheckoutResult;
 import com.navneet.executespec.billing.gateway.PaymentGateway;
 import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
+import com.navneet.executespec.billing.repository.BillingActivationClaimRepository;
 import com.navneet.executespec.billing.repository.BillingPlanLimitRepository;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
@@ -43,6 +46,7 @@ import com.navneet.executespec.billing.repository.RunTopupRepository;
 import com.navneet.executespec.billing.security.WebhookSignatureVerifier;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class BillingServiceStripeTest {
 
@@ -62,6 +66,10 @@ class BillingServiceStripeTest {
   private final RunTopupRepository runTopupRepo = mock(RunTopupRepository.class);
   private final InvoiceService invoiceService = mock(InvoiceService.class);
   private final TierConfigRepository tierConfigRepository = mock(TierConfigRepository.class);
+  private final BillingActivationClaimRepository activationClaimRepo =
+      mock(BillingActivationClaimRepository.class);
+  private final BillingWebhookSequencingService webhookSequencing =
+      new BillingWebhookSequencingService(activationClaimRepo);
 
   /**
    * V310 (RR-048 / RR-049): gateway obligations are recorded before every irreversible gateway
@@ -111,7 +119,8 @@ class BillingServiceStripeTest {
           obligationService,
           new BillingSubscriptionWriter(subRepo),
           new BillingWebhookEventRecorder(webhookRepo),
-          mock(RunTopupService.class));
+          mock(RunTopupService.class),
+          webhookSequencing);
 
   @Test
   void stripeCheckoutCompletedRewritesCheckoutSessionIdToSubscriptionId() {
@@ -295,6 +304,9 @@ class BillingServiceStripeTest {
     when(gatewayRouter.stripe()).thenReturn(stripeGateway);
     when(usageService.getCurrentUsage("user-1")).thenReturn(List.of());
     when(invoiceService.findLatestBySubscriptionId(existing.getId())).thenReturn(Optional.empty());
+    // RR-056: this is the first (winning) activation of payment pay_1.
+    when(activationClaimRepo.insertIfAbsent(any(), eq("RAZORPAY"), eq("pay_1"), any()))
+        .thenReturn(1);
 
     service.verifyAndActivate("user-1", request);
 
@@ -386,5 +398,109 @@ class BillingServiceStripeTest {
     verify(stripeGateway, never()).cancelSubscription("sub_test_123");
     assertThat(sub.isCancelAtPeriodEnd()).isTrue();
     verify(subRepo).save(sub);
+  }
+
+  /**
+   * RR-056 — a duplicate invoice.paid for the same immutable Stripe invoice id (the claim was
+   * already taken) is a no-op: it does NOT re-activate, re-save or generate a second invoice.
+   */
+  @Test
+  void stripeInvoicePaidDuplicateForSamePaymentIsNoOp() {
+    UUID planId = UUID.randomUUID();
+    BillingSubscription sub =
+        BillingSubscription.builder()
+            .id(UUID.randomUUID())
+            .userId("user-1")
+            .orgId("org-1")
+            .billingPlanId(planId)
+            .paymentGateway("STRIPE")
+            .gatewaySubscriptionId("sub_dup")
+            .status("ACTIVE")
+            .totalSeats(1)
+            .extraSeats(0)
+            .build();
+    BillingPlan plan =
+        BillingPlan.builder().id(planId).name("Team").tier("TEAM").period("MONTHLY").build();
+
+    when(webhookRepo.existsByGatewayAndEventId("STRIPE", "evt_dup")).thenReturn(false);
+    when(subRepo.findByGatewaySubscriptionId("sub_dup")).thenReturn(Optional.of(sub));
+    when(planRepo.findById(planId)).thenReturn(Optional.of(plan));
+    // The activation for invoice in_dup was already claimed — this delivery must lose.
+    when(activationClaimRepo.insertIfAbsent(any(), eq("STRIPE"), eq("in_dup"), any()))
+        .thenReturn(0);
+
+    service.processStripeWebhook(
+        """
+        {"id":"evt_dup","created":1000,"data":{"object":{
+          "id":"in_dup","subscription":"sub_dup"}}}
+        """,
+        "sig",
+        "invoice.paid");
+
+    verify(invoiceService, never()).generateStripeSubscriptionInvoice(any(), any(), any(), any());
+    verify(subRepo, never()).save(any());
+    assertThat(sub.getStatus()).isEqualTo("ACTIVE");
+  }
+
+  /**
+   * RR-054 — an out-of-order invoice.payment_failed whose provider event time predates the last
+   * applied transition must not regress an ACTIVE subscription to PAST_DUE.
+   */
+  @Test
+  void staleStripeEventDoesNotRegressStatus() {
+    UUID planId = UUID.randomUUID();
+    BillingSubscription sub =
+        BillingSubscription.builder()
+            .id(UUID.randomUUID())
+            .userId("user-1")
+            .billingPlanId(planId)
+            .paymentGateway("STRIPE")
+            .gatewaySubscriptionId("sub_race")
+            .status("ACTIVE")
+            .lastProviderEventAt(Instant.ofEpochSecond(2000))
+            .totalSeats(1)
+            .extraSeats(0)
+            .build();
+
+    when(webhookRepo.existsByGatewayAndEventId("STRIPE", "evt_stale")).thenReturn(false);
+    when(subRepo.findByGatewaySubscriptionId("sub_race")).thenReturn(Optional.of(sub));
+
+    // created=1000 is OLDER than the applied high-water mark (2000): the transition is stale.
+    service.processStripeWebhook(
+        """
+        {"id":"evt_stale","created":1000,"data":{"object":{"subscription":"sub_race"}}}
+        """,
+        "sig",
+        "invoice.payment_failed");
+
+    assertThat(sub.getStatus()).isEqualTo("ACTIVE");
+    verify(subRepo, never()).save(any());
+    verify(notificationService, never()).sendPaymentFailed(any(), any());
+  }
+
+  /**
+   * RR-055 — a signed Razorpay event whose local subscription is not visible yet must NOT be marked
+   * processed. The recorder inserts the row once (processed=false) and markProcessed never runs, so
+   * the event stays truthfully un-acknowledged and reprocessable instead of being falsely acked.
+   */
+  @Test
+  void razorpayEventForNotYetVisibleSubscriptionIsNotMarkedProcessed() {
+    String payload =
+        """
+        {"event":"subscription.charged","created_at":1000,
+         "payload":{"subscription":{"entity":{"id":"sub_missing"}},
+                    "payment":{"entity":{"id":"pay_x"}}}}
+        """;
+    when(signatureVerifier.verifyWebhookSignature(payload, "sig")).thenReturn(true);
+    when(webhookRepo.existsByGatewayAndEventId(eq("RAZORPAY"), any())).thenReturn(false);
+    when(subRepo.findByGatewaySubscriptionId("sub_missing")).thenReturn(Optional.empty());
+
+    ArgumentCaptor<BillingWebhookEvent> captor = ArgumentCaptor.forClass(BillingWebhookEvent.class);
+
+    service.processRazorpayWebhook(payload, "sig");
+
+    // Only the recordStart insert ran — markProcessed (a second save with processed=true) did not.
+    verify(webhookRepo, times(1)).save(captor.capture());
+    assertThat(captor.getValue().isProcessed()).isFalse();
   }
 }
