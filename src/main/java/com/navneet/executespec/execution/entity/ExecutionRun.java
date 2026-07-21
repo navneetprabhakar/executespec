@@ -123,6 +123,32 @@ public class ExecutionRun {
   @Builder.Default
   private Long version = 0L;
 
+  /**
+   * V315 (RR-905) — boot-recovery fencing.
+   *
+   * <p>The boot scanner previously selected every {@code EXECUTING} row with no owner or lease and
+   * re-dispatched all of them on <em>every</em> instance's {@code ApplicationReadyEvent}. During a
+   * rolling deploy or a scale-out that ran the same LLM, Git, pull-request and cost side effects
+   * concurrently on multiple instances for the same launch.
+   *
+   * <p>These three columns are the durable lease: {@code recovery_attempts} is the compare-and-set
+   * counter (one winner per attempt), {@code recovering_instance} records who owns it, and {@code
+   * recovery_heartbeat} is the takeover timeout — another instance may only claim a launch whose
+   * heartbeat has gone stale. Mirrors the V2 {@code PipelineRunRepository.claimCrashResume}
+   * contract.
+   */
+  @Column(name = "recovery_attempts", nullable = false)
+  @Builder.Default
+  private Integer recoveryAttempts = 0;
+
+  /** V315 (RR-905) — the instance that currently owns boot recovery for this launch. */
+  @Column(name = "recovering_instance", length = 128)
+  private String recoveringInstance;
+
+  /** V315 (RR-905) — last recovery heartbeat; a stale value permits takeover. */
+  @Column(name = "recovery_heartbeat")
+  private Instant recoveryHeartbeat;
+
   /** v2.5.7 — continue-on-PR: links back to the execution that created the original PR. */
   @Column(name = "source_execution_id")
   private String sourceExecutionId;

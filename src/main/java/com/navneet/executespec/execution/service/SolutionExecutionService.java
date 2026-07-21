@@ -183,7 +183,12 @@ public class SolutionExecutionService {
     PipelineRun pipelineRun =
         v2Orchestrator.submitRun(
             fullRequest,
-            "EXECUTION_VIEW",
+            // RR-241 — this dispatch legitimately skips the V2 plan gate, but only because
+            // ExecutionOrchestrator.executeApprovedPlan has already proven the launch's own durable
+            // plan approval. The distinct source token is what grants that authority in
+            // PlanGateBypassPolicy; the unified dispatch path uses plain "EXECUTION_VIEW" and does
+            // NOT skip the gate.
+            "EXECUTION_VIEW_APPROVED",
             repoUrl,
             repoUrl != null ? "EXISTING" : "NEW",
             githubPat,

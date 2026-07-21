@@ -238,6 +238,28 @@ public class PipelineRun {
   @Column(name = "execution_mode", length = 20)
   private String executionMode = "PRODUCTION";
 
+  /**
+   * V323 (RR-234) — durable "do not auto-publish this run" consent.
+   *
+   * <p>This used to live only in a Redis key whose own contract said a JVM crash loses the intent
+   * and the next attempt resumes default auto-push — i.e. a crash silently converted the customer's
+   * "do not publish" into "publish". The auto-push gate now reads this column and fails CLOSED when
+   * the policy cannot be loaded.
+   */
+  @Builder.Default
+  @Column(name = "skip_auto_push", nullable = false)
+  private boolean skipAutoPush = false;
+
+  /**
+   * V315 (RR-1217) — durable TDD-mode intent. Before V315 this was a pipeline-thread parameter
+   * only, so nothing that recreates a run from the persisted row (notably {@code POST
+   * /api/runs/{id}/fork}) could inherit it; the fork hardcoded {@code false} and therefore behaved
+   * differently from the run it claimed to copy.
+   */
+  @Builder.Default
+  @Column(name = "tdd_mode", nullable = false)
+  private boolean tddMode = false;
+
   /** User-selected LLM provider (copied from Project at submission time). */
   @Builder.Default
   @Column(name = "ai_provider", length = 20)
