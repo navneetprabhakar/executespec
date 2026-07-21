@@ -125,6 +125,22 @@ public class ValidationReport {
   @Column(name = "tests_total")
   private Integer testsTotal;
 
+  /**
+   * V317 / RR-1660 — three-valued execution-provenance token for {@link #testsPassed} / {@link
+   * #testsTotal}.
+   *
+   * <p>{@code TRUE} only when the producing runner proved the counts belong to this run's own
+   * execution: report directories reset before launch, exit status checked, every parsed report
+   * postdating launch. {@code FALSE} when the producer explicitly could not prove it. {@code null}
+   * when no provenance signal was recorded at all — including every row written before V317.
+   *
+   * <p><b>null is unproven, never proven-false.</b> The evidence ledger promotes the tests row back
+   * to {@code DETERMINISTIC}/HIGH only on {@code TRUE}; both other states keep the conservative
+   * {@code UNVERIFIED_COUNT}/MEDIUM label.
+   */
+  @Column(name = "test_execution_verified")
+  private Boolean testExecutionVerified;
+
   /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
   @Column(name = "reviewer_verdict", length = 32)
   private String reviewerVerdict;

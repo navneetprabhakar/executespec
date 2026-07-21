@@ -1,6 +1,5 @@
 package com.navneet.executespec.executioncontext;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Set;
@@ -34,6 +33,7 @@ public class LlmExecutionDispatchGuard {
   private final ApiKeyResolver apiKeyResolver;
   private final ModelRegistry modelRegistry;
   private final RunStepUsageRepository usageRepository;
+  private final LlmExecutionBudgetGate budgetGate;
 
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformAnthropicKey;
@@ -97,6 +97,7 @@ public class LlmExecutionDispatchGuard {
           LlmDispatchPolicyException.Reason.PROVIDER_NOT_ALLOWED,
           "Provider failover is disabled by the durable execution policy");
     }
+    checkFencing(context, request.llmExecutionAttempt());
     checkBudget(context);
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
@@ -184,6 +185,7 @@ public class LlmExecutionDispatchGuard {
           LlmDispatchPolicyException.Reason.EXACT_ROUTE_VIOLATION,
           "Provider capability differs from the project's selected provider");
     }
+    checkFencing(context, null);
     checkBudget(context);
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
@@ -301,23 +303,47 @@ public class LlmExecutionDispatchGuard {
     }
   }
 
+  /**
+   * RR-321 — atomic. The former implementation ran three independent read-only aggregates and then
+   * returned permission, so concurrent authorizers could all pass at the last unit of any budget
+   * dimension. Delegates to {@link LlmExecutionBudgetGate}, which evaluates every dimension under a
+   * pessimistic row lock and commits a provider-call reservation before transport.
+   */
   private void checkBudget(LlmExecutionContext context) {
-    String id = context.getId();
-    if (context.getMaxProviderCalls() != null
-        && usageRepository.countByLlmExecutionContextId(id) >= context.getMaxProviderCalls()) {
-      throw budget();
+    budgetGate.reserveProviderCall(context);
+  }
+
+  /**
+   * RR-322 — execution fencing. The durable contract increments {@code attempt} and replaces {@code
+   * leaseOwner} when a worker claims or steals a context, but nothing bound dispatch to that claim,
+   * so a worker whose lease had already been stolen could keep issuing provider calls against the
+   * same context alongside its replacement.
+   *
+   * <p>Two bounded fences are applied here. (1) A context that carries a lease owner whose lease
+   * has EXPIRED is not dispatchable — that lease is stealable and the holder can no longer be
+   * trusted to be the sole writer. (2) When the caller declares which claim it holds ({@link
+   * LlmRequest#llmExecutionAttempt()}), it must match the context's current attempt, so a stale
+   * worker is fenced out the moment a replacement claims.
+   *
+   * <p>Deliberately NOT done: restricting dispatch to {@code RUNNING} only. No production caller
+   * invokes {@code LlmExecutionContextService.claim} today, so every real context is {@code
+   * QUEUED}; requiring {@code RUNNING} would fail-close all customer dispatch rather than fence a
+   * stale worker. Making the lease mandatory is a lifecycle change for the context-creation
+   * callers, not this guard, and is reported as remaining work.
+   */
+  private void checkFencing(LlmExecutionContext context, Integer declaredAttempt) {
+    boolean leased = context.getLeaseOwner() != null && !context.getLeaseOwner().isBlank();
+    if (leased
+        && context.getLeaseExpiresAt() != null
+        && !context.getLeaseExpiresAt().isAfter(Instant.now())) {
+      throw reject(
+          LlmDispatchPolicyException.Reason.CONTEXT_NOT_DISPATCHABLE,
+          "LLM execution lease has expired; this worker is fenced out and must reclaim");
     }
-    long input = value(usageRepository.sumSuccessfulInputTokensByContextId(id));
-    long output = value(usageRepository.sumSuccessfulOutputTokensByContextId(id));
-    if ((context.getMaxInputTokens() != null && input >= context.getMaxInputTokens())
-        || (context.getMaxOutputTokens() != null && output >= context.getMaxOutputTokens())
-        || (context.getMaxTotalTokens() != null
-            && safeAdd(input, output) >= context.getMaxTotalTokens())) {
-      throw budget();
-    }
-    if (context.getMaxCostUsd() != null) {
-      double spent = value(usageRepository.sumSuccessfulCostByContextId(id));
-      if (BigDecimal.valueOf(spent).compareTo(context.getMaxCostUsd()) >= 0) throw budget();
+    if (declaredAttempt != null && declaredAttempt != context.getAttempt()) {
+      throw reject(
+          LlmDispatchPolicyException.Reason.CONTEXT_NOT_DISPATCHABLE,
+          "LLM execution attempt generation has advanced; this worker is fenced out");
     }
   }
 

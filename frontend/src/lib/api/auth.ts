@@ -19,6 +19,14 @@ export const authLogin = (body: {email: string; password: string}) =>
 
 export const authLogout = () => req<void>('/auth/logout', {method: 'DELETE'});
 
+/**
+ * Exchanges the HttpOnly `refresh_token` cookie for a fresh access token + user.
+ *
+ * Used by the OAuth callback page: the backend no longer places any credential in the redirect URL
+ * (RR-130 / RR-1334), it sets the refresh cookie and lets the SPA rotate it here.
+ */
+export const authRefreshSession = () => req<LoginResponse>('/auth/refresh', {method: 'POST'});
+
 export const getMyPermissions = () =>
   req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
 

@@ -45,11 +45,46 @@ public class UsageTrackingService {
    * SUPER_ADMIN is always allowed (unlimited usage).
    *
    * <p>Call this BEFORE performing the action (e.g., before starting a run).
+   *
+   * <p><b>RR-186 (2026-07-20):</b> this method is a NON-ATOMIC read. Pairing it with a later {@link
+   * #increment} call leaves a window in which N concurrent callers each observe {@code max - 1} and
+   * are all admitted. Any surface that must actually ENFORCE a ceiling has to call {@link
+   * #reserveWithinLimits} instead, which admits and increments in one conditional statement. This
+   * read-only form is retained only for advisory/display use.
    */
   public void assertWithinLimits(String userId, String metric) {
+    assertWithinLimits(userId, metric, false);
+  }
+
+  /**
+   * RR-186 — atomic admission. Resolves the same allowance {@link #assertWithinLimits} would, then
+   * increments the counter only if the post-increment value still fits, using a single conditional
+   * database statement. Throws {@link BillingException} when the reservation loses.
+   *
+   * <p>Unmetered outcomes (SUPER_ADMIN, unlimited sentinel, no configured limit, bonus top-up
+   * headroom) still record the usage, because the counter also feeds analytics and billing display.
+   */
+  @Transactional
+  public void reserveWithinLimits(String userId, String metric, long delta) {
+    admit(userId, metric, Math.max(0L, delta), true);
+  }
+
+  private void assertWithinLimits(String userId, String metric, boolean atomicReserve) {
+    admit(userId, metric, atomicReserve ? 1L : 0L, atomicReserve);
+  }
+
+  /**
+   * Shared admission. When {@code reserve} is false this is the historical read-only check. When it
+   * is true the ceiling test and the counter increment happen in ONE conditional UPDATE, so no two
+   * concurrent callers can both be admitted at the final unit of the allowance.
+   */
+  private void admit(String userId, String metric, long delta, boolean reserve) {
     // SUPER_ADMIN has no limits
     AppUser user = userRepo.findById(userId).orElse(null);
-    if (user != null && "SUPER_ADMIN".equals(user.getGlobalRole())) return;
+    if (user != null && "SUPER_ADMIN".equals(user.getGlobalRole())) {
+      if (reserve && delta > 0) increment(userId, metric, delta);
+      return;
+    }
     BillingSubscription sub = subscriptionRepo.findActiveByUserId(userId).orElse(null);
 
     // Resolve plan ID — fall back to FREE plan for users who registered before billing system
@@ -62,6 +97,7 @@ public class UsageTrackingService {
       if (freePlan == null) {
         log.warn(
             "No active FREE plan found and no subscription for user {} — allowing action", userId);
+        if (reserve && delta > 0) increment(userId, metric, delta);
         return;
       }
       planId = freePlan.getId();
@@ -80,23 +116,35 @@ public class UsageTrackingService {
       TierConfig cfg = tierConfigRepo.findById(tierKey).orElse(null);
       if (cfg == null) {
         log.warn("No tier_config row for tier={} — allowing RUNS for user {}", tierKey, userId);
+        if (reserve && delta > 0) increment(userId, metric, delta);
         return;
       }
       maxValue = cfg.getMonthlyRunLimit();
     } else {
       Optional<BillingPlanLimit> limitOpt = limitRepo.findByBillingPlanIdAndMetric(planId, metric);
       if (limitOpt.isEmpty()) {
+        if (reserve && delta > 0) increment(userId, metric, delta);
         return;
       }
       maxValue = limitOpt.get().getMaxValue();
     }
-    if (maxValue <= 0) return; // unlimited sentinel
+    if (maxValue <= 0) { // unlimited sentinel
+      if (reserve && delta > 0) increment(userId, metric, delta);
+      return;
+    }
 
     Instant now = Instant.now();
     String orgId = sub != null ? sub.getOrgId() : null;
     BillingUsage usage = getOrCreateUsage(userId, orgId, metric, now);
 
-    if (usage.getCurrentValue() >= maxValue) {
+    // RR-186 — the ENFORCING path is one conditional statement: the row is incremented only if the
+    // resulting value still fits the allowance, and the affected-row count is the admission answer.
+    // Concurrent submissions therefore serialize on the row instead of all reading `max - 1`.
+    boolean admitted =
+        reserve && delta > 0
+            ? usageRepo.incrementIfWithinAllowance(usage.getId(), delta, maxValue, now) > 0
+            : usage.getCurrentValue() + Math.max(delta, 0L) <= maxValue;
+    if (!admitted) {
       // For RUNS metric, check bonus top-up credits before rejecting
       if ("RUNS".equals(metric)) {
         Instant checkNow = Instant.now();
@@ -109,7 +157,9 @@ public class UsageTrackingService {
               userBonus + orgBonus,
               userBonus,
               orgBonus);
-          return; // allow — bonus consumption handled by TierEnforcementService
+          // allow — bonus consumption handled by TierEnforcementService
+          if (reserve && delta > 0) increment(userId, metric, delta);
+          return;
         }
       }
       log.warn(

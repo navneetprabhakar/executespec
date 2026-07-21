@@ -2,6 +2,7 @@ package com.navneet.executespec.context;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -10,6 +11,7 @@ import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.ReviewReport;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.springframework.stereotype.Component;
@@ -114,15 +116,33 @@ public class ContextAgentScanner {
             : "");
   }
 
+  /**
+   * Resolve a framework-reserved metadata file inside a customer-controlled checkout, or return
+   * empty when the repository shipped it as a symlink (RR-1253). Following such a link would read a
+   * host file — credentials, service config, anything the server account can read — and the full
+   * contents flow straight into the provider prompt. Trust-boundary labelling does not undo
+   * disclosure, so the read is refused rather than sanitized.
+   */
+  private String readGuarded(Path projectPath, String relativePath) throws IOException {
+    Path p;
+    try {
+      p = SafeWorkspacePath.resolveWithin(projectPath, relativePath);
+    } catch (SecurityException e) {
+      log.warn(
+          "[ContextAgentScanner] refused unsafe context path {}: {}", relativePath, e.getMessage());
+      return "";
+    }
+    if (!Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)) return "";
+    return Files.readString(p);
+  }
+
   private String readContextDoc(Path projectPath) throws IOException {
-    Path p = projectPath.resolve(".agent-context/CODEBASE_CONTEXT.md");
-    return Files.exists(p) ? Files.readString(p) : "";
+    return readGuarded(projectPath, ".agent-context/CODEBASE_CONTEXT.md");
   }
 
   private String readRecentDecisions(Path projectPath) throws IOException {
-    Path p = projectPath.resolve(".agent-context/decisions.md");
-    if (!Files.exists(p)) return "No decisions recorded yet";
-    String content = Files.readString(p);
+    String content = readGuarded(projectPath, ".agent-context/decisions.md");
+    if (content.isEmpty()) return "No decisions recorded yet";
     String[] sections = content.split("(?=## )");
     int from = Math.max(0, sections.length - 5);
     return String.join("", Arrays.copyOfRange(sections, from, sections.length));

@@ -161,6 +161,24 @@ public class LlmExecutionContext {
   @Column(name = "max_attempts", nullable = false)
   private int maxAttempts;
 
+  /**
+   * RR-321 (V316) — append-only count of provider dispatches this context has been AUTHORIZED to
+   * make. Incremented inside the locked budget transaction, before transport, so concurrent
+   * authorizers cannot each observe the same remaining allowance. Always {@code >=} the number of
+   * recorded terminal usage rows.
+   */
+  @Column(name = "reserved_provider_calls", nullable = false)
+  private long reservedProviderCalls;
+
+  /**
+   * RR-321 — records one authorized provider dispatch. Package-private and monotonic by contract:
+   * an authorization that reached transport is never given back, because a failed attempt still
+   * consumed its authorization. Callable only from inside the locked budget transaction.
+   */
+  void recordProviderCallReservation(long reserved) {
+    if (reserved > this.reservedProviderCalls) this.reservedProviderCalls = reserved;
+  }
+
   @Column(name = "idempotency_key", nullable = false, length = 160)
   private String idempotencyKey;
 

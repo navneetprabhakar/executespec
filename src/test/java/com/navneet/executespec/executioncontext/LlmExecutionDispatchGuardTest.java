@@ -31,11 +31,14 @@ class LlmExecutionDispatchGuardTest {
   private final ApiKeyResolver apiKeys = mock(ApiKeyResolver.class);
   private final ModelRegistry models = mock(ModelRegistry.class);
   private final RunStepUsageRepository usage = mock(RunStepUsageRepository.class);
+  // RR-321 — budget evaluation + provider-call reservation moved into the locked
+  // LlmExecutionBudgetGate. Mocked here so these route/credential tests stay budget-neutral.
+  private final LlmExecutionBudgetGate budgetGate = mock(LlmExecutionBudgetGate.class);
   private LlmExecutionDispatchGuard guard;
 
   @BeforeEach
   void setUp() {
-    guard = new LlmExecutionDispatchGuard(contexts, apiKeys, models, usage);
+    guard = new LlmExecutionDispatchGuard(contexts, apiKeys, models, usage, budgetGate);
     ReflectionTestUtils.setField(guard, "platformAnthropicKey", "platform-a");
     ReflectionTestUtils.setField(guard, "platformOpenAiKey", "platform-o");
     ReflectionTestUtils.setField(guard, "platformGeminiKey", "");
@@ -113,11 +116,21 @@ class LlmExecutionDispatchGuardTest {
     verify(apiKeys, never()).resolveWithProvenance(org.mockito.ArgumentMatchers.any());
   }
 
+  /**
+   * RR-321 — the guard must still refuse before touching credentials when the budget gate rejects.
+   * The ceiling arithmetic itself now lives in {@link LlmExecutionBudgetGate}, which evaluates it
+   * under a pessimistic row lock and commits a reservation; here we pin only that its rejection is
+   * honoured ahead of credential resolution.
+   */
   @Test
   void providerCallBudgetIsCheckedAgainstDurableAttemptLedger() {
     LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
     stubContext(scope, exactOwnKeyPolicy(), 2);
-    when(usage.countByLlmExecutionContextId("ctx-1")).thenReturn(2L);
+    org.mockito.Mockito.doThrow(
+            new LlmDispatchPolicyException(
+                LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED, "exhausted"))
+        .when(budgetGate)
+        .reserveProviderCall(org.mockito.ArgumentMatchers.any());
 
     assertThatThrownBy(() -> guard.authorize(request("ctx-1", scope, "openai", "gpt-test")))
         .isInstanceOf(LlmDispatchPolicyException.class)

@@ -114,9 +114,13 @@ public class ContractDriftController {
           "could not read source: " + DriftDetectionService.describe(sourceRead));
     }
     String sourceContent = sourceRead.content();
+    // RR-525 — contract names are source/customer-derived strings, not a constrained filename
+    // type. A name such as `../../../.github/workflows/release` would give this narrow "refresh
+    // one contract" action repository-wide write authority. Derive a bounded slug instead of
+    // interpolating the raw name, and let the folder writer re-validate the final path.
     String folderPath =
         ".executespec/contracts/produced/"
-            + contract.getName()
+            + safeContractFileSlug(contract.getName(), contract.getId().toString())
             + DriftDetectionService.extensionFor(contract.typeEnum());
     Optional<ExecutespecFolderWriter.PullRequestInfo> pr =
         folderWriter.writeFiles(
@@ -259,4 +263,19 @@ public class ContractDriftController {
   public record DismissResponse(int dismissedCount) {}
 
   public record RefreshResponse(String prUrl, String branchName) {}
+
+  /**
+   * RR-525 — bound a customer/source-derived contract name to a single safe path segment. Anything
+   * outside {@code [A-Za-z0-9._-]} is collapsed; leading dots, empty results and over-long names
+   * fall back to the contract's own immutable id, so the produced filename can never contain a
+   * separator, dot segment or control character.
+   */
+  static String safeContractFileSlug(String contractName, String contractId) {
+    String slug = contractName == null ? "" : contractName.replaceAll("[^A-Za-z0-9._-]", "-");
+    slug = slug.replaceAll("^[.-]+", "");
+    if (slug.length() > 100) slug = slug.substring(0, 100);
+    slug = slug.replaceAll("[.-]+$", "");
+    if (slug.isBlank()) return "contract-" + contractId;
+    return slug;
+  }
 }
