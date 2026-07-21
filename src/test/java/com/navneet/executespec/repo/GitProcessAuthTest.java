@@ -1,16 +1,119 @@
 package com.navneet.executespec.repo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * 2026-07-17 credential gate — git credentials must never appear in argv or the remote URL. The
  * token rides the child environment; argv carries only the literal unexpanded variable reference.
  */
 class GitProcessAuthTest {
+
+  // ---- RR-1669: repository-local url.* rewrites must refuse a credential-bearing invocation ----
+
+  @Test
+  void authenticatedPushIsRefusedWhenTheRepositoryRewritesRemoteUrls(@TempDir Path tmp)
+      throws Exception {
+    Path repo = initRepo(tmp);
+    git(repo, "config", "--local", "url.https://evil.example/.insteadOf", "https://github.com/");
+
+    assertThatThrownBy(
+            () ->
+                GitProcessAuth.git(
+                    "ghp_secret",
+                    List.of("-C", repo.toString(), "push", "https://github.com/a/b", "branch")))
+        .isInstanceOf(GitProcessAuth.GitRemoteRewriteException.class)
+        .hasMessageContaining("url.* rewrite")
+        // Findings carry a count, never the attacker-chosen destination.
+        .hasMessageNotContaining("evil.example");
+  }
+
+  /**
+   * A {@code --local}-scoped read does not follow includes (verified against git 2.50.1), so the
+   * scan reads the EFFECTIVE config under the same hardened environment the real command uses.
+   */
+  @Test
+  void authenticatedPushIsRefusedWhenTheRewriteArrivesThroughAnInclude(@TempDir Path tmp)
+      throws Exception {
+    Path repo = initRepo(tmp);
+    Path included = repo.resolve("extra.cfg");
+    java.nio.file.Files.writeString(
+        included, "[url \"https://evil.example/\"]\n\tinsteadOf = https://github.com/\n");
+    git(repo, "config", "--local", "include.path", included.toString());
+
+    assertThatThrownBy(
+            () ->
+                GitProcessAuth.git(
+                    "ghp_secret",
+                    List.of("-C", repo.toString(), "push", "https://github.com/a/b", "branch")))
+        .isInstanceOf(GitProcessAuth.GitRemoteRewriteException.class);
+  }
+
+  @Test
+  void ordinaryRepositoryPushIsUnaffected(@TempDir Path tmp) throws Exception {
+    Path repo = initRepo(tmp);
+
+    ProcessBuilder pb =
+        GitProcessAuth.git(
+            "ghp_secret",
+            List.of("-C", repo.toString(), "push", "https://github.com/a/b", "branch"));
+
+    assertThat(pb.environment()).containsEntry(GitProcessAuth.TOKEN_ENV, "ghp_secret");
+  }
+
+  @Test
+  void cloneIsExemptBecauseNoRepositoryConfigExistsYet() {
+    ProcessBuilder pb =
+        GitProcessAuth.git("ghp_secret", List.of("clone", "https://github.com/a/b", "/tmp/target"));
+
+    assertThat(pb.environment()).containsEntry(GitProcessAuth.TOKEN_ENV, "ghp_secret");
+  }
+
+  @Test
+  void unauthenticatedInvocationsAreNotScanned() {
+    // No credential to redirect, and the scan cannot be run against an unknown directory anyway.
+    ProcessBuilder pb = GitProcessAuth.git(null, List.of("fetch", "origin"));
+
+    assertThat(pb.environment()).doesNotContainKey(GitProcessAuth.TOKEN_ENV);
+  }
+
+  @Test
+  void authenticatedFetchWithNoDeterminableRepositoryIsRefused() {
+    assertThatThrownBy(() -> GitProcessAuth.git("ghp_secret", List.of("fetch", "origin")))
+        .isInstanceOf(GitProcessAuth.GitRemoteRewriteException.class)
+        .hasMessageContaining("could not be determined");
+  }
+
+  @Test
+  void explicitRepositoryDirectoryIsAcceptedForCallersThatUseProcessBuilderDirectory(
+      @TempDir Path tmp) throws Exception {
+    Path repo = initRepo(tmp);
+
+    ProcessBuilder pb = GitProcessAuth.git("ghp_secret", null, repo, List.of("fetch", "origin"));
+
+    assertThat(pb.environment()).containsEntry(GitProcessAuth.TOKEN_ENV, "ghp_secret");
+  }
+
+  private static Path initRepo(Path tmp) throws Exception {
+    Path repo = tmp.resolve("repo");
+    java.nio.file.Files.createDirectories(repo);
+    git(repo, "init", "-q");
+    return repo;
+  }
+
+  private static void git(Path dir, String... args) throws Exception {
+    java.util.List<String> cmd = new java.util.ArrayList<>(java.util.List.of("git"));
+    cmd.addAll(java.util.List.of(args));
+    Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
+    String out = new String(p.getInputStream().readAllBytes());
+    if (p.waitFor() != 0) throw new IllegalStateException("git setup failed: " + out);
+  }
 
   @Test
   void tokenNeverEntersArgvAndRidesTheChildEnvironment() {
@@ -30,10 +133,13 @@ class GitProcessAuthTest {
   }
 
   @Test
-  void usernameVariantCarriesBothValuesInEnvOnly() {
+  void usernameVariantCarriesBothValuesInEnvOnly(@TempDir Path tmp) throws Exception {
     ProcessBuilder pb =
         GitProcessAuth.git(
-            "app-password-value", "bb-user", List.of("push", "https://bitbucket.org/w/r", "main"));
+            "app-password-value",
+            "bb-user",
+            initRepo(tmp),
+            List.of("push", "https://bitbucket.org/w/r", "main"));
 
     String argv = String.join(" ", pb.command());
     assertThat(argv).doesNotContain("app-password-value").doesNotContain("bb-user");
@@ -43,8 +149,8 @@ class GitProcessAuthTest {
   }
 
   @Test
-  void inheritedCredentialHelpersAreResetBeforeTheEphemeralOne() {
-    ProcessBuilder pb = GitProcessAuth.git("t", List.of("fetch"));
+  void inheritedCredentialHelpersAreResetBeforeTheEphemeralOne(@TempDir Path tmp) throws Exception {
+    ProcessBuilder pb = GitProcessAuth.git("t", null, initRepo(tmp), List.of("fetch"));
     List<String> cmd = pb.command();
 
     int emptyReset = cmd.indexOf("credential.helper=");
@@ -68,9 +174,12 @@ class GitProcessAuthTest {
    * .git/hooks} nor a repository-set {@code core.hooksPath} can run.
    */
   @Test
-  void hooksAndCommandExecutingConfigAreDisabledOnEveryInvocation() {
+  void hooksAndCommandExecutingConfigAreDisabledOnEveryInvocation(@TempDir Path tmp)
+      throws Exception {
+    Path repo = initRepo(tmp);
     ProcessBuilder authenticated =
-        GitProcessAuth.git("ghp_x", List.of("-C", "/ws", "push", "https://github.com/a/b", "br"));
+        GitProcessAuth.git(
+            "ghp_x", List.of("-C", repo.toString(), "push", "https://github.com/a/b", "br"));
     ProcessBuilder anonymous = GitProcessAuth.git(null, List.of("clone", "https://github.com/a/b"));
 
     for (ProcessBuilder pb : List.of(authenticated, anonymous)) {
