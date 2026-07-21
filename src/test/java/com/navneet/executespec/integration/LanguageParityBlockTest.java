@@ -2,7 +2,10 @@ package com.navneet.executespec.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.navneet.executespec.router.LlmProvider;
 
 import org.junit.jupiter.api.Test;
 
@@ -95,5 +98,29 @@ class LanguageParityBlockTest {
     String hint3 = RunPipelineSupport.languageConventionHint("Python", null);
     assertEquals(hint1, hint2);
     assertEquals(hint2, hint3);
+  }
+
+  // RR-364: the accuracy route must fail closed rather than coercing an unknown/null provider to
+  // OpenAI and silently spending against a provider the run never selected.
+
+  @Test
+  void providerForAccuracy_resolves_a_known_provider() {
+    assertEquals(LlmProvider.GEMINI, RunPipelineSupport.providerForAccuracy("gemini"));
+    assertEquals(LlmProvider.ANTHROPIC, RunPipelineSupport.providerForAccuracy("ANTHROPIC"));
+  }
+
+  @Test
+  void providerForAccuracy_throws_on_null_or_blank_provider() {
+    assertThrows(
+        IllegalArgumentException.class, () -> RunPipelineSupport.providerForAccuracy(null));
+    assertThrows(
+        IllegalArgumentException.class, () -> RunPipelineSupport.providerForAccuracy("  "));
+  }
+
+  @Test
+  void providerForAccuracy_throws_on_unknown_provider_instead_of_defaulting_to_openai() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> RunPipelineSupport.providerForAccuracy("mystery-provider"));
   }
 }

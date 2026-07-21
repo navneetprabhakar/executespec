@@ -380,31 +380,60 @@ public class ModelProviderCandidateService {
       List<BenchmarkRun> runs, String taskCategory, int minSampleTasks) {
     BenchmarkRun first = runs.getFirst();
     String canonicalModel = first.getModel();
-    long totalTasks = runs.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
-    long resolvedTasks = runs.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
+    // RR-219 evidence integrity: repeated runs of the SAME corpus are not independent observations.
+    // Two evaluations of one (suite, dataset) re-measure the same tasks, so summing their
+    // totalTasks/resolvedTasks inflates the sample weight with experiment frequency rather than
+    // adding evidence. Collapse each (suite, dataset) to its most recent run before
+    // sample-weighting
+    // so a favorable (or unfavorable) benchmark that is re-run repeatedly cannot dominate the
+    // prior.
+    // Runs arrive newest-first (createdAt desc), so the first occurrence per corpus is the newest.
+    List<BenchmarkRun> distinctObservations = dedupeRepeatedTrials(runs);
+    int repeatedTrialsCollapsed = runs.size() - distinctObservations.size();
+    long totalTasks = distinctObservations.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
+    long resolvedTasks =
+        distinctObservations.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
     double resolvedRate = totalTasks <= 0 ? 0.0 : (resolvedTasks * 100.0) / totalTasks;
     String reason;
-    if (runs.size() == 1) {
+    if (distinctObservations.size() == 1) {
+      BenchmarkRun only = distinctObservations.getFirst();
+      String collapsedNote =
+          repeatedTrialsCollapsed > 0
+              ? String.format(
+                  Locale.ROOT,
+                  " (used as quality prior; %d repeated trial(s) of the same corpus collapsed to"
+                      + " newest)",
+                  repeatedTrialsCollapsed)
+              : " (used as quality prior)";
       reason =
           String.format(
               Locale.ROOT,
-              "benchmark %s/%s resolved %d/%d tasks (used as quality prior)",
-              first.getSuite(),
-              first.getDataset(),
-              first.getResolvedTasks(),
-              first.getTotalTasks());
+              "benchmark %s/%s resolved %d/%d tasks%s",
+              only.getSuite(),
+              only.getDataset(),
+              only.getResolvedTasks(),
+              only.getTotalTasks(),
+              collapsedNote);
     } else {
+      String collapsedNote =
+          repeatedTrialsCollapsed > 0
+              ? String.format(
+                  Locale.ROOT,
+                  "; %d repeated trial(s) collapsed to newest",
+                  repeatedTrialsCollapsed)
+              : "";
       reason =
           String.format(
               Locale.ROOT,
-              "benchmark aggregate %s/%s resolved %d/%d tasks across %d runs (sample-weighted;"
-                  + " minimum %d-task prior)",
+              "benchmark aggregate %s/%s resolved %d/%d tasks across %d distinct observation(s)"
+                  + " (sample-weighted; minimum %d-task prior%s)",
               first.getProvider(),
               first.getModel(),
               resolvedTasks,
               totalTasks,
-              runs.size(),
-              minSampleTasks);
+              distinctObservations.size(),
+              minSampleTasks,
+              collapsedNote);
     }
     return ModelProviderCapabilitySignal.builder()
         .provider(first.getProvider())
@@ -413,6 +442,23 @@ public class ModelProviderCandidateService {
         .benchmarkQualityScore(resolvedRate)
         .reasons(List.of(reason))
         .build();
+  }
+
+  /**
+   * Collapse repeated trials of the same benchmark observation to the newest run. The observation
+   * key is (suite, dataset): two runs sharing it are re-evaluations of the same task corpus, not
+   * independent evidence (RR-219). Distinct datasets under the same suite (e.g. {@code lite-a} and
+   * {@code lite-b}) remain separate observations and are legitimately summed. Input is assumed
+   * newest-first, so the first occurrence of each key is retained.
+   */
+  private static List<BenchmarkRun> dedupeRepeatedTrials(List<BenchmarkRun> runs) {
+    Map<String, BenchmarkRun> newestPerObservation = new LinkedHashMap<>();
+    for (BenchmarkRun run : runs) {
+      String key =
+          normalizeBenchmarkLabel(run.getSuite()) + "|" + normalizeBenchmarkLabel(run.getDataset());
+      newestPerObservation.putIfAbsent(key, run);
+    }
+    return List.copyOf(newestPerObservation.values());
   }
 
   private record BenchmarkAggregateKey(String provider, String model, String taskCategory) {}
@@ -476,6 +522,17 @@ public class ModelProviderCandidateService {
     return " (used as quality prior)";
   }
 
+  /**
+   * Closed, versioned suite→task-category taxonomy. Only the suites ExecuteSpec actually knows
+   * (mirroring {@link com.navneet.executespec.benchmark.BenchmarkSuite}, plus their legacy
+   * lowercase/variant aliases) can back a routing quality prior.
+   *
+   * <p>RR-218 fail-closed: the {@code default} branch previously declared every UNKNOWN suite
+   * compatible with the common coding categories, so a newly introduced, misspelled or unrelated
+   * benchmark could silently become a production quality prior. An unrecognised suite is now
+   * informational only — it stays visible as an explanatory signal but never drives model/provider
+   * selection until it is explicitly mapped here.
+   */
   private static boolean benchmarkSuiteSupportsTaskCategory(String suite, String taskCategory) {
     String normalizedSuite = normalizeBenchmarkLabel(suite);
     String normalizedCategory = normalizeBenchmarkLabel(taskCategory);
@@ -495,12 +552,8 @@ public class ModelProviderCandidateService {
           normalizedCategory.equals("bug_fix")
               || normalizedCategory.equals("test_fix")
               || normalizedCategory.equals("benchmark_patch");
-      default ->
-          normalizedCategory.equals("benchmark_patch")
-              || normalizedCategory.equals("terminal_task")
-              || normalizedCategory.equals("bug_fix")
-              || normalizedCategory.equals("test_fix")
-              || normalizedCategory.equals("project_patch");
+        // RR-218: unknown/unmapped suite -> not a quality prior for any task category.
+      default -> false;
     };
   }
 

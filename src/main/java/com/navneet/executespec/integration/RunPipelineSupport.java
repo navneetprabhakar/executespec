@@ -211,14 +211,25 @@ public final class RunPipelineSupport {
     return out;
   }
 
+  /**
+   * Resolve the run's stored provider string to an {@link LlmProvider} for the accuracy-assessment
+   * route.
+   *
+   * <p>RR-364 fail-closed: a null or unrecognised provider used to be coerced to OpenAI, which
+   * spent against OpenAI and attributed the assessment to a provider the run never selected. It now
+   * throws; the single caller ({@code RunValidationKickoff}) already catches and degrades to
+   * "accuracy not assessed", so a broken/unknown provider fails the assessment rather than silently
+   * rerouting it.
+   */
   public static LlmProvider providerForAccuracy(String provider) {
-    if (provider == null) return LlmProvider.OPENAI;
-    String up = provider.toUpperCase();
-    if ("GEMINI".equals(up)) return LlmProvider.GEMINI;
+    if (provider == null || provider.isBlank()) {
+      throw new IllegalArgumentException("accuracy provider missing on run");
+    }
+    String up = provider.trim().toUpperCase();
     try {
       return LlmProvider.valueOf(up);
     } catch (IllegalArgumentException e) {
-      return LlmProvider.OPENAI;
+      throw new IllegalArgumentException("unknown accuracy provider: " + provider, e);
     }
   }
 

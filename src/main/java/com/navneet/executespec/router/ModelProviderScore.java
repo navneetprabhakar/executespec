@@ -32,6 +32,21 @@ public record ModelProviderScore(
       throw new IllegalArgumentException("model required");
     }
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
+    // RR-397 fail-closed: a NaN/infinite quality score or threshold must never be able to pass the
+    // below-threshold check. Java comparisons against NaN are always false, so a NaN qualityScore
+    // would slip past {@code score < threshold} rejection and a NaN threshold would let every score
+    // look eligible. Collapse a non-finite score to the worst quality (0.0 — guaranteed below any
+    // threshold and a stable sort key) and a non-finite threshold to the strictest bar (100.0 —
+    // unsatisfiable by a garbage config), so a malformed input fails the decision rather than
+    // silently making every candidate eligible for automatic continuation. Cost is coerced to a
+    // large sentinel so a NaN cost never ranks as "cheapest".
+    qualityScore = Double.isFinite(qualityScore) ? qualityScore : 0.0;
+    costPerMillionTokens =
+        Double.isFinite(costPerMillionTokens) ? costPerMillionTokens : Double.MAX_VALUE;
+    requiredQualityThreshold =
+        Double.isFinite(requiredQualityThreshold)
+            ? Math.max(0.0, Math.min(100.0, requiredQualityThreshold))
+            : 100.0;
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
   }
 
