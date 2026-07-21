@@ -32,8 +32,10 @@ class PrReviewControllerAdmissionTest {
   private final ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
   private final ProjectRepoService projectRepoService = mock(ProjectRepoService.class);
   private final PrReviewAutofixService autofixService = mock(PrReviewAutofixService.class);
+  private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository =
+      mock(com.navneet.executespec.auth.repository.ProjectRepository.class);
   private final PrReviewController controller =
-      new PrReviewController(service, guard, projectRepoService, autofixService);
+      new PrReviewController(service, guard, projectRepoService, autofixService, projectRepository);
   private final UUID repoId = UUID.randomUUID();
   private final AppUserDetails principal = principal();
 

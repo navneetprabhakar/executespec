@@ -4,7 +4,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.cost.CostVisibilityPolicy;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.prreview.entity.PrReview;
@@ -47,6 +50,18 @@ public class PrReviewController {
   private final ProjectAccessGuard projectAccessGuard;
   private final ProjectRepoService projectRepoService;
   private final PrReviewAutofixService autofixService;
+  private final ProjectRepository projectRepository;
+
+  /**
+   * RR-563 — raw provider-dollar cost is a billing figure. The review DTO exposed {@code costUsd}
+   * to every project reader (including non-billing developers and cross-org collaborators). Only a
+   * billing-role viewer of the project's own org sees it; for everyone else the field is {@code
+   * null}, and the DTO shape is otherwise unchanged.
+   */
+  private boolean canSeeCost(String projectId, AppUserDetails userDetails) {
+    String orgId = projectRepository.findById(projectId).map(Project::getOrgId).orElse(null);
+    return CostVisibilityPolicy.canViewRawCost(userDetails, orgId);
+  }
 
   /** Body for {@link #submit}. */
   public record SubmitPrReviewRequest(
@@ -93,7 +108,8 @@ public class PrReviewController {
       // not a request validation error.
       throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(PrReviewDto.from(row));
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(PrReviewDto.from(row, canSeeCost(req.projectId(), userDetails)));
   }
 
   /** Body for {@link #autofix}. */
@@ -147,7 +163,9 @@ public class PrReviewController {
     if (!service.retryReview(review.getId())) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "review is not retryable");
     }
-    return ResponseEntity.accepted().body(PrReviewDto.from(service.findById(id)));
+    return ResponseEntity.accepted()
+        .body(
+            PrReviewDto.from(service.findById(id), canSeeCost(review.getProjectId(), userDetails)));
   }
 
   private PrReview requireWritableReview(UUID id, AppUserDetails userDetails) {
@@ -175,7 +193,8 @@ public class PrReviewController {
     }
     projectAccessGuard.assertCanRead(row.getProjectId(), userDetails);
     List<PrReviewComment> comments = service.commentsFor(id);
-    return ResponseEntity.ok(PrReviewWithComments.from(row, comments));
+    return ResponseEntity.ok(
+        PrReviewWithComments.from(row, comments, canSeeCost(row.getProjectId(), userDetails)));
   }
 
   /** All reviews for a single PR, newest first. */
@@ -204,7 +223,7 @@ public class PrReviewController {
             prNumber,
             Instant.now().minusSeconds((long) safeSinceDays * 86_400L),
             org.springframework.data.domain.PageRequest.of(safePage, safeLimit));
-    return historyResponse(rows, safePage, safeLimit);
+    return historyResponse(rows, safePage, safeLimit, canSeeCost(projectId, userDetails));
   }
 
   /** All reviews for a project, newest first — used by the project-level dashboard. */
@@ -229,16 +248,19 @@ public class PrReviewController {
             projectId,
             Instant.now().minusSeconds((long) safeSinceDays * 86_400L),
             org.springframework.data.domain.PageRequest.of(safePage, safeLimit));
-    return historyResponse(rows, safePage, safeLimit);
+    return historyResponse(rows, safePage, safeLimit, canSeeCost(projectId, userDetails));
   }
 
   private static ResponseEntity<List<PrReviewDto>> historyResponse(
-      org.springframework.data.domain.Slice<PrReview> rows, int page, int limit) {
+      org.springframework.data.domain.Slice<PrReview> rows,
+      int page,
+      int limit,
+      boolean includeCost) {
     return ResponseEntity.ok()
         .header("X-Page", Integer.toString(page))
         .header("X-Page-Size", Integer.toString(limit))
         .header("X-Has-More", Boolean.toString(rows.hasNext()))
-        .body(rows.getContent().stream().map(PrReviewDto::from).toList());
+        .body(rows.getContent().stream().map(r -> PrReviewDto.from(r, includeCost)).toList());
   }
 
   /** Trim the entity for JSON; client never needs the raw cost columns sliced separately. */
@@ -257,7 +279,11 @@ public class PrReviewController {
       Instant startedAt,
       Instant finishedAt,
       String failureReason) {
-    static PrReviewDto from(PrReview r) {
+    /**
+     * RR-563 — {@code includeCost=false} nulls the raw provider-dollar cost for non-billing
+     * readers.
+     */
+    static PrReviewDto from(PrReview r, boolean includeCost) {
       return new PrReviewDto(
           r.getId(),
           r.getProjectId(),
@@ -268,7 +294,7 @@ public class PrReviewController {
           r.getStatus(),
           r.getVerdict(),
           r.getSummary(),
-          r.getCostUsd(),
+          includeCost ? r.getCostUsd() : null,
           r.getDurationMs(),
           r.getStartedAt(),
           r.getFinishedAt(),
@@ -297,9 +323,11 @@ public class PrReviewController {
   }
 
   public record PrReviewWithComments(PrReviewDto review, List<PrReviewCommentDto> comments) {
-    static PrReviewWithComments from(PrReview r, List<PrReviewComment> comments) {
+    static PrReviewWithComments from(
+        PrReview r, List<PrReviewComment> comments, boolean includeCost) {
       return new PrReviewWithComments(
-          PrReviewDto.from(r), comments.stream().map(PrReviewCommentDto::from).toList());
+          PrReviewDto.from(r, includeCost),
+          comments.stream().map(PrReviewCommentDto::from).toList());
     }
   }
 }
