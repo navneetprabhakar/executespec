@@ -204,6 +204,85 @@ class PlanBreakingChangeReportTest {
         .isEqualTo(1);
   }
 
+  // -----------------------------------------------------------------------------------------
+  // RR-1630 — an UNCLASSIFIED verdict carries an EMPTY change list, so hasBreaking() is false and
+  // the contract used to be dropped from the report entirely. "We could not classify this" then
+  // looked exactly like "we verified this is safe". That is the normal production state: the
+  // oasdiff / buf / graphql-inspector CLIs are installed nowhere, and ASYNCAPI / EVENT_SCHEMA have
+  // no classifier registered at all.
+  // -----------------------------------------------------------------------------------------
+
+  @Test
+  void unclassified_with_consumer_surfacesUnverifiedRow_andTriggersGateFriction() {
+    when(registryRepo.findById(contractId)).thenReturn(Optional.of(contract));
+    when(breakingChangeService.classify(any(), any(), any()))
+        .thenReturn(unclassifiedDiff("oasdiff not on PATH"));
+    when(consumerRepo.findByContractIdAndDeclaredInProjectId(contractId, projectId))
+        .thenReturn(
+            List.of(
+                ContractConsumer.builder()
+                    .id(UUID.randomUUID())
+                    .contractId(contractId)
+                    .consumerRepoId(consumerRepoId)
+                    .declaredInProjectId(projectId)
+                    .build()));
+    ProjectRepo cr = new ProjectRepo();
+    cr.setId(consumerRepoId);
+    cr.setGithubRepoFullName("acme/web");
+    when(projectRepoRepo.findById(consumerRepoId)).thenReturn(Optional.of(cr));
+
+    PlanBreakingChangeReport.Report r =
+        report.compose(
+            projectId,
+            List.of(new PlanBreakingChangeReport.IntendedChange(contractId, "old", "new")));
+
+    assertThat(r.breakingChanges()).hasSize(1);
+    assertThat(r.requiresTypedAck()).isTrue();
+    PlanBreakingChangeReport.BreakingChangeRow row = r.breakingChanges().get(0);
+    assertThat(row.requiresFriction()).isTrue();
+    assertThat(row.confidence()).isEqualTo(ContractDiff.Confidence.UNCLASSIFIED.name());
+    assertThat(row.summary()).contains("unverified").contains("oasdiff not on PATH");
+  }
+
+  @Test
+  void unclassified_without_consumer_stillRecorded_butNoFriction() {
+    when(registryRepo.findById(contractId)).thenReturn(Optional.of(contract));
+    when(breakingChangeService.classify(any(), any(), any()))
+        .thenReturn(unclassifiedDiff("no classifier for ASYNCAPI"));
+    when(consumerRepo.findByContractIdAndDeclaredInProjectId(contractId, projectId))
+        .thenReturn(List.of());
+
+    PlanBreakingChangeReport.Report r =
+        report.compose(
+            projectId,
+            List.of(new PlanBreakingChangeReport.IntendedChange(contractId, "old", "new")));
+
+    assertThat(r.breakingChanges()).hasSize(1);
+    assertThat(r.breakingChanges().get(0).requiresFriction()).isFalse();
+    assertThat(r.requiresTypedAck()).isFalse();
+  }
+
+  @Test
+  void classifiedNonBreaking_remainsExcluded_soTheReportStaysReadable() {
+    // The RR-1630 fix must not turn every safe change into a warning: only UNCLASSIFIED is
+    // promoted, a DETERMINISTIC non-breaking verdict is still dropped.
+    when(registryRepo.findById(contractId)).thenReturn(Optional.of(contract));
+    when(breakingChangeService.classify(any(), any(), any()))
+        .thenReturn(nonBreakingDiff("optional field added"));
+
+    PlanBreakingChangeReport.Report r =
+        report.compose(
+            projectId,
+            List.of(new PlanBreakingChangeReport.IntendedChange(contractId, "old", "new")));
+
+    assertThat(r.breakingChanges()).isEmpty();
+  }
+
+  private ContractDiff unclassifiedDiff(String summary) {
+    // Every classifier returns an EMPTY change list for UNCLASSIFIED — that is the fail-open pivot.
+    return new ContractDiff(summary, List.of(), ContractDiff.Confidence.UNCLASSIFIED, "(none)");
+  }
+
   private ContractDiff breakingDiff(String summary) {
     return new ContractDiff(
         summary,
