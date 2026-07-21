@@ -114,9 +114,13 @@ public class ShellTool implements Tool {
     if (reviewerPolicyError != null) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
     }
+    // Clamp both bounds: the JSON schema declares a minimum of 1, but a model-authored argument is
+    // not re-validated against it, and a value <= 0 makes proc.waitFor(timeout,…) return
+    // immediately — starting the process (side effects begin) and then instantly killing it and
+    // reporting a spurious TIMEOUT (RR-1550).
     int timeout =
         args.hasNonNull("timeoutSeconds")
-            ? Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC)
+            ? Math.max(1, Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC))
             : DEFAULT_TIMEOUT_SEC;
 
     // Resolve the cleanroom container FIRST (was done after the sandbox check — see below for why

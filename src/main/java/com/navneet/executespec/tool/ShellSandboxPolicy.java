@@ -438,8 +438,14 @@ public class ShellSandboxPolicy {
   }
 
   /**
-   * Splits a command string on &&, ||, ;, |, and raw newlines. Respects quoted strings (single and
-   * double quotes) — does not split inside them.
+   * Splits a command string on &&, ||, ;, |, a lone &amp;, subshell/group delimiters, and raw
+   * newlines. Respects quoted strings (single and double quotes) — does not split inside them.
+   *
+   * <p>A lone {@code &amp;} (background operator) MUST terminate a segment: {@code /bin/sh -c} runs
+   * both sides of {@code echo hi &amp; bash -c '...'} as separate commands, so without splitting here
+   * only the first token would be allowlist-checked and the second command would execute unguarded
+   * (RR-1540). The grouping characters {@code ( ) &#123; &#125;} and form-feed are likewise treated as
+   * separators so a subshell or command group cannot smuggle a non-allowlisted first token.
    */
   private List<String> splitChainedCommands(String command) {
     List<String> segments = new ArrayList<>();
@@ -477,9 +483,21 @@ public class ShellSandboxPolicy {
         }
       }
 
-      // Split on ;, single |, and raw newlines. /bin/sh treats newlines as command separators, so
-      // they must get the same per-segment allowlist validation as semicolons.
-      if (c == ';' || c == '|' || c == '\n' || c == '\r') {
+      // Split on ;, single |, a lone & (background operator), subshell/command-group delimiters,
+      // and raw newlines. /bin/sh treats all of these as command separators, so each resulting
+      // segment must get the same per-segment allowlist validation as a semicolon-delimited one.
+      // The && / || cases above already consumed their second char via i++, so reaching here with
+      // c == '&' means a lone &. (RR-1540)
+      if (c == ';'
+          || c == '|'
+          || c == '&'
+          || c == '('
+          || c == ')'
+          || c == '{'
+          || c == '}'
+          || c == '\n'
+          || c == '\r'
+          || c == '\f') {
         segments.add(current.toString());
         current.setLength(0);
         continue;

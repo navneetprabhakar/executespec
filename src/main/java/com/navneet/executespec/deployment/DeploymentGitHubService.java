@@ -29,7 +29,11 @@ public class DeploymentGitHubService {
   private final ObjectMapper objectMapper;
   private final RunRepoRepository runRepoRepo;
   private final ArtifactPublicationGuard publicationGuard;
-  private final HttpClient httpClient = HttpClient.newHttpClient();
+  // Bounded client: a hung GitHub API connect/response must not pin the deploy virtual thread
+  // indefinitely, matching the timeout discipline every subprocess in this package already has
+  // (RR-1637).
+  private final HttpClient httpClient =
+      HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(15)).build();
 
   public DeploymentGitHubService(
       AgentProperties agentProps,
@@ -85,13 +89,17 @@ public class DeploymentGitHubService {
       throw new IOException(
           "GitHub PAT required to create a repo — connect your PAT in Integrations.");
     }
+    // Private by default: pushing a customer's generated/brownfield source to a world-readable repo
+    // with no opt-in is a data-exposure defect (RR-1628). Visibility should become an explicit
+    // caller parameter surfaced in the UI/API; until then the safe default is private.
     String body =
         objectMapper.writeValueAsString(
-            java.util.Map.of("name", name, "private", false, "auto_init", false));
+            java.util.Map.of("name", name, "private", true, "auto_init", false));
 
     HttpRequest request =
         HttpRequest.newBuilder()
             .uri(URI.create("https://api.github.com/user/repos"))
+            .timeout(java.time.Duration.ofSeconds(30))
             .header("Authorization", "Bearer " + pat)
             .header("Accept", "application/vnd.github+json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
