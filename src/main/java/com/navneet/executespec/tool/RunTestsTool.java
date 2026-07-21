@@ -6,13 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.smoketest.TestCommandResolver;
 
@@ -88,16 +84,49 @@ public class RunTestsTool implements Tool {
   private final ObjectMapper json;
   private final TestCommandResolver testCommandResolver;
 
+  /**
+   * RR-547 — every non-pytest path composes a shell string from model-controlled input and hands it
+   * to {@code /bin/sh -c}, on the application host whenever no bench container is registered. That
+   * string is now validated by the same {@link ShellSandboxPolicy} the {@code shell} tool uses, so
+   * {@code runTests} can no longer be the way around it. Container dispatch skips the host policy
+   * for the same reason {@link ShellTool} does.
+   */
+  private final ShellSandboxPolicy sandboxPolicy;
+
+  /** Result-envelope construction; see {@link RunTestsEnvelope}. */
+  private final RunTestsEnvelope envelopes;
+
   @Autowired
   public RunTestsTool(
       ProgramBenchContainerStore programBenchContainers,
       com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
       ObjectMapper json,
-      TestCommandResolver testCommandResolver) {
+      TestCommandResolver testCommandResolver,
+      ShellSandboxPolicy sandboxPolicy) {
     this.programBenchContainers = programBenchContainers;
     this.swebenchContainers = swebenchContainers;
     this.json = json;
     this.testCommandResolver = testCommandResolver;
+    this.sandboxPolicy = sandboxPolicy;
+    this.envelopes = new RunTestsEnvelope(json);
+  }
+
+  /**
+   * Compatibility constructor for focused tool tests. Deliberately supplies a REAL policy at the
+   * default LOW guardrail rather than a null bypass, so a test cannot pass a command production
+   * would refuse.
+   */
+  RunTestsTool(
+      ProgramBenchContainerStore programBenchContainers,
+      com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
+      ObjectMapper json,
+      TestCommandResolver testCommandResolver) {
+    this(
+        programBenchContainers,
+        swebenchContainers,
+        json,
+        testCommandResolver,
+        new ShellSandboxPolicy());
   }
 
   @Override
@@ -166,10 +195,9 @@ public class RunTestsTool implements Tool {
         if (id.isEmpty()) continue;
         // Defence: test ids should never contain shell metachars. Layered on top of the
         // ProcessBuilder argument-array dispatch below (audit 2026-05-12 #77).
-        if (containsShellMetachar(id)) {
-          return ToolResult.err(
-              ToolResult.ErrorKind.INVALID_ARGS,
-              "test id contains forbidden shell metachars: " + id);
+        String idRejection = rejectionForTestId(id);
+        if (idRejection != null) {
+          return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, idRejection);
         }
         testIds.add(id);
       }
@@ -230,18 +258,36 @@ public class RunTestsTool implements Tool {
     }
 
     List<String> cmd;
+    String shellProgram = null;
     if (!commandOverride.isEmpty()) {
+      shellProgram = commandOverride;
       cmd = wrapShellCommand(containerId, workdir, commandOverride);
     } else if (framework == TestCommandResolver.Framework.PYTEST && !testIds.isEmpty()) {
-      // Byte-identical legacy pytest path (pinned by RunTestsToolTest).
+      // Byte-identical legacy pytest path (pinned by RunTestsToolTest). This one dispatches an
+      // argument array with no shell program, so there is nothing for the shell policy to read.
       cmd = buildProcessCommand(containerId, workdir, useLoginShell, testIds);
     } else {
-      String shellCmd =
+      shellProgram =
           frameworkCommand(
               framework,
               testIds,
               resolved.map(TestCommandResolver.TestCommand::command).orElse(null));
-      cmd = wrapShellCommand(containerId, workdir, shellCmd);
+      cmd = wrapShellCommand(containerId, workdir, shellProgram);
+    }
+
+    // RR-547 — on the host, whatever we are about to hand to `/bin/sh -c` must satisfy the same
+    // policy the `shell` tool enforces. Without this, structured filters and the `command`
+    // override were an unguarded route to host execution with the app process's authority.
+    if (containerId == null && shellProgram != null && sandboxPolicy != null) {
+      ShellSandboxPolicy.ValidationResult validation =
+          sandboxPolicy.validate(shellProgram, ctx.workspaceRoot().toString());
+      if (!validation.permitted()) {
+        log.warn(
+            "runTests blocked by sandbox command={} reason={}", shellProgram, validation.reason());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "test command blocked by sandbox: " + validation.reason());
+      }
     }
 
     try {
@@ -283,8 +329,9 @@ public class RunTestsTool implements Tool {
           output.length());
       String envelope =
           framework == TestCommandResolver.Framework.PYTEST
-              ? parseAndEnvelope(ctx, testIds, exit, output)
-              : genericEnvelope(ctx, framework, String.join(" ", cmd), testIds, exit, output);
+              ? envelopes.parseAndEnvelope(ctx, testIds, exit, output)
+              : envelopes.genericEnvelope(
+                  ctx, framework, String.join(" ", cmd), testIds, exit, output);
       return ToolResult.ok(envelope);
     } catch (IOException ioe) {
       log.warn("runTests IO error: {}", ioe.getMessage());
@@ -372,153 +419,6 @@ public class RunTestsTool implements Tool {
     return !containsShellMetachar(screened);
   }
 
-  // ------------------------------------------------------------------ envelopes
-
-  /**
-   * pytest -q output ends with a summary line like:
-   *
-   * <pre>
-   *   1 passed, 2 failed in 1.23s
-   *   FAILED test/foo.py::test_b - AssertionError: ...
-   *   PASSED test/foo.py::test_a
-   * </pre>
-   *
-   * We extract those into a structured envelope. Failing tests' assertion lines are pulled from the
-   * {@code FAILED ... - <error>} suffix when present; otherwise we leave the message blank and let
-   * the LLM read raw_tail.
-   */
-  private static final Pattern PYTEST_FAILED_LINE =
-      Pattern.compile("(?m)^FAILED\\s+(\\S+)(?:\\s+-\\s+(.*))?$");
-
-  private static final Pattern PYTEST_PASSED_LINE = Pattern.compile("(?m)^PASSED\\s+(\\S+)\\s*$");
-  private static final Pattern PYTEST_SUMMARY_LINE =
-      Pattern.compile("(?m)^=+\\s*(.*?passed.*?|.*?failed.*?|.*?error.*?)\\s*=+\\s*$");
-
-  /**
-   * Go test failure markers: per-test {@code --- FAIL: TestX} and per-package {@code FAIL\tpkg}.
-   */
-  private static final Pattern GO_FAIL_LINE = Pattern.compile("(?m)^\\s*--- FAIL: (\\S+)");
-
-  private static final Pattern GO_PKG_FAIL_LINE = Pattern.compile("(?m)^FAIL\\s+(\\S+)");
-
-  private String parseAndEnvelope(
-      ExecutionContext ctx, List<String> requestedIds, int exit, String output) {
-    ObjectNode env = json.createObjectNode();
-
-    // Find pass/fail counts in the summary line (e.g. "1 passed, 2 failed in 1.23s").
-    String summary = "";
-    Matcher sm = PYTEST_SUMMARY_LINE.matcher(output);
-    while (sm.find()) summary = sm.group(1).trim();
-    if (summary.isEmpty()) {
-      summary = exit == 0 ? "all passed" : "exit=" + exit;
-    }
-    env.put("summary", summary);
-    env.put("framework", "PYTEST");
-
-    // Extract individual passed / failed test ids.
-    ArrayNode passed = env.putArray("passed");
-    ArrayNode failed = env.putArray("failed");
-
-    Matcher pm = PYTEST_PASSED_LINE.matcher(output);
-    while (pm.find()) passed.add(pm.group(1));
-
-    Matcher fm = PYTEST_FAILED_LINE.matcher(output);
-    while (fm.find()) {
-      ObjectNode entry = failed.addObject();
-      entry.put("test_id", fm.group(1));
-      String msg = fm.group(2);
-      entry.put("message", msg == null ? "" : msg.trim());
-    }
-
-    // For tests in the request that didn't appear in either list (e.g. collection error),
-    // mark them as "errored" so the LLM doesn't think they silently passed.
-    java.util.Set<String> seen = new java.util.HashSet<>();
-    for (JsonNode el : passed) seen.add(el.asText());
-    for (JsonNode el : failed) seen.add(el.path("test_id").asText());
-    ArrayNode errored = env.putArray("errored");
-    for (String id : requestedIds) {
-      if (!seen.contains(id)) errored.add(id);
-    }
-
-    env.put("exit_code", exit);
-    env.put("raw_tail", tailLines(output, RAW_TAIL_CHARS));
-    // Output budget (#6): on large output, persist the full log + expose a readFile path so the
-    // worker can inspect the COMPLETE failure trace, not just raw_tail.
-    if (output != null && output.length() > ToolOutput.DEFAULT_INLINE_CAP) {
-      String p = ToolOutput.persistFull(ctx, "tests", output);
-      if (p != null) env.put("full_output_path", p);
-    }
-    return env.toString();
-  }
-
-  /**
-   * Non-pytest envelope — same field shape so the V182 completeTask gate works on every stack:
-   * green run ⇒ {@code "failed":[]} + {@code "errored":[]} + {@code "exit_code":0}; red run ⇒ a
-   * failed entry (Go gets real {@code --- FAIL:} names; others get a framework-level entry) so the
-   * gate blocks. Deliberately under-parsed beyond that — the model reads raw_tail.
-   */
-  private String genericEnvelope(
-      ExecutionContext ctx,
-      TestCommandResolver.Framework framework,
-      String command,
-      List<String> requestedIds,
-      int exit,
-      String output) {
-    ObjectNode env = json.createObjectNode();
-    env.put("framework", framework.name());
-    env.put("command", command);
-    ArrayNode passed = env.putArray("passed");
-    ArrayNode failed = env.putArray("failed");
-    ArrayNode errored = env.putArray("errored");
-
-    if (framework == TestCommandResolver.Framework.GO) {
-      Matcher gf = GO_FAIL_LINE.matcher(output);
-      while (gf.find()) {
-        ObjectNode entry = failed.addObject();
-        entry.put("test_id", gf.group(1));
-        entry.put("message", "see raw_tail");
-      }
-      if (failed.isEmpty() && exit != 0) {
-        Matcher pf = GO_PKG_FAIL_LINE.matcher(output);
-        while (pf.find()) {
-          ObjectNode entry = failed.addObject();
-          entry.put("test_id", pf.group(1));
-          entry.put("message", "package failed — see raw_tail (may be a build error)");
-        }
-      }
-    }
-    if (exit != 0 && failed.isEmpty()) {
-      ObjectNode entry = failed.addObject();
-      entry.put("test_id", framework.name().toLowerCase() + " suite");
-      entry.put("message", "non-zero exit " + exit + " — see raw_tail");
-    }
-    if (exit == 0) {
-      for (String id : requestedIds) passed.add(id);
-    }
-
-    env.put(
-        "summary",
-        exit == 0
-            ? framework.name().toLowerCase() + " tests passed (exit=0)"
-            : framework.name().toLowerCase() + " tests FAILED (exit=" + exit + ")");
-    env.put("exit_code", exit);
-    env.put("raw_tail", tailLines(output, RAW_TAIL_CHARS));
-    if (output != null && output.length() > ToolOutput.DEFAULT_INLINE_CAP) {
-      String p = ToolOutput.persistFull(ctx, "tests", output);
-      if (p != null) env.put("full_output_path", p);
-    }
-    return env.toString();
-  }
-
-  private static String tailLines(String s, int maxChars) {
-    if (s == null) return "";
-    if (s.length() <= maxChars) return s;
-    int idx = s.length() - maxChars;
-    int nl = s.indexOf('\n', idx);
-    if (nl >= 0 && nl < s.length() - 1) idx = nl + 1;
-    return "... [head omitted] ...\n" + s.substring(idx);
-  }
-
   static List<String> buildProcessCommand(
       String containerId, String workdir, boolean useLoginShell, List<String> testIds) {
     List<String> cmd = new ArrayList<>();
@@ -549,6 +449,32 @@ public class RunTestsTool implements Tool {
     cmd.add("--no-header");
     cmd.add("-q");
     return cmd;
+  }
+
+  /**
+   * RR-547 — per-id admission for the framework-filter paths. Beyond {@link
+   * #containsShellMetachar}, this rejects quotes and whitespace, which were both MISSING: every
+   * non-pytest path joins ids into ONE shell string, and the Go path wraps them in single quotes
+   * (`-run '<names>'`), so an apostrophe closed our quoting and injected runner arguments while a
+   * space started a new argument. A leading {@code -} is option injection into whichever runner
+   * receives the joined string.
+   *
+   * @return a rejection reason, or {@code null} when the id is acceptable
+   */
+  static String rejectionForTestId(String id) {
+    if (containsShellMetachar(id)) {
+      return "test id contains forbidden shell metachars: " + id;
+    }
+    for (int i = 0; i < id.length(); i++) {
+      char c = id.charAt(i);
+      if (c == '\'' || c == '"' || Character.isWhitespace(c)) {
+        return "test id may not contain quotes or whitespace: " + id;
+      }
+    }
+    if (id.startsWith("-")) {
+      return "test id may not start with '-' (runner options are not accepted here): " + id;
+    }
+    return null;
   }
 
   /**

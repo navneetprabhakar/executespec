@@ -41,6 +41,16 @@ public class BuildProjectTool implements Tool {
   // no compile.sh contract — the tests are the truth).
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
 
+  /**
+   * RR-281 — {@code buildProject} used to be an unrestricted shell-execution tool: the resolved
+   * command (which can originate from a model-authored {@code plannerCommand} / {@code command}
+   * argument) went straight to {@code /bin/sh -c} with no policy check, so anything the shell tool
+   * refused could be re-submitted here. Host dispatch now validates through the same {@link
+   * ShellSandboxPolicy}. Container dispatch skips it for the same reason {@link ShellTool} does —
+   * the {@code --network none} cleanroom is the boundary there.
+   */
+  private final ShellSandboxPolicy sandboxPolicy;
+
   @Override
   public String name() {
     return "buildProject";
@@ -125,6 +135,24 @@ public class BuildProjectTool implements Tool {
         containerId = pbCid;
         workdir = "/workspace";
         applyCompileCheckWrapper = true; // see Bug G — programbench-only no-op compile.sh guard
+      }
+    }
+
+    // RR-281 — validate the resolved command before it reaches /bin/sh. Only the host path is
+    // checked: the ProgramBench compile-check wrapper below intentionally uses subshells the
+    // policy forbids, and it is only ever applied for container dispatch.
+    if (containerId == null && sandboxPolicy != null) {
+      ShellSandboxPolicy.ValidationResult validation =
+          sandboxPolicy.validate(bc.command(), ctx.workspaceRoot().toString());
+      if (!validation.permitted()) {
+        log.warn(
+            "buildProject blocked by sandbox command={} source={} reason={}",
+            bc.command(),
+            bc.sourceDescription(),
+            validation.reason());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "build command blocked by sandbox: " + validation.reason());
       }
     }
 
