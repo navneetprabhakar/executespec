@@ -170,6 +170,53 @@ public class RunSandboxStore {
     return count != null && count == 1;
   }
 
+  /**
+   * Whether the holder of {@code lease} may execute a command in this sandbox right now.
+   *
+   * <p>Read in one statement so state and fence are judged against the same row version. The two
+   * refusals are kept distinct on purpose: losing the lease and finding the sandbox not READY are
+   * different facts, and collapsing them would report a takeover as an ordinary "not ready".
+   *
+   * <p><strong>Honest bound.</strong> This is a check, not a hold. Nothing prevents the lease from
+   * expiring between this call and the command starting; that window is inherent to a lease and is
+   * closed in practice by two things rather than by this query — the takeover path destroys the
+   * container before it does anything else, so a command issued into a taken-over sandbox fails
+   * against a container that no longer exists, and the lease duration is long relative to the
+   * check. A caller that needs a stronger guarantee must heartbeat, not re-check.
+   */
+  public SandboxExecAuthorization authorizeExec(RunSandbox.Lease lease) {
+    List<SandboxExecAuthorization> rows =
+        jdbc.query(
+            """
+            SELECT state,
+                   (runtime_owner = ? AND lease_token = ? AND lease_expires_at > NOW()) AS fenced
+            FROM run_sandbox WHERE id = ?
+            """,
+            (rs, ignored) -> {
+              if (!rs.getBoolean("fenced")) {
+                return SandboxExecAuthorization.FENCED;
+              }
+              return SandboxState.valueOf(rs.getString("state")) == SandboxState.READY
+                  ? SandboxExecAuthorization.AUTHORIZED
+                  : SandboxExecAuthorization.NOT_READY;
+            },
+            lease.owner(),
+            lease.fencingToken(),
+            lease.sandboxId());
+    // A missing row is a lost sandbox, never an authorization.
+    return rows.isEmpty() ? SandboxExecAuthorization.FENCED : rows.getFirst();
+  }
+
+  /** The three answers to "may this lease holder execute here". */
+  public enum SandboxExecAuthorization {
+    /** The lease is live and the sandbox is READY. */
+    AUTHORIZED,
+    /** The sandbox exists but is provisioning, cancelling or terminal. */
+    NOT_READY,
+    /** This lease is not the current owner, has expired, or the sandbox is gone. */
+    FENCED
+  }
+
   // --------------------------------------------------------------- lifecycle
 
   /** PROVISIONING -> READY, under the caller's fence. */

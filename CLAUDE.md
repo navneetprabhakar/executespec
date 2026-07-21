@@ -170,6 +170,29 @@ for high-cardinality ledgers remain Phase 5 work.
 
 Cleanroom containers (SWE-bench / ProgramBench) run with `--rm --network none -v <hostDir>:/workspace`. `ShellTool` + `BuildProjectTool` consult `ProgramBenchContainerStore` per invocation; when a containerId is set for the run, the tool dispatches via `docker exec` instead of host shell.
 
+**Sandbox exec seam (2026-07-21, `sandbox/`).** Three audit lanes converged on the same missing
+piece: `RunSandboxRuntime` could `provision` / `destroy` / `alive` a network-none, read-only-root,
+cap-dropped container but could not run anything in it, so customer-generated build and test
+commands (RR-282, RR-119) and admitted repository-controlled lint (RR-1051) still executed on the
+application host as the service account — with host network reach, including the GCE metadata
+endpoint that a stripped environment does not hide. `RunSandboxRuntime.exec(sandbox, request)` and
+`RunSandboxRuntimeDispatcher.exec(sandbox, lease, request)` are that seam.
+`SandboxExecRequest` is an argument **vector** with a hard 30-minute ceiling — a shell is reachable
+only by naming it (`["sh","-c",…]`), never as an invisible default. `SandboxExecResult` carries a
+status (`COMPLETED` / `TIMED_OUT` / `UNAVAILABLE` / `REFUSED`), not just an exit code, so "no
+sandbox ran this" is not readable as "the command failed" and cannot be caught into a host-execution
+fallback. The dispatcher gates on `sandbox.runtime.dispatch.enabled`, then on
+`RunSandboxStore.authorizeExec` (one statement judging fence and state together — a stale owner gets
+`SandboxLeaseFencedException`, a non-READY sandbox gets `REFUSED`), then delegates. `SandboxProcess`
+drains stdout and stderr separately on virtual threads so the timeout is actually reachable, caps
+each stream at 256k chars, and destroys the whole process tree on expiry.
+**Explicitly not closed:** a timeout destroys the host-side `docker exec` client tree; the process
+inside the container is a child of container init and is bounded only by the container's own
+CPU/memory/PID/wall-clock ceilings until release — a container-side kill would depend on a binary
+present in an untrusted image. The lease check is a check, not a hold. **No `tool/**` caller was
+migrated onto this seam**: the whole `sandbox/` package still has zero callers outside itself and
+all three flags remain seeded false, so no existing execution path changed.
+
 Terminal-Bench 2.0 (`terminalbench/`, RL-2026-06-004) is an operator-only **local/dev** benchmark adapter, not a customer surface. `POST /api/v2/test/terminal-bench/start` (SUPER_ADMIN + `@Profile({"local","dev","benchmark"})` — the `benchmark` profile was added so TB runs on the dedicated benchmark env) persists a `TERMINAL_BENCH` run and executes `engine/WorkerAgent` directly in REMOTE-tool mode: ExecuteSpec is the brain, the Harbor adapter in `~/tbench/es_harbor_agent.py` is the local hands inside the TB container. The keystone fix is in the manual worker dispatch path: `ToolRegistry.isRemoteRun(ctx)` + `dispatchRemote(ctx,name,args)` are consulted by `WorkerAgent.dispatchOne`; `RemoteToolDispatcher` timeout is configurable via `executespec.remote-tool.timeout-ms` (default 600s). DeepSeek first-20 baseline before terminal-mode tuning: 7/20 resolved (35%) for about $0.09; 80-floor terminal tuning reached 12/20 (60%) for about $0.40. The 100-floor + terminal-finalizer run also reached 12/20 (60%) for $0.400126 in 47m52s: `openssl-selfsigned-cert` and `sanitize-git-repo` flipped to pass, while `largest-eigenval` and `query-optimize` regressed on verifier/performance thresholds. Current comparable runs should use DeepSeek, the first-20 slice, an effective 120-iteration floor, terminal-artifact checkpoints at about iterations 16 and 32, a restricted terminal finalizer at iteration 64 even when shell calls keep counting as progress, a restricted wall-clock finalizer before failure, a forced terminal finalizer after the second text-only stop, a 1410s server-side wall clock below Harbor's 1500s agent timeout with a 90s buffer for an in-flight turn/finalizer, prompt policy that inspects `/tests`, treats exact visible assertions as byte-for-byte artifact contracts, implements detection-first no-op handling for clean transform inputs, cleans helper artifacts from deliverable directories, sweeps named error patterns, benchmarks against golden/reference thresholds, and the shared verified-pass guard that mechanically preserves a passing candidate.
 
 ### Project workbench (`project/` + companions)

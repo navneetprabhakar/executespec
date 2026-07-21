@@ -1,10 +1,8 @@
 package com.navneet.executespec.sandbox;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
@@ -80,6 +78,75 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
     return new Provisioned(name, imageDigest(spec.image()));
   }
 
+  /**
+   * Runs one command inside this sandbox's container and waits for it under a wall-clock bound.
+   *
+   * <p>Isolation is the container's, not this method's: the exec'd process inherits the network
+   * namespace ({@code none}), the read-only root, the dropped capabilities and the CPU/memory/PID
+   * ceilings that {@link SandboxContainerCommand#create} applied. What this method adds is a
+   * reachable timeout, bounded capture and an honest status.
+   *
+   * <p><strong>Timeout semantics, stated exactly.</strong> Expiry destroys the {@code docker exec}
+   * client and its descendants on the host. The process inside the container is a child of the
+   * container's init, not of that client, so it is not proven dead — it stays bounded by the
+   * container's own ceilings and is destroyed with the container by {@link #destroy}. A timed-out
+   * sandbox should be released, not reused. This is stated rather than papered over because a
+   * container-side kill would depend on a binary being present in the customer-supplied image, and
+   * a containment guarantee that depends on the contents of an untrusted image is not a guarantee.
+   */
+  @Override
+  public SandboxExecResult exec(RunSandbox sandbox, SandboxExecRequest request) {
+    if (!featureFlags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1)) {
+      return SandboxExecResult.unavailable(
+          RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1 + " is off; nothing was executed");
+    }
+    String name =
+        sandbox.runtimeHandle() == null ? containerName(sandbox) : sandbox.runtimeHandle();
+
+    SandboxProcess.Outcome outcome =
+        SandboxProcess.run(SandboxContainerCommand.exec(name, request), request.timeout());
+
+    if (!outcome.finished()) {
+      log.warn(
+          "sandbox {} command {} did not finish: {}",
+          sandbox.id(),
+          request.programLabel(),
+          outcome.detail());
+      return SandboxExecResult.timedOut(
+          outcome.stdout(), outcome.stderr(), outcome.truncated(), outcome.duration());
+    }
+    // A container-engine failure is not a command failure. The engine reports these on stderr with
+    // stable prefixes; classification is textual and therefore best-effort, so it is used only to
+    // widen "unavailable" — a command that genuinely exits non-zero is still reported as COMPLETED.
+    String engineFailure = engineFailure(outcome.exitCode(), outcome.stderr());
+    if (engineFailure != null) {
+      return SandboxExecResult.unavailable(engineFailure);
+    }
+    return SandboxExecResult.completed(
+        outcome.exitCode(),
+        outcome.stdout(),
+        outcome.stderr(),
+        outcome.truncated(),
+        outcome.duration());
+  }
+
+  /** The engine could not run the command at all, as opposed to the command exiting non-zero. */
+  private static String engineFailure(int exitCode, String stderr) {
+    if (exitCode == 0 || stderr == null) {
+      return null;
+    }
+    String lower = stderr.toLowerCase();
+    if (lower.contains("no such container")) {
+      return "sandbox container is gone";
+    }
+    if (lower.contains("cannot connect to the docker daemon")
+        || lower.contains("is not running")
+        || lower.contains("container is paused")) {
+      return "container engine unavailable";
+    }
+    return null;
+  }
+
   @Override
   public void destroy(RunSandbox sandbox) {
     String name =
@@ -141,27 +208,23 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
    * Runs a docker CLI invocation as an argument vector. Never a shell string, so no path or image
    * name can be interpreted as shell syntax. The child's streams are captured rather than
    * inherited, so container output cannot reach the server log unfiltered.
+   *
+   * <p>Routed through {@link SandboxProcess} so the declared {@code timeoutSeconds} is actually
+   * reachable. The previous implementation read the child's stdout to EOF before calling {@code
+   * waitFor}, and stdout only closes when the child exits — so the wait was always reached on an
+   * already-dead process and a wedged docker CLI pinned this thread indefinitely. It also destroyed
+   * only the direct child, leaving CLI helper processes alive.
    */
   private ExecResult exec(List<String> argv, int timeoutSeconds) {
-    Process process = null;
-    try {
-      process = new ProcessBuilder(argv).redirectErrorStream(true).start();
-      String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-        process.destroyForcibly();
-        return new ExecResult(-1, "timed out after " + timeoutSeconds + "s");
-      }
-      return new ExecResult(process.exitValue(), output);
-    } catch (IOException failure) {
-      log.warn("sandbox docker invocation failed: {}", argv.getFirst(), failure);
-      return new ExecResult(-1, failure.getMessage() == null ? "io error" : failure.getMessage());
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-      if (process != null) {
-        process.destroyForcibly();
-      }
-      throw new IllegalStateException("sandbox docker invocation interrupted", interrupted);
+    SandboxProcess.Outcome outcome = SandboxProcess.run(argv, Duration.ofSeconds(timeoutSeconds));
+    if (!outcome.finished()) {
+      log.warn(
+          "sandbox docker invocation did not finish: {} ({})", argv.getFirst(), outcome.detail());
+      return new ExecResult(-1, outcome.detail() == null ? "did not finish" : outcome.detail());
     }
+    // These call sites parse a single combined blob (a state flag, a digest, a "no such container"
+    // message), so the two streams are joined here rather than at the source.
+    return new ExecResult(outcome.exitCode(), outcome.stdout() + outcome.stderr());
   }
 
   private record ExecResult(int exitCode, String output) {}
