@@ -379,21 +379,44 @@ public class RunTopupService {
     return topup;
   }
 
+  /**
+   * Credit a Stripe-purchased AI-credit top-up.
+   *
+   * <p>RR-110: the read / status-check / {@code save()} sequence this used to run was not a claim.
+   * {@link RunTopup} carries no optimistic version and there was no conditional activation query,
+   * so two concurrent deliveries of the same valid Stripe event could both observe {@code PENDING}
+   * and each call {@code grantPurchasedCredits} — an additive update under the usage-period lock,
+   * not an idempotent one — granting the full credit quantity twice for a single payment. (The
+   * Razorpay path already used a conditional {@code PENDING} update; only Stripe was exposed.)
+   *
+   * <p>The status flip is now a single conditional UPDATE keyed by top-up id. Exactly one caller
+   * can win it; every loser returns the already-credited row without granting anything.
+   */
   public RunTopup creditStripeTopup(String topupId, String sessionId, String paymentId) {
+    UUID id = UUID.fromString(topupId);
     RunTopup topup =
         topupRepo
-            .findById(UUID.fromString(topupId))
+            .findById(id)
             .orElseThrow(() -> new BillingException("Top-up record not found: " + topupId));
     if (!"PENDING".equals(topup.getStatus())) {
       log.warn(
           "Stripe top-up already processed: topupId={}, status={}", topupId, topup.getStatus());
       return topup;
     }
-    topup.setGatewayOrderId(sessionId);
-    topup.setGatewayPaymentId(paymentId);
-    topup.setRemaining(0);
-    topup.setStatus("CREDITED");
-    topupRepo.save(topup);
+
+    int claimed = topupRepo.claimPendingStripeTopup(id, sessionId, paymentId, Instant.now());
+    if (claimed == 0) {
+      // A concurrent delivery of the same Stripe event won the claim and has already granted
+      // the credits. Returning without granting is the whole point of the conditional update.
+      log.warn("Stripe top-up credit lost race — no duplicate grant: topupId={}", topupId);
+      return topupRepo.findById(id).orElse(topup);
+    }
+    topup =
+        topupRepo
+            .findById(id)
+            .orElseThrow(
+                () -> new BillingException("Top-up record not found after credit: " + topupId));
+
     managedAiUsageService.grantPurchasedCredits(
         topup.getUserId(), topup.getOrgId(), topup.getQuantity());
     auditService.record(
