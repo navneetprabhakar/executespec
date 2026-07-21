@@ -2,6 +2,7 @@ package com.navneet.executespec.billing.service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -120,8 +121,17 @@ public class BillingService {
               .filter(p -> tierIsListed(p.getTier()))
               .collect(Collectors.toList());
     }
+    // RR-057: was one limit query per plan inside the mapper. Fetch every plan's limits in a single
+    // batch query, then group in memory so the response is identical with a constant query count.
+    List<UUID> planIds = plans.stream().map(BillingPlan::getId).collect(Collectors.toList());
+    Map<UUID, List<BillingPlanLimit>> limitsByPlan =
+        planIds.isEmpty()
+            ? Map.of()
+            : limitRepo.findByBillingPlanIdIn(planIds).stream()
+                .collect(Collectors.groupingBy(BillingPlanLimit::getBillingPlanId));
+
     return plans.stream()
-        .map(p -> PlanResponse.from(p, limitRepo.findByBillingPlanId(p.getId())))
+        .map(p -> PlanResponse.from(p, limitsByPlan.getOrDefault(p.getId(), List.of())))
         .collect(Collectors.toList());
   }
 

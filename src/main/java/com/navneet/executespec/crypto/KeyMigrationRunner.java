@@ -1,6 +1,8 @@
 package com.navneet.executespec.crypto;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -29,6 +31,13 @@ public class KeyMigrationRunner {
   private final SimpleKeyEncryptionService encryptionService;
   private final JdbcTemplate jdbcTemplate;
   private final CryptoProperties cryptoProperties;
+
+  /**
+   * RR-123 — rows scanned/updated per DB round-trip. Keyset pagination bounds heap to one page and
+   * {@code batchUpdate} replaces the previous one-UPDATE-per-row amplification, so a large table no
+   * longer makes boot O(rows) of individual queries or loads every credential into a single list.
+   */
+  private static final int MIGRATION_PAGE_SIZE = 500;
 
   @EventListener(ApplicationReadyEvent.class)
   public void migrateExistingKeys() {
@@ -108,48 +117,76 @@ public class KeyMigrationRunner {
 
   private int migrateTable(String table, String column, String keyColumn) {
     try {
-      // NOTE: use the no-element-type overload — queryForList(sql, Map.class) maps each row to a
-      // SINGLE column and throws "Incorrect column count: expected 1, actual 2" for our two-column
-      // (id, <column>) select. queryForList(sql) returns List<Map<String,Object>> as intended.
-      List<java.util.Map<String, Object>> rows =
-          jdbcTemplate.queryForList(
-              "SELECT "
-                  + keyColumn
-                  + ", "
-                  + column
-                  + " FROM "
-                  + table
-                  + " WHERE "
-                  + column
-                  + " IS NOT NULL AND "
-                  + column
-                  + " != ''");
+      // RR-123: page through the table by key (keyset) instead of loading every non-null credential
+      // into one list, and rewrite each page with a single batchUpdate instead of one UPDATE per
+      // row. Rewritten rows sort behind the advancing cursor so they are never re-read, keeping the
+      // migration idempotent and terminating exactly as before. The cursor is the raw key Object so
+      // the same code works for varchar ids (app_user/org/pipeline_run) and the bigint slack id.
+      String baseSelect =
+          "SELECT "
+              + keyColumn
+              + ", "
+              + column
+              + " FROM "
+              + table
+              + " WHERE "
+              + column
+              + " IS NOT NULL AND "
+              + column
+              + " != ''";
+      String firstPageSql =
+          baseSelect + " ORDER BY " + keyColumn + " ASC LIMIT " + MIGRATION_PAGE_SIZE;
+      String nextPageSql =
+          baseSelect
+              + " AND "
+              + keyColumn
+              + " > ? ORDER BY "
+              + keyColumn
+              + " ASC LIMIT "
+              + MIGRATION_PAGE_SIZE;
+      String updateSql = "UPDATE " + table + " SET " + column + " = ? WHERE " + keyColumn + " = ?";
 
       int count = 0;
-      for (var row : rows) {
-        String value = (String) row.get(column);
-        if (value == null || value.isBlank()) continue;
-        if (encryptionService.isCurrentEnvelope(value)) continue;
+      Object cursor = null;
+      while (true) {
+        // NOTE: the no-element-type queryForList overload returns List<Map<String,Object>>; the
+        // Map.class overload maps to a SINGLE column and throws on our two-column select.
+        List<Map<String, Object>> rows =
+            cursor == null
+                ? jdbcTemplate.queryForList(firstPageSql)
+                : jdbcTemplate.queryForList(nextPageSql, cursor);
+        if (rows.isEmpty()) break;
 
-        String plaintext = value;
-        if (encryptionService.isEnveloped(value)) {
-          // Rotation is not complete while existing rows remain under a retired decrypt-only key.
-          // Decrypt the old envelope and immediately rewrap it with the active key version so the
-          // previous key can be removed after a successful, verified migration.
-          plaintext = encryptionService.decrypt(value);
-        } else if (encryptionService.isLikelyEncrypted(value)) {
-          // Legacy bare-Base64 ciphertext: recover the plaintext with the current key. The lenient
-          // legacy path returns the input unchanged when it is not actually ciphertext — in that
-          // ambiguous case we still envelope it (it was stored as-is, so it IS the credential).
-          plaintext = encryptionService.decrypt(value);
+        List<Object[]> batchArgs = new ArrayList<>();
+        for (var row : rows) {
+          cursor = row.get(keyColumn); // advance for every row seen, rewritten or not
+          String value = (String) row.get(column);
+          if (value == null || value.isBlank()) continue;
+          if (encryptionService.isCurrentEnvelope(value)) continue;
+
+          String plaintext = value;
+          if (encryptionService.isEnveloped(value)) {
+            // Rotation is not complete while existing rows remain under a retired decrypt-only key.
+            // Decrypt the old envelope and immediately rewrap it with the active key version so the
+            // previous key can be removed after a successful, verified migration.
+            plaintext = encryptionService.decrypt(value);
+          } else if (encryptionService.isLikelyEncrypted(value)) {
+            // Legacy bare-Base64 ciphertext: recover the plaintext with the current key. The
+            // lenient
+            // legacy path returns the input unchanged when it is not actually ciphertext — in that
+            // ambiguous case we still envelope it (it was stored as-is, so it IS the credential).
+            plaintext = encryptionService.decrypt(value);
+          }
+
+          batchArgs.add(new Object[] {encryptionService.encrypt(plaintext), row.get(keyColumn)});
         }
 
-        String enveloped = encryptionService.encrypt(plaintext);
-        jdbcTemplate.update(
-            "UPDATE " + table + " SET " + column + " = ? WHERE " + keyColumn + " = ?",
-            enveloped,
-            row.get(keyColumn));
-        count++;
+        if (!batchArgs.isEmpty()) {
+          jdbcTemplate.batchUpdate(updateSql, batchArgs);
+          count += batchArgs.size();
+        }
+
+        if (rows.size() < MIGRATION_PAGE_SIZE) break;
       }
 
       if (count > 0) {

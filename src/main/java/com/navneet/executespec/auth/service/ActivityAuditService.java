@@ -4,7 +4,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -31,6 +36,9 @@ public class ActivityAuditService {
 
   /** M-019 (V147) — genesis prev_hash for the very first chained row. */
   static final String GENESIS_HASH = "0".repeat(64);
+
+  /** RR-209 — rows the streaming chain verifier holds in heap at once. */
+  private static final int CHAIN_VERIFY_PAGE_SIZE = 1000;
 
   private final ActivityAuditRepository repo;
   private final AppUserRepository userRepo;
@@ -196,50 +204,69 @@ public class ActivityAuditService {
    * scale beyond that, switch to a Merkle-tree summary.
    */
   public ChainVerifyReport verifyChain() {
-    var rows = repo.findChainOrdered();
+    // RR-209: was a single findChainOrdered() that loaded the entire ledger into one list. The scan
+    // is inherently sequential (each row's expectedPrev is the previous row's rowHash), so it is
+    // now
+    // a checkpointed keyset walk — page by chain_seq carrying expectedPrev/afterSeq across pages —
+    // which bounds heap to one page while producing the identical clean/break verdict.
+    long total = repo.countChained();
+    int totalChained = (int) total;
     long checked = 0;
     String expectedPrev = GENESIS_HASH;
-    for (ActivityAudit row : rows) {
-      checked++;
-      // Prev-hash linkage check
-      if (!expectedPrev.equals(row.getPrevHash())) {
-        return new ChainVerifyReport(
-            rows.size(),
-            checked,
-            false,
-            new ChainBreak(
-                row.getId(),
-                row.getChainSeq(),
-                "prev_hash mismatch — expected "
-                    + expectedPrev
-                    + " but row carries "
-                    + row.getPrevHash()));
+    long afterSeq = Long.MIN_VALUE;
+    var pageable = org.springframework.data.domain.PageRequest.of(0, CHAIN_VERIFY_PAGE_SIZE);
+
+    while (true) {
+      List<ActivityAudit> rows = repo.findChainOrderedAfter(afterSeq, pageable);
+      if (rows.isEmpty()) break;
+
+      for (ActivityAudit row : rows) {
+        checked++;
+        // Prev-hash linkage check
+        if (!expectedPrev.equals(row.getPrevHash())) {
+          return new ChainVerifyReport(
+              totalChained,
+              checked,
+              false,
+              new ChainBreak(
+                  row.getId(),
+                  row.getChainSeq(),
+                  "prev_hash mismatch — expected "
+                      + expectedPrev
+                      + " but row carries "
+                      + row.getPrevHash()));
+        }
+        // Row-hash recompute check. RR-208: new rows are hashed with the v2 canonical encoding;
+        // rows written before v2 are accepted when they verify under the legacy v1 encoding, so the
+        // canonicalization change does not break tamper-verification of existing audit history.
+        String recomputed = computeRowHashV2(row.getPrevHash(), row);
+        boolean rowHashOk = recomputed.equals(row.getRowHash());
+        if (!rowHashOk) {
+          rowHashOk = computeRowHashV1(row.getPrevHash(), row).equals(row.getRowHash());
+        }
+        if (!rowHashOk) {
+          return new ChainVerifyReport(
+              totalChained,
+              checked,
+              false,
+              new ChainBreak(
+                  row.getId(),
+                  row.getChainSeq(),
+                  "row_hash mismatch — fields mutated after write; "
+                      + "expected "
+                      + recomputed
+                      + " (v2) but stored "
+                      + row.getRowHash()));
+        }
+        expectedPrev = row.getRowHash();
+        if (row.getChainSeq() != null) {
+          afterSeq = row.getChainSeq();
+        }
       }
-      // Row-hash recompute check. RR-208: new rows are hashed with the v2 canonical encoding;
-      // rows written before v2 are accepted when they verify under the legacy v1 encoding, so the
-      // canonicalization change does not break tamper-verification of existing audit history.
-      String recomputed = computeRowHashV2(row.getPrevHash(), row);
-      boolean rowHashOk = recomputed.equals(row.getRowHash());
-      if (!rowHashOk) {
-        rowHashOk = computeRowHashV1(row.getPrevHash(), row).equals(row.getRowHash());
-      }
-      if (!rowHashOk) {
-        return new ChainVerifyReport(
-            rows.size(),
-            checked,
-            false,
-            new ChainBreak(
-                row.getId(),
-                row.getChainSeq(),
-                "row_hash mismatch — fields mutated after write; "
-                    + "expected "
-                    + recomputed
-                    + " (v2) but stored "
-                    + row.getRowHash()));
-      }
-      expectedPrev = row.getRowHash();
+
+      if (rows.size() < CHAIN_VERIFY_PAGE_SIZE) break;
     }
-    return new ChainVerifyReport(rows.size(), checked, true, null);
+    return new ChainVerifyReport(totalChained, checked, true, null);
   }
 
   public record ChainBreak(String rowId, Long chainSeq, String reason) {}
@@ -262,15 +289,26 @@ public class ActivityAuditService {
     Specification<ActivityAudit> spec =
         ActivityAuditSpec.buildFilter(orgId, entityType, eventType, actorId, entityId, from, to);
 
-    return AuditLogPage.from(
-        repo.findAll(spec, PageBounds.request(page, size, 100)).map(this::toEntry));
+    var rawPage = repo.findAll(spec, PageBounds.request(page, size, 100));
+
+    // RR-209: was one userRepo.findById per row (N+1, up to the page size). Resolve every distinct
+    // actor's email in a single batch query, then map from the in-memory index.
+    List<String> actorIds =
+        rawPage.getContent().stream()
+            .map(ActivityAudit::getActorId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    Map<String, String> emailByActor = new HashMap<>();
+    if (!actorIds.isEmpty()) {
+      userRepo.findAllById(actorIds).forEach(u -> emailByActor.put(u.getId(), u.getEmail()));
+    }
+
+    return AuditLogPage.from(rawPage.map(a -> toEntry(a, emailByActor)));
   }
 
-  private AuditLogEntry toEntry(ActivityAudit a) {
-    String actorEmail = null;
-    if (a.getActorId() != null) {
-      actorEmail = userRepo.findById(a.getActorId()).map(u -> u.getEmail()).orElse(null);
-    }
+  private AuditLogEntry toEntry(ActivityAudit a, Map<String, String> emailByActor) {
+    String actorEmail = a.getActorId() != null ? emailByActor.get(a.getActorId()) : null;
     return new AuditLogEntry(
         a.getId(),
         a.getEventType(),

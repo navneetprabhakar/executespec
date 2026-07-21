@@ -86,17 +86,20 @@ class KeyMigrationRunnerTest {
 
     new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
 
-    ArgumentCaptor<Object> written = ArgumentCaptor.forClass(Object.class);
-    verify(jdbc).update(contains("org_slack_integration"), written.capture(), eq(1L));
-    assertThat(written.getValue().toString()).startsWith("enc:v1:1:");
-    assertThat(service.decrypt(written.getValue().toString()))
-        .isEqualTo("xoxb-plaintext-slack-token");
-
-    ArgumentCaptor<Object> rewrapped = ArgumentCaptor.forClass(Object.class);
-    verify(jdbc).update(contains("org_slack_integration"), rewrapped.capture(), eq(2L));
-    assertThat(service.decrypt(rewrapped.getValue().toString())).isEqualTo("legacy-secret");
-
-    verify(jdbc, never()).update(anyString(), any(), eq(3L));
+    // RR-123: rows are rewritten in one batchUpdate per page, not one update per row.
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Object[]>> batch = ArgumentCaptor.forClass(List.class);
+    verify(jdbc).batchUpdate(contains("org_slack_integration"), batch.capture());
+    Map<Object, String> byKey = new java.util.HashMap<>();
+    for (Object[] args : batch.getValue()) {
+      byKey.put(args[1], args[0].toString());
+    }
+    // id 3 (already a current envelope) is skipped; only id 1 + id 2 are batched.
+    assertThat(byKey).hasSize(2).doesNotContainKey(3L);
+    assertThat(byKey.get(1L)).startsWith("enc:v1:1:");
+    assertThat(service.decrypt(byKey.get(1L))).isEqualTo("xoxb-plaintext-slack-token");
+    assertThat(service.decrypt(byKey.get(2L))).isEqualTo("legacy-secret");
+    verify(jdbc, never()).update(anyString(), any(), any());
   }
 
   @Test
@@ -111,9 +114,13 @@ class KeyMigrationRunnerTest {
 
     new KeyMigrationRunner(rotatedService, jdbc, properties(true)).migrateExistingKeys();
 
-    ArgumentCaptor<Object> rewrapped = ArgumentCaptor.forClass(Object.class);
-    verify(jdbc).update(contains("org_slack_integration"), rewrapped.capture(), eq(7L));
-    String currentEnvelope = rewrapped.getValue().toString();
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Object[]>> batch = ArgumentCaptor.forClass(List.class);
+    verify(jdbc).batchUpdate(contains("org_slack_integration"), batch.capture());
+    assertThat(batch.getValue()).hasSize(1);
+    Object[] args = batch.getValue().get(0);
+    assertThat(args[1]).isEqualTo(7L);
+    String currentEnvelope = args[0].toString();
     assertThat(currentEnvelope).startsWith("enc:v1:current:");
     SimpleKeyEncryptionService afterRetirement = service(ROTATED_KEY, "current", Map.of());
     assertThat(afterRetirement.decrypt(currentEnvelope)).isEqualTo("rotate-and-retire");
@@ -132,13 +139,42 @@ class KeyMigrationRunnerTest {
 
     new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
 
-    ArgumentCaptor<Object> written = ArgumentCaptor.forClass(Object.class);
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<Object[]>> batch = ArgumentCaptor.forClass(List.class);
     verify(jdbc)
-        .update(
-            contains("UPDATE pipeline_run SET github_pat = ? WHERE run_id = ?"),
-            written.capture(),
-            eq("run-1"));
-    assertThat(service.decrypt(written.getValue().toString())).isEqualTo("ghp-legacy");
+        .batchUpdate(
+            contains("UPDATE pipeline_run SET github_pat = ? WHERE run_id = ?"), batch.capture());
+    assertThat(batch.getValue()).hasSize(1);
+    Object[] args = batch.getValue().get(0);
+    assertThat(args[1]).isEqualTo("run-1");
+    assertThat(service.decrypt(args[0].toString())).isEqualTo("ghp-legacy");
+  }
+
+  @Test
+  void largeColumnIsPagedByKeysetAndBatched() {
+    // RR-123: a full first page must trigger a second keyset page fetch, and each page must be
+    // written with a single batchUpdate — never a per-row update — so boot stays bounded.
+    SimpleKeyEncryptionService service = liveService();
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString())).thenReturn(List.of());
+
+    List<Map<String, Object>> firstPage = new java.util.ArrayList<>();
+    for (long i = 1; i <= 500; i++) {
+      firstPage.add(Map.of("id", i, "bot_token", "xoxb-token-" + i));
+    }
+    when(jdbc.queryForList(contains("org_slack_integration"))).thenReturn(firstPage);
+    when(jdbc.queryForList(contains("org_slack_integration"), any(Object.class)))
+        .thenReturn(List.of(Map.of("id", 501L, "bot_token", "xoxb-token-501")));
+
+    new KeyMigrationRunner(service, jdbc, properties(false)).migrateExistingKeys();
+
+    // First page via single-arg query; second page via keyset (two-arg) query with cursor = 500.
+    verify(jdbc).queryForList(contains("org_slack_integration"));
+    verify(jdbc).queryForList(contains("org_slack_integration"), eq(500L));
+    // One batchUpdate per page (500 rows, then 1 row); never a per-row update.
+    verify(jdbc, org.mockito.Mockito.times(2))
+        .batchUpdate(contains("org_slack_integration"), any(List.class));
+    verify(jdbc, never()).update(anyString(), any(), any());
   }
 
   @Test

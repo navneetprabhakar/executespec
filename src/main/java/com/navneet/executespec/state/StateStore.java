@@ -1292,14 +1292,60 @@ public class StateStore {
   /** Global (SUPER_ADMIN) variant: no org filter. */
   public UserRunsSummaryData computeUserRunsSummaryGlobal(int days) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
-    // N2 (audit 2026-05-29) — windowed query in the DB; all-time global stays a full scan as
-    // before.
-    List<PipelineRun> runs =
-        since == null ? runRepo.findAll() : runRepo.findByStartedAtAfter(since);
-    Map<String, AppUser> userMap =
-        appUserRepo.findAllActive().stream()
-            .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
-    return buildUserStats(runs, userMap);
+    // RR-079: the all-time global summary used to load every pipeline_run AND every active user
+    // into heap, then group in Java. Now the per-user counts/token sums are aggregated in SQL
+    // (one row per distinct run owner) and only the owning users' display names are batch-fetched,
+    // so heap and query count no longer scale with the total run/user count.
+    List<PipelineRunRepository.UserRunAggregate> aggregates =
+        since == null ? runRepo.aggregateUserRunStats() : runRepo.aggregateUserRunStatsSince(since);
+    return buildUserStatsFromAggregates(aggregates);
+  }
+
+  /**
+   * RR-079 — builds the summary from SQL aggregate rows, batch-resolving run-owner display names.
+   * Preserves the DELETED-exclusion the previous {@code findAllActive()} userMap applied (a DELETED
+   * owner falls back to a truncated id, exactly as before), and the run-count-descending ordering.
+   */
+  private UserRunsSummaryData buildUserStatsFromAggregates(
+      List<PipelineRunRepository.UserRunAggregate> aggregates) {
+    List<String> userIds =
+        aggregates.stream()
+            .map(PipelineRunRepository.UserRunAggregate::getUid)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    Map<String, AppUser> userMap = new HashMap<>();
+    if (!userIds.isEmpty()) {
+      for (AppUser u : appUserRepo.findAllById(userIds)) {
+        if (!"DELETED".equals(u.getStatus())) {
+          userMap.put(u.getId(), u);
+        }
+      }
+    }
+
+    List<UserRunStat> stats =
+        aggregates.stream()
+            .map(
+                a -> {
+                  String uid = a.getUid();
+                  AppUser user = userMap.get(uid);
+                  String displayName =
+                      user != null
+                          ? (user.getFirstName() + " " + user.getLastName()).trim()
+                          : uid.substring(0, Math.min(8, uid.length())) + "…";
+                  return new UserRunStat(
+                      uid,
+                      displayName,
+                      (int) a.getRunCount(),
+                      (int) a.getCompleted(),
+                      (int) a.getFailed(),
+                      a.getTotalIn(),
+                      a.getTotalOut());
+                })
+            .sorted(Comparator.comparingInt(UserRunStat::runCount).reversed())
+            .toList();
+
+    return new UserRunsSummaryData(stats);
   }
 
   private UserRunsSummaryData buildUserStats(List<PipelineRun> runs, Map<String, AppUser> userMap) {
