@@ -1431,7 +1431,10 @@ export function IdeLive() {
       ? 'Connecting…'
       : sseStatus === 'RECONNECTING'
         ? 'Reconnecting — brief delay…'
-        : 'Live (5s refresh)';
+        : // RR-202/RR-203 — surface a stalled stream instead of implying it is live.
+          sseStatus === 'ERROR'
+          ? 'Live stream unavailable — using 5s refresh'
+          : 'Live (5s refresh)';
   // Mobile hides the task list via CSS — keep a one-line summary visible at
   // all widths (subtle enough to be harmless on desktop too).
   const currentTaskTitle = tasks.find((t) => taskIsRunning(t.status))?.title;

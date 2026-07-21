@@ -1,6 +1,14 @@
 import {create} from 'zustand';
 
-export type SseConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
+export type SseConnectionStatus =
+  | 'DISCONNECTED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'RECONNECTING'
+  // RR-202/RR-203 — retry budget exhausted or a required scoped token could not
+  // be obtained. Distinct from RECONNECTING so the UI can stop implying an
+  // imminent recovery and rely on the background poll instead.
+  | 'ERROR';
 
 export interface LogEntry {
   id: string;

@@ -2,12 +2,22 @@ import {create} from 'zustand';
 import * as api from '@/lib/api';
 import type {TierPermissions} from '@/hooks/useTierPermissions';
 
+/**
+ * RR-198 — permissions are a three-state signal, not a nullable value. `null`
+ * means "unknown" but the store must also tell consumers WHY it is unknown so
+ * the UI can render a retry/error rather than silently downgrading a paid/admin
+ * account to a disabled-controls state when the permission fetch merely failed.
+ */
+export type PermissionsStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 interface AuthStore {
   user: api.AuthUser | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   permissions: TierPermissions | null;
+  /** RR-198 — lifecycle of the permissions fetch. `error` ≠ empty permissions. */
+  permissionsStatus: PermissionsStatus;
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -20,6 +30,8 @@ interface AuthStore {
   ) => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
   loadMe: () => Promise<void>;
+  /** RR-198 — (re)fetch tier permissions, tracking loading/ready/error state. */
+  loadPermissions: () => Promise<void>;
   setUser: (user: api.AuthUser | null) => void;
   clearAuth: () => void;
 }
@@ -30,6 +42,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
   permissions: null,
+  permissionsStatus: 'idle',
 
   login: async (email, password) => {
     const resp = await api.authLogin({email, password});
@@ -40,11 +53,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       user: api.normalizeAuthUser(resp.user),
       isAuthenticated: true,
     });
-    // Load permissions after login
-    api
-      .getMyPermissions()
-      .then((p) => set({permissions: p}))
-      .catch(() => {});
+    // RR-198 — load permissions with tracked loading/ready/error state.
+    void get().loadPermissions();
   },
 
   logout: async () => {
@@ -54,7 +64,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       /* ignore */
     }
     localStorage.removeItem('access_token');
-    set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    set({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      permissions: null,
+      permissionsStatus: 'idle',
+    });
   },
 
   register: async (email, firstName, lastName, password, attribution) => {
@@ -75,7 +91,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       return true;
     } catch {
       localStorage.removeItem('access_token');
-      set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+      set({
+        accessToken: null,
+        user: null,
+        isAuthenticated: false,
+        permissions: null,
+        permissionsStatus: 'idle',
+      });
       return false;
     }
   },
@@ -102,20 +124,48 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         api.updateViewMode('pro').catch(() => {});
       }
       set({user, isAuthenticated: true});
-      // Load tier permissions
-      api
-        .getMyPermissions()
-        .then((p) => set({permissions: p}))
-        .catch(() => {});
+      // RR-198 — load tier permissions with tracked loading/ready/error state.
+      void get().loadPermissions();
+    } catch (e) {
+      // RR-197 — distinguish a definitively dead session from a transient fault.
+      // A 401/403 means the token is invalid: clear ALL access state including
+      // the persisted token, atomically, so a reload does not reconstruct
+      // isAuthenticated=true from the same dead token and loop the spinner /
+      // unauthorized-request path. A transient failure (network / 5xx / unknown)
+      // must NOT mutate authentication truth — leave the session intact so a
+      // retry can recover instead of forcing a spurious logout.
+      const status = e instanceof api.ApiError ? e.status : undefined;
+      const definitiveAuthFailure = status === 401 || status === 403;
+      if (definitiveAuthFailure) {
+        get().clearAuth();
+      }
+    }
+  },
+
+  loadPermissions: async () => {
+    // RR-198 — model permissions as loading | ready | error so consumers can
+    // tell "the permission service failed" apart from "not entitled". On failure
+    // we retain the last-known permissions snapshot (do not null it) and flag
+    // `error` so the UI can offer retry instead of rendering a downgraded account.
+    set({permissionsStatus: 'loading'});
+    try {
+      const p = await api.getMyPermissions();
+      set({permissions: p, permissionsStatus: 'ready'});
     } catch {
-      set({user: null, isAuthenticated: false, permissions: null});
+      set({permissionsStatus: 'error'});
     }
   },
 
   setUser: (user) => set({user}),
   clearAuth: () => {
     localStorage.removeItem('access_token');
-    set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    set({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      permissions: null,
+      permissionsStatus: 'idle',
+    });
   },
 }));
 
