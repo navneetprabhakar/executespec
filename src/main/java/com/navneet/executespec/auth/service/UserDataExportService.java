@@ -4,10 +4,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -20,6 +25,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.entity.Invoice;
@@ -71,6 +77,7 @@ public class UserDataExportService {
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
   private final ProjectRepository projectRepo;
+  private final ProjectMemberRepository projectMemberRepo;
   private final PipelineRunRepository runRepo;
   private final NotificationRepository notificationRepo;
   private final BillingSubscriptionRepository subRepo;
@@ -78,6 +85,18 @@ public class UserDataExportService {
 
   /** Cap on row count per top-level key to keep the export bounded. */
   private static final int EXPORT_ROW_LIMIT = 200;
+
+  /**
+   * RR-207 — total serialized-payload byte ceiling. The row cap alone does not bound bytes (a run's
+   * {@code userRequest} spec text is unbounded), so once the projected rows exceed this budget the
+   * remaining rows are dropped and the collection is marked truncated in the manifest rather than
+   * risking heap exhaustion. 20 MiB comfortably fits the {@link #EXPORT_ROW_LIMIT}-row projections
+   * for ordinary users while capping pathological payloads.
+   *
+   * <p>Package-private and non-final only so tests can drive the truncation path with a tiny cap
+   * instead of allocating 20 MiB; production never mutates it.
+   */
+  static long MAX_EXPORT_PAYLOAD_BYTES = 20L * 1024 * 1024;
 
   private static final ObjectMapper MAPPER =
       new ObjectMapper()
@@ -110,6 +129,14 @@ public class UserDataExportService {
         "GDPR Article 15 (access) + Article 20 (portability). Contact admin@executespec.ai for"
             + " erasure (Article 17) requests.");
 
+    // RR-207: one shared serialized-byte budget across the (large) run/notification/invoice
+    // collections. When exhausted, later rows are dropped and the collection is marked truncated
+    // in the manifest instead of building an unbounded object graph in heap.
+    ByteBudget budget = new ByteBudget(MAX_EXPORT_PAYLOAD_BYTES);
+
+    // RR-206: honest per-collection truncation accounting so the compliance claim is not false.
+    Map<String, Object> truncation = new LinkedHashMap<>();
+
     // Build payloads
     Map<String, Object> payload = new HashMap<>();
     payload.put("user", redactUser(user));
@@ -126,30 +153,34 @@ public class UserDataExportService {
             : List.of();
     payload.put("orgs", orgs);
 
-    // Project ownership is org-scoped — a user inherits visibility through their org row.
-    // For solo users (auto-provisioned personal org), this is just their projects. For
-    // multi-member orgs, this returns all projects in their org; downstream filtering for
-    // strict per-user data is a follow-up if/when product wants narrower export scope.
-    List<Project> projects =
-        user.getOrgId() != null ? projectRepo.findByOrgId(user.getOrgId()) : List.of();
-    payload.put("projects", projects.stream().map(UserDataExportService::exportProject).toList());
+    // RR-205: a "personal" DSAR must export only projects ATTRIBUTABLE to the requester, not every
+    // project in their org. `findByOrgId` returns all org projects (tombstones included); we retain
+    // only those the requester created or is a member of, then add any membership projects that
+    // live in another org (external collaboration).
+    List<Project> attributableProjects = resolveAttributableProjects(userId, user.getOrgId());
+    payload.put(
+        "projects",
+        attributableProjects.stream().map(UserDataExportService::exportProject).toList());
 
     // schemaVersion 2 (P5.4 follow-up, 2026-05-06) — pull additional personal-data tables.
-    // Each list is capped at EXPORT_ROW_LIMIT (200) to bound the in-memory zip size; for
-    // power users with thousands of runs we'd add proper async + GCS hand-off in a future
-    // bump, but the cap is sufficient for current scale.
+    // Each list is row-capped at EXPORT_ROW_LIMIT and byte-capped by the shared budget above.
     PageRequest topN = PageRequest.of(0, EXPORT_ROW_LIMIT);
-    List<PipelineRun> runs =
-        runRepo.findByCreatedByUserIdOrderByStartedAtDesc(userId, topN).getContent();
-    // RR-204: `PipelineRun` exposes the DECRYPTED GitHub PAT + Bitbucket app password copied onto
-    // the run row, so the entity must not be serialised either. Allowlist below.
-    payload.put("runs", runs.stream().map(UserDataExportService::exportRun).toList());
 
-    List<Notification> notifications =
-        notificationRepo.findByUserIdOrderByCreatedAtDesc(userId, topN).getContent();
-    payload.put(
-        "notifications",
-        notifications.stream().map(UserDataExportService::exportNotification).toList());
+    // RR-204: `PipelineRun` exposes the DECRYPTED GitHub PAT + Bitbucket app password copied onto
+    // the run row, so the entity must not be serialised either — allowlist projection only.
+    var runsPage = runRepo.findByCreatedByUserIdOrderByStartedAtDesc(userId, topN);
+    BoundedList runs =
+        boundedProject(runsPage.getContent(), UserDataExportService::exportRun, budget);
+    payload.put("runs", runs.rows());
+    truncation.put("runs", collectionStat(runs, runsPage.getTotalElements()));
+
+    var notificationsPage = notificationRepo.findByUserIdOrderByCreatedAtDesc(userId, topN);
+    BoundedList notifications =
+        boundedProject(
+            notificationsPage.getContent(), UserDataExportService::exportNotification, budget);
+    payload.put("notifications", notifications.rows());
+    truncation.put(
+        "notifications", collectionStat(notifications, notificationsPage.getTotalElements()));
 
     // Active subscription (current state) — historical churn arc is a future schema bump.
     Map<String, Object> billing = new HashMap<>();
@@ -157,17 +188,41 @@ public class UserDataExportService {
     billing.put(
         "activeSubscription",
         activeSub.map(UserDataExportService::exportSubscription).orElse(null));
-    List<Invoice> invoices =
-        invoiceRepo.findByUserIdOrderByInvoiceDateDesc(userId, topN).getContent();
-    billing.put("invoices", invoices.stream().map(UserDataExportService::exportInvoice).toList());
+    var invoicesPage = invoiceRepo.findByUserIdOrderByInvoiceDateDesc(userId, topN);
+    BoundedList invoices =
+        boundedProject(invoicesPage.getContent(), UserDataExportService::exportInvoice, budget);
+    billing.put("invoices", invoices.rows());
     payload.put("billing", billing);
+    truncation.put("invoices", collectionStat(invoices, invoicesPage.getTotalElements()));
+
+    // Projects are not row/byte-capped here; report an honest, non-truncated stat for parity.
+    truncation.put(
+        "projects",
+        collectionStat(
+            new BoundedList(List.of(), attributableProjects.size(), false),
+            attributableProjects.size()));
+
+    // RR-206: surface truncation in the manifest so an incomplete Article 15/20 export is never
+    // presented as complete.
+    boolean anyTruncated =
+        runs.byteCapped()
+            || notifications.byteCapped()
+            || invoices.byteCapped()
+            || runsPage.getTotalElements() > runs.includedRows()
+            || notificationsPage.getTotalElements() > notifications.includedRows()
+            || invoicesPage.getTotalElements() > invoices.includedRows();
+    manifest.put("truncation", truncation);
+    manifest.put("truncated", anyTruncated);
+    manifest.put("byteCapBytes", MAX_EXPORT_PAYLOAD_BYTES);
 
     payload.put(
         "_note",
         "schemaVersion 2 — runs / notifications / billing included alongside the user / orgs"
-            + " / projects identity bundle. Each list is capped at "
+            + " / projects identity bundle. Projects are scoped to those you own or belong to."
+            + " Each list is row-capped at "
             + EXPORT_ROW_LIMIT
-            + " rows for in-memory export safety; the full row count is logged at export time."
+            + " rows and byte-capped for in-memory export safety; see manifest.truncation for the"
+            + " true total counts and whether any collection was truncated."
             + " Activity audit hash chain is preserved internally for compliance and is not"
             + " exposed here.");
 
@@ -181,13 +236,109 @@ public class UserDataExportService {
       String filename =
           "executespec-export-" + userId + "-" + Instant.now().toString().substring(0, 10) + ".zip";
       log.info(
-          "[UserDataExport] Generated export for user={} sizeBytes={} projectsIncluded={}",
+          "[UserDataExport] Generated export for user={} sizeBytes={} projectsIncluded={}"
+              + " truncated={}",
           userId,
           baos.size(),
-          projects.size());
+          attributableProjects.size(),
+          Boolean.TRUE.equals(manifest.get("truncated")));
       return new ExportBundle(baos.toByteArray(), filename);
     } catch (IOException e) {
       throw new IllegalStateException("Failed to build export bundle for user " + userId, e);
+    }
+  }
+
+  /**
+   * RR-205 — the set of projects a "personal" DSAR may include: those the requester created within
+   * their org, plus every project the requester is a {@link ProjectMember} of (which may live in
+   * another org through external collaboration). Deliberately EXCLUDES other org members' projects
+   * the requester merely inherits org-wide visibility to.
+   */
+  private List<Project> resolveAttributableProjects(String userId, String orgId) {
+    Set<String> memberProjectIds = new HashSet<>(projectMemberRepo.findProjectIdsByUserId(userId));
+
+    List<Project> orgProjects = orgId != null ? projectRepo.findByOrgId(orgId) : List.of();
+    List<Project> attributable = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    Set<String> orgProjectIds = new HashSet<>();
+    for (Project p : orgProjects) {
+      orgProjectIds.add(p.getId());
+      boolean owned = userId.equals(p.getCreatedBy());
+      if ((owned || memberProjectIds.contains(p.getId())) && seen.add(p.getId())) {
+        attributable.add(p);
+      }
+    }
+
+    // Membership projects in another org (external collaboration) are attributable to the
+    // requester but not returned by the org-scoped lookup above.
+    List<String> foreignMemberIds =
+        memberProjectIds.stream().filter(id -> !orgProjectIds.contains(id)).toList();
+    if (!foreignMemberIds.isEmpty()) {
+      for (Project p : projectRepo.findAllById(foreignMemberIds)) {
+        if (seen.add(p.getId())) {
+          attributable.add(p);
+        }
+      }
+    }
+    return attributable;
+  }
+
+  /**
+   * RR-207 — project each entity through its allowlist mapper, admitting rows only while the shared
+   * serialized-byte {@code budget} holds. Stops (byte-capped) rather than growing the heap without
+   * bound. The caller's row list is already {@link #EXPORT_ROW_LIMIT}-capped.
+   */
+  private static <T> BoundedList boundedProject(
+      List<T> rows, Function<T, Map<String, Object>> mapper, ByteBudget budget) {
+    List<Map<String, Object>> out = new ArrayList<>(rows.size());
+    boolean byteCapped = false;
+    for (T row : rows) {
+      Map<String, Object> projected = mapper.apply(row);
+      byte[] serialized;
+      try {
+        serialized = MAPPER.writeValueAsBytes(projected);
+      } catch (IOException e) {
+        // A row that cannot be serialised is skipped rather than aborting the whole export.
+        log.warn("[UserDataExport] Skipping unserialisable export row: {}", e.getMessage());
+        continue;
+      }
+      if (!budget.tryConsume(serialized.length)) {
+        byteCapped = true;
+        break;
+      }
+      out.add(projected);
+    }
+    return new BoundedList(out, out.size(), byteCapped);
+  }
+
+  /** RR-206 — per-collection completion stat for the manifest. */
+  private static Map<String, Object> collectionStat(BoundedList included, long totalRows) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("includedRows", included.includedRows());
+    m.put("totalRows", totalRows);
+    m.put("truncated", totalRows > included.includedRows());
+    m.put("byteCapReached", included.byteCapped());
+    return m;
+  }
+
+  /** RR-207 — projected rows plus the count admitted and whether the byte budget stopped early. */
+  private record BoundedList(
+      List<Map<String, Object>> rows, int includedRows, boolean byteCapped) {}
+
+  /** RR-207 — mutable serialized-byte budget shared across the exported collections. */
+  private static final class ByteBudget {
+    private long remaining;
+
+    ByteBudget(long cap) {
+      this.remaining = cap;
+    }
+
+    boolean tryConsume(long bytes) {
+      if (bytes > remaining) {
+        return false;
+      }
+      remaining -= bytes;
+      return true;
     }
   }
 
@@ -388,20 +539,24 @@ public class UserDataExportService {
             + "Top-level keys in `payload.json`:\n\n"
             + "- `user` — your AppUser record with sensitive fields redacted.\n"
             + "- `orgs` — orgs you belong to.\n"
-            + "- `projects` — projects in your org (cross-member visible per org membership).\n"
-            + "- `runs` — last "
+            + "- `projects` — only projects you created or are a member of (NOT every project in\n"
+            + "  your org).\n"
+            + "- `runs` — up to "
             + EXPORT_ROW_LIMIT
             + " pipeline runs you submitted.\n"
-            + "- `notifications` — last "
+            + "- `notifications` — up to "
             + EXPORT_ROW_LIMIT
             + " in-app notifications.\n"
             + "- `billing.activeSubscription` — current paid subscription (or absent).\n"
-            + "- `billing.invoices` — last "
+            + "- `billing.invoices` — up to "
             + EXPORT_ROW_LIMIT
             + " invoices.\n\n"
             + "Each list is capped at "
             + EXPORT_ROW_LIMIT
-            + " rows for in-memory export safety.\n\n"
+            + " rows and bounded by a total serialized-byte budget for in-memory export safety.\n"
+            + "`manifest.json` → `truncation` reports the TRUE total row count per collection and\n"
+            + "whether it was truncated (`manifest.truncated` is true if any collection was cut).\n"
+            + "If truncated, contact admin@executespec.ai for a full paged export.\n\n"
             + "## What's redacted\n\n"
             + "Your password hash + LLM API keys + GitHub PAT are intentionally excluded.\n"
             + "You can recover or rotate them from Settings → Account.\n\n"

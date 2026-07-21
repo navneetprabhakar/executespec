@@ -80,10 +80,57 @@ public class ActivityAuditService {
   }
 
   /**
-   * M-019 — canonical SHA-256 of (prev_hash || immutable row content). Mutating any persisted field
-   * after write will invalidate the chain.
+   * RR-208 — schema tag for the canonical, length-prefixed row-hash encoding. Authenticated as the
+   * first field so a v1 pre-image can never collide with a v2 pre-image.
+   */
+  static final String HASH_SCHEMA_V2 = "activity-audit-hash/v2";
+
+  /**
+   * M-019 / RR-208 — canonical SHA-256 of (prev_hash || immutable row content). Mutating any
+   * persisted field after write will invalidate the chain.
+   *
+   * <p>New rows are hashed with the {@link #computeRowHashV2 v2} canonical encoding. Verification
+   * ({@link #verifyChain}) still recognizes rows written under the legacy {@link #computeRowHashV1
+   * v1} encoding, so existing audit rows keep verifying without a rehash/migration.
    */
   public static String computeRowHash(String prevHash, ActivityAudit entry) {
+    return computeRowHashV2(prevHash, entry);
+  }
+
+  /**
+   * RR-208 — canonical, structurally-unambiguous SHA-256 over (prev_hash || immutable row content).
+   *
+   * <p>The legacy v1 encoding joined nullable, user-controlled fields with a raw {@code '|'} and no
+   * length prefix or escaping, so a delimiter character could be shifted between two adjacent field
+   * values without changing the hashed byte string (tamper-evidence gap); it also omitted {@code
+   * chain_seq}. v2 length-prefixes every field ({@code len:value}), encodes {@code null} distinctly
+   * from empty ({@code -1:} vs {@code 0:}), and authenticates a schema tag AND the chain sequence.
+   * Because each field is read by exact length rather than by delimiter-scan, no injected {@code
+   * '|'} / {@code ':'} can move a field boundary.
+   */
+  static String computeRowHashV2(String prevHash, ActivityAudit entry) {
+    StringBuilder sb = new StringBuilder(640);
+    appendLengthPrefixed(sb, HASH_SCHEMA_V2);
+    appendLengthPrefixed(sb, prevHash);
+    appendLengthPrefixed(sb, entry.getId());
+    appendLengthPrefixed(sb, entry.getEventType());
+    appendLengthPrefixed(sb, entry.getEntityType());
+    appendLengthPrefixed(sb, entry.getEntityId());
+    appendLengthPrefixed(sb, entry.getActorId());
+    appendLengthPrefixed(sb, entry.getOrgId());
+    appendLengthPrefixed(sb, entry.getOldValue());
+    appendLengthPrefixed(sb, entry.getNewValue());
+    appendLengthPrefixed(sb, entry.getMetadata());
+    appendLengthPrefixed(sb, entry.getCreatedAt() == null ? null : entry.getCreatedAt().toString());
+    appendLengthPrefixed(sb, entry.getChainSeq() == null ? null : entry.getChainSeq().toString());
+    return sha256Hex(sb.toString());
+  }
+
+  /**
+   * RR-208 — legacy (pre-canonicalization) row-hash encoding. Retained ONLY so audit rows written
+   * before v2 continue to verify under {@link #verifyChain}; never used to hash new rows.
+   */
+  static String computeRowHashV1(String prevHash, ActivityAudit entry) {
     StringBuilder sb =
         new StringBuilder(512)
             .append(prevHash == null ? "" : prevHash)
@@ -108,6 +155,18 @@ public class ActivityAuditService {
             .append('|')
             .append(entry.getCreatedAt() == null ? "" : entry.getCreatedAt().toString());
     return sha256Hex(sb.toString());
+  }
+
+  /**
+   * RR-208 — length-prefixed, null-distinguishing field encoder. {@code null} is {@code -1:} (an
+   * impossible length) and cannot collide with any real value's {@code len:value} framing.
+   */
+  private static void appendLengthPrefixed(StringBuilder sb, String v) {
+    if (v == null) {
+      sb.append("-1:");
+    } else {
+      sb.append(v.length()).append(':').append(v);
+    }
   }
 
   private static String nullSafe(String s) {
@@ -156,9 +215,15 @@ public class ActivityAuditService {
                     + " but row carries "
                     + row.getPrevHash()));
       }
-      // Row-hash recompute check
-      String recomputed = computeRowHash(row.getPrevHash(), row);
-      if (!recomputed.equals(row.getRowHash())) {
+      // Row-hash recompute check. RR-208: new rows are hashed with the v2 canonical encoding;
+      // rows written before v2 are accepted when they verify under the legacy v1 encoding, so the
+      // canonicalization change does not break tamper-verification of existing audit history.
+      String recomputed = computeRowHashV2(row.getPrevHash(), row);
+      boolean rowHashOk = recomputed.equals(row.getRowHash());
+      if (!rowHashOk) {
+        rowHashOk = computeRowHashV1(row.getPrevHash(), row).equals(row.getRowHash());
+      }
+      if (!rowHashOk) {
         return new ChainVerifyReport(
             rows.size(),
             checked,
@@ -169,7 +234,7 @@ public class ActivityAuditService {
                 "row_hash mismatch — fields mutated after write; "
                     + "expected "
                     + recomputed
-                    + " but stored "
+                    + " (v2) but stored "
                     + row.getRowHash()));
       }
       expectedPrev = row.getRowHash();
