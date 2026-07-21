@@ -31,12 +31,13 @@ class InvoiceControllerTest {
   private final InvoiceEmailService emailService = mock(InvoiceEmailService.class);
   private final TierPermissionService permissionService = mock(TierPermissionService.class);
   private final AppUserRepository userRepo = mock(AppUserRepository.class);
+  private final BillingProfileRepository profileRepo = mock(BillingProfileRepository.class);
   private final InvoiceController controller =
       new InvoiceController(
           invoiceService,
           mock(InvoicePdfService.class),
           emailService,
-          mock(BillingProfileRepository.class),
+          profileRepo,
           mock(SellerConfigRepository.class),
           permissionService,
           mock(ActivityAuditService.class),
@@ -109,6 +110,118 @@ class InvoiceControllerTest {
         .isEqualTo(HttpStatus.BAD_REQUEST);
 
     verify(invoiceService, never()).generateCreditNote(invoiceId, 1001, "too much");
+  }
+
+  // ---- RR-183: billing profile + invoice reads require a billing capability ----
+
+  private AppUser orgMember() {
+    return AppUser.builder()
+        .id("dev-1")
+        .email("dev@example.com")
+        .firstName("Dev")
+        .globalRole("USER")
+        .orgId("org-1")
+        .status("ACTIVE")
+        .build();
+  }
+
+  /** Permission fixture with all flags false except the two named billing capabilities. */
+  private TierPermissionService.TierPermissions billingPerms(
+      boolean canViewInvoices, boolean canManageBillingProfile) {
+    return new TierPermissionService.TierPermissions(
+        false, // canManageAiKeys
+        false, // canViewPricing
+        false, // canManageIntegrations
+        false, // canViewMetrics
+        false, // canViewCostBreakdown
+        false, // canViewTokenUsage
+        false, // canUseChat
+        false, // canCreateOrg
+        false, // canInviteMembers
+        false, // canViewOrgMembers
+        false, // canViewAudit
+        false, // canViewLiveLog
+        canViewInvoices, // canViewInvoices
+        false, // canViewAccounting
+        false, // canManageCreditNotes
+        false, // canExportGstr
+        false, // canManageSellerConfig
+        canManageBillingProfile, // canManageBillingProfile
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        false,
+        0,
+        "NONE",
+        0,
+        false,
+        "fixture");
+  }
+
+  @Test
+  void getProfileDeniedForOrgMemberWithoutBillingCapability() {
+    AppUser dev = orgMember();
+    when(permissionService.getPermissions("dev-1")).thenReturn(billingPerms(false, false));
+
+    assertThatThrownBy(() -> controller.getProfile(new AppUserDetails(dev, null)))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+
+    verify(profileRepo, never()).findByOrgId("org-1");
+  }
+
+  @Test
+  void updateProfileDeniedWithoutManageCapabilityEvenWithViewCapability() {
+    AppUser dev = orgMember();
+    // Can view (read) but not manage (write): the PUT must still be refused.
+    when(permissionService.getPermissions("dev-1")).thenReturn(billingPerms(true, false));
+
+    assertThatThrownBy(
+            () ->
+                controller.updateProfile(
+                    new AppUserDetails(dev, null),
+                    com.navneet.executespec.billing.entity.BillingProfile.builder()
+                        .gstin("HACKED")
+                        .build()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+
+    verify(profileRepo, never()).save(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void myInvoicesDeniedForOrgMemberWithoutBillingCapability() {
+    AppUser dev = orgMember();
+    when(permissionService.getPermissions("dev-1")).thenReturn(billingPerms(false, false));
+
+    assertThatThrownBy(
+            () ->
+                controller.myInvoices(
+                    new AppUserDetails(dev, null),
+                    org.springframework.data.domain.Pageable.unpaged()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+
+    verify(invoiceService, never())
+        .listByOrg(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void billingReaderCanReadProfile() {
+    AppUser dev = orgMember();
+    when(permissionService.getPermissions("dev-1")).thenReturn(billingPerms(true, false));
+    when(profileRepo.findByOrgId("org-1")).thenReturn(Optional.empty());
+
+    // No exception — a billing-capable member reads the org profile (new default profile returned).
+    controller.getProfile(new AppUserDetails(dev, null));
+
+    verify(profileRepo).findByOrgId("org-1");
   }
 
   private AppUser financeAdmin() {
