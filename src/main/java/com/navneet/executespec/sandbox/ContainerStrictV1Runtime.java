@@ -24,7 +24,10 @@ import lombok.extern.slf4j.Slf4j;
  * enable this runtime, and do not describe it as proven, until it has.
  *
  * <p>Container naming is derived from the sandbox id so a restarted JVM reattaches to the same
- * container instead of leaking a second one.
+ * container instead of leaking a second one. Because that name is therefore NOT an ownership proof,
+ * every container is stamped at creation with {@link SandboxContainerCommand#LABEL_SANDBOX_ID} and
+ * {@link SandboxContainerCommand#LABEL_SANDBOX_EPOCH}, and reattach, liveness and destroy all
+ * require an exact label match before touching it (RR-327).
  */
 @Component
 @RequiredArgsConstructor
@@ -57,8 +60,16 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
     String name = containerName(sandbox);
 
     // Crash-safe: if a previous attempt by this or another JVM already started the container,
-    // reattach rather than starting a second one.
+    // reattach rather than starting a second one — but only after proving it is OUR container.
+    // A name is not an identity (RR-327): reattaching to a container that carries a different
+    // sandbox id or a different runtime epoch would execute customer code in someone else's
+    // isolation boundary and then report it as this sandbox's runtime.
     if (running(name)) {
+      Fence fence = readFence(sandbox, name);
+      if (fence != Fence.MATCHES) {
+        throw new IllegalStateException(
+            "refusing to reattach to container %s: fencing labels %s".formatted(name, fence));
+      }
       log.info("sandbox {} reattaching to existing container {}", sandbox.id(), name);
       return new Provisioned(name, imageDigest(spec.image()));
     }
@@ -69,7 +80,11 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
             // the sandbox id. Passing only the global workspace root admitted the root itself
             // and every sibling tenant's workspace.
             SandboxContainerCommand.create(
-                name, spec, Path.of(properties.getWorkspaceRoot()), String.valueOf(sandbox.id())),
+                name,
+                spec,
+                Path.of(properties.getWorkspaceRoot()),
+                String.valueOf(sandbox.id()),
+                sandbox.runtimeEpoch()),
             properties.getCommandTimeoutSeconds());
     if (started.exitCode() != 0) {
       throw new IllegalStateException(
@@ -147,26 +162,92 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
     return null;
   }
 
+  /**
+   * Removes this sandbox's container, and only this sandbox's container.
+   *
+   * <p><strong>RR-327.</strong> This used to resolve the target from the sandbox-id-derived name
+   * and issue an unfenced {@code docker rm --force}. That name is stable across a takeover by
+   * design — it is what lets a restarted JVM reattach — so a JVM that had just lost the lease could
+   * delete the live container the winner had reattached to, in exactly the race the database fence
+   * exists to arbitrate. Destroy now reads the container's own fencing labels and removes it only
+   * on an exact match of sandbox id AND runtime epoch. Every other answer is a refusal, never a
+   * guess: an unlabelled container, a foreign container that answers to this name, or an engine
+   * that cannot be read all mean "this is not provably mine", and removing something on that basis
+   * is the defect.
+   *
+   * <p>The consequence is deliberate: a container this runtime cannot prove it owns will not be
+   * cleaned up by this method, and the failure surfaces as {@code TEARDOWN_FAILED}. A leaked
+   * container an operator must remove is strictly better than a live tenant's container removed by
+   * a stale process. No container predating this fence exists — all three sandbox flags are seeded
+   * false and no caller outside this package has ever provisioned one.
+   *
+   * <p>Ownership is the dispatcher's half of the fence, not this method's: labels prove WHICH
+   * container, the lease proves WHO may act on it.
+   */
   @Override
   public void destroy(RunSandbox sandbox) {
     String name =
         sandbox.runtimeHandle() == null ? containerName(sandbox) : sandbox.runtimeHandle();
+    Fence fence = readFence(sandbox, name);
+    if (fence == Fence.ABSENT) {
+      // Already gone. Teardown is idempotent, and reconciliation of an orphan whose container
+      // died with its JVM is the common case.
+      return;
+    }
+    if (fence != Fence.MATCHES) {
+      throw new IllegalStateException(
+          "refusing to destroy container %s: fencing labels %s".formatted(name, fence));
+    }
     ExecResult removed =
         exec(SandboxContainerCommand.destroy(name), properties.getCommandTimeoutSeconds());
-    // `docker rm --force` on an absent container exits non-zero with "No such container". That is
-    // the expected outcome for reconciliation of an orphan whose container is already gone, so it
-    // is a success. Any other non-zero exit means the container may still be live.
+    // `docker rm --force` can still race a concurrent removal between the inspect and here, so an
+    // absent container remains a success. Any other non-zero exit means it may still be live.
     if (removed.exitCode() != 0 && !removed.output().toLowerCase().contains("no such container")) {
       throw new IllegalStateException(
           "sandbox container teardown failed (exit %d)".formatted(removed.exitCode()));
     }
   }
 
+  /** Whether a container is provably the one this sandbox generation created. */
+  enum Fence {
+    /** Labels carry this sandbox's exact id and runtime epoch. */
+    MATCHES,
+    /** No such container. */
+    ABSENT,
+    /** The container exists but carries different, missing or empty fencing labels. */
+    MISMATCHED,
+    /** The container engine could not be read, so nothing is proven either way. */
+    UNREADABLE
+  }
+
+  /**
+   * Reads a container's fencing labels (RR-327).
+   *
+   * <p>Absence is distinguished from unreadability by the engine's own "no such container" text.
+   * That classification is textual and therefore best-effort — which is why it is only ever used to
+   * widen refusal: an ambiguous answer resolves to {@link Fence#UNREADABLE}, which refuses, and
+   * never to {@link Fence#MATCHES}.
+   */
+  private Fence readFence(RunSandbox sandbox, String name) {
+    ExecResult inspected = exec(SandboxContainerCommand.inspectFence(name), 30);
+    if (inspected.exitCode() != 0) {
+      return inspected.output().toLowerCase().contains("no such") ? Fence.ABSENT : Fence.UNREADABLE;
+    }
+    String observed = inspected.output().trim();
+    String expected =
+        SandboxContainerCommand.expectedFence(String.valueOf(sandbox.id()), sandbox.runtimeEpoch());
+    return observed.equals(expected) ? Fence.MATCHES : Fence.MISMATCHED;
+  }
+
+  /**
+   * Whether THIS sandbox's container is still live. A foreign or stale-generation container that
+   * happens to answer to the same name is not this sandbox being alive (RR-327).
+   */
   @Override
   public boolean alive(RunSandbox sandbox) {
     String name =
         sandbox.runtimeHandle() == null ? containerName(sandbox) : sandbox.runtimeHandle();
-    return running(name);
+    return running(name) && readFence(sandbox, name) == Fence.MATCHES;
   }
 
   /** The default strict spec for a sandbox, from configuration. */
@@ -214,8 +295,12 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
    * waitFor}, and stdout only closes when the child exits — so the wait was always reached on an
    * already-dead process and a wedged docker CLI pinned this thread indefinitely. It also destroyed
    * only the direct child, leaving CLI helper processes alive.
+   *
+   * <p>Package-private and overridable so the fencing logic above can be exercised against scripted
+   * engine responses. It is the ONLY place this class starts a process; a test that replaces it
+   * replaces the container engine entirely and nothing else.
    */
-  private ExecResult exec(List<String> argv, int timeoutSeconds) {
+  ExecResult exec(List<String> argv, int timeoutSeconds) {
     SandboxProcess.Outcome outcome = SandboxProcess.run(argv, Duration.ofSeconds(timeoutSeconds));
     if (!outcome.finished()) {
       log.warn(
@@ -227,5 +312,5 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
     return new ExecResult(outcome.exitCode(), outcome.stdout() + outcome.stderr());
   }
 
-  private record ExecResult(int exitCode, String output) {}
+  record ExecResult(int exitCode, String output) {}
 }
