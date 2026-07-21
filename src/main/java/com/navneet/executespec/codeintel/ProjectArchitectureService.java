@@ -187,6 +187,22 @@ public class ProjectArchitectureService {
           "Project has no linked repos — link repos before generating architecture");
     }
 
+    // RR-457 — decide up front which linked sources this pipeline can actually read. Every step
+    // below constructs "https://github.com/" + githubRepoFullName and calls GitHubRepoService, so a
+    // Bitbucket or LOCAL source used to be fed through as the literal repository "null": codemap,
+    // per-repo architecture, the combined document and downstream planner context were all
+    // generated against a repository that does not exist, or the whole regen threw with a message
+    // that never named the real cause. Non-GitHub sources are now excluded explicitly and the
+    // exclusion is carried into the document instead of being silently absent.
+    SourceAdmission admission = admitSources(links);
+    if (admission.generatable().isEmpty()) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_IMPLEMENTED,
+          "Architecture generation is not available for this project's linked sources: "
+              + admission.excludedSummary()
+              + ". Code intelligence currently reads GitHub sources only.");
+    }
+
     LlmProvider provider = projectProviderResolver.resolve(projectId, providerOverride);
 
     boolean hasOverride = branchOverride != null && !branchOverride.isBlank();
@@ -199,9 +215,7 @@ public class ProjectArchitectureService {
     // defaultBranch (fixes permanent-STALE for non-default-branch regenerations).
     java.util.LinkedHashMap<String, String> branchesByRepo = new java.util.LinkedHashMap<>();
 
-    for (ProjectRepoLink link : links) {
-      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo == null) continue;
+    for (ProjectRepo repo : admission.generatable()) {
       String effectiveBranch = hasOverride ? branchOverride : repo.getDefaultBranch();
 
       // Step 1: per-repo codemap (idempotent by SHA)
@@ -277,6 +291,10 @@ public class ProjectArchitectureService {
               "deterministic");
     }
 
+    // RR-457 — a document that silently omits half the project reads as complete coverage. When
+    // some linked sources could not be read, say so inside the document itself.
+    String combinedMarkdown = admission.appendExclusionNotice(combined.markdown());
+
     int nextVersion =
         archDocRepo
             .findFirstByProjectIdOrderByVersionDesc(projectId)
@@ -309,7 +327,7 @@ public class ProjectArchitectureService {
         ProjectArchitectureDoc.builder()
             .projectId(projectId)
             .version(nextVersion)
-            .content(combined.markdown())
+            .content(combinedMarkdown)
             .generatedFromShas(shasJson)
             .generatedFromBranches(branchesJson)
             .costUsd(archCost)
@@ -325,7 +343,7 @@ public class ProjectArchitectureService {
         projectId,
         codeMaps.size(),
         nextVersion,
-        combined.markdown().length(),
+        combinedMarkdown.length(),
         combined.inputTokens(),
         combined.outputTokens());
 
@@ -334,7 +352,7 @@ public class ProjectArchitectureService {
         codeMaps,
         repoArchDocs,
         repoFullNames,
-        combined.markdown(),
+        combinedMarkdown,
         provider,
         actorUserId,
         confirmedActionReference);
@@ -661,6 +679,84 @@ public class ProjectArchitectureService {
         projectId, archMarkdown, provider, actorUserId, confirmedActionReference);
   }
 
+  /**
+   * RR-457 — split linked sources into the ones this GitHub-shaped pipeline can genuinely read and
+   * the ones it cannot, with a stated reason per exclusion.
+   *
+   * <p>This is deliberately an explicit typed unavailable result rather than Bitbucket support. The
+   * per-repo path is GitHub API calls all the way down — {@code CodeMapGenerator} builds {@code
+   * https://github.com/<name>} and reads blobs through {@code GitHubRepoService}. Making it
+   * provider-neutral means routing through {@code ScmRepositoryClient} and giving the codemap
+   * reader a provider-neutral file/blob contract; that is a real port, not a rename, and it belongs
+   * with the repo-client lane. Until then the honest behaviour is to name the gap rather than
+   * fabricate a {@code github.com/null} repository and present the output as project-wide truth.
+   */
+  private SourceAdmission admitSources(List<ProjectRepoLink> links) {
+    List<ProjectRepo> generatable = new ArrayList<>();
+    List<String> excluded = new ArrayList<>();
+    for (ProjectRepoLink link : links) {
+      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
+      if (repo == null) {
+        excluded.add("linked source " + link.getRepoId() + " (registry row not found)");
+        continue;
+      }
+      String reason = unsupportedSourceReason(repo);
+      if (reason == null) {
+        generatable.add(repo);
+      } else {
+        excluded.add(sourceLabel(repo) + " (" + reason + ")");
+      }
+    }
+    return new SourceAdmission(List.copyOf(generatable), List.copyOf(excluded));
+  }
+
+  /** Null when the source can be read by the GitHub-shaped code-intelligence pipeline. */
+  static String unsupportedSourceReason(ProjectRepo repo) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      return "LOCAL source — there is no remote to read a codemap from";
+    }
+    String provider = repo.getScmProvider();
+    if (provider != null && !"GITHUB".equalsIgnoreCase(provider)) {
+      return provider + " source — code intelligence has no provider-neutral reader yet";
+    }
+    if (repo.getGithubRepoFullName() == null || repo.getGithubRepoFullName().isBlank()) {
+      return "no GitHub repository name recorded";
+    }
+    return null;
+  }
+
+  private static String sourceLabel(ProjectRepo repo) {
+    if (repo.getSourceKey() != null && !repo.getSourceKey().isBlank()) return repo.getSourceKey();
+    if (repo.getGithubRepoFullName() != null && !repo.getGithubRepoFullName().isBlank()) {
+      return repo.getGithubRepoFullName();
+    }
+    return String.valueOf(repo.getId());
+  }
+
+  /**
+   * The readable and unreadable halves of a project's linked sources.
+   *
+   * @param generatable sources the pipeline may read, in link order
+   * @param excluded human-readable "name (reason)" strings for sources it may not
+   */
+  record SourceAdmission(List<ProjectRepo> generatable, List<String> excluded) {
+
+    String excludedSummary() {
+      return String.join("; ", excluded);
+    }
+
+    /** Append a coverage caveat so the document never implies it covers every linked source. */
+    String appendExclusionNotice(String markdown) {
+      String base = markdown == null ? "" : markdown;
+      if (excluded.isEmpty()) return base;
+      StringBuilder sb = new StringBuilder(base);
+      sb.append("\n\n## Sources excluded from this architecture\n\n");
+      sb.append("The following linked sources were not read, so nothing below describes them:\n\n");
+      for (String entry : excluded) sb.append("* ").append(entry).append('\n');
+      return sb.toString();
+    }
+  }
+
   private static String repoShortName(String full) {
     String s = full.contains("/") ? full.substring(full.indexOf('/') + 1) : full;
     return s.replaceAll("[^A-Za-z0-9._-]", "-");
@@ -832,6 +928,14 @@ public class ProjectArchitectureService {
     if (!linked) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "repo " + repoId + " is not linked to project " + projectId);
+    }
+    // RR-457 — same GitHub-only boundary as the project-wide pipeline. Without this the Bitbucket
+    // and LOCAL cases reach ensureCodeMap and read "https://github.com/null".
+    String unsupported = unsupportedSourceReason(repo);
+    if (unsupported != null) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_IMPLEMENTED,
+          "Architecture generation is not available for " + sourceLabel(repo) + ": " + unsupported);
     }
 
     LlmProvider provider = projectProviderResolver.resolve(projectId);

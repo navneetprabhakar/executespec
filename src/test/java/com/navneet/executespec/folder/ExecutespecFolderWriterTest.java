@@ -143,16 +143,19 @@ class ExecutespecFolderWriterTest {
   // End-to-end writeFiles (PR mode)
 
   @Test
-  void writeFiles_prMode_opensSetupBranchPutsFilesAndOpensPr() {
-    // Sequence of HTTP responses the writer will see:
-    //  1. GET /repos/.../git/refs/heads/main — base SHA lookup
-    //  2. POST /repos/.../git/refs           — branch creation
-    //  3. GET .../contents/.../codemap.md?ref=main — existing-sha lookup (404 = doesn't exist)
-    //  4. PUT .../contents/.../codemap.md   — file write on new branch
+  void writeFiles_prMode_buildsOneCommitAndOpensPr() {
+    // RR-536 — the batch is now one blob/tree/commit set behind a single new branch ref:
+    //  GET  /git/refs/heads/main              — base SHA
+    //  GET  /contents/...?ref=main            — drift pre-flight (404 = new file)
+    //  GET  /git/commits/base-sha-001         — base tree
+    //  POST /git/blobs, /git/trees, /git/commits, /git/refs
     http.queueGet(200, "{\"object\":{\"sha\":\"base-sha-001\"}}");
-    http.queuePost(201, "{\"ref\":\"refs/heads/executespec/foo\"}");
     http.queueGet(404, "{}");
-    http.queuePut(201, "{\"content\":{\"sha\":\"new-blob\"}}");
+    http.queueGet(200, "{\"tree\":{\"sha\":\"base-tree-001\"}}");
+    http.queuePost(201, "{\"sha\":\"blob-1\"}");
+    http.queuePost(201, "{\"sha\":\"tree-1\"}");
+    http.queuePost(201, "{\"sha\":\"commit-1\"}");
+    http.queuePost(201, "{\"ref\":\"refs/heads/executespec/foo\"}");
 
     when(gh.createPullRequest(
             anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
@@ -174,11 +177,69 @@ class ExecutespecFolderWriterTest {
   }
 
   @Test
-  void writeFiles_directPushMode_skipsBranchAndPr() {
-    repo.setExecutespecPrMode(ProjectRepo.PrMode.DIRECT_PUSH.name());
-    // Direct push only does: getContents (existing-sha) + putContents
+  void writeFiles_prMode_deletesOrphanBranchWhenPrOpenFails() {
+    http.queueGet(200, "{\"object\":{\"sha\":\"base-sha-001\"}}");
     http.queueGet(404, "{}");
-    http.queuePut(201, "{\"content\":{\"sha\":\"new-blob\"}}");
+    http.queueGet(200, "{\"tree\":{\"sha\":\"base-tree-001\"}}");
+    http.queuePost(201, "{\"sha\":\"blob-1\"}");
+    http.queuePost(201, "{\"sha\":\"tree-1\"}");
+    http.queuePost(201, "{\"sha\":\"commit-1\"}");
+    http.queuePost(201, "{\"ref\":\"refs/heads/executespec/foo\"}");
+    http.queueDelete(204, "");
+
+    when(gh.createPullRequest(
+            anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        .thenReturn(null);
+
+    Optional<ExecutespecFolderWriter.PullRequestInfo> result =
+        writer.writeFiles(
+            repo,
+            null,
+            Map.of(".executespec/arch/codemap.md", "# codemap"),
+            "bootstrap",
+            "body",
+            "ghp_test");
+
+    assertThat(result).isEmpty();
+    assertThat(http.deletesIssued()).isEqualTo(1);
+  }
+
+  @Test
+  void writeFiles_prMode_publishesNothingWhenOneBlobFails() {
+    // RR-536 — the load-bearing property: a mid-batch failure must not create any ref, so the
+    // repository is byte-identical afterwards and the caller's "nothing was written" is true.
+    http.queueGet(200, "{\"object\":{\"sha\":\"base-sha-001\"}}");
+    http.queueGet(404, "{}");
+    http.queueGet(404, "{}");
+    http.queueGet(200, "{\"tree\":{\"sha\":\"base-tree-001\"}}");
+    http.queuePost(201, "{\"sha\":\"blob-1\"}");
+    http.queuePost(500, "{}"); // second blob fails
+
+    Optional<ExecutespecFolderWriter.PullRequestInfo> result =
+        writer.writeFiles(
+            repo,
+            null,
+            new java.util.LinkedHashMap<>(
+                Map.of(
+                    ".executespec/arch/a.md", "a",
+                    ".executespec/arch/b.md", "b")),
+            "bootstrap",
+            "body",
+            "ghp_test");
+
+    assertThat(result).isEmpty();
+    assertThat(http.postsIssued()).isEqualTo(2); // blobs only — no tree, no commit, no ref
+  }
+
+  @Test
+  void writeFiles_directPushMode_compareAndSwapsTheDefaultBranch() {
+    repo.setExecutespecPrMode(ProjectRepo.PrMode.DIRECT_PUSH.name());
+    http.queueGet(200, "{\"object\":{\"sha\":\"base-sha-001\"}}");
+    http.queueGet(200, "{\"tree\":{\"sha\":\"base-tree-001\"}}");
+    http.queuePost(201, "{\"sha\":\"blob-1\"}");
+    http.queuePost(201, "{\"sha\":\"tree-1\"}");
+    http.queuePost(201, "{\"sha\":\"commit-1\"}");
+    http.queuePatch(200, "{\"object\":{\"sha\":\"commit-1\"}}");
 
     Optional<ExecutespecFolderWriter.PullRequestInfo> result =
         writer.writeFiles(
@@ -193,6 +254,28 @@ class ExecutespecFolderWriterTest {
     assertThat(result.get().openedNewPr()).isFalse();
     assertThat(result.get().prUrl()).isNull();
     assertThat(result.get().branchName()).isEqualTo("main");
+  }
+
+  @Test
+  void writeFiles_directPushMode_publishesNothingWhenTheRefRaceIsLost() {
+    repo.setExecutespecPrMode(ProjectRepo.PrMode.DIRECT_PUSH.name());
+    http.queueGet(200, "{\"object\":{\"sha\":\"base-sha-001\"}}");
+    http.queueGet(200, "{\"tree\":{\"sha\":\"base-tree-001\"}}");
+    http.queuePost(201, "{\"sha\":\"blob-1\"}");
+    http.queuePost(201, "{\"sha\":\"tree-1\"}");
+    http.queuePost(201, "{\"sha\":\"commit-1\"}");
+    http.queuePatch(422, "{\"message\":\"Update is not a fast forward\"}");
+
+    Optional<ExecutespecFolderWriter.PullRequestInfo> result =
+        writer.writeFiles(
+            repo,
+            null,
+            Map.of(".executespec/arch/codemap.md", "# codemap"),
+            "regen post-merge",
+            null,
+            "ghp_test");
+
+    assertThat(result).isEmpty();
   }
 
   /** Encode a content string into a GitHub /contents response body. */
@@ -211,6 +294,10 @@ class ExecutespecFolderWriterTest {
     private final Deque<HttpResponse<String>> getQueue = new ArrayDeque<>();
     private final Deque<HttpResponse<String>> postQueue = new ArrayDeque<>();
     private final Deque<HttpResponse<String>> putQueue = new ArrayDeque<>();
+    private final Deque<HttpResponse<String>> patchQueue = new ArrayDeque<>();
+    private final Deque<HttpResponse<String>> deleteQueue = new ArrayDeque<>();
+    private int postsIssued;
+    private int deletesIssued;
 
     void queueGet(int status, String body) {
       getQueue.add(stub(status, body));
@@ -224,6 +311,22 @@ class ExecutespecFolderWriterTest {
       putQueue.add(stub(status, body));
     }
 
+    void queuePatch(int status, String body) {
+      patchQueue.add(stub(status, body));
+    }
+
+    void queueDelete(int status, String body) {
+      deleteQueue.add(stub(status, body));
+    }
+
+    int postsIssued() {
+      return postsIssued;
+    }
+
+    int deletesIssued() {
+      return deletesIssued;
+    }
+
     @SuppressWarnings("unchecked")
     @Override
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
@@ -232,8 +335,16 @@ class ExecutespecFolderWriterTest {
       Deque<HttpResponse<String>> queue =
           switch (method) {
             case "GET" -> getQueue;
-            case "POST" -> postQueue;
+            case "POST" -> {
+              postsIssued++;
+              yield postQueue;
+            }
             case "PUT" -> putQueue;
+            case "PATCH" -> patchQueue;
+            case "DELETE" -> {
+              deletesIssued++;
+              yield deleteQueue;
+            }
             default -> throw new IllegalStateException("unexpected method: " + method);
           };
       HttpResponse<String> next = queue.poll();
