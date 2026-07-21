@@ -47,6 +47,14 @@ public class EmbeddingService {
   private final RunStepUsageRecorder usageRecorder;
   private final ManagedAiUsageService managedAiUsageService;
 
+  /**
+   * RR-392 (2026-07-20) — the embedding transport is a real provider-spending path that carried no
+   * live-LLM kill switch at all, so an emergency cost shutdown or a misconfigured test could still
+   * bill OpenAI here. It now passes through the same shared authorization as chat dispatch.
+   */
+  private final com.navneet.executespec.agent.ProviderDispatchAuthorization
+      providerDispatchAuthorization;
+
   @Value("${project.rag.embedding.openai.input-cost-per-million-usd:0.02}")
   private double inputCostPerMillionUsd = 0.02d;
 
@@ -138,6 +146,7 @@ public class EmbeddingService {
               model,
               dispatch.keySource().name(),
               batchNumber);
+      providerDispatchAuthorization.authorize(PROVIDER, model, runId);
       long started = System.currentTimeMillis();
       OpenAiEmbeddingTransport.Result result;
       try {

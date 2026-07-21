@@ -40,6 +40,12 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   through planner/worker/reviewer/compactor children and survives a JVM restart.
 - Lifecycle mutations take a tenant scope and use a pessimistic row lock plus JPA `@Version`.
 - An active lease cannot be stolen. After expiry, a new owner may claim and increment `attempt`.
+- RR-322: dispatch is fenced against a superseded claim. A context whose lease owner is set but whose
+  lease has EXPIRED is not dispatchable, and a caller that declares `LlmRequest.llmExecutionAttempt`
+  must match the context's current attempt. Dispatch is NOT restricted to `RUNNING` only, because no
+  production caller invokes `claim` yet — every real context is `QUEUED`, so that restriction would
+  fail-close all customer dispatch rather than fence a stale worker. Making the lease mandatory is
+  open lifecycle work for the context-creation callers.
 - Stale owners cannot heartbeat, complete, or fail after lease loss.
 - Cancellation is immediate for queued/expired work and cooperative for active work.
 - Reusing an idempotency key with a different immutable request fails closed.
@@ -55,6 +61,12 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   `LlmRequest`.
 - `LlmExecutionPolicyFactory` — idempotent run/agent/project/chat/platform context construction.
 - `LlmExecutionDispatchGuard` — last-mile route, credential-source and durable-budget enforcement.
+- `LlmExecutionBudgetGate` — RR-321 (V316). Budget evaluation plus the atomic provider-call
+  reservation, under a pessimistic row lock in its own transaction. `maxProviderCalls` is a hard
+  ceiling: `reserved_provider_calls` is incremented before transport, so concurrent authorizers
+  cannot each observe the same remaining allowance. Token/cost ceilings are evaluated under the same
+  lock but remain reconciled-after-the-fact rather than reserved — a per-call worst-case estimate
+  was deliberately not invented.
 
 ## Adopted customer surfaces
 

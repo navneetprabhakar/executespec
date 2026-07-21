@@ -695,6 +695,30 @@ managed-AI FREE-tier locks is systematic (every FREE managed call is forced to
 `deepseek-v4-flash-native`), so the requested/served divergence there is by design and high-volume,
 not a rare tail.
 
+**Spend-quota correction (2026-07-20, RR-186/225/226/255/321/322/392/557/825):** provider spend is
+now bounded by controls that actually stop. `ManagedAiRoutingPolicy.recomputeState` treats the
+configured raw-COGS hard stop as an INDEPENDENT tighten-only gate, so a managed tier reaches
+EXHAUSTED on EITHER its credit grant or its raw ceiling (a credit top-up lifts only the former).
+`ManagedAiTierResolver` no longer raises a user's managed-AI billing tier from an external host
+project's tier, so a scoped collaboration entitlement cannot grant uncapped platform-key spend in
+the collaborator's own org. `cost/CostCapValues` is the single validated hard-cost-cap type; NaN /
+±Infinity / out-of-band values are rejected at `StateStore.setUserCostCap` and at the agent
+confirmation gate, closing the `POST /api/orchestrator/turn/confirm` path that could disable the
+worker ceiling. `engine/WorkerAgent` evaluates the hard cap on EVERY iteration and no longer makes
+the deliberate over-cap Lever-B salvage call. `agent/ProviderDispatchAuthorization` is now the real
+production boundary: `LlmRouter` and `project/rag/EmbeddingService` both call it instead of the
+router re-implementing the kill switch inline and the embedding transport having none.
+`executioncontext/LlmExecutionBudgetGate` (V316 `llm_execution_context.reserved_provider_calls`)
+evaluates every budget dimension under a pessimistic row lock and commits a provider-call
+reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency; token and
+cost ceilings are serialized but still reconciled after the fact, not reserved. The dispatch guard
+also fences a stale worker whose lease has expired or whose declared attempt generation has been
+superseded. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
+than the immediate parent's, so nesting can no longer multiply the advertised 48-turn/$8 ceiling.
+`UsageTrackingService.reserveWithinLimits` adds an atomic admit-and-increment primitive; the legacy
+`assertWithinLimits` read remains but has no production caller (RUNS admission is managed-AI
+credits).
+
 **Current correction (2026-07-19):** source migration head is V305; the next allocatable number is V306. V300 adds durable idempotent
 failed-run quota compensation; V301 snapshots the human project/org/global role on immutable LLM attempt
 intents so later membership edits cannot rewrite historical usage exports. V302 adds the preview-render
