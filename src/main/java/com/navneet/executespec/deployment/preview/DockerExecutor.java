@@ -78,15 +78,36 @@ public class DockerExecutor {
    *   <li>{@code --cap-drop ALL} and {@code --security-opt no-new-privileges} — no ambient
    *       capabilities, no setuid escalation inside the container.
    *   <li>{@code --pids-limit} — a fork bomb exhausts its own container, not the host.
-   *   <li>{@code --add-host} entries pinning the cloud metadata names to loopback, matching {@code
-   *       ComposeFileGenerator}.
+   *   <li>{@code --add-host} entries pinning the cloud metadata <em>names</em> AND the link-local
+   *       address string to loopback, matching {@code ComposeFileGenerator} exactly. Docker's
+   *       default seccomp profile is also applied because this call never passes {@code
+   *       seccomp=unconfined}.
    * </ul>
    *
-   * <p><b>Not closed here:</b> the container still has ordinary bridge-network egress. Metadata
-   * <em>names</em> are redirected, but the link-local address is reachable by IP from inside a
-   * container on a bridge network, and reaching internal services is unaffected. Deny-by-default
-   * egress requires a network policy or a separate preview VM/worker boundary and is not something
-   * a {@code docker run} flag can supply.
+   * <p>Non-root is enforced at the image layer, not here: {@code DevDockerfileGenerator} injects a
+   * {@code USER} directive (app / nginx) into the generated WEB Dockerfiles, so forcing {@code
+   * --user} at run time (which would collide with the image's own uid/gid ownership of the app dir
+   * and break writes) is neither needed nor safe.
+   *
+   * <p><b>Deliberately NOT added, because each would break real previews or needs host infra —
+   * reported, not silently dropped (RR-157 remainder):</b>
+   *
+   * <ul>
+   *   <li><b>Raw-IP egress to the metadata server (169.254.169.254) is NOT blocked.</b> An {@code
+   *       /etc/hosts} entry only rewrites a <em>name</em> lookup; a socket opened to the numeric IP
+   *       never consults it, so the {@code --add-host} for the IP string (like Compose's) is parity
+   *       theatre, not a control. Actually denying that IP requires a host firewall rule, a
+   *       dedicated egress-denied preview network, or a separate preview VM/worker boundary — none
+   *       of which a {@code docker run} flag can supply, and a blanket {@code --internal} network
+   *       would break previews that legitimately call external APIs at runtime.
+   *   <li><b>Read-only root filesystem ({@code --read-only}).</b> The generated node dev-server
+   *       previews (vite/next) write cache and build output back into their {@code /app} WORKDIR on
+   *       the image rootfs, so a read-only root breaks the common preview outright. A durable fix
+   *       stages an allowlisted context onto named writable volumes.
+   *   <li><b>A custom (tightened) seccomp profile.</b> The Docker default profile is already
+   *       active; a stricter custom profile needs a shipped, tested artifact and risks breaking
+   *       legitimate syscalls in arbitrary customer runtimes.
+   * </ul>
    */
   public String run(
       String imageTag,
@@ -115,6 +136,8 @@ public class DockerExecutor {
                 "metadata.google.internal:127.0.0.1",
                 "--add-host",
                 "metadata:127.0.0.1",
+                "--add-host",
+                "169.254.169.254:127.0.0.1",
                 "-p",
                 hostPort + ":" + containerPort,
                 imageTag),

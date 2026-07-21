@@ -20,6 +20,18 @@ public class DevDockerfileGenerator {
 
   private static final ObjectMapper mapper = new ObjectMapper();
 
+  /**
+   * Pinned versions for the global npm tools these previews install (RR-385 partial). {@code
+   * @latest} let a preview build silently drift onto whatever the registry served that day — a
+   * mutable, unaudited supply-chain input. These pins are tag-based (not integrity/digest-pinned)
+   * and, like the {@code node:20-bookworm-slim} tag pin, need a human to bump them on a security
+   * release; that rotation belongs with the lockfile/SBOM work. RR-385 stays OPEN: lifecycle scripts
+   * still run and no dependency plan is validated.
+   */
+  private static final String SERVE_VERSION = "14.2.4";
+
+  private static final String MCP_INSPECTOR_PKG = "@modelcontextprotocol/inspector@0.14.0";
+
   private final PreviewProperties previewProperties;
 
   @org.springframework.beans.factory.annotation.Autowired
@@ -390,7 +402,7 @@ public class DevDockerfileGenerator {
       cmd = "CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}";
     } else {
       cmd = "CMD npx serve -s . -l ${PORT:-8080}";
-      viteInstall = " && npm install -g serve";
+      viteInstall = " && npm install -g serve@" + SERVE_VERSION;
     }
 
     var sb = new StringBuilder();
@@ -1191,9 +1203,12 @@ public class DevDockerfileGenerator {
    * ExecuteSpec's own control directories ({@code .agent-context}, {@code .executespec}), package
    * manager credential files ({@code .npmrc}, {@code .pypirc}, …), and key/certificate material.
    *
+   * <p>This is the generated block only; {@link PreviewArtifactWriter#writeDockerIgnore} merges it
+   * onto any customer-authored {@code .dockerignore} rather than overwriting it (RR-384), appending
+   * these security exclusions last so a customer re-include cannot pull a secret back in.
+   *
    * <p><b>Not closed here:</b> this is still a deny-list over the customer's tree, not an
-   * allowlisted staged context. A repository secret under an unrecognised name is still copied. It
-   * also overwrites any {@code .dockerignore} the customer authored.
+   * allowlisted staged context. A repository secret under an unrecognised name is still copied.
    */
   public String dockerIgnore() {
     return """
@@ -1207,6 +1222,7 @@ public class DevDockerfileGenerator {
            .vscode
            *.log
            .dockerignore
+           .dockerignore.user
            Dockerfile
 
            # ExecuteSpec control directories — planner/spec context, never product source
@@ -1369,9 +1385,9 @@ public class DevDockerfileGenerator {
       // `serve` defaults to localhost; `-l tcp://0.0.0.0:5173` binds to all
       // interfaces so Docker's port-forward can reach it from the host.
       cmd =
-          """
-          RUN npm install -g serve
-          CMD ["npx", "serve", "-s", ".", "-l", "tcp://0.0.0.0:5173"]""";
+          "RUN npm install -g serve@"
+              + SERVE_VERSION
+              + "\nCMD [\"npx\", \"serve\", \"-s\", \".\", \"-l\", \"tcp://0.0.0.0:5173\"]";
     }
 
     // Ensure vite and common React dependencies are installed at build time
@@ -2538,14 +2554,19 @@ COPY requirements.txt* pyproject.toml* ./
            FROM node:20-alpine
            WORKDIR /app
            LABEL preview=true
-           RUN npm install -g @modelcontextprotocol/inspector
-           COPY package*.json ./
-           RUN npm install --legacy-peer-deps
-           COPY . .
-           EXPOSE 8080
-           ENV CLIENT_PORT=8080
-           ENV SERVER_PORT=9315
-           CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- """
+           RUN npm install -g\s"""
+        + MCP_INSPECTOR_PKG
+        + """
+
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
+COPY . .
+EXPOSE 8080
+ENV CLIENT_PORT=8080
+ENV SERVER_PORT=9315
+CMD ["sh", "-c", "npx\s"""
+        + MCP_INSPECTOR_PKG
+        + " --port 8080 -- "
         + serverCmd
         + "\"]\n";
   }
@@ -2568,8 +2589,10 @@ COPY requirements.txt* pyproject.toml* ./
                rm -rf /var/lib/apt/lists/*
            """
         + pinnedNodeInstall()
+        + "RUN npm install -g "
+        + MCP_INSPECTOR_PKG
+        + "\n"
         + """
-          RUN npm install -g @modelcontextprotocol/inspector
           COPY requirements.txt* pyproject.toml* ./
           """
         + installStep
@@ -2579,7 +2602,9 @@ COPY requirements.txt* pyproject.toml* ./
           EXPOSE 8080
           ENV CLIENT_PORT=8080
           ENV SERVER_PORT=9315
-          CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- python """
+          CMD ["sh", "-c", "npx\s"""
+        + MCP_INSPECTOR_PKG
+        + " --port 8080 -- python "
         + entryFile
         + "\"]\n";
   }

@@ -220,13 +220,29 @@ public class PreviewProxyFilter implements Filter {
           .map()
           .forEach(
               (name, values) -> {
-                String lower = name.toLowerCase();
-                if (!HOP_BY_HOP.contains(lower)
-                    && !STRIPPED_SECURITY_HEADERS.contains(lower)
-                    && !name.equalsIgnoreCase(":status")) {
+                String lower = name.toLowerCase(java.util.Locale.ROOT);
+                if (HOP_BY_HOP.contains(lower)
+                    || STRIPPED_SECURITY_HEADERS.contains(lower)
+                    || name.equalsIgnoreCase(":status")) {
+                  return;
+                }
+                // RR-159 (response path): a preview lives on preview-<label>.executespec.ai, a
+                // subdomain that shares the registrable domain with the real app. Copying an
+                // upstream Set-Cookie verbatim lets untrusted customer code emit
+                // "Set-Cookie: sid=x; Domain=.executespec.ai", which the browser would then also
+                // send to dev/app.executespec.ai — a cookie injection / fixation vector against the
+                // platform. Rewrite every Set-Cookie so any Domain attribute is dropped, making the
+                // cookie host-only to the exact preview host (a host-only cookie is never sent to
+                // another executespec.ai host). The preview keeps working cookies for its own
+                // origin.
+                if ("set-cookie".equals(lower) || "set-cookie2".equals(lower)) {
                   for (String v : values) {
-                    res.addHeader(name, v);
+                    res.addHeader(name, stripCookieDomain(v));
                   }
+                  return;
+                }
+                for (String v : values) {
+                  res.addHeader(name, v);
                 }
               });
 
@@ -244,5 +260,36 @@ public class PreviewProxyFilter implements Filter {
       log.warn("Preview proxy error for {}: {}", upstream, e.getMessage());
       res.sendError(502, "Preview unavailable");
     }
+  }
+
+  /**
+   * Removes any {@code Domain} attribute from a Set-Cookie value (RR-159). A cookie set without a
+   * Domain is "host-only" — the browser returns it only to the exact host that set it
+   * (preview-&lt;label&gt;.executespec.ai), never to a sibling like dev/app.executespec.ai. This
+   * neutralizes an untrusted preview's attempt to scope a cookie to the parent registrable domain
+   * while leaving the cookie functional for the preview's own origin. Every other attribute (Path,
+   * Secure, HttpOnly, SameSite, Max-Age, Expires, the name=value pair) is preserved verbatim.
+   */
+  static String stripCookieDomain(String setCookie) {
+    if (setCookie == null || setCookie.isEmpty()) {
+      return setCookie;
+    }
+    String[] segments = setCookie.split(";");
+    StringBuilder out = new StringBuilder(setCookie.length());
+    boolean first = true;
+    for (String segment : segments) {
+      String trimmed = segment.trim();
+      // Drop "Domain=..." (and a bare "Domain"); attribute names are case-insensitive per RFC 6265.
+      String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+      if (lower.equals("domain") || lower.startsWith("domain=")) {
+        continue;
+      }
+      if (!first) {
+        out.append("; ");
+      }
+      out.append(trimmed);
+      first = false;
+    }
+    return out.toString();
   }
 }
