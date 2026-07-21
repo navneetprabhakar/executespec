@@ -66,6 +66,13 @@ public record LlmRequest(
     String retryOf,
     String llmExecutionContextId,
     LlmExecutionScope llmExecutionScope,
+    /**
+     * RR-322 — optional fencing token: the {@code attempt} generation of the execution-context
+     * claim this caller believes it holds. When supplied, {@code LlmExecutionDispatchGuard} rejects
+     * the dispatch if the context's attempt has since advanced, so a worker whose lease was stolen
+     * cannot keep spending against the same context. Null preserves every existing caller.
+     */
+    Integer llmExecutionAttempt,
     String usageLogicalCallId,
     boolean strictProvider,
     PromptCacheStrategy promptCacheStrategy) {

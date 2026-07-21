@@ -1,13 +1,11 @@
 package com.navneet.executespec.billing.service;
 
-import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
-import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 
 import org.springframework.stereotype.Service;
 
@@ -29,7 +27,6 @@ class ManagedAiTierResolver {
 
   private final AppUserRepository userRepository;
   private final OrgRepository orgRepository;
-  private final ProjectMemberRepository projectMemberRepository;
 
   String resolveUserTier(String userId) {
     if (userId == null) return "FREE";
@@ -39,6 +36,24 @@ class ManagedAiTierResolver {
     return resolveEffectiveTier(user);
   }
 
+  /**
+   * RR-226 (2026-07-20): managed-AI billing policy is resolved from the user's OWN billing
+   * relationship (personal tier, raised only by the org they actually belong to). External
+   * host-project tiers are deliberately NOT folded in here.
+   *
+   * <p>Previously the highest tier of any external host project raised the user's global managed-AI
+   * tier. Because TEAM/BYOK/ENTERPRISE policies carry zero managed caps and are therefore treated
+   * as unmanaged/unlimited, a FREE or PRO user accepted onto a single external TEAM/Enterprise
+   * project gained uncapped platform-key spend EVERYWHERE — including their own personal org and
+   * projects — while still holding a personal billing relationship. That converted a scoped
+   * collaboration entitlement into open-ended provider spend.
+   *
+   * <p>Feature entitlement (what the collaborator may DO inside the host project) still flows
+   * through {@code EntitlementResolver}/{@code TierEnforcementService}; only the managed-credit
+   * PAYER decision is narrowed here. Scoping the host tier to calls actually executing under the
+   * host project's payer identity requires the execution context's payer org/project, which this
+   * user-keyed resolver does not receive.
+   */
   private String resolveEffectiveTier(AppUser user) {
     String effective = normalizeTier(user.getTier());
     if (user.getOrgId() != null) {
@@ -47,15 +62,7 @@ class ManagedAiTierResolver {
         effective = higherTier(effective, normalizeTier(org.getTier()));
       }
     }
-    for (String hostTier : externalHostTiers(user.getId())) {
-      effective = higherTier(effective, normalizeTier(hostTier));
-    }
     return effective;
-  }
-
-  private List<String> externalHostTiers(String userId) {
-    List<String> tiers = projectMemberRepository.findActiveExternalHostOrgTiersByUserId(userId);
-    return tiers != null ? tiers : List.of();
   }
 
   private static String normalizeTier(String tier) {
