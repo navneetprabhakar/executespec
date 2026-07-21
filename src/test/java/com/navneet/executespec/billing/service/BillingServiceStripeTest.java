@@ -24,6 +24,7 @@ import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.auth.service.PaymentAuditService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.dto.VerifyPaymentRequest;
+import com.navneet.executespec.billing.entity.BillingGatewayObligation;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.entity.RunTopup;
@@ -61,6 +62,26 @@ class BillingServiceStripeTest {
   private final RunTopupRepository runTopupRepo = mock(RunTopupRepository.class);
   private final InvoiceService invoiceService = mock(InvoiceService.class);
   private final TierConfigRepository tierConfigRepository = mock(TierConfigRepository.class);
+
+  /**
+   * V310 (RR-048 / RR-049): gateway obligations are recorded before every irreversible gateway
+   * action. Echo the argument back with an id so the service sees a PENDING obligation, which is
+   * what the production {@code record} does on first sight of an idempotency key.
+   */
+  private final BillingGatewayObligationService obligationService =
+      mock(
+          BillingGatewayObligationService.class,
+          invocation -> {
+            if ("record".equals(invocation.getMethod().getName())) {
+              BillingGatewayObligation arg = invocation.getArgument(0);
+              if (arg.getId() == null) {
+                arg.setId(UUID.randomUUID());
+              }
+              return arg;
+            }
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+          });
+
   private final BillingService service =
       new BillingService(
           razorpayGateway,
@@ -87,6 +108,7 @@ class BillingServiceStripeTest {
           new BillingPeriodService(),
           new BillingTierBridgeService(
               userRepo, mock(OrgRepository.class), planRepo, subRepo, notificationService),
+          obligationService,
           new BillingSubscriptionWriter(subRepo),
           new BillingWebhookEventRecorder(webhookRepo),
           mock(RunTopupService.class));

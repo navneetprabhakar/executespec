@@ -23,6 +23,11 @@ public class BillingSubscriptionWriter {
     this.currentTermsVersion = currentTermsVersion;
   }
 
+  /**
+   * Legacy overload — persists the plan's minimum seat count. Retained only for callers that
+   * genuinely have no per-checkout quantity; every checkout path must use the {@code
+   * requestedSeats} overload below.
+   */
   public BillingSubscription createPending(
       String userId,
       String orgId,
@@ -31,6 +36,42 @@ public class BillingSubscriptionWriter {
       String gatewaySubscriptionId,
       String gatewayCustomerId,
       boolean isFounder) {
+    return createPending(
+        userId,
+        orgId,
+        plan,
+        paymentGateway,
+        gatewaySubscriptionId,
+        gatewayCustomerId,
+        isFounder,
+        plan.getIncludedSeats());
+  }
+
+  /**
+   * RR-419: persist the seat quantity that was actually validated and sent to the gateway.
+   *
+   * <p>The Razorpay checkout path charges {@code effectiveSeats} (the Razorpay plan carries the
+   * per-seat price and the subscription sets {@code quantity = seats}), but the pending row used to
+   * record only {@code plan.includedSeats}. A TEAM customer could therefore pay for 3–20 seats and
+   * keep the 2-seat plan minimum in ExecuteSpec, corrupting seat access and every downstream
+   * lifecycle calculation. Stripe's callback restores the charged quantity from the session;
+   * Razorpay had no such reconciliation, so the checkout-requested quantity must be durable from
+   * the start.
+   *
+   * <p>{@code requestedSeats} is clamped up to the plan minimum — never below it — so a malformed
+   * request cannot under-provision a paid plan.
+   */
+  public BillingSubscription createPending(
+      String userId,
+      String orgId,
+      BillingPlan plan,
+      String paymentGateway,
+      String gatewaySubscriptionId,
+      String gatewayCustomerId,
+      boolean isFounder,
+      int requestedSeats) {
+    int includedSeats = plan.getIncludedSeats();
+    int totalSeats = Math.max(includedSeats, requestedSeats);
     BillingSubscription sub =
         BillingSubscription.builder()
             .userId(userId)
@@ -40,8 +81,8 @@ public class BillingSubscriptionWriter {
             .gatewaySubscriptionId(gatewaySubscriptionId)
             .gatewayCustomerId(gatewayCustomerId)
             .status("CREATED")
-            .totalSeats(plan.getIncludedSeats())
-            .extraSeats(0)
+            .totalSeats(totalSeats)
+            .extraSeats(Math.max(0, totalSeats - includedSeats))
             .cancelAtPeriodEnd(false)
             .termsAcceptedAt(java.time.Instant.now())
             .termsVersion(currentTermsVersion)

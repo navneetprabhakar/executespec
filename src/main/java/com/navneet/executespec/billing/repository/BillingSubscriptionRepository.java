@@ -81,4 +81,25 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
       "SELECT s FROM BillingSubscription s WHERE s.orgId = :orgId AND s.status IN ('FREE',"
           + " 'ACTIVE', 'PAST_DUE', 'CANCELLING_AT_PERIOD_END')")
   List<BillingSubscription> findActiveByOrgId(@Param("orgId") String orgId);
+
+  /**
+   * RR-517 — every other live subscription row for this user, excluding the one being retired.
+   *
+   * <p>The schema permits multiple subscription rows per user, so the period-end downgrade job must
+   * be able to see a NEWER paid subscription before it erases the user's tier. {@link
+   * #findActiveByUserId} cannot serve this: it returns a single {@code Optional} and includes the
+   * {@code FREE} placeholder status.
+   */
+  @Query(
+      "SELECT s FROM BillingSubscription s WHERE s.userId = :userId AND s.id <> :excludeId AND"
+          + " s.status IN ('ACTIVE', 'PAST_DUE', 'CANCELLING_AT_PERIOD_END')")
+  List<BillingSubscription> findOtherLiveByUserId(
+      @Param("userId") String userId, @Param("excludeId") UUID excludeId);
+
+  /** RR-517 — org-scoped counterpart of {@link #findOtherLiveByUserId}. */
+  @Query(
+      "SELECT s FROM BillingSubscription s WHERE s.orgId = :orgId AND s.id <> :excludeId AND"
+          + " s.status IN ('ACTIVE', 'PAST_DUE', 'CANCELLING_AT_PERIOD_END')")
+  List<BillingSubscription> findOtherLiveByOrgId(
+      @Param("orgId") String orgId, @Param("excludeId") UUID excludeId);
 }
