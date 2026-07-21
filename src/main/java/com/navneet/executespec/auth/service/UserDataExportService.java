@@ -114,8 +114,16 @@ public class UserDataExportService {
     Map<String, Object> payload = new HashMap<>();
     payload.put("user", redactUser(user));
 
-    List<Org> orgs =
-        user.getOrgId() != null ? orgRepo.findById(user.getOrgId()).stream().toList() : List.of();
+    // RR-204: NEVER serialise the persistence entity here. `Org` has Jackson-visible getters for
+    // the DECRYPTED Anthropic / OpenAI / Gemini / OpenRouter / DeepSeek / Fireworks keys and the
+    // JIRA / Confluence API tokens; `@ToString.Exclude` is not JSON redaction. Every top-level key
+    // below is now built from an explicit, deny-by-default field allowlist.
+    List<Map<String, Object>> orgs =
+        user.getOrgId() != null
+            ? orgRepo.findById(user.getOrgId()).stream()
+                .map(UserDataExportService::exportOrg)
+                .toList()
+            : List.of();
     payload.put("orgs", orgs);
 
     // Project ownership is org-scoped — a user inherits visibility through their org row.
@@ -124,7 +132,7 @@ public class UserDataExportService {
     // strict per-user data is a follow-up if/when product wants narrower export scope.
     List<Project> projects =
         user.getOrgId() != null ? projectRepo.findByOrgId(user.getOrgId()) : List.of();
-    payload.put("projects", projects);
+    payload.put("projects", projects.stream().map(UserDataExportService::exportProject).toList());
 
     // schemaVersion 2 (P5.4 follow-up, 2026-05-06) — pull additional personal-data tables.
     // Each list is capped at EXPORT_ROW_LIMIT (200) to bound the in-memory zip size; for
@@ -133,23 +141,25 @@ public class UserDataExportService {
     PageRequest topN = PageRequest.of(0, EXPORT_ROW_LIMIT);
     List<PipelineRun> runs =
         runRepo.findByCreatedByUserIdOrderByStartedAtDesc(userId, topN).getContent();
-    payload.put("runs", runs);
-    // TODO P5.4-followup: project to a slimmer "RunExportRow" record so internal ops
-    // fields (worker IDs, retry counters, etc.) stay out of the public bundle. For now
-    // the entity ships as-is; the data is the user's own so leakage is bounded to
-    // them seeing more than they need.
+    // RR-204: `PipelineRun` exposes the DECRYPTED GitHub PAT + Bitbucket app password copied onto
+    // the run row, so the entity must not be serialised either. Allowlist below.
+    payload.put("runs", runs.stream().map(UserDataExportService::exportRun).toList());
 
     List<Notification> notifications =
         notificationRepo.findByUserIdOrderByCreatedAtDesc(userId, topN).getContent();
-    payload.put("notifications", notifications);
+    payload.put(
+        "notifications",
+        notifications.stream().map(UserDataExportService::exportNotification).toList());
 
     // Active subscription (current state) — historical churn arc is a future schema bump.
     Map<String, Object> billing = new HashMap<>();
     Optional<BillingSubscription> activeSub = subRepo.findActiveByUserId(userId);
-    billing.put("activeSubscription", activeSub.orElse(null));
+    billing.put(
+        "activeSubscription",
+        activeSub.map(UserDataExportService::exportSubscription).orElse(null));
     List<Invoice> invoices =
         invoiceRepo.findByUserIdOrderByInvoiceDateDesc(userId, topN).getContent();
-    billing.put("invoices", invoices);
+    billing.put("invoices", invoices.stream().map(UserDataExportService::exportInvoice).toList());
     payload.put("billing", billing);
 
     payload.put(
@@ -211,6 +221,152 @@ public class UserDataExportService {
     return redacted;
   }
 
+  /**
+   * RR-204 — deny-by-default projection of {@link Org}.
+   *
+   * <p>The entity carries six decrypted provider API keys plus JIRA and Confluence API tokens. Only
+   * the identity/plan fields named here are exported; credential presence is reported as a boolean
+   * so the user can still confirm their configuration without the bundle containing the secret.
+   *
+   * <p>Adding a field to {@code Org} does NOT add it to the export — that is the point of the
+   * allowlist, and {@code UserDataExportSecretCanaryTest} pins it.
+   */
+  private static Map<String, Object> exportOrg(Org o) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("id", o.getId());
+    m.put("name", o.getName());
+    m.put("tier", o.getTier());
+    m.put("status", o.getStatus());
+    m.put("seatCount", o.getSeatCount());
+    m.put("keySourceMode", o.getKeySourceMode());
+    m.put("isPersonal", o.isPersonal());
+    m.put("planExpiresAt", o.getPlanExpiresAt());
+    m.put("monthlyRunCount", o.getMonthlyRunCount());
+    m.put("hasOwnProviderKeys", o.isApiKeysProvided());
+    m.put(
+        "_redacted",
+        "Org provider API keys (Anthropic / OpenAI / Gemini / OpenRouter / DeepSeek / Fireworks)"
+            + " and JIRA / Confluence API tokens are shared org credentials and are never"
+            + " exported.");
+    return m;
+  }
+
+  /** RR-204 — deny-by-default projection of {@link Project}. */
+  private static Map<String, Object> exportProject(Project p) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("id", p.getId());
+    m.put("orgId", p.getOrgId());
+    m.put("name", p.getName());
+    m.put("description", p.getDescription());
+    m.put("status", p.getStatus());
+    m.put("aiProvider", p.getAiProvider());
+    m.put("createdBy", p.getCreatedBy());
+    m.put("createdAt", p.getCreatedAt());
+    m.put("updatedAt", p.getUpdatedAt());
+    m.put("targetBranch", p.getTargetBranch());
+    m.put("archivedAt", p.getArchivedAt());
+    m.put("deletedAt", p.getDeletedAt());
+    return m;
+  }
+
+  /**
+   * RR-204 — deny-by-default projection of {@link PipelineRun}.
+   *
+   * <p>The entity exposes {@code githubPat} and {@code bitbucketAppPassword} — decrypted SCM
+   * credentials copied onto the run row — which must never leave the server.
+   */
+  private static Map<String, Object> exportRun(PipelineRun r) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("runId", r.getRunId());
+    m.put("userRequest", r.getUserRequest());
+    m.put("runTitle", r.getRunTitle());
+    m.put("runSummary", r.getRunSummary());
+    m.put("status", r.getStatus());
+    m.put("statusReason", r.getStatusReason());
+    m.put("failureReason", r.getFailureReason());
+    m.put("runMode", r.getRunMode());
+    m.put("executionMode", r.getExecutionMode());
+    m.put("aiProvider", r.getAiProvider());
+    m.put("requestedProvider", r.getRequestedProvider());
+    m.put("requestedModel", r.getRequestedModel());
+    m.put("projectId", r.getProjectId());
+    m.put("orgId", r.getOrgId());
+    m.put("createdByUserId", r.getCreatedByUserId());
+    m.put("startedAt", r.getStartedAt());
+    m.put("completedAt", r.getCompletedAt());
+    m.put("creditsCharged", r.getCreditsCharged());
+    m.put("actualCostUsd", r.getActualCostUsd());
+    m.put("totalInputTokens", r.getTotalInputTokens());
+    m.put("totalOutputTokens", r.getTotalOutputTokens());
+    m.put("githubPrUrl", r.getGithubPrUrl());
+    m.put("scmPrUrl", r.getScmPrUrl());
+    m.put("archivedAt", r.getArchivedAt());
+    m.put("deletedAt", r.getDeletedAt());
+    m.put(
+        "_redacted",
+        "Run-scoped SCM credentials (GitHub PAT, Bitbucket app password) and internal execution"
+            + " state are never exported.");
+    return m;
+  }
+
+  /** RR-204 — deny-by-default projection of {@link Notification}. */
+  private static Map<String, Object> exportNotification(Notification n) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("id", n.getId());
+    m.put("type", n.getType());
+    m.put("title", n.getTitle());
+    m.put("body", n.getBody());
+    m.put("link", n.getLink());
+    m.put("read", n.isRead());
+    m.put("createdAt", n.getCreatedAt());
+    return m;
+  }
+
+  /**
+   * RR-204 — deny-by-default projection of {@link BillingSubscription}. Gateway customer /
+   * subscription identifiers and the free-form {@code metadata} blob are deliberately excluded.
+   */
+  private static Map<String, Object> exportSubscription(BillingSubscription s) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("id", s.getId());
+    m.put("status", s.getStatus());
+    m.put("paymentGateway", s.getPaymentGateway());
+    m.put("currentPeriodStart", s.getCurrentPeriodStart());
+    m.put("currentPeriodEnd", s.getCurrentPeriodEnd());
+    m.put("totalSeats", s.getTotalSeats());
+    m.put("cancelAtPeriodEnd", s.isCancelAtPeriodEnd());
+    m.put("cancelledAt", s.getCancelledAt());
+    m.put("termsAcceptedAt", s.getTermsAcceptedAt());
+    m.put("termsVersion", s.getTermsVersion());
+    m.put("createdAt", s.getCreatedAt());
+    return m;
+  }
+
+  /**
+   * RR-204 — deny-by-default projection of {@link Invoice}. Gateway payment/order identifiers, the
+   * PDF storage path and the free-form {@code metadata} blob are deliberately excluded.
+   */
+  private static Map<String, Object> exportInvoice(Invoice i) {
+    Map<String, Object> m = new HashMap<>();
+    m.put("id", i.getId());
+    m.put("invoiceNumber", i.getInvoiceNumber());
+    m.put("invoiceType", i.getInvoiceType());
+    m.put("status", i.getStatus());
+    m.put("currency", i.getCurrency());
+    m.put("subtotal", i.getSubtotal());
+    m.put("totalTax", i.getTotalTax());
+    m.put("totalAmount", i.getTotalAmount());
+    m.put("invoiceDate", i.getInvoiceDate());
+    m.put("dueDate", i.getDueDate());
+    m.put("paidAt", i.getPaidAt());
+    m.put("paymentMethod", i.getPaymentMethod());
+    m.put("description", i.getDescription());
+    m.put("buyerName", i.getBuyerName());
+    m.put("buyerGstin", i.getBuyerGstin());
+    m.put("createdAt", i.getCreatedAt());
+    return m;
+  }
+
   private static void writeJsonEntry(ZipOutputStream zip, String entryName, Object obj)
       throws IOException {
     zip.putNextEntry(new ZipEntry(entryName));
@@ -249,6 +405,10 @@ public class UserDataExportService {
             + "## What's redacted\n\n"
             + "Your password hash + LLM API keys + GitHub PAT are intentionally excluded.\n"
             + "You can recover or rotate them from Settings → Account.\n\n"
+            + "Every section of `payload.json` is built from an explicit field allowlist rather\n"
+            + "than a dump of the stored row, so shared org provider keys, JIRA/Confluence API\n"
+            + "tokens, run-scoped SCM credentials, payment-gateway identifiers and internal\n"
+            + "execution state are structurally absent — not merely omitted by convention.\n\n"
             + "## Erasure\n\n"
             + "If you want your data deleted (GDPR Article 17), email\n"
             + "admin@executespec.ai — that path is processed manually within 30 days.\n\n"
