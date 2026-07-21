@@ -56,6 +56,15 @@ public class RateLimitPolicy {
                   "login", 10,
                   "register", 5,
                   "forgot", 3,
+                  // Token-redemption steps, matched to real legitimate frequency: reset-password is
+                  // as rare as the forgot-password request that issues its token; verify-email is
+                  // once per signup. refresh is deliberately looser — every active session calls it
+                  // on access-token expiry, so a tight per-IP cap would break shared-NAT offices,
+                  // and a high-entropy refresh JWT is not brute-forceable anyway. All three are
+                  // still far below the WRITE(60)/READ(300) buckets they used to fall into.
+                  "reset", 3,
+                  "verify", 5,
+                  "refresh", 30,
                   "DEFAULT", 10)),
           Map.entry(
               "RUNS",
@@ -141,9 +150,16 @@ public class RateLimitPolicy {
 
   /** Classify a request into an endpoint group. */
   public String classifyGroup(String method, String path) {
+    // reset-password / refresh / verify-email consume the higher-value token, so they belong in the
+    // tight AUTH bucket alongside forgot-password. Previously they fell through to WRITE (60/min)
+    // and READ (300/min) — 20x more permissive than the 3/min forgot-password step that merely
+    // *issues* the token they redeem (RR-1642).
     if (path.startsWith("/api/auth/login")
         || path.startsWith("/api/auth/register")
-        || path.startsWith("/api/auth/forgot")) {
+        || path.startsWith("/api/auth/forgot")
+        || path.startsWith("/api/auth/reset-password")
+        || path.startsWith("/api/auth/refresh")
+        || path.startsWith("/api/auth/verify-email")) {
       return "AUTH";
     }
     if (path.contains("/webhook")) {
@@ -171,11 +187,15 @@ public class RateLimitPolicy {
     return "WRITE";
   }
 
-  /** Get the sub-type for AUTH group (login, register, forgot). */
+  /** Get the sub-type for AUTH group (login, register, forgot, reset, verify, refresh). */
   public String getAuthSubType(String path) {
     if (path.contains("/login")) return "login";
     if (path.contains("/register")) return "register";
+    // Check reset-password before the looser /forgot match so it gets its own bucket.
+    if (path.contains("/reset-password")) return "reset";
     if (path.contains("/forgot")) return "forgot";
+    if (path.contains("/verify-email")) return "verify";
+    if (path.contains("/refresh")) return "refresh";
     return "DEFAULT";
   }
 }
