@@ -809,11 +809,15 @@ and does NOT escalate. The RR-826 fail-closed behaviour itself is unchanged. (4)
 solution row no longer names (superseded by a RETRY) or whose solution an operator skipped. It fails
 OPEN on repository error and never touches ordinary customer runs.
 
-**Not closed:** the RR-819 gate is server-enforced but has no frontend yet, so a web approver on a
-gated run currently receives a 409 they cannot satisfy from the UI; the frontend contract is
-`GET /api/runs/{id}/plan-contract-gate` → render rows → typed input → echo
-`breakingChangeAck` + `breakingChangeReportDigest` on approve. Manual push endpoints do not consult
-`RunPublicationFence`. The V278 `localInstallationId` is still not re-checked on retry.
+**RR-819 web frontend (2026-07-21).** The gate is now satisfiable from the UI. `frontend/src/ide/
+IdePlan.tsx` fetches `GET /api/runs/{id}/plan-contract-gate` (204 = no gate = unchanged approval
+flow), renders `PlanContractGateCard.tsx` with the contract name, type, detected path, declared
+consumer repositories and responsible plan steps, disables approve until the literal `BREAKING` is
+typed, and echoes `breakingChangeAck` + the fetched report's `breakingChangeReportDigest` on
+approve. The two 409s get distinct recoveries, and the report is subject to the same RR-1459
+run-identity discipline as the plan. **Still not closed:** CLI/VS Code send no acknowledgement, so a
+gated run remains unapprovable from those clients; manual push endpoints do not consult
+`RunPublicationFence`; the V278 `localInstallationId` is still not re-checked on retry.
 
 **Solution decision authority + child fencing (2026-07-21, V327).** The Execution-View per-solution
 gate had no state machine. `SolutionExecutionService.processDecision` applied SKIP / RETRY / FIX /

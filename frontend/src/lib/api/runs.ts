@@ -101,6 +101,48 @@ export const createRun = (body: {
   lowComplexityWorkerStartTier?: 'WORKHORSE' | 'LIGHTWEIGHT';
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
+/**
+ * RR-819 — one registered contract this plan intends to modify, as composed by the server while
+ * the run parked at AWAITING_APPROVAL. `declaredConsumers` is the reason the friction exists: those
+ * repositories declared themselves consumers of this contract, so the planned change breaks them.
+ */
+export interface PlanContractGateRow {
+  contractId?: string | null;
+  contractName?: string | null;
+  type?: string | null;
+  detectedPath?: string | null;
+  declaredConsumers?: string[] | null;
+  matchedPlanTasks?: string[] | null;
+}
+
+/**
+ * RR-819 — the durable plan-approval contract gate report.
+ *
+ * `reportJson` is a serialized `PlanContractGateRow[]`. `reportDigest` is the server's SHA-256 over
+ * that exact string; approval must echo it back so an acknowledgement collected against one set of
+ * contracts cannot be replayed against a different one.
+ */
+export interface PlanContractGateReport {
+  runId?: string | null;
+  projectId?: string | null;
+  reportJson?: string | null;
+  reportDigest?: string | null;
+  requiresTypedAck?: boolean | null;
+  contractCount?: number | null;
+  createdAt?: string | null;
+  acknowledgedAt?: string | null;
+  acknowledgedByUserId?: string | null;
+  acknowledgementText?: string | null;
+}
+
+/**
+ * RR-819 — what the approver must be shown before approving. The server answers 204 (no body) when
+ * this plan touches no registered contract, which is the overwhelming majority of runs; `req`
+ * surfaces that as `undefined`, and the gate UI stays absent.
+ */
+export const getPlanContractGate = (runId: string) =>
+  req<PlanContractGateReport | undefined>(`/runs/${runId}/plan-contract-gate`);
+
 export const approveRun = (
   id: string,
   approved: boolean,
@@ -112,6 +154,13 @@ export const approveRun = (
    * server answers 409 on a mismatch; an omitted value is "not supplied", never "matched".
    */
   planFingerprint?: string,
+  /**
+   * RR-819 — the literal text the approver typed to acknowledge that this plan breaks contracts
+   * other repositories declared themselves consumers of, together with the digest of the exact
+   * report they were shown. The server refuses approval with 409 when the text is absent/wrong, and
+   * with a distinct 409 when the digest is not the one currently on the run.
+   */
+  breakingChange?: {ack: string; reportDigest: string},
 ) =>
   req<void>(`/runs/${id}/approve`, {
     method: 'POST',
@@ -120,6 +169,8 @@ export const approveRun = (
       creditsConfirmed: creditsConfirmed ?? null,
       executionMode: executionMode ?? null,
       planFingerprint: planFingerprint ?? null,
+      breakingChangeAck: breakingChange?.ack ?? null,
+      breakingChangeReportDigest: breakingChange?.reportDigest ?? null,
     }),
   });
 
