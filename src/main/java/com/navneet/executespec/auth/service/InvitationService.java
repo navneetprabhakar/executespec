@@ -297,6 +297,16 @@ public class InvitationService {
     log.info("Escalated invitation {} rejected by {}", invitationId, adminUserId);
   }
 
+  /**
+   * Canonical form used to compare an authenticated account against an invited address (RR-221).
+   * Trims surrounding whitespace and lower-cases with {@link java.util.Locale#ROOT} so a
+   * locale-sensitive default (Turkish dotless i, for instance) cannot make two different addresses
+   * compare equal.
+   */
+  private static String canonicalEmail(String email) {
+    return email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
+  }
+
   @Transactional
   public void acceptInvitation(String token, String currentUserId) {
     OrgInvitation invitation =
@@ -304,6 +314,41 @@ public class InvitationService {
             .findByToken(token)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+    // Resolve the user BEFORE any status branch, so the recipient check applies to the idempotent
+    // path too.
+    String userId;
+    if (currentUserId != null) {
+      userId = currentUserId;
+    } else {
+      // User must have just registered via the abbreviated invite form
+      AppUser existing = userRepo.findByEmail(invitation.getInvitedEmail()).orElse(null);
+      if (existing == null) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Please register first then accept the invitation");
+      }
+      userId = existing.getId();
+    }
+
+    AppUser user =
+        userRepo
+            .findById(userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+    // RR-221: bind acceptance to the invited identity. The bearer token alone must not confer the
+    // invited role — forwarded mail, browser history, logs and support tooling make token leakage
+    // realistic, and the invited role can be ORG_ADMIN / BILLING_ADMIN. Compare canonical
+    // (trimmed, lower-cased) addresses; anything else is a different account taking the seat.
+    if (!canonicalEmail(user.getEmail()).equals(canonicalEmail(invitation.getInvitedEmail()))) {
+      log.warn(
+          "Invitation {} presented by user {} whose email does not match the invited address",
+          invitation.getId(),
+          userId);
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "This invitation was issued to a different email address. Sign in as the invited user to"
+              + " accept it.");
+    }
 
     // Idempotent: if already accepted, return success silently
     if ("ACCEPTED".equals(invitation.getStatus())) {
@@ -323,29 +368,22 @@ public class InvitationService {
       throw new ResponseStatusException(HttpStatus.GONE, "Invitation has expired");
     }
 
-    // Resolve the user
-    String userId;
-    if (currentUserId != null) {
-      userId = currentUserId;
-    } else {
-      // User must have just registered via the abbreviated invite form
-      AppUser existing = userRepo.findByEmail(invitation.getInvitedEmail()).orElse(null);
-      if (existing == null) {
-        throw new ResponseStatusException(
-            HttpStatus.BAD_REQUEST, "Please register first then accept the invitation");
-      }
-      userId = existing.getId();
-    }
-
-    AppUser user =
-        userRepo
-            .findById(userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-
     if (user.getOrgId() != null && !user.getOrgId().equals(invitation.getOrgId())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "User is already a member of another org");
     }
+
+    // RR-222: claim PENDING -> ACCEPTED atomically BEFORE granting anything. The old code created
+    // memberships first and wrote ACCEPTED last, so two concurrent holders of one token could both
+    // pass the status read and both receive the invited org role (and its project access) from a
+    // single seat. The conditional UPDATE has exactly one winner.
+    Instant claimedAt = Instant.now();
+    if (invitationRepo.claimPending(invitation.getId(), claimedAt) != 1) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Invitation is no longer available for acceptance");
+    }
+    invitation.setStatus("ACCEPTED");
+    invitation.setResolvedAt(claimedAt);
 
     // Add to org — catch constraint violation from concurrent/duplicate requests
     if (!orgMemberRepo.existsByOrgIdAndUserId(invitation.getOrgId(), userId)) {
@@ -411,10 +449,6 @@ public class InvitationService {
         }
       }
     }
-
-    invitation.setStatus("ACCEPTED");
-    invitation.setResolvedAt(Instant.now());
-    invitationRepo.save(invitation);
 
     auditService.record(
         ActivityAudit.builder()
