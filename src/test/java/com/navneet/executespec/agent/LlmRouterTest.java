@@ -74,6 +74,10 @@ class LlmRouterTest {
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
   private LlmRouter build() {
+    return build(new ProviderDispatchAuthorization(true, false, ""));
+  }
+
+  private LlmRouter build(ProviderDispatchAuthorization dispatchAuthorization) {
     ToolRegistry toolRegistry = mock(ToolRegistry.class);
     lenient().when(toolRegistry.bind(any())).thenReturn(List.of());
     openai = mock(OpenAiNativeToolClient.class);
@@ -163,6 +167,7 @@ class LlmRouterTest {
             flags,
             managedAiUsageService,
             routePolicyService,
+            dispatchAuthorization,
             anthropicModelProvider);
     router = spy(real);
     ReflectionTestUtils.setField(router, "executionContextEnforcementEnabled", false);
@@ -223,8 +228,9 @@ class LlmRouterTest {
 
   @Test
   void testTransportKillSwitchRejectsBeforeAnyProviderOrUsageCall() {
-    LlmRouter subject = build();
-    ReflectionTestUtils.setField(subject, "liveLlmEnabled", false);
+    // RR-392 — the kill switch now lives in the shared ProviderDispatchAuthorization component, so
+    // it is injected rather than reflected onto a router field.
+    LlmRouter subject = build(new ProviderDispatchAuthorization(false, false, ""));
 
     assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
         .isInstanceOf(IllegalStateException.class)
@@ -236,9 +242,7 @@ class LlmRouterTest {
 
   @Test
   void goalLiveTestModeRequiresAProviderBudgetReservation() {
-    LlmRouter subject = build();
-    ReflectionTestUtils.setField(subject, "liveLlmTestMode", true);
-    ReflectionTestUtils.setField(subject, "liveLlmReservationId", "");
+    LlmRouter subject = build(new ProviderDispatchAuthorization(true, true, ""));
 
     assertThatThrownBy(() -> subject.call(req("openai", "gpt-x")))
         .isInstanceOf(IllegalStateException.class)

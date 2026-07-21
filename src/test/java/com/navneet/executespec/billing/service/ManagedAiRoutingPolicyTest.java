@@ -48,6 +48,47 @@ class ManagedAiRoutingPolicyTest {
     assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
   }
 
+  /**
+   * RR-225 (2026-07-20) — the configured raw-COGS hard stop is an independent ceiling. Before the
+   * fix, EXHAUSTED was reachable only through credit consumption, so the credit conversion and
+   * retail multiplier let a period spend well past its configured raw ceiling.
+   */
+  @Test
+  void rawCogsHardStopExhaustsIndependentlyOfCredits() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(0);
+
+    period.setRawCogsUsedUsd(15.99);
+    assertThat(policy.recomputeState(period)).isNotEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+
+    period.setRawCogsUsedUsd(16.0);
+    assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+
+    period.setRawCogsUsedUsd(21.0);
+    assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+  }
+
+  /** RR-225 — a credit top-up lifts the credit gate but must NOT lift the raw-COGS margin gate. */
+  @Test
+  void topUpDoesNotLiftTheRawCogsHardStop() {
+    ManagedAiUsagePeriod period = period();
+    period.setPurchasedAiCredits(100_000);
+    period.setAiCreditsUsed(0);
+    period.setRawCogsUsedUsd(16.0);
+
+    assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+  }
+
+  /** RR-225 — falls back to rawCogsCapUsd when no explicit hard stop is configured. */
+  @Test
+  void rawCogsCapActsAsTheHardStopWhenNoExplicitHardStopIsSet() {
+    ManagedAiUsagePeriod period = period();
+    period.setHardStopAfterRawUsd(0.0);
+    period.setRawCogsUsedUsd(16.0);
+
+    assertThat(policy.recomputeState(period)).isEqualTo(ManagedAiRoutingPolicy.EXHAUSTED);
+  }
+
   @Test
   void appliesStateModelClassAndAgentRoleRules() {
     assertThat(policy.isAllowed(ManagedAiRoutingPolicy.FULL, "FRONTIER", "WorkerAgent")).isTrue();

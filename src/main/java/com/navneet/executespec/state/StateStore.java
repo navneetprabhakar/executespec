@@ -511,6 +511,10 @@ public class StateStore {
    */
   public void setUserCostCap(String runId, Double userCostCap) {
     if (userCostCap == null) return;
+    // RR-825 — fail closed on a cap the enforcement path cannot honour (NaN / ±Infinity / out of
+    // band). Validated here rather than only in RunRequest because the agent confirmation surface
+    // reaches this method without bean validation.
+    com.navneet.executespec.cost.CostCapValues.requireValidOptional(userCostCap);
     runRepo
         .findById(runId)
         .ifPresent(
