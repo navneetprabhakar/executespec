@@ -31,4 +31,21 @@ public interface ActivityAuditRepository
   /** M-019 — verifier walks chained rows in monotonic order. */
   @Query("SELECT a FROM ActivityAudit a WHERE a.chainSeq IS NOT NULL " + "ORDER BY a.chainSeq ASC")
   List<ActivityAudit> findChainOrdered();
+
+  /**
+   * RR-209 — keyset page of the chain used by the streaming verifier, so {@link
+   * #findChainOrdered()} no longer loads the whole ledger into one list. Ordered by chain_seq so
+   * the caller can carry {@code expectedPrev} across pages; {@code afterSeq} is the last seq
+   * already verified.
+   */
+  @Query(
+      "SELECT a FROM ActivityAudit a WHERE a.chainSeq IS NOT NULL AND a.chainSeq > :afterSeq "
+          + "ORDER BY a.chainSeq ASC")
+  List<ActivityAudit> findChainOrderedAfter(
+      @org.springframework.data.repository.query.Param("afterSeq") long afterSeq,
+      Pageable pageable);
+
+  /** RR-209 — total chained-row count for the verifier report, without materializing the rows. */
+  @Query("SELECT COUNT(a) FROM ActivityAudit a WHERE a.chainSeq IS NOT NULL")
+  long countChained();
 }

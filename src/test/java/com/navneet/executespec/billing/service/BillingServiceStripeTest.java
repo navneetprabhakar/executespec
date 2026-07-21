@@ -27,6 +27,7 @@ import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.dto.VerifyPaymentRequest;
 import com.navneet.executespec.billing.entity.BillingGatewayObligation;
 import com.navneet.executespec.billing.entity.BillingPlan;
+import com.navneet.executespec.billing.entity.BillingPlanLimit;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.entity.BillingWebhookEvent;
 import com.navneet.executespec.billing.entity.RunTopup;
@@ -52,6 +53,7 @@ class BillingServiceStripeTest {
 
   private final BillingGateway razorpayGateway = mock(BillingGateway.class);
   private final BillingPlanRepository planRepo = mock(BillingPlanRepository.class);
+  private final BillingPlanLimitRepository limitRepo = mock(BillingPlanLimitRepository.class);
   private final BillingSubscriptionRepository subRepo = mock(BillingSubscriptionRepository.class);
   private final BillingWebhookEventRepository webhookRepo =
       mock(BillingWebhookEventRepository.class);
@@ -94,7 +96,7 @@ class BillingServiceStripeTest {
       new BillingService(
           razorpayGateway,
           planRepo,
-          mock(BillingPlanLimitRepository.class),
+          limitRepo,
           subRepo,
           usageService,
           signatureVerifier,
@@ -121,6 +123,38 @@ class BillingServiceStripeTest {
           new BillingWebhookEventRecorder(webhookRepo),
           mock(RunTopupService.class),
           webhookSequencing);
+
+  @Test
+  void listPlansBatchesLimitLookupInOneQuery() {
+    // RR-057: was one limitRepo.findByBillingPlanId per plan; now a single batch query grouped in
+    // memory. includeHidden=true isolates the batch mapping from the LISTED/tier filter.
+    BillingPlan p1 = BillingPlan.builder().id(UUID.randomUUID()).name("Pro").tier("PRO").build();
+    BillingPlan p2 = BillingPlan.builder().id(UUID.randomUUID()).name("Team").tier("TEAM").build();
+    when(planRepo.findByActiveTrue()).thenReturn(List.of(p1, p2));
+    when(limitRepo.findByBillingPlanIdIn(any()))
+        .thenReturn(
+            List.of(
+                BillingPlanLimit.builder()
+                    .id(UUID.randomUUID())
+                    .billingPlanId(p1.getId())
+                    .metric("runs")
+                    .maxValue(10)
+                    .build(),
+                BillingPlanLimit.builder()
+                    .id(UUID.randomUUID())
+                    .billingPlanId(p2.getId())
+                    .metric("runs")
+                    .maxValue(20)
+                    .build()));
+
+    var plans = service.listPlans(null, true);
+
+    assertThat(plans).hasSize(2);
+    assertThat(plans.get(0).limits()).containsEntry("runs", 10L);
+    assertThat(plans.get(1).limits()).containsEntry("runs", 20L);
+    verify(limitRepo, times(1)).findByBillingPlanIdIn(any());
+    verify(limitRepo, never()).findByBillingPlanId(any());
+  }
 
   @Test
   void stripeCheckoutCompletedRewritesCheckoutSessionIdToSubscriptionId() {
