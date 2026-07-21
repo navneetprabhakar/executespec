@@ -93,6 +93,23 @@ owner. Read visibility alone never authorizes SCM-side or shared-metadata mutati
 **Shared-profile crypto correction (2026-07-19):** `application-dev.yml` now joins prod and
 benchmark with `require-encryption: true`; every remote/shared profile refuses plaintext fallback.
 
+**Framework path containment (2026-07-21):** `security/SafeWorkspacePath` is the shared
+containment boundary for framework-owned filesystem access into customer-controlled trees, applying
+the same rules the agent tool sandbox already used (`tool/PathSafety`,
+`deployment/WorkspaceFileService`): relative-only, no dot/empty segments, canonical-root
+containment, and no symbolic link in any existing component. It is called by run-context metadata
+writes (`integration/RunContextComposer`), worker checkpoint write/read/delete AND the destructive
+run-end cleanup (`context/ContextStore`), the context scanner/agent/evidence-bundle/run-journal
+reads and writes under `.agent-context` (`context/*`), and the Code Review workspace sampler
+(`codereview/CodeReviewService`, which additionally opens candidates with `NOFOLLOW_LINKS`).
+`folder/ExecutespecFolderWriter` now enforces canonical POSIX relative segments — a `.executespec/`
+prefix alone is not containment — and contract refresh derives a bounded filename slug rather than
+interpolating a customer-derived contract name. Generated test class names must be bare Java
+identifiers before they become filenames (`testgen/TestWorkerAgent`, validated at plan persistence
+in `TestPlannerAgent`). Failures are refusals, not redirects. This covers the server-side framework
+paths; agent tool calls keep their own boundary, and the CLI/VS Code client repository has its own
+equivalent gaps tracked separately.
+
 `SensitiveWorkspacePathPolicy` is the pre-model credential-file boundary for worker tools. Direct
 reads and search hits exclude `.env`, credential stores, private keys and keystores while allowing
 `.env.example`/sample/template contracts; host-shell validation blocks explicit references to the

@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.eclipse.jgit.api.Git;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,8 +66,11 @@ public class ContextEvidenceBundleWriter {
     if (input == null) throw new IllegalArgumentException("input is required");
     if (runId == null || runId.isBlank()) throw new IllegalArgumentException("runId is required");
 
-    Path contextDir = projectPath.resolve(".agent-context");
+    // Sibling of RR-465 (not in the ledger): the evidence bundle is written into a
+    // customer-controlled checkout, so `.agent-context` may be a repository symlink.
+    Path contextDir = SafeWorkspacePath.resolveWithin(projectPath, ".agent-context");
     Files.createDirectories(contextDir);
+    SafeWorkspacePath.requireWithin(projectPath, contextDir);
     Path target = contextDir.resolve(FILE_NAME);
     ObjectNode root = objectMapper.createObjectNode();
     root.put("schemaVersion", SCHEMA_VERSION);
@@ -123,7 +127,12 @@ public class ContextEvidenceBundleWriter {
    */
   public Optional<JsonNode> readCurrent(Path projectPath, String runId) {
     if (projectPath == null || runId == null || runId.isBlank()) return Optional.empty();
-    Path contextDir = projectPath.resolve(".agent-context");
+    Path contextDir;
+    try {
+      contextDir = SafeWorkspacePath.resolveWithin(projectPath, ".agent-context");
+    } catch (IOException | SecurityException e) {
+      return Optional.empty();
+    }
     Path target = contextDir.resolve(FILE_NAME);
     try {
       JsonNode root = objectMapper.readTree(Files.readString(target));
@@ -238,8 +247,13 @@ public class ContextEvidenceBundleWriter {
           continue;
         }
         digest.update((entry.getValue() + "\0" + relative + "\0").getBytes(StandardCharsets.UTF_8));
+        // `relative` comes from JGit status over a customer repository; a symlinked entry would
+        // otherwise be read through into the fingerprint.
         Path file = projectPath.resolve(relative);
-        if (Files.isRegularFile(file)) digest.update(Files.readAllBytes(file));
+        if (!SafeWorkspacePath.isWithin(projectPath, file)) continue;
+        if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+          digest.update(Files.readAllBytes(file));
+        }
       }
       return hex(digest.digest());
     } catch (Exception e) {
