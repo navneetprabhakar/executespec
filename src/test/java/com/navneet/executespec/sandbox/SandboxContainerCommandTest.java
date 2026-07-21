@@ -3,11 +3,17 @@ package com.navneet.executespec.sandbox;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Pins the CONTAINER_STRICT_V1 argument vector.
@@ -18,12 +24,31 @@ import org.junit.jupiter.api.Test;
  */
 class SandboxContainerCommandTest {
 
-  private static final Path ROOT = Path.of("/var/lib/executespec/sandboxes");
   private static final String SANDBOX_ID = "s1";
+  private static final long EPOCH = 7L;
+
+  /**
+   * RR-328 — mount admission now proves containment on disk, so the root and every admitted mount
+   * must be real. A test that asserted over invented paths could not tell a lexical check from a
+   * real one, which is how the symlink escape survived.
+   */
+  @TempDir Path tempRoot;
+
+  /** Stands in for anything on the host that is not a sandbox workspace. */
+  @TempDir Path hostElsewhere;
+
+  private Path root;
+  private Path work;
+
+  @BeforeEach
+  void setUp() throws IOException {
+    root = tempRoot.toRealPath();
+    work = Files.createDirectories(root.resolve(SANDBOX_ID).resolve("work"));
+  }
 
   @Test
   void strictProfileAppliesEveryDeclaredHardeningFlag() {
-    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID);
+    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), root, SANDBOX_ID, EPOCH);
     String joined = String.join(" ", argv);
 
     assertThat(argv).startsWith("docker", "run", "--detach");
@@ -41,7 +66,8 @@ class SandboxContainerCommandTest {
   @Test
   void memorySwapIsPinnedToMemorySoSwapCannotDefeatTheCap() {
     String joined =
-        String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID));
+        String.join(
+            " ", SandboxContainerCommand.create("es-sbx-1", spec(), root, SANDBOX_ID, EPOCH));
     assertThat(joined).contains("--memory 1073741824b");
     assertThat(joined).contains("--memory-swap 1073741824b");
   }
@@ -51,23 +77,24 @@ class SandboxContainerCommandTest {
     List<String> argv =
         SandboxContainerCommand.create(
             "es-sbx-1",
-            specWithMount(
-                new SandboxRuntimeSpec.WritableMount(
-                    "/var/lib/executespec/sandboxes/s1/work", "/workspace")),
-            ROOT,
-            SANDBOX_ID);
+            specWithMount(new SandboxRuntimeSpec.WritableMount(work.toString(), "/workspace")),
+            root,
+            SANDBOX_ID,
+            EPOCH);
     String joined = String.join(" ", argv);
 
     assertThat(argv).contains("--read-only");
     assertThat(joined).contains("--tmpfs /tmp:rw,noexec,nosuid,size=67108864");
-    assertThat(joined).contains("--volume /var/lib/executespec/sandboxes/s1/work:/workspace:rw");
+    assertThat(joined).contains("--volume " + work + ":/workspace:rw");
 
     // Exactly one bind mount: nothing else is writable.
     assertThat(argv.stream().filter("--volume"::equals)).hasSize(1);
   }
 
   @Test
-  void neverMountsTheDockerSocketOrAnyPathOutsideTheSandboxRoot() {
+  void neverMountsTheDockerSocketOrAnyPathOutsideTheSandboxRoot() throws IOException {
+    Files.createDirectories(root.resolve("other-tenant").resolve("work"));
+
     for (String outside :
         List.of(
             "/var/run/docker.sock",
@@ -75,19 +102,12 @@ class SandboxContainerCommandTest {
             "/etc/shadow",
             "/root/.aws",
             "/Users/someone/.ssh",
-            "/var/lib/executespec/other-tenant",
-            // RR-821 — these two are INSIDE the configured global root and were previously
-            // admitted: the root that holds every sandbox, and a sibling tenant's workspace.
-            "/var/lib/executespec/sandboxes",
-            "/var/lib/executespec/sandboxes/other-tenant/work",
+            // RR-821 — these two are INSIDE the configured global root and were once admitted:
+            // the root that holds every sandbox, and a sibling tenant's workspace.
+            root.toString(),
+            root.resolve("other-tenant").resolve("work").toString(),
             "/")) {
-      assertThatThrownBy(
-              () ->
-                  SandboxContainerCommand.create(
-                      "es-sbx-1",
-                      specWithMount(new SandboxRuntimeSpec.WritableMount(outside, "/mnt")),
-                      ROOT,
-                      SANDBOX_ID))
+      assertThatThrownBy(() -> create(outside))
           .as("host path %s must be refused", outside)
           .isInstanceOf(IllegalArgumentException.class);
     }
@@ -95,32 +115,93 @@ class SandboxContainerCommandTest {
 
   @Test
   void traversalAndRelativeMountPathsAreRefused() {
-    assertThatThrownBy(
-            () ->
-                SandboxContainerCommand.create(
-                    "es-sbx-1",
-                    specWithMount(
-                        new SandboxRuntimeSpec.WritableMount(
-                            "/var/lib/executespec/sandboxes/../../../etc", "/mnt")),
-                    ROOT,
-                    SANDBOX_ID))
+    assertThatThrownBy(() -> create(root.resolve(SANDBOX_ID) + "/../../../etc"))
         .isInstanceOf(IllegalArgumentException.class);
 
-    assertThatThrownBy(
-            () ->
-                SandboxContainerCommand.create(
-                    "es-sbx-1",
-                    specWithMount(new SandboxRuntimeSpec.WritableMount("relative/path", "/mnt")),
-                    ROOT,
-                    SANDBOX_ID))
+    assertThatThrownBy(() -> create("relative/path")).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /**
+   * RR-328 — the escape the previous lexical check could not see. Every one of these paths passes a
+   * {@code startsWith(sandboxRoot)} test; each one makes Docker bind something else read-write into
+   * a container the customer's code controls.
+   */
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void symbolicLinksInsideTheSandboxRootCannotSmuggleTheirTargetIntoTheContainer()
+      throws IOException {
+    Path outside = Files.createDirectories(hostElsewhere.resolve("secrets")).toRealPath();
+    Path sandboxRoot = root.resolve(SANDBOX_ID);
+
+    // 1. The mount itself is a link to a host directory.
+    Path linkedMount = Files.createSymbolicLink(sandboxRoot.resolve("escape"), outside);
+
+    // 2. The mount is real, but an intermediate component on the way to it is a link.
+    Path linkedParent = Files.createSymbolicLink(sandboxRoot.resolve("via"), outside);
+    Path throughLinkedParent = Files.createDirectories(outside.resolve("target"));
+
+    for (String escape :
+        List.of(
+            linkedMount.toString(),
+            linkedParent.resolve("target").toString(),
+            // Same target, reached lexically from inside the root.
+            sandboxRoot.resolve("via").resolve(throughLinkedParent.getFileName()).toString())) {
+      assertThatThrownBy(() -> create(escape))
+          .as("symlinked host path %s must be refused, not resolved", escape)
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  /**
+   * A bind path Docker would have to create is created root-owned and never passed through
+   * workspace preparation, so "not there yet" is a refusal rather than a mount.
+   */
+  @Test
+  void aMountThatDoesNotAlreadyExistAsARealDirectoryIsRefused() throws IOException {
+    assertThatThrownBy(() -> create(root.resolve(SANDBOX_ID).resolve("not-created-yet").toString()))
         .isInstanceOf(IllegalArgumentException.class);
+
+    Path file = Files.createFile(root.resolve(SANDBOX_ID).resolve("a-file"));
+    assertThatThrownBy(() -> create(file.toString())).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void everyContainerCarriesItsSandboxIdAndRuntimeEpochAsFencingLabels() {
+    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), root, SANDBOX_ID, EPOCH);
+
+    assertThat(argv)
+        .containsSequence("--label", SandboxContainerCommand.LABEL_SANDBOX_ID + "=" + SANDBOX_ID)
+        .containsSequence("--label", SandboxContainerCommand.LABEL_SANDBOX_EPOCH + "=" + EPOCH);
+  }
+
+  @Test
+  void theFenceProbeReadsBothLabelsAndToleratesAnUnlabelledContainer() {
+    List<String> argv = SandboxContainerCommand.inspectFence("es-sbx-1");
+
+    assertThat(argv).startsWith("docker", "inspect", "--format").endsWith("es-sbx-1");
+    assertThat(argv.get(3))
+        .contains(SandboxContainerCommand.LABEL_SANDBOX_ID)
+        .contains(SandboxContainerCommand.LABEL_SANDBOX_EPOCH)
+        .as("a container with no labels must yield empty output, not a template error")
+        .startsWith("{{with .Config.Labels}}");
+    assertThat(SandboxContainerCommand.expectedFence(SANDBOX_ID, EPOCH)).isEqualTo("s1|7");
+  }
+
+  private List<String> create(String hostPath) {
+    return SandboxContainerCommand.create(
+        "es-sbx-1",
+        specWithMount(new SandboxRuntimeSpec.WritableMount(hostPath, "/mnt")),
+        root,
+        SANDBOX_ID,
+        EPOCH);
   }
 
   @Test
   void containerNamesThatCouldCarryArgumentsAreRefused() {
     for (String unsafe :
         List.of("es sbx", "-es-sbx", "es;rm -rf /", "es$(id)", "", "a".repeat(70))) {
-      assertThatThrownBy(() -> SandboxContainerCommand.create(unsafe, spec(), ROOT, SANDBOX_ID))
+      assertThatThrownBy(
+              () -> SandboxContainerCommand.create(unsafe, spec(), root, SANDBOX_ID, EPOCH))
           .as("container name %s", unsafe)
           .isInstanceOf(IllegalArgumentException.class);
     }
@@ -128,7 +209,7 @@ class SandboxContainerCommandTest {
 
   @Test
   void commandIsAnArgumentVectorNotAShellString() {
-    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID);
+    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), root, SANDBOX_ID, EPOCH);
     assertThat(argv).doesNotContain("sh", "-c", "/bin/sh", "bash");
   }
 
@@ -142,7 +223,8 @@ class SandboxContainerCommandTest {
   void wallClockCeilingIsExposedBecauseNoContainerFlagExpressesIt() {
     assertThat(SandboxContainerCommand.limitsExceededTimeout(spec())).isEqualTo(900L);
     assertThat(
-            String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID)))
+            String.join(
+                " ", SandboxContainerCommand.create("es-sbx-1", spec(), root, SANDBOX_ID, EPOCH)))
         .endsWith("sleep 900");
   }
 

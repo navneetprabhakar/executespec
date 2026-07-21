@@ -113,8 +113,13 @@ class RunSandboxRuntimeDispatcherTest {
     assertThat(strict.provisioned).isEmpty();
   }
 
+  /**
+   * RR-327 — the stale owner must not clean up. A failed fenced transition proves another JVM owns
+   * this sandbox, and the takeover reattaches to the container of the same name, so destroying it
+   * here deletes the winner's live container. Nothing leaks: the new owner adopts it.
+   */
   @Test
-  void losingTheLeaseMidProvisionTearsDownWithoutWritingStateItNoLongerOwns() {
+  void losingTheLeaseMidProvisionDestroysNothingBecauseTheContainerIsNowSomeoneElses() {
     when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_DISPATCH)).thenReturn(true);
     RunSandbox sandbox = sandbox(SandboxState.PROVISIONING);
     RunSandbox.Lease lease = lease(sandbox);
@@ -123,8 +128,41 @@ class RunSandboxRuntimeDispatcherTest {
 
     assertThatThrownBy(() -> dispatcher.provision(sandbox, lease, spec()))
         .isInstanceOf(SandboxLeaseFencedException.class);
-    assertThat(strict.destroyed).containsExactly(sandbox.id());
+    assertThat(strict.destroyed).isEmpty();
     verify(store, never()).fail(any(), anyString(), anyString());
+  }
+
+  /**
+   * A provisioning failure only licenses cleanup while this JVM still demonstrably owns the
+   * sandbox. With the lease gone, both the container and the lifecycle row belong to the current
+   * owner.
+   */
+  @Test
+  void aProvisionFailureAfterTheLeaseLapsedTouchesNeitherTheContainerNorTheRow() {
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_DISPATCH)).thenReturn(true);
+    RunSandbox sandbox = sandbox(SandboxState.PROVISIONING);
+    RunSandbox.Lease lease = lease(sandbox);
+    strict.provisionFailure = new IllegalStateException("container did not start");
+    when(store.holdsLiveLease(lease)).thenReturn(false);
+
+    assertThatThrownBy(() -> dispatcher.provision(sandbox, lease, spec()))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(strict.destroyed).isEmpty();
+    verify(store, never()).fail(any(), anyString(), anyString());
+  }
+
+  @Test
+  void aProvisionFailureUnderALiveLeaseStillTearsDownAndFailsTheRow() {
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_DISPATCH)).thenReturn(true);
+    RunSandbox sandbox = sandbox(SandboxState.PROVISIONING);
+    RunSandbox.Lease lease = lease(sandbox);
+    strict.provisionFailure = new IllegalStateException("container did not start");
+    when(store.holdsLiveLease(lease)).thenReturn(true);
+
+    assertThatThrownBy(() -> dispatcher.provision(sandbox, lease, spec()))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(strict.destroyed).containsExactly(sandbox.id());
+    verify(store).fail(eq(lease), eq("RUNTIME_ERROR"), anyString());
   }
 
   @Test
@@ -216,6 +254,7 @@ class RunSandboxRuntimeDispatcherTest {
     private final List<UUID> provisioned = new ArrayList<>();
     private final List<UUID> destroyed = new ArrayList<>();
     private RuntimeException destroyFailure;
+    private RuntimeException provisionFailure;
 
     @Override
     public SandboxIsolationProfile profile() {
@@ -229,6 +268,9 @@ class RunSandboxRuntimeDispatcherTest {
 
     @Override
     public Provisioned provision(RunSandbox sandbox, SandboxRuntimeSpec spec) {
+      if (provisionFailure != null) {
+        throw provisionFailure;
+      }
       provisioned.add(sandbox.id());
       return new Provisioned("es-sbx-1", "sha256:image");
     }

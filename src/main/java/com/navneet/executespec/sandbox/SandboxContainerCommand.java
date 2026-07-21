@@ -1,16 +1,23 @@
 package com.navneet.executespec.sandbox;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 /**
  * Builds the exact argument vector for a {@link SandboxIsolationProfile#CONTAINER_STRICT_V1}
  * container.
  *
- * <p>Deliberately pure and free of I/O so the hardening flags are asserted directly rather than
- * inferred from a running container. Arguments are produced as a list and never as a shell string,
- * so no path or image name can be interpreted as shell syntax.
+ * <p>Arguments are produced as a list and never as a shell string, so no path or image name can be
+ * interpreted as shell syntax. Everything here is pure except writable-mount admission, which
+ * deliberately touches the filesystem: RR-328 established that a purely lexical containment check
+ * cannot decide whether a host path is inside the sandbox root, because a symbolic link planted in
+ * that root resolves elsewhere and Docker binds the link target, not the link.
  *
  * <p>What the profile applies, and what each flag is actually for:
  *
@@ -37,6 +44,25 @@ public final class SandboxContainerCommand {
   /** Fixed unprivileged identity. Chosen high to avoid colliding with image system accounts. */
   public static final String NON_ROOT_USER = "65532:65532";
 
+  /**
+   * Labels that carry the fencing identity of the container itself (RR-327).
+   *
+   * <p>The container name is derived from the sandbox id and is therefore stable across a takeover,
+   * which is exactly what made an unfenced {@code docker rm --force} able to delete a container
+   * this JVM does not own. These labels are the resource-side half of the fence: a destroy proves
+   * it is removing the container that THIS sandbox generation created, not merely one that happens
+   * to answer to the same name. The ownership half — proving the caller still holds the lease —
+   * belongs to {@link RunSandboxRuntimeDispatcher}, because only the database knows who owns the
+   * sandbox.
+   */
+  public static final String LABEL_SANDBOX_ID = "com.executespec.sandbox.id";
+
+  /**
+   * Runtime generation of the sandbox this container was created for. See {@link
+   * #LABEL_SANDBOX_ID}.
+   */
+  public static final String LABEL_SANDBOX_EPOCH = "com.executespec.sandbox.epoch";
+
   private static final String TMPFS_MOUNT = "/tmp";
 
   private SandboxContainerCommand() {}
@@ -50,11 +76,20 @@ public final class SandboxContainerCommand {
    * were both bindable read-write. The caller cannot supply the admission root directly; it can
    * only supply the identity the root is derived from.
    *
+   * <p>RR-327 — the container is stamped with {@link #LABEL_SANDBOX_ID} and {@link
+   * #LABEL_SANDBOX_EPOCH} so a later destroy can prove it is removing the resource this sandbox
+   * generation created rather than trusting a name.
+   *
    * @param globalWorkspaceRoot the configured {@code sandbox.runtime.workspace-root}
    * @param sandboxId this sandbox's immutable identifier
+   * @param runtimeEpoch the sandbox's runtime generation at creation time
    */
   public static List<String> create(
-      String containerName, SandboxRuntimeSpec spec, Path globalWorkspaceRoot, String sandboxId) {
+      String containerName,
+      SandboxRuntimeSpec spec,
+      Path globalWorkspaceRoot,
+      String sandboxId,
+      long runtimeEpoch) {
     if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
       throw new IllegalArgumentException("unsafe container name: " + containerName);
     }
@@ -63,6 +98,11 @@ public final class SandboxContainerCommand {
     List<String> argv = new ArrayList<>(List.of("docker", "run", "--detach"));
 
     argv.addAll(List.of("--name", containerName));
+
+    // Fencing identity. Emitted before any policy flag so it is impossible to build a sandbox
+    // container that carries no owner stamp.
+    argv.addAll(List.of("--label", LABEL_SANDBOX_ID + "=" + sandboxId));
+    argv.addAll(List.of("--label", LABEL_SANDBOX_EPOCH + "=" + runtimeEpoch));
 
     // Isolation.
     argv.addAll(List.of("--network", "none"));
@@ -127,9 +167,37 @@ public final class SandboxContainerCommand {
     return List.copyOf(argv);
   }
 
-  /** Idempotent teardown. Succeeds for a container that is already gone. */
+  /**
+   * Idempotent teardown. Succeeds for a container that is already gone.
+   *
+   * <p>This argv carries no fence of its own — {@code docker rm} has no compare-and-delete. The
+   * caller MUST read {@link #inspectFence} and prove the container's labels match before issuing
+   * it; {@link ContainerStrictV1Runtime#destroy} is the only permitted caller.
+   */
   public static List<String> destroy(String containerName) {
     return List.of("docker", "rm", "--force", "--volumes", containerName);
+  }
+
+  /**
+   * Reads the fencing labels off a container as {@code <sandboxId>|<epoch>} (RR-327).
+   *
+   * <p>{@code with} rather than a bare {@code index} so a container with no labels at all yields
+   * empty output instead of a template error, which keeps "unlabelled" and "engine broken"
+   * distinguishable at the call site. Both are refusals; only one is a bug.
+   */
+  public static List<String> inspectFence(String containerName) {
+    return List.of(
+        "docker",
+        "inspect",
+        "--format",
+        "{{with .Config.Labels}}{{index . \"%s\"}}|{{index . \"%s\"}}{{end}}"
+            .formatted(LABEL_SANDBOX_ID, LABEL_SANDBOX_EPOCH),
+        containerName);
+  }
+
+  /** The expected {@link #inspectFence} output for a sandbox generation. */
+  public static String expectedFence(String sandboxId, long runtimeEpoch) {
+    return sandboxId + "|" + runtimeEpoch;
   }
 
   /** Liveness probe used by reconciliation to find orphaned containers. */
@@ -178,10 +246,18 @@ public final class SandboxContainerCommand {
    * property that keeps the container engine socket, ambient credential stores, other tenants'
    * workspaces, the global sandbox root and the host root unbindable.
    *
-   * <p>Containment is proved by normalising both paths — traversal segments are already rejected by
-   * {@link #requireAbsolute}. This is a bind-argument guard: it does not resolve symlinks on the
-   * host, so a symlink planted inside the workspace root is out of scope here and must be handled
-   * where the workspace is populated.
+   * <p>RR-328 — this used to be lexical only, and its own javadoc admitted it did not resolve
+   * symbolic links. A lexical check is not containment: {@code <root>/work} passes it while being a
+   * link to {@code /var/run}, and Docker binds the link's target read-write into a container the
+   * customer's code controls. Containment is now proved on disk through {@link SafeWorkspacePath},
+   * the shared boundary the rest of the framework already uses, rather than a fourth private copy
+   * of the same rules: relative-only resolution beneath a canonical root, no symbolic link in any
+   * existing component, and refusal rather than redirection.
+   *
+   * <p>Deliberately stricter than {@code SafeWorkspacePath} alone on one point: the mount must
+   * already exist as a real directory. A bind path Docker has to create is created root-owned and
+   * outside the workspace-preparation path that would have been checked, so "not there yet" is a
+   * refusal rather than a mount.
    */
   private static void requireContained(String hostPath, Path sandboxRoot) {
     if (sandboxRoot == null || !sandboxRoot.isAbsolute()) {
@@ -195,6 +271,21 @@ public final class SandboxContainerCommand {
     if (!candidate.startsWith(root) || candidate.equals(root.getRoot())) {
       throw new IllegalArgumentException(
           "refusing to mount a host path outside this sandbox's workspace root: " + hostPath);
+    }
+    try {
+      if (!Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
+        throw new IllegalArgumentException(
+            "refusing to mount a host path that is not an existing real directory: " + hostPath);
+      }
+      SafeWorkspacePath.requireWithin(root, candidate);
+    } catch (IOException | SecurityException notContained) {
+      // The message names the path, never what it resolved to: a rejection must not become a probe
+      // for the host's filesystem layout.
+      throw new IllegalArgumentException(
+          "refusing to mount a host path that does not resolve inside this sandbox's workspace"
+              + " root: "
+              + hostPath,
+          notContained);
     }
   }
 }
