@@ -47,7 +47,7 @@ class GodClassLineCeilingTest {
   private static Map<String, Integer> ceilings() {
     Map<String, Integer> ceilings = new LinkedHashMap<>();
     ceilings.put("src/main/java/com/navneet/executespec/integration/RunOrchestrator.java", 4329);
-    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 5144);
+    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 5069);
     ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3453);
     ceilings.put("frontend/src/lib/api/core.ts", 1803);
     ceilings.put("frontend/src/ide/agentPanels.tsx", 1918);
