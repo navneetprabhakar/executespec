@@ -34,9 +34,15 @@ UPDATE billing_plan
 ALTER TABLE billing_plan
   DROP CONSTRAINT IF EXISTS ck_billing_plan_period;
 
+-- 'NONE' is a legitimate value, not drift: BillingPlan.period is documented as
+-- "MONTHLY, ANNUAL, NONE" and free plans carry NONE because they have no billing
+-- period at all. An earlier draft of this constraint listed only MONTHLY/ANNUAL
+-- and failed on a real database with SQLSTATE 23514 — the local instance holds
+-- one such row. Do not "tidy" NONE out of this list without first migrating those
+-- rows and changing the entity contract.
 ALTER TABLE billing_plan
   ADD CONSTRAINT ck_billing_plan_period
-  CHECK (period IN ('MONTHLY', 'ANNUAL'));
+  CHECK (period IN ('MONTHLY', 'ANNUAL', 'NONE'));
 
 -- ---------------------------------------------------------------------------
 -- RR-048 / RR-049 / RR-352 / RR-353 — durable gateway obligations
