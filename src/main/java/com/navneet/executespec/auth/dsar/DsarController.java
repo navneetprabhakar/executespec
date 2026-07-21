@@ -14,6 +14,7 @@ import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -88,6 +89,13 @@ public class DsarController {
     return ResponseEntity.ok(buildExport(userId));
   }
 
+  /**
+   * Per-section row ceiling. RR-230: a DSAR is a legal export that claims completeness, so every
+   * section must either return all rows or state explicitly that it was truncated — a silent cap is
+   * a false claim of completeness, and an unbounded section is a heap/response-size hazard.
+   */
+  static final int MAX_ROWS = 1000;
+
   private Map<String, Object> buildExport(String userId) {
     AppUser user =
         userRepo
@@ -118,23 +126,29 @@ public class DsarController {
     // Secrets themselves are intentionally OMITTED — DSAR mandates
     // disclosure of WHAT we hold, not handing back live credentials.
 
-    // PaymentAudit rows touching this user or their org.
-    List<PaymentAudit> payments = paymentRepo.findByUserIdOrOrgId(user.getId(), user.getOrgId());
-    List<Map<String, Object>> paymentRows = payments.stream().map(this::serializePayment).toList();
+    // RR-229: PaymentAudit rows attributable to THIS SUBJECT ONLY. The prior query
+    // (findByUserIdOrOrgId) returned every payment row for the caller's whole org regardless of the
+    // row's data subject, so any ordinary org member's "personal data export" leaked other members'
+    // payment reference ids, amounts, tier changes and gateway metadata. A DSAR must disclose only
+    // the requesting subject's own personal data; organization financial portability is a separate,
+    // capability-gated concern. RR-230: bounded, with an explicit truncation marker.
+    Page<PaymentAudit> paymentPage =
+        paymentRepo.findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> paymentRows =
+        paymentPage.getContent().stream().map(this::serializePayment).toList();
 
-    // Runs the user authored — capped at 1000 to keep the response sane.
-    List<PipelineRun> runs =
-        runRepo
-            .findByCreatedByUserIdOrderByStartedAtDesc(user.getId(), PageRequest.of(0, 1000))
-            .getContent();
-    List<Map<String, Object>> runRows = runs.stream().map(this::serializeRun).toList();
+    // Runs the user authored — bounded with an explicit truncation marker (RR-230).
+    Page<PipelineRun> runPage =
+        runRepo.findByCreatedByUserIdOrderByStartedAtDesc(
+            user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> runRows =
+        runPage.getContent().stream().map(this::serializeRun).toList();
 
-    // Notifications.
-    List<Notification> notifs =
-        notifRepo
-            .findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, 1000))
-            .getContent();
-    List<Map<String, Object>> notifRows = notifs.stream().map(this::serializeNotif).toList();
+    // Notifications — bounded with an explicit truncation marker (RR-230).
+    Page<Notification> notifPage =
+        notifRepo.findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> notifRows =
+        notifPage.getContent().stream().map(this::serializeNotif).toList();
 
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("schemaVersion", 1);
@@ -143,6 +157,16 @@ public class DsarController {
     root.put("payments", paymentRows);
     root.put("runs", runRows);
     root.put("notifications", notifRows);
+    // RR-230: completeness is stated, never implied. Each section reports its returned count, the
+    // true total, and whether rows were withheld by the cap, so an active subject can tell a
+    // complete export from a truncated one and request the remainder.
+    root.put(
+        "truncation",
+        Map.of(
+            "maxRowsPerSection", MAX_ROWS,
+            "payments", sectionTruncation(paymentPage),
+            "runs", sectionTruncation(runPage),
+            "notifications", sectionTruncation(notifPage)));
     root.put(
         "note",
         "Per GDPR Art. 15 / CCPA / DPDP this is the machine-readable copy "
@@ -152,6 +176,19 @@ public class DsarController {
             + "we hold, not handing back active secrets. To request "
             + "deletion (right to be forgotten), email admin@executespec.ai.");
     return root;
+  }
+
+  /**
+   * RR-230 — per-section completeness evidence: returned count, true total, and truncation flag.
+   */
+  private static Map<String, Object> sectionTruncation(Page<?> page) {
+    long total = page.getTotalElements();
+    int returned = page.getNumberOfElements();
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("returned", returned);
+    m.put("total", total);
+    m.put("truncated", total > returned);
+    return m;
   }
 
   private Map<String, Object> serializePayment(PaymentAudit p) {
