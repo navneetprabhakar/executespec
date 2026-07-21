@@ -90,6 +90,17 @@ public class TierEnforcementService {
           "ENTERPRISE", 4);
 
   /**
+   * Whether a resolved tier is a paid tier. Derived from {@link #TIER_RANK} rather than a
+   * hand-maintained tier-name allow-list: RR-1508 found `Set.of("PRO","TEAM","MAX","ENTERPRISE")`
+   * copied into {@code ProjectInviteService}, which omitted V253's first-class {@code PRO_PLUS} and
+   * {@code BYOK} (so paying customers were told to upgrade) while still honouring the retired
+   * {@code MAX}. An unknown tier is not paid — the gate fails closed.
+   */
+  public static boolean isPaidTier(String tier) {
+    return TIER_RANK.getOrDefault(normalizeTier(tier), 0) > 0;
+  }
+
+  /**
    * Atomically checks quota AND increments the run count in a single transaction with pessimistic
    * locking. Prevents TOCTOU race where two concurrent submissions both pass the quota check before
    * either increments. Throws 429/402 if quota exceeded.

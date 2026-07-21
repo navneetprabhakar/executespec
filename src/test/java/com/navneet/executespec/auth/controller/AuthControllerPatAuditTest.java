@@ -42,7 +42,8 @@ class AuthControllerPatAuditTest {
             mock(UserDataExportService.class),
             pats,
             mock(AiProviderPreferenceService.class),
-            mock(TierEnforcementService.class));
+            mock(TierEnforcementService.class),
+            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class));
     AppUser user = new AppUser();
     user.setId("u1");
     PersonalAccessToken token =

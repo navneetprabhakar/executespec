@@ -79,7 +79,25 @@ class PersonalAccessTokenServiceTest {
     assertThat(row.getUserId()).isEqualTo("user-1");
     assertThat(row.getScopes())
         .isEqualTo("api:read,runs:write,projects:write,agent:write,settings:write");
-    assertThat(row.getExpiresAt()).isNull();
+    // RR-1337 — omitting expiresInDays must apply the bounded default, never "never expires".
+    assertThat(row.getExpiresAt())
+        .isNotNull()
+        .isAfter(
+            Instant.now().plus(PersonalAccessTokenService.DEFAULT_EXPIRY_DAYS - 1, ChronoUnit.DAYS))
+        .isBefore(
+            Instant.now()
+                .plus(PersonalAccessTokenService.DEFAULT_EXPIRY_DAYS + 1, ChronoUnit.DAYS));
+  }
+
+  @Test
+  void create_rejectsLifetimeBeyondTheBoundedMaximum() {
+    assertThatThrownBy(
+            () ->
+                svc.create(
+                    "user-1",
+                    new CreatePatRequest(
+                        "forever", PersonalAccessTokenService.MAX_EXPIRY_DAYS + 1)))
+        .isInstanceOf(ResponseStatusException.class);
   }
 
   @Test

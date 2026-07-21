@@ -1,11 +1,5 @@
 package com.navneet.executespec.auth.controller;
 
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 
@@ -21,6 +15,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.auth.service.AuthService;
+import com.navneet.executespec.auth.service.ExternalConnectionValidator;
 import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
@@ -53,6 +48,7 @@ public class AuthController {
   private final PersonalAccessTokenService personalAccessTokenService;
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final TierEnforcementService tierEnforcementService;
+  private final ExternalConnectionValidator externalConnectionValidator;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -741,9 +737,6 @@ public class AuthController {
         "Confluence returned %d — check your credentials");
   }
 
-  private static final HttpClient HTTP_CLIENT =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
   }
@@ -788,69 +781,21 @@ public class AuthController {
       Map<String, String> headers,
       String successMessage,
       String failureMessageTemplate) {
-    if (isDisallowedTarget(url)) {
-      return ResponseEntity.ok(
-          new ValidationResult(false, "Connection target is not an allowed external address"));
-    }
-    try {
-      HttpRequest.Builder reqBuilder =
-          HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET();
-      headers.forEach(reqBuilder::header);
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, successMessage));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(false, String.format(failureMessageTemplate, resp.statusCode())));
-    } catch (Exception e) {
-      return ResponseEntity.ok(
-          new ValidationResult(
-              false, "Connection failed; verify the key and provider availability"));
-    }
-  }
-
-  /**
-   * SSRF guard for {@link #validateExternalConnection}: the JIRA/Confluence validators build the
-   * target from a user-supplied base URL, so an authenticated user could otherwise point us at
-   * {@code http://169.254.169.254/…} (cloud metadata) or an internal host. Require HTTPS and reject
-   * any host that resolves to a loopback / link-local / private / CGNAT / unique-local address.
-   * Returns {@code true} when the URL must NOT be fetched. C1 — audit 2026-05-29.
-   */
-  private static boolean isDisallowedTarget(String url) {
-    try {
-      URI uri = URI.create(url);
-      String scheme = uri.getScheme();
-      if (scheme == null || !scheme.equalsIgnoreCase("https")) {
-        return true;
-      }
-      String host = uri.getHost();
-      if (host == null || host.isBlank()) {
-        return true;
-      }
-      for (InetAddress addr : InetAddress.getAllByName(host)) {
-        if (addr.isAnyLocalAddress()
-            || addr.isLoopbackAddress()
-            || addr.isLinkLocalAddress()
-            || addr.isSiteLocalAddress()
-            || addr.isMulticastAddress()) {
-          return true;
-        }
-        byte[] b = addr.getAddress();
-        if (b.length == 4) {
-          int b0 = b[0] & 0xff;
-          int b1 = b[1] & 0xff;
-          if (b0 == 100 && b1 >= 64 && b1 <= 127) {
-            return true; // 100.64.0.0/10 carrier-grade NAT
-          }
-        } else if (b.length == 16 && (b[0] & 0xfe) == 0xfc) {
-          return true; // fc00::/7 IPv6 unique-local
-        }
-      }
-      return false;
-    } catch (Exception e) {
-      return true; // unparseable / unresolvable → do not fetch
-    }
+    ExternalConnectionValidator.ProbeResult probe = externalConnectionValidator.probe(url, headers);
+    return switch (probe.status()) {
+      case OK -> ResponseEntity.ok(new ValidationResult(true, successMessage));
+      case TARGET_NOT_ALLOWED ->
+          ResponseEntity.ok(
+              new ValidationResult(false, "Connection target is not an allowed external address"));
+      case HTTP_ERROR ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, String.format(failureMessageTemplate, probe.statusCode())));
+      case UNREACHABLE ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, "Connection failed; verify the key and provider availability"));
+    };
   }
 
   private void setRefreshCookie(HttpServletResponse response, String refreshToken) {
