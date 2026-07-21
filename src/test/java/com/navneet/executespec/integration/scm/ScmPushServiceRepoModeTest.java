@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -61,11 +64,18 @@ class ScmPushServiceRepoModeTest {
   @Mock private ArtifactPublicationGuard publicationGuard;
   @Mock private SideEffectOutbox sideEffectOutbox;
 
+  @Mock
+  private com.navneet.executespec.state.repository.RunRepoSnapshotRepository
+      runRepoSnapshotRepository;
+
   @org.mockito.Spy private ObjectMapper objectMapper = new ObjectMapper();
 
   @InjectMocks private ScmPushService service;
 
   private PipelineRun runWithMode(String repoMode) {
+    // RR-1668 — no cloned-branch snapshot in these single-repo mode tests, so the push takes the
+    // plain non-forced create path (pushToBranch is still invoked).
+    lenient().when(runRepoSnapshotRepository.findByRunId(anyString())).thenReturn(List.of());
     AppUser user = new AppUser();
     user.setId("user-1");
     user.setGithubPat("ghp_user_pat");
@@ -84,7 +94,8 @@ class ScmPushServiceRepoModeTest {
   @ValueSource(strings = {"EXISTNG", "existing ", "exsiting", "PUSH", "new-repo", "  "})
   void unknownOrBlankModeNeverForcePushesTheDefaultBranch(String hostileMode) {
     PipelineRun run = runWithMode(hostileMode);
-    when(gitTool.pushToBranch(anyString(), anyString(), anyString(), anyString()))
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
         .thenReturn(GitToolResult.ok("pushed"));
     when(gitHubRepoService.getDefaultBranch(anyString(), anyString())).thenReturn("main");
     when(gitHubRepoService.createPullRequestDetailed(
@@ -106,13 +117,15 @@ class ScmPushServiceRepoModeTest {
     assertThat(result.status()).isEqualTo("FAILED");
     assertThat(result.message()).contains("Unsupported repository mode");
     verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
-    verify(gitTool, never()).pushToBranch(anyString(), anyString(), anyString(), anyString());
+    verify(gitTool, never())
+        .pushToBranch(anyString(), anyString(), anyString(), anyString(), nullable(String.class));
   }
 
   @Test
   void absentModeFallsBackToTheSafeBranchAndPullRequestPath() {
     PipelineRun run = runWithMode(null);
-    when(gitTool.pushToBranch(anyString(), anyString(), anyString(), anyString()))
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
         .thenReturn(GitToolResult.ok("pushed"));
     when(gitHubRepoService.getDefaultBranch(anyString(), anyString())).thenReturn("main");
     when(gitHubRepoService.createPullRequestDetailed(
@@ -123,7 +136,8 @@ class ScmPushServiceRepoModeTest {
 
     assertThat(result.status()).isEqualTo("PUSHED");
     verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
-    verify(gitTool).pushToBranch(anyString(), anyString(), anyString(), anyString());
+    verify(gitTool)
+        .pushToBranch(anyString(), anyString(), anyString(), anyString(), nullable(String.class));
   }
 
   /**
@@ -133,7 +147,8 @@ class ScmPushServiceRepoModeTest {
   @Test
   void newModeWithAPreexistingRepositoryUrlStillUsesBranchAndPullRequest() {
     PipelineRun run = runWithMode("NEW");
-    when(gitTool.pushToBranch(anyString(), anyString(), anyString(), anyString()))
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
         .thenReturn(GitToolResult.ok("pushed"));
     when(gitHubRepoService.getDefaultBranch(anyString(), anyString())).thenReturn("main");
     when(gitHubRepoService.createPullRequestDetailed(

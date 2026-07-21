@@ -3,10 +3,12 @@ package com.navneet.executespec.integration.scm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -58,6 +60,10 @@ class ScmPushServiceExistingPullRequestTest {
   @Mock private ArtifactPublicationGuard publicationGuard;
   @Mock private SideEffectOutbox sideEffectOutbox;
 
+  @Mock
+  private com.navneet.executespec.state.repository.RunRepoSnapshotRepository
+      runRepoSnapshotRepository;
+
   @org.mockito.Spy private ObjectMapper objectMapper = new ObjectMapper();
 
   @InjectMocks private ScmPushService service;
@@ -67,7 +73,10 @@ class ScmPushServiceExistingPullRequestTest {
     user.setId("user-1");
     user.setGithubPat("ghp_user_pat");
     when(appUserRepository.findById("user-1")).thenReturn(Optional.of(user));
-    when(gitTool.pushToBranch(anyString(), anyString(), anyString(), anyString()))
+    // RR-1668 — single-repo run with no cloned-branch snapshot ⇒ plain non-forced push path.
+    when(runRepoSnapshotRepository.findByRunId(anyString())).thenReturn(List.of());
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
         .thenReturn(GitToolResult.ok("pushed"));
     when(gitHubRepoService.getDefaultBranch(anyString(), anyString())).thenReturn("main");
     return PipelineRun.builder()

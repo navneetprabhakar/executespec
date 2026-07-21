@@ -21,6 +21,7 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.codereview.CodeReviewService;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
+import com.navneet.executespec.cost.CostVisibilityPolicy;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -367,9 +368,10 @@ public class ProjectChatTools {
         DefaultToolDefinition.builder()
             .name("list_recent_runs")
             .description(
-                "List the most recent runs for this project — id, status, statusReason, plan "
-                    + "strategy, verifiedScore, started/completed timestamps, and total cost. "
-                    + "Read-only. Use to summarise project history or to find a specific run.")
+                "List the most recent runs for this project — id, status, statusReason, plan"
+                    + " strategy, verifiedScore, and started/completed timestamps. Read-only. Use"
+                    + " to summarise project history or to find a specific run. Raw provider-dollar"
+                    + " cost is only included for billing-role viewers; otherwise it is withheld.")
             .inputSchema(
                 """
                 {
@@ -402,7 +404,18 @@ public class ProjectChatTools {
             if (run.getStartedAt() != null) row.put("startedAt", run.getStartedAt().toString());
             if (run.getCompletedAt() != null)
               row.put("completedAt", run.getCompletedAt().toString());
-            if (run.getActualCostUsd() != null) row.put("actualCostUsd", run.getActualCostUsd());
+            // RR-563: raw provider-dollar cost is a billing figure the product hides from ordinary
+            // customer surfaces (managed AI credits are shown instead). This tool is a plain
+            // PROJECT_READ callback reachable by non-billing developers and cross-org
+            // collaborators,
+            // so emit actualCostUsd only to a billing-role viewer of the run's own org; otherwise
+            // mark it withheld rather than narrating internal COGS through the chat model.
+            if (run.getActualCostUsd() != null
+                && CostVisibilityPolicy.canViewRawCost(ctx.principal(), run.getOrgId())) {
+              row.put("actualCostUsd", run.getActualCostUsd());
+            } else if (run.getActualCostUsd() != null) {
+              row.put("actualCostUsdWithheld", true);
+            }
           }
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);

@@ -2,8 +2,8 @@ package com.navneet.executespec.engine;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import jakarta.annotation.PostConstruct;
 
@@ -13,8 +13,10 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.testgen.BoundedProcess;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
@@ -154,7 +156,11 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private boolean requireTestVerification(EngineRequest request) {
     if (request.verifyMode() == VerifyMode.NONE) return false;
     String src = runRepo.findById(request.runId()).map(PipelineRun::getSourceType).orElse("");
-    if (src != null && (src.startsWith("swebench") || src.startsWith("benchmark"))) {
+    // Shared classifier — same set LlmExecutionPolicyFactory.isControlledWorkerRun uses (RR-1590),
+    // so the test-gate-off and no-failover behaviours cannot drift. TERMINAL_BENCH runs execute via
+    // engine.WorkerAgent directly (not this PATCH path), so it is inert for them today, but keeping
+    // one classifier means a future PATCH-shaped benchmark source is correct here automatically.
+    if (BenchmarkSourceType.isControlledWorkerSource(src)) {
       return false;
     }
     // Historical PATCH default: customer autofix/finding sources require a recent passing runTests
@@ -221,18 +227,20 @@ public class CodeGenEngineImpl implements CodeGenEngine {
               ":(exclude)*.egg-info",
               ":(exclude,glob)appendonlydir/**");
       pb.redirectErrorStream(true);
-      Process p = pb.start();
-      String out = new String(p.getInputStream().readAllBytes());
-      if (!p.waitFor(120, TimeUnit.SECONDS)) {
-        p.destroyForcibly();
-        return "";
-      }
-      return p.exitValue() == 0 ? out : "";
-    } catch (IOException e) {
-      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
-      return "";
+      // RR-1565: BoundedProcess makes the 120s deadline reachable and caps the captured output.
+      // Reading stdout to EOF on this thread first (the old shape) let a stalled `git diff` — an
+      // index lock, a hung filter/textconv driver, or a credential-helper prompt — pin the pipeline
+      // thread forever, and the unbounded read materialised a large working tree whole into heap.
+      // (EngineResult.diff() has no production reader today; this keeps the value bounded and
+      // honest
+      // rather than deleting the capture.)
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(120));
+      return outcome.finished() && outcome.exitCode() == 0 ? outcome.output() : "";
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      return "";
+    } catch (Exception e) {
+      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
       return "";
     }
   }

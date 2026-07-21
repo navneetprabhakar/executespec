@@ -124,12 +124,19 @@ public class TierEvalRunner {
               t.setDaemon(true);
               return t;
             });
+    Future<ChatResponse> future = null;
     try {
-      Future<ChatResponse> future = executor.submit(() -> llmRouter.call(req));
+      future = executor.submit(() -> llmRouter.call(req));
       ChatResponse resp = future.get(PER_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
       long elapsed = System.currentTimeMillis() - start;
       return grade(testCase, resolvedProvider, model, resp, elapsed, runId);
     } catch (TimeoutException e) {
+      // RR-696: cancel(true) frees the waiter and interrupts the eval worker thread; shutdownNow()
+      // in finally also interrupts. Neither guarantees the provider HTTP request stops mid-flight,
+      // so a socket already streaming may finish and bill after this returns — reported cost stays
+      // a lower bound. This is an operator-only eval harness, so the residual leak is bounded; full
+      // settlement (RunCostTracker.finalizeRun on every terminal path) is a broader change.
+      future.cancel(true);
       long elapsed = System.currentTimeMillis() - start;
       log.warn(
           "tier-eval-v2 timeout case={} provider={} elapsed={}ms",
