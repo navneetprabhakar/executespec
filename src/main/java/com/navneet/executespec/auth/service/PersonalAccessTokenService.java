@@ -56,6 +56,12 @@ public class PersonalAccessTokenService {
 
   private static final int CAP_OTHER = 3;
 
+  /** Bounded default lifetime applied when a client omits {@code expiresInDays} (RR-1337). */
+  public static final int DEFAULT_EXPIRY_DAYS = 90;
+
+  /** Upper bound on any requested PAT lifetime. */
+  public static final int MAX_EXPIRY_DAYS = 365;
+
   private final PersonalAccessTokenRepository repo;
   private final AppUserRepository appUserRepo;
   private final OrgRepository orgRepo;
@@ -74,13 +80,18 @@ public class PersonalAccessTokenService {
     if (name.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token name is required");
     }
-    Instant expiresAt = null;
-    if (req.expiresInDays() != null) {
-      if (req.expiresInDays() <= 0) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expiresInDays must be positive");
-      }
-      expiresAt = Instant.now().plus(req.expiresInDays(), ChronoUnit.DAYS);
+    // RR-1337 — a PAT is a device credential; it must always have a bounded lifetime. Callers that
+    // omit expiresInDays (the web CLI/VS Code device-login mint did exactly this) previously got a
+    // token that never expired, so a stolen device credential stayed valid until manual revocation.
+    int expiresInDays = req.expiresInDays() == null ? DEFAULT_EXPIRY_DAYS : req.expiresInDays();
+    if (expiresInDays <= 0) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expiresInDays must be positive");
     }
+    if (expiresInDays > MAX_EXPIRY_DAYS) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "expiresInDays must be at most " + MAX_EXPIRY_DAYS);
+    }
+    Instant expiresAt = Instant.now().plus(expiresInDays, ChronoUnit.DAYS);
 
     // Serialize the complete read/evict/insert sequence on the owning user row. Without this lock,
     // concurrent device logins can all observe the same active set and exceed the tier cap.

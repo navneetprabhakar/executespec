@@ -75,6 +75,32 @@ public final class PatScopePolicy {
     return required != null && scopes.contains(required);
   }
 
+  /**
+   * Route prefixes that mutate or probe stored provider / SCM / Jira / Confluence credentials, or
+   * the org key-source mode. These are the ACTUAL controller mappings: personal credential routes
+   * live under {@code /api/auth/settings/**} (see {@code AuthController}), not {@code
+   * /api/auth/me/settings/**} — the older constants pointed at paths no controller ever mapped, so
+   * a scoped {@code credentials:manage} PAT could not manage personal keys as documented (RR-004).
+   * The legacy {@code /api/auth/me/settings/**} prefixes are retained so any client or proxy still
+   * addressing them keeps failing closed rather than falling through to a weaker scope.
+   */
+  private static final String[] CREDENTIAL_ROUTE_PREFIXES = {
+    "/api/auth/settings/ai-keys",
+    "/api/auth/settings/github",
+    "/api/auth/settings/bitbucket",
+    "/api/auth/settings/jira",
+    "/api/auth/settings/confluence",
+    "/api/auth/me/settings/ai-keys",
+    "/api/auth/me/settings/github",
+    "/api/auth/me/settings/bitbucket",
+    "/api/auth/me/settings/jira",
+    "/api/auth/me/settings/confluence",
+    "/api/org/me/settings/ai-keys",
+    "/api/org/me/settings/key-source",
+    "/api/org/me/settings/jira",
+    "/api/org/me/settings/confluence",
+  };
+
   static String requiredScope(String method, String requestUri) {
     String verb = method == null ? "" : method.toUpperCase(Locale.ROOT);
     String path = requestUri == null ? "" : requestUri;
@@ -90,16 +116,10 @@ public final class PatScopePolicy {
     if (path.startsWith("/api/billing/") || path.startsWith("/api/webhooks/")) {
       return BILLING_WRITE;
     }
-    if (path.startsWith("/api/auth/me/settings/ai-keys")
-        || path.startsWith("/api/auth/me/settings/github")
-        || path.startsWith("/api/auth/me/settings/bitbucket")
-        || path.startsWith("/api/auth/me/settings/jira")
-        || path.startsWith("/api/auth/me/settings/confluence")
-        || path.startsWith("/api/org/me/settings/ai-keys")
-        || path.startsWith("/api/org/me/settings/key-source")
-        || path.startsWith("/api/org/me/settings/jira")
-        || path.startsWith("/api/org/me/settings/confluence")) {
-      return CREDENTIALS_MANAGE;
+    for (String credentialRoute : CREDENTIAL_ROUTE_PREFIXES) {
+      if (path.startsWith(credentialRoute)) {
+        return CREDENTIALS_MANAGE;
+      }
     }
     if (path.startsWith("/api/agent/")
         || path.startsWith("/api/orchestrator/")

@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
+import com.navneet.executespec.auth.dto.ProjectMemberCapabilitiesDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
 import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -163,6 +164,32 @@ public class ProjectController {
     projectService.addMember(
         id, body.get("userId"), body.get("role"), userDetails.getUser().getId());
     return ResponseEntity.status(HttpStatus.CREATED).build();
+  }
+
+  /**
+   * RR-1513 — change an existing member's project role. Same write guard + PROJECT_ADMIN authority
+   * as add/remove; the service applies the last-admin guard on demotion.
+   */
+  @PutMapping("/{id}/members/{userId}")
+  public ResponseEntity<Void> updateMemberRole(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String id,
+      @PathVariable String userId,
+      @RequestBody Map<String, String> body) {
+    projectAccessGuard.assertCanWrite(id, userDetails);
+    projectService.updateMemberRole(id, userId, body.get("role"), userDetails.getUser().getId());
+    return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * RR-1507 / RR-1509 — the effective per-action authority for this caller on this project, so
+   * clients render exactly what the server will accept instead of re-deriving it from one role.
+   */
+  @GetMapping("/{id}/member-capabilities")
+  public ResponseEntity<ProjectMemberCapabilitiesDto> memberCapabilities(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    projectAccessGuard.assertCanRead(id, userDetails);
+    return ResponseEntity.ok(projectService.memberCapabilities(id, userDetails.getUser().getId()));
   }
 
   @DeleteMapping("/{id}/members/{userId}")

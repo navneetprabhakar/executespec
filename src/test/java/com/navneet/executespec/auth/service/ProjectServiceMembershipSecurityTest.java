@@ -44,7 +44,8 @@ class ProjectServiceMembershipSecurityTest {
             auditService,
             mock(EventTrackingService.class),
             mock(TierEnforcementService.class),
-            mock(com.navneet.executespec.router.ProviderReadinessService.class));
+            mock(com.navneet.executespec.router.ProviderReadinessService.class),
+            mock(com.navneet.executespec.auth.repository.OrgRepository.class));
     Project project = new Project();
     project.setId("p1");
     project.setOrgId("host-org");
