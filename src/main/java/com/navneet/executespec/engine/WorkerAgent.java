@@ -953,15 +953,19 @@ public class WorkerAgent {
           // succeeds because build mode has its own smoke gate downstream.
           if (gateOn) {
             int sinceLastTest = lastTestRunIter < 0 ? Integer.MAX_VALUE : iter - lastTestRunIter;
-            if (sinceLastTest > TEST_VERIFICATION_RECENCY_ITERS) {
+            // RR-256 — a write after the last passing runTests invalidates that green evidence: the
+            // tree the test verified no longer exists, so the recency window must not accept it.
+            boolean editedSinceTest = lastTestRunIter >= 0 && lastEditIter > lastTestRunIter;
+            if (sinceLastTest > TEST_VERIFICATION_RECENCY_ITERS || editedSinceTest) {
               String reason;
-              if (lastTestRunIter < 0) {
+              if (lastTestRunIter < 0 || editedSinceTest) {
                 reason =
-                    "completeTask refused — you have not called the `runTests` tool"
-                        + " in this conversation. Run the failing test (using runTests"
-                        + " with the FAIL_TO_PASS test ids from the user message) and"
-                        + " confirm it passes before calling completeTask. The bench"
-                        + " harness will not score your patch unless the failing test"
+                    "completeTask refused — there is no passing `runTests` result for the CURRENT"
+                        + " workspace. You either have not run the failing test, or you edited"
+                        + " files after the last passing run (which invalidated it). Run the"
+                        + " failing test (using runTests with the FAIL_TO_PASS test ids from the"
+                        + " user message) and confirm it passes before calling completeTask. The"
+                        + " bench harness will not score your patch unless the failing test"
                         + " actually passes.";
               } else {
                 reason =
@@ -999,16 +1003,20 @@ public class WorkerAgent {
           if (buildGateOn) {
             int sinceLastBuild =
                 lastBuildPassIter < 0 ? Integer.MAX_VALUE : iter - lastBuildPassIter;
-            if (sinceLastBuild > BUILD_VERIFICATION_RECENCY_ITERS) {
+            // RR-256 — a write after the last passing build invalidates that green evidence; the
+            // recency window must not accept a build that predates the current edits.
+            boolean editedSinceBuild = lastBuildPassIter >= 0 && lastEditIter > lastBuildPassIter;
+            if (sinceLastBuild > BUILD_VERIFICATION_RECENCY_ITERS || editedSinceBuild) {
               String reason;
-              if (lastBuildPassIter < 0) {
+              if (lastBuildPassIter < 0 || editedSinceBuild) {
                 reason =
-                    "completeTask refused — the build was failing entering this review pass"
-                        + " and you have not yet seen a successful `buildProject` call (exit=0)"
-                        + " in this conversation. Make whatever edits are needed to fix the"
-                        + " build error, then call buildProject and confirm exit=0 before"
-                        + " calling completeTask. A reviewer pass that ends with a still-failing"
-                        + " build is the dominant cause of PARTIAL runs in production.";
+                    "completeTask refused — there is no passing `buildProject` (exit=0) for the"
+                        + " CURRENT workspace. Either the build has not passed in this"
+                        + " conversation, or you edited files after the last passing build (which"
+                        + " invalidated it). Make whatever edits are needed, then call buildProject"
+                        + " and confirm exit=0 before calling completeTask. A reviewer pass that"
+                        + " ends with a still-failing build is the dominant cause of PARTIAL runs"
+                        + " in production.";
               } else {
                 reason =
                     "completeTask refused — last passing buildProject (exit=0) was "

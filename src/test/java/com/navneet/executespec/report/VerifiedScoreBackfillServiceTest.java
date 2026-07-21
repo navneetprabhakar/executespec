@@ -125,8 +125,11 @@ class VerifiedScoreBackfillServiceTest {
         svc.backfill(new VerifiedScoreBackfillService.BackfillRequest("run-boot", null, true));
 
     // BUILD slot reads the boot verdict (UNHEALTHY = 55) instead of the compile-only 100:
-    //   (30*100 + 25*55 + 20*100 + 20*100 + 5*100) / 100 = 88.75 → 89
-    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(89);
+    //   (30*100 + 25*55 + 20*100 + 20*100 + 5*100) / 100 = 88.75 → 89 raw.
+    // RR-296 — a non-HEALTHY boot must not read PASS: the trust cap bounds the headline at 84
+    // (below the 85 PASS threshold), so a service that compiles + tests + reviews clean but fails
+    // its health probe can no longer show a passing 89.
+    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(84);
   }
 
   /** RR-1645 — the recompute must be a pure function of the persisted row, so it is idempotent. */
@@ -138,7 +141,9 @@ class VerifiedScoreBackfillServiceTest {
     row.setRunId("run-boot-2");
     row.setBootVerdict(BootHealthEvaluator.Verdict.UNHEALTHY.name());
     row.setBootHealthy(false);
-    row.setVerifiedScore(89);
+    // RR-296 — the recompute is a pure function of the persisted row; an UNHEALTHY boot lands at
+    // the boot-aware trust cap of 84, so seed the already-correct value to prove idempotency.
+    row.setVerifiedScore(84);
     row.setRubricScore(100);
     when(repo.findByRunId("run-boot-2")).thenReturn(Optional.of(row));
 
@@ -148,7 +153,7 @@ class VerifiedScoreBackfillServiceTest {
 
     assertThat(result.unchanged()).isEqualTo(1);
     assertThat(result.updated()).isZero();
-    assertThat(row.getVerifiedScore()).isEqualTo(89);
+    assertThat(row.getVerifiedScore()).isEqualTo(84);
     verify(repo, never()).save(any());
   }
 
