@@ -36,4 +36,12 @@ public interface AppUserRepository extends JpaRepository<AppUser, String> {
   /** Solo users: active, no org (FREE tier individuals). */
   @Query("SELECT u FROM AppUser u WHERE u.status = 'ACTIVE' AND u.orgId IS NULL")
   List<AppUser> findActiveSoloUsers();
+
+  /**
+   * RR-010 — count of usable platform super-admins, so a status/role mutation can refuse to demote
+   * or suspend the last one and lock everyone out of the admin surface.
+   */
+  @Query(
+      "SELECT COUNT(u) FROM AppUser u WHERE u.globalRole = 'SUPER_ADMIN' AND u.status = 'ACTIVE'")
+  long countActiveSuperAdmins();
 }
