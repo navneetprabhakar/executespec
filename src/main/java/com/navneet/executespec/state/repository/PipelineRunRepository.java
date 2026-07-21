@@ -546,4 +546,43 @@ public interface PipelineRunRepository
    * summary is inherently a full scan, exactly as before.
    */
   List<PipelineRun> findByStartedAtAfter(Instant since);
+
+  /**
+   * RR-079 — per-user run aggregate computed in SQL (GROUP BY owner). Replaces the global user-runs
+   * summary's {@code findAll()}/{@code findByStartedAtAfter()} + in-Java grouping, which loaded
+   * every pipeline_run into heap. Bounded to one row per distinct run owner.
+   */
+  interface UserRunAggregate {
+    String getUid();
+
+    long getRunCount();
+
+    long getCompleted();
+
+    long getFailed();
+
+    long getTotalIn();
+
+    long getTotalOut();
+  }
+
+  @Query(
+      "SELECT r.createdByUserId AS uid, COUNT(r) AS runCount,"
+          + " SUM(CASE WHEN r.status = 'COMPLETE' THEN 1L ELSE 0L END) AS completed,"
+          + " SUM(CASE WHEN r.status = 'FAILED' THEN 1L ELSE 0L END) AS failed,"
+          + " COALESCE(SUM(r.totalInputTokens), 0L) AS totalIn,"
+          + " COALESCE(SUM(r.totalOutputTokens), 0L) AS totalOut"
+          + " FROM PipelineRun r WHERE r.createdByUserId IS NOT NULL"
+          + " GROUP BY r.createdByUserId")
+  List<UserRunAggregate> aggregateUserRunStats();
+
+  @Query(
+      "SELECT r.createdByUserId AS uid, COUNT(r) AS runCount,"
+          + " SUM(CASE WHEN r.status = 'COMPLETE' THEN 1L ELSE 0L END) AS completed,"
+          + " SUM(CASE WHEN r.status = 'FAILED' THEN 1L ELSE 0L END) AS failed,"
+          + " COALESCE(SUM(r.totalInputTokens), 0L) AS totalIn,"
+          + " COALESCE(SUM(r.totalOutputTokens), 0L) AS totalOut"
+          + " FROM PipelineRun r WHERE r.createdByUserId IS NOT NULL AND r.startedAt > :since"
+          + " GROUP BY r.createdByUserId")
+  List<UserRunAggregate> aggregateUserRunStatsSince(@Param("since") Instant since);
 }
