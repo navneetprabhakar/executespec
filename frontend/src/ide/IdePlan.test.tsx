@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   getRun: vi.fn(),
   getManagedAiBalance: vi.fn(),
   approveRun: vi.fn(),
+  getPlanContractGate: vi.fn(),
   cancelRun: vi.fn(),
   editRunPlan: vi.fn(),
 }));
@@ -80,6 +81,8 @@ beforeEach(() => {
   root = createRoot(host);
   api.getManagedAiBalance.mockResolvedValue(null);
   api.approveRun.mockResolvedValue(undefined);
+  // RR-819 — 204 (no contract gate) is the default for the overwhelming majority of runs.
+  api.getPlanContractGate.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -156,6 +159,7 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
       3,
       undefined,
       await sha256Hex('{"tasks":["a"]}'),
+      undefined,
     );
   });
 
@@ -167,5 +171,209 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
     expect(text()).toContain('Loading plan');
     expect(text()).not.toContain('7 credit(s)');
     expect(button('Approve and start work')).toBeUndefined();
+  });
+});
+
+const GATE_ROWS = [
+  {
+    contractId: 'c-1',
+    contractName: 'Orders API',
+    type: 'OPENAPI',
+    detectedPath: 'api/orders.yaml',
+    declaredConsumers: ['acme/billing'],
+    matchedPlanTasks: ['t-2'],
+  },
+];
+
+function gateReport(runId: string, digest: string, requiresTypedAck = true) {
+  return {
+    runId,
+    reportJson: JSON.stringify(GATE_ROWS),
+    reportDigest: digest,
+    requiresTypedAck,
+    contractCount: GATE_ROWS.length,
+  };
+}
+
+function ackInput(): HTMLInputElement | null {
+  return host.querySelector('[data-testid="breaking-ack-input"]');
+}
+
+async function typeAck(value: string) {
+  const input = ackInput();
+  if (!input) throw new Error('acknowledgement input is not rendered');
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set as (
+      v: string,
+    ) => void;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+  });
+}
+
+describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
+  it('shows what breaks and blocks approval until the exact literal BREAKING is typed', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A'));
+    await render();
+
+    // The approver must see WHAT breaks, not a bare confirmation box.
+    expect(text()).toContain('Orders API');
+    expect(text()).toContain('api/orders.yaml');
+    expect(text()).toContain('acme/billing');
+
+    const approve = button('Approve and start work');
+    expect(approve?.disabled).toBe(true);
+
+    await typeAck('breaking');
+    expect(button('Approve and start work')?.disabled).toBe(true);
+    await typeAck('BREAKIN');
+    expect(button('Approve and start work')?.disabled).toBe(true);
+
+    await typeAck('BREAKING');
+    expect(button('Approve and start work')?.disabled).toBe(false);
+  });
+
+  it('refuses to approve even if the disabled button is clicked before the ack is typed', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A'));
+    await render();
+
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+    expect(api.approveRun).not.toHaveBeenCalled();
+  });
+
+  it('sends the ack bound to the digest of the report it actually fetched', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A'));
+    await render();
+
+    await typeAck('BREAKING');
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+
+    expect(api.approveRun).toHaveBeenCalledWith(
+      'run-a',
+      true,
+      3,
+      undefined,
+      await sha256Hex('{"tasks":["a"]}'),
+      {ack: 'BREAKING', reportDigest: 'DIGEST-A'},
+    );
+  });
+
+  it('never lets a gate report for a different run gate — or enable — this one', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    // A report the server (or a stale in-flight fetch) attributes to another run.
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-zzz', 'DIGEST-Z'));
+    await render();
+
+    // It must not render as this run's evidence...
+    expect(host.querySelector('[data-testid="plan-contract-gate"]')).toBeNull();
+    expect(text()).not.toContain('Orders API');
+
+    // ...and it must not travel with this run's approval either.
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+    expect(api.approveRun).toHaveBeenCalledWith(
+      'run-a',
+      true,
+      3,
+      undefined,
+      await sha256Hex('{"tasks":["a"]}'),
+      undefined,
+    );
+  });
+
+  it('drops the acknowledgement when the route moves to another run', async () => {
+    api.getRun.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'run-a'
+          ? runDetail('run-a', '{"tasks":["a"]}', 3)
+          : runDetail('run-b', '{"tasks":["b"]}', 9),
+      ),
+    );
+    api.getPlanContractGate.mockImplementation((id: string) =>
+      Promise.resolve(id === 'run-a' ? gateReport('run-a', 'DIGEST-A') : undefined),
+    );
+    await render();
+
+    await typeAck('BREAKING');
+    expect(button('Approve and start work')?.disabled).toBe(false);
+
+    await act(async () => {
+      (host.querySelector('[data-testid="go-b"]') as HTMLButtonElement).click();
+    });
+
+    // Run B has no gate, so it approves with no friction — but never carrying run A's ack.
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+    expect(api.approveRun).toHaveBeenCalledWith(
+      'run-b',
+      true,
+      9,
+      undefined,
+      await sha256Hex('{"tasks":["b"]}'),
+      undefined,
+    );
+  });
+
+  it('separates the two 409s: missing acknowledgement vs a report that moved', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A'));
+    api.approveRun.mockRejectedValueOnce(
+      new Error(
+        'The breaking-change report you acknowledged is not the one currently on this run.' +
+          ' Reload the plan and review the change again before approving.',
+      ),
+    );
+    await render();
+
+    await typeAck('BREAKING');
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+
+    expect(text()).toContain('reload');
+    // The stale acknowledgement is dropped and the report is re-read, so the user re-acknowledges
+    // the change they will actually ship.
+    expect(ackInput()?.value).toBe('');
+    expect(button('Approve and start work')?.disabled).toBe(true);
+    expect(api.getPlanContractGate.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('does not add any friction to a run with no contract gate (the 204 case)', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(undefined);
+    await render();
+
+    expect(host.querySelector('[data-testid="plan-contract-gate"]')).toBeNull();
+    expect(button('Approve and start work')?.disabled).toBe(false);
+
+    await act(async () => {
+      button('Approve and start work')?.click();
+    });
+    expect(api.approveRun).toHaveBeenCalledWith(
+      'run-a',
+      true,
+      3,
+      undefined,
+      await sha256Hex('{"tasks":["a"]}'),
+      undefined,
+    );
+  });
+
+  it('does not gate when the server report says no typed acknowledgement is required', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A', false));
+    await render();
+
+    expect(host.querySelector('[data-testid="plan-contract-gate"]')).toBeNull();
+    expect(button('Approve and start work')?.disabled).toBe(false);
   });
 });
