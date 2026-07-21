@@ -70,7 +70,7 @@ compatible; omitted-scope and Web device-login tokens default to
 management, operator-test, global-admin and unknown mutation routes. Device-cap LRU displacement
 produces a dedicated append-only audit event.
 
-JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). OAuth authorization requests are persisted in short-lived signed HttpOnly cookies keyed by `state` (`CookieOAuth2AuthorizationRequestRepository`, 5-min TTL, `SameSite=Lax`) instead of relying only on the Tomcat session, so provider callbacks survive stale/missing session cookies and parallel OAuth attempts (RL-2026-06-032). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. **Personal Access Tokens** (V215, `personal_access_token`) provide programmatic auth for headless clients (CLI / VS Code / CI): a revocable, SHA-256-hashed (never-plaintext) `es_pat_…` bearer the user mints via `POST /api/auth/me/tokens`; `JwtAuthenticationFilter` resolves the `es_pat_` prefix to the **same `AppUserDetails`** a JWT would (identical roles + tenant), and tags the request auth source so server-only capabilities can distinguish PAT from browser JWT. **Local-hands run submit is PAT-only** (RL-2026-06-037): even when `worker.local-hands.enabled` is ON, `POST /api/runs localExecution=true` is rejected for browser/JWT sessions because the web UI cannot enforce local command/file approvals; CLI and VS Code use PAT sessions for that path. **Provider preference** (V242, `app_user.preferred_ai_provider`) is account-scoped: `GET/PUT /api/auth/me/provider-preference` lets web, CLI, and VS Code share one default provider. Explicit per-run/per-chat provider input still wins and is remembered; absent input resolves to the account preference, then existing project/YAML defaults. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). Accepted external project collaborators now inherit the highest active host-project org tier as an **effective entitlement** through `TierEnforcementService` / `EntitlementResolver` / auth DTOs; the user's personal billing tier is not mutated, so removing the project membership automatically falls back to their own tier. Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`); paid users can convert that personal workspace into a real org through `POST /api/org`, and `OrgDto.isPersonal` tells the web UI whether to show the conversion surface.
+JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). OAuth authorization requests are persisted in short-lived signed HttpOnly cookies keyed by `state` (`CookieOAuth2AuthorizationRequestRepository`, 5-min TTL, `SameSite=Lax`) instead of relying only on the Tomcat session, so provider callbacks survive stale/missing session cookies and parallel OAuth attempts (RL-2026-06-032). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. **Personal Access Tokens** (V215, `personal_access_token`) provide programmatic auth for headless clients (CLI / VS Code / CI): a revocable, SHA-256-hashed (never-plaintext) `es_pat_…` bearer the user mints via `POST /api/auth/me/tokens`; `JwtAuthenticationFilter` resolves the `es_pat_` prefix to the **same `AppUserDetails`** a JWT would (identical roles + tenant), and tags the request auth source so server-only capabilities can distinguish PAT from browser JWT. **Local-hands run submit is PAT-only** (RL-2026-06-037): even when `worker.local-hands.enabled` is ON, `POST /api/runs localExecution=true` is rejected for browser/JWT sessions because the web UI cannot enforce local command/file approvals; CLI and VS Code use PAT sessions for that path. **Provider preference** (V242, `app_user.preferred_ai_provider`) is account-scoped: `GET/PUT /api/auth/me/provider-preference` lets web, CLI, and VS Code share one default provider. Explicit per-run/per-chat provider input still wins and is remembered; absent input resolves to the account preference, then existing project/YAML defaults. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). **RR-973 (2026-07-21):** that flag, the ORG_ADMIN role gate and the paid entitlement are all evaluated for the org that OWNS the invited project, never the inviter's home org — project write access is not authority to delegate access to another tenant's project. Accepted external project collaborators now inherit the highest active host-project org tier as an **effective entitlement** through `TierEnforcementService` / `EntitlementResolver` / auth DTOs; the user's personal billing tier is not mutated, so removing the project membership automatically falls back to their own tier. Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`); paid users can convert that personal workspace into a real org through `POST /api/org`, and `OrgDto.isPersonal` tells the web UI whether to show the conversion surface.
 
 `AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard — AND that write handlers (POST/PUT/DELETE/PATCH) use `ProjectAccessGuard.assertCanWrite` / `RunAccessGuard.requireRunWriteAccess`, not `assertCanRead` / `requireRunAccess` (RL-2026-05-040 + RL-2026-06-196; genuine read-only POSTs allowlisted in `READ_ONLY_WRITE_HANDLERS`). `KNOWN_LEGACY_DRIFT` is empty (35/35 cleared); new violators fail the build.
 
@@ -106,6 +106,19 @@ owner. Read visibility alone never authorizes SCM-side or shared-metadata mutati
 
 **Shared-profile crypto correction (2026-07-19):** `application-dev.yml` now joins prod and
 benchmark with `require-encryption: true`; every remote/shared profile refuses plaintext fallback.
+
+**Anonymous-session bearers (2026-07-21, RR-665).** The `anonrun/` trial-session token is a bearer
+credential and is now treated as one. `AnonymousRunSessionStore.bindToUser` was read-check-write, so
+two concurrent claims of one unbound token could both be told they succeeded and race to overwrite
+the owner; ownership is now decided by a single `SETNX` on a separate claim key
+(`v3:anon-run:claim:<token>`) that is the authoritative record, the session blob is written only by
+the caller that won it, and every loser is returned the real owner. Sessions bound before the claim
+key existed seed it from the blob, so they keep exactly one owner. Separately the store, the service
+and the stub dispatcher all logged the token verbatim (or a usable prefix) and
+`POST /api/v3/auth/claim-anonymous-session` echoed it back after authentication; every diagnostic now
+uses a truncated SHA-256 fingerprint and `ClaimResponse` no longer carries the bearer field at all.
+**Not closed:** the Redis key and stored blob still contain the token, which is inherent to a
+token-keyed session store; only the log and response surfaces are cleaned.
 
 **Framework path containment (2026-07-21):** `security/SafeWorkspacePath` is the shared
 containment boundary for framework-owned filesystem access into customer-controlled trees, applying
@@ -186,12 +199,51 @@ fallback. The dispatcher gates on `sandbox.runtime.dispatch.enabled`, then on
 `SandboxLeaseFencedException`, a non-READY sandbox gets `REFUSED`), then delegates. `SandboxProcess`
 drains stdout and stderr separately on virtual threads so the timeout is actually reachable, caps
 each stream at 256k chars, and destroys the whole process tree on expiry.
+**Container fencing and mount containment (2026-07-21, RR-327 / RR-328).** The container name is
+derived from the sandbox id so a restarted JVM reattaches instead of leaking a second container —
+which means the name is not an ownership proof. `SandboxContainerCommand.create` now stamps
+`com.executespec.sandbox.id` and `com.executespec.sandbox.epoch` labels, and reattach, `alive` and
+`destroy` all read them back and act only on an exact match; an unlabelled, foreign or
+different-generation container, or an unreadable engine, is a refusal (surfaced as
+`TEARDOWN_FAILED`), never a guess. The ownership half moved to the dispatcher: the
+`SandboxLeaseFencedException` branch of `provision` no longer destroys anything, because a failed
+fenced transition is proof that another JVM owns the sandbox and the takeover reattaches to that
+same container; the ordinary-failure branch cleans up only while `holdsLiveLease` is true. Writable
+bind-mount admission was lexical and said so in its own javadoc, so a symlink planted inside the
+sandbox root bind-mounted its target read-write; it now proves containment on disk through
+`security/SafeWorkspacePath` (no symbolic link in any existing component, canonical-root
+containment) and additionally requires the mount to already exist as a real directory. All three
+sandbox flags remain seeded false.
 **Explicitly not closed:** a timeout destroys the host-side `docker exec` client tree; the process
 inside the container is a child of container init and is bounded only by the container's own
 CPU/memory/PID/wall-clock ceilings until release — a container-side kill would depend on a binary
-present in an untrusted image. The lease check is a check, not a hold. **No `tool/**` caller was
-migrated onto this seam**: the whole `sandbox/` package still has zero callers outside itself and
-all three flags remain seeded false, so no existing execution path changed.
+present in an untrusted image. The lease check is a check, not a hold. Neither the label fence nor
+the mount check eliminates its check/use window: Docker offers no compare-and-delete, so a
+generation could in principle change between the inspect and the `rm`, and a mount path validated
+here could be replaced by a symlink before the daemon opens it. Closing those needs
+descriptor-relative mounts or engine-managed volumes. `exec` does not re-read the labels per
+command; a stale owner is caught at `authorizeExec` in the database, but a name-colliding container
+is not.
+
+**Callers migrated onto the seam (2026-07-21, RR-119 / RR-282 / RR-1674).**
+`sandboxroute/SandboxCommandRoutingService` is the caller-side adapter: it resolves the run's
+sandbox from `RunSandboxStore.findActiveForRun` (admitting one through `RunSandboxLifecycleService`
+when absent), keeps this JVM's lease alive across a run's many commands, and hands one argument
+vector to `RunSandboxRuntimeDispatcher.exec`. `routingEnabled()` — `sandbox.lifecycle.enabled` AND
+`sandbox.runtime.dispatch.enabled`, both still seeded false — is the only question a caller may ask.
+Four call sites now consult it ahead of any host `ProcessBuilder`: `tool/BuildProjectTool`,
+`tool/RunTestsTool`, `smoketest/WorkspaceTestRunner` and
+`standards/enforcement/lint/LintProcessRunner`. **`UNAVAILABLE` is never a host fallback** — the
+build reports "build unavailable", `runTests` reports "tests unavailable", the workspace test runner
+returns no count (the existing fail-safe to LLM-judged coverage), and lint reports UNAVAILABLE. The
+SWE-bench / ProgramBench cleanroom branches are untouched; those containers are already the boundary.
+**With the flags off every path is byte-identical**, pinned by `SandboxRoutedBuildAndLintTest`.
+**Not yet operable with the flags on:** `SandboxContainerCommand` admits a writable mount only under
+`executespec.sandbox.workspace-root/<sandboxId>` (RR-821), and a run workspace lives under
+`agent.workspace/<runId>`, so provisioning is refused and every routed command reports UNAVAILABLE.
+That is fail-closed and correct, but the flags cannot be turned on for real work until `sandbox/`
+admits the run workspace (or the workspace is staged into the sandbox-owned root). `LintAdapter` /
+`StandardsRunner` also do not thread a run id, so lint has no run scope to be contained in.
 
 Terminal-Bench 2.0 (`terminalbench/`, RL-2026-06-004) is an operator-only **local/dev** benchmark adapter, not a customer surface. `POST /api/v2/test/terminal-bench/start` (SUPER_ADMIN + `@Profile({"local","dev","benchmark"})` — the `benchmark` profile was added so TB runs on the dedicated benchmark env) persists a `TERMINAL_BENCH` run and executes `engine/WorkerAgent` directly in REMOTE-tool mode: ExecuteSpec is the brain, the Harbor adapter in `~/tbench/es_harbor_agent.py` is the local hands inside the TB container. The keystone fix is in the manual worker dispatch path: `ToolRegistry.isRemoteRun(ctx)` + `dispatchRemote(ctx,name,args)` are consulted by `WorkerAgent.dispatchOne`; `RemoteToolDispatcher` timeout is configurable via `executespec.remote-tool.timeout-ms` (default 600s). DeepSeek first-20 baseline before terminal-mode tuning: 7/20 resolved (35%) for about $0.09; 80-floor terminal tuning reached 12/20 (60%) for about $0.40. The 100-floor + terminal-finalizer run also reached 12/20 (60%) for $0.400126 in 47m52s: `openssl-selfsigned-cert` and `sanitize-git-repo` flipped to pass, while `largest-eigenval` and `query-optimize` regressed on verifier/performance thresholds. Current comparable runs should use DeepSeek, the first-20 slice, an effective 120-iteration floor, terminal-artifact checkpoints at about iterations 16 and 32, a restricted terminal finalizer at iteration 64 even when shell calls keep counting as progress, a restricted wall-clock finalizer before failure, a forced terminal finalizer after the second text-only stop, a 1410s server-side wall clock below Harbor's 1500s agent timeout with a 90s buffer for an in-flight turn/finalizer, prompt policy that inspects `/tests`, treats exact visible assertions as byte-for-byte artifact contracts, implements detection-first no-op handling for clean transform inputs, cleans helper artifacts from deliverable directories, sweeps named error patterns, benchmarks against golden/reference thresholds, and the shared verified-pass guard that mechanically preserves a passing candidate.
 
@@ -288,10 +340,20 @@ termination proof — after cancelling it re-interrupts and waits up to
 pass counts down in its own `finally`. If that latch trips the review proceeds as before. If it
 does not, the review is ABANDONED at that stage: `REVIEW_FAILED` with
 `ReviewerResult.workspaceQuiescent=false` and **no** build, formatter or test evidence attached,
-because none of it can be attributed to a stable workspace generation. **Not closed:** write
-authority is not yet lease/generation-scoped, so an abandoned thread that outlives the reserve can
-still mutate the workspace — the reviewer refuses to vouch for it, it does not stop it.
-`tool/ReviewerMutationScope` is the seam for revocation and is owned by the tool lane.
+because none of it can be attributed to a stable workspace generation. **Write authority is now
+revocable (RR-272 / RR-1687, 2026-07-21).** `tool/ReviewerMutationScope` binds a shared `Lease`
+alongside the thread-local policy; the reviewer control thread holds that lease and calls
+`revoke()` the moment it cancels a pass (before the reserve wait begins). Every mutation check
+(`validateWriteFile`/`validateEditFile`/`validateDelete`/`validateMove`/`validateShell`/
+`validateBackgroundJob`) consults the lease FIRST, before the brownfield gate, so a
+`writeFile`/`editFile` from an abandoned pass thread is REFUSED on BOTH the brownfield and
+greenfield paths — the runaway thread loses authority, not merely the reviewer's willingness to
+vouch for it. **RR-1686:** an unproven-terminated pass records its workspace root in a JVM-scoped
+non-quiescent set, and `capturePreReviewBuildError` skips the pre-review build smoke for a
+workspace in that set, so a concurrent review of the same workspace does not measure a tree an
+abandoned thread may still hold. **Residual:** revocation refuses the tool call but cannot preempt
+an in-flight provider/tool turn already past its dispatch check; and the non-quiescent set is
+append-only (a workspace flagged once stays flagged for the JVM's lifetime).
 
 Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
 
@@ -520,7 +582,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 
 | Method | Path                                                                                          | Description                                                                                                                                                                                                                 |
 | ------ | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/projects/{id}/invites` + GET + DELETE                                                   | Cross-org `ProjectMember` invite by email. **V198 (2026-05-16):** create now requires tier PRO+ AND ORG_ADMIN-of-own-org (or SUPER_ADMIN) AND `org.external_sharing_enabled=true`. PROJECT_ADMIN alone is no longer enough. |
+| POST   | `/api/projects/{id}/invites` + GET + DELETE                                                   | Cross-org `ProjectMember` invite by email. **RR-973 (2026-07-21):** every gate is evaluated against the org that OWNS the project, not the inviter's — create requires ORG_ADMIN **of the host org** (or SUPER_ADMIN) AND the **host** org's `external_sharing_enabled=true` AND a paid **host** entitlement. PROJECT_ADMIN alone is not enough, and neither is being an org admin somewhere else. `accept` re-consults the host org's flag, so a standing invite minted under the old rule cannot complete. |
 | GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                             | Accept invite (email-match required).                                                                                                                                                                                       |
 | POST   | `/api/projects/{id}/share-links` + GET + DELETE                                               | Public read-only share links (tier-gated). V287 stores only token hashes, requires 1..90-day expiry and returns plaintext once; list/reload is prefix-only.                                                                 |
 | GET    | `/api/projects/{id}/share-links/{linkId}/audit`                                               | Latest 100 secret-free append-only lifecycle/access facts; project writers/admins only.                                                                                                                                    |
@@ -651,7 +713,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V329; 318 source files; applied V-files immutable)                                                                                                                                                                                     |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V334; 320 source files; applied V-files immutable). V334 (`pending_erasure_obligation`, RR-090) makes GDPR erasure a durable, retryable obligation.                                                                                                                                                                                     |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -888,14 +950,37 @@ production boundary: `LlmRouter` and `project/rag/EmbeddingService` both call it
 router re-implementing the kill switch inline and the embedding transport having none.
 `executioncontext/LlmExecutionBudgetGate` (V316 `llm_execution_context.reserved_provider_calls`)
 evaluates every budget dimension under a pessimistic row lock and commits a provider-call
-reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency; token and
-cost ceilings are serialized but still reconciled after the fact, not reserved. The dispatch guard
-also fences a stale worker whose lease has expired or whose declared attempt generation has been
-superseded. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
+reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency. Output
+tokens are also reserved (worst-case `max-output-tokens` of the largest model the policy admits,
+charged per in-flight call), so `maxOutputTokens` is a hard concurrent ceiling too; input tokens and
+`maxCostUsd` remain serialized-and-reconciled because a call's input count and dollar cost are not
+knowable until it returns. The dispatch guard contains an expired-lease / superseded-attempt fence,
+but it is **built, not wired**: `LlmExecutionContextService.claim` has no production caller and no
+caller sets `LlmRequest.llmExecutionAttempt`, so every real context stays QUEUED with a null lease
+and the fence never fires (RR-322/RR-1666). Wiring it live (claim on ownership, heartbeat, propagate
+the attempt onto each request, release on terminal, then restrict dispatch to RUNNING) is tracked
+open; `executioncontext/CLAUDE.md` records the exact remaining steps. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
 than the immediate parent's, so nesting can no longer multiply the advertised 48-turn/$8 ceiling.
 `UsageTrackingService.reserveWithinLimits` adds an atomic admit-and-increment primitive; the legacy
 `assertWithinLimits` read remains but has no production caller (RUNS admission is managed-AI
 credits).
+
+**Spend-admission serialization (2026-07-21, V331, RR-1664/RR-1665).** The live submission gate —
+`ManagedAiUsageService.assertCanStartRun` at `POST /api/runs`, not RR-186's caller-less
+`assertWithinLimits` — was itself check-then-act: an unlocked read, a recompute, and a throw only if
+the state was ALREADY `EXHAUSTED`, with nothing reserved, so N concurrent submissions at the last
+credit were all admitted. `billing/service/ManagedAiAdmissionGate` applies the RR-321 shape one layer
+up: it evaluates under a pessimistic row lock in a `REQUIRES_NEW` transaction and commits a
+`managed_ai_usage_period.reserved_ai_credits` claim before the async pipeline can start. The
+reservation is the MINIMUM a spending run consumes (1 credit), not an estimate of its cost, and is
+reconciled to `max(reserved, ai_credits_used)` on every later admission so recorded usage subsumes
+it and an unspent run leaks nothing — no release path, and therefore no crash leak. The raw-COGS
+ceiling is serialized under the same lock but still reconciled after the fact, because a future run's
+dollars are not knowable. `authorizeCall` and `authorizeFixedCapabilityCall` (RR-1665) now take the
+same row lock `recordSuccessfulCall` already used, so the per-call decision is no longer made on
+state a committed sibling has superseded. The persisted routing state stays denominated in RECORDED
+usage: a reservation is a claim on headroom, not proof of spend, and must not make an unspent period
+look exhausted to the balance and notification surfaces.
 
 **Current correction (2026-07-21):** source migration head is **V309** (310 source files). V300 adds durable idempotent
 failed-run quota compensation; V301 snapshots the human project/org/global role on immutable LLM attempt

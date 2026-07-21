@@ -3,12 +3,32 @@ package com.navneet.executespec.tool;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-/** Thread-bound, fail-closed write authority for brownfield reviewer passes. */
+/**
+ * Thread-bound, fail-closed write authority for reviewer passes.
+ *
+ * <p>Two distinct concerns live here:
+ *
+ * <ul>
+ *   <li><b>Brownfield containment</b> — a brownfield pass may only write inside admitted repository
+ *       roots, may not fabricate build manifests, and may not create unplanned files or run a
+ *       shell. Greenfield passes are unrestricted on THIS axis.
+ *   <li><b>Revocation (RR-272 / RR-1687)</b> — a timed-out/abandoned reviewer pass keeps running
+ *       until {@link com.navneet.executespec.engine.WorkerAgent} next checks its interrupt flag at
+ *       an iteration boundary, and its thread-local policy is still bound because the pass's {@code
+ *       finally} has not run. The reviewer control thread cannot reach into another thread's {@link
+ *       ThreadLocal}, so it holds a {@link Lease} — a shared revocation flag bound alongside the
+ *       policy — and flips it when it abandons the pass. Every write/mutation/command check
+ *       consults the lease FIRST, before the brownfield gate, so revocation refuses a post-abandon
+ *       {@code writeFile}/{@code editFile}/delete/move/shell on BOTH the brownfield and greenfield
+ *       paths — not merely declines to vouch for it.
+ * </ul>
+ */
 public final class ReviewerMutationScope {
 
-  private static final ThreadLocal<Policy> CURRENT = new ThreadLocal<>();
+  private static final ThreadLocal<Bound> CURRENT = new ThreadLocal<>();
   private static final Set<String> BUILD_MANIFESTS =
       Set.of(
           "package.json",
@@ -25,9 +45,41 @@ public final class ReviewerMutationScope {
 
   private ReviewerMutationScope() {}
 
+  /**
+   * A revocable authority handle for one reviewer pass. The pass binds it (indirectly, via {@link
+   * #withPolicy(Policy, Lease, Supplier)}); the reviewer control thread that supervises the pass
+   * retains a reference and calls {@link #revoke()} the moment it abandons the pass after a
+   * timeout. Idempotent and thread-safe: once revoked, every mutation check on the bound thread
+   * fails closed forever, so an in-flight or later tool call from a runaway worker thread is
+   * refused rather than merely un-vouched-for.
+   */
+  public static final class Lease {
+    private final AtomicBoolean revoked = new AtomicBoolean(false);
+
+    public void revoke() {
+      revoked.set(true);
+    }
+
+    public boolean isRevoked() {
+      return revoked.get();
+    }
+  }
+
+  /** The policy plus its revocation lease, bound together on the pass thread. */
+  private record Bound(Policy policy, Lease lease) {}
+
   public static <T> T withPolicy(Policy policy, Supplier<T> operation) {
-    Policy previous = CURRENT.get();
-    CURRENT.set(policy);
+    return withPolicy(policy, new Lease(), operation);
+  }
+
+  /**
+   * Bind {@code policy} together with a caller-supplied {@code lease} so the supervising thread can
+   * revoke write authority for this pass even while the pass thread is still running. A {@code
+   * null} lease is treated as a fresh (never-externally-revoked) lease.
+   */
+  public static <T> T withPolicy(Policy policy, Lease lease, Supplier<T> operation) {
+    Bound previous = CURRENT.get();
+    CURRENT.set(new Bound(policy, lease == null ? new Lease() : lease));
     try {
       return operation.get();
     } finally {
@@ -36,9 +88,24 @@ public final class ReviewerMutationScope {
     }
   }
 
+  /**
+   * Error returned when the bound pass's authority has been revoked. Checked before the
+   * brownfield/greenfield gate so revocation refuses writes on both paths.
+   */
+  private static String revokedError(Bound bound) {
+    return bound.lease().isRevoked()
+        ? "reviewer write authority revoked: this review pass was abandoned after a timeout and"
+            + " can no longer mutate the workspace"
+        : null;
+  }
+
   public static String validateWriteFile(String path, boolean exists, boolean overwrite) {
-    Policy policy = CURRENT.get();
-    if (policy == null || !policy.brownfield()) return null;
+    Bound bound = CURRENT.get();
+    if (bound == null) return null;
+    String revoked = revokedError(bound);
+    if (revoked != null) return revoked;
+    Policy policy = bound.policy();
+    if (!policy.brownfield()) return null;
     String normalized = normalize(path);
     String rootError = validateRoot(normalized, policy.allowedRepoRoots());
     if (rootError != null) return rootError;
@@ -55,8 +122,12 @@ public final class ReviewerMutationScope {
   }
 
   public static String validateEditFile(String path) {
-    Policy policy = CURRENT.get();
-    if (policy == null || !policy.brownfield()) return null;
+    Bound bound = CURRENT.get();
+    if (bound == null) return null;
+    String revoked = revokedError(bound);
+    if (revoked != null) return revoked;
+    Policy policy = bound.policy();
+    if (!policy.brownfield()) return null;
     return validateRoot(normalize(path), policy.allowedRepoRoots());
   }
 
@@ -65,8 +136,12 @@ public final class ReviewerMutationScope {
    * writes (RR-1542 — {@code delete} / {@code deletePath} previously bypassed this scope entirely).
    */
   public static String validateDelete(String path) {
-    Policy policy = CURRENT.get();
-    if (policy == null || !policy.brownfield()) return null;
+    Bound bound = CURRENT.get();
+    if (bound == null) return null;
+    String revoked = revokedError(bound);
+    if (revoked != null) return revoked;
+    Policy policy = bound.policy();
+    if (!policy.brownfield()) return null;
     return validateRoot(normalize(path), policy.allowedRepoRoots());
   }
 
@@ -76,16 +151,23 @@ public final class ReviewerMutationScope {
    * scope entirely).
    */
   public static String validateMove(String srcPath, String dstPath) {
-    Policy policy = CURRENT.get();
-    if (policy == null || !policy.brownfield()) return null;
+    Bound bound = CURRENT.get();
+    if (bound == null) return null;
+    String revoked = revokedError(bound);
+    if (revoked != null) return revoked;
+    Policy policy = bound.policy();
+    if (!policy.brownfield()) return null;
     String srcError = validateRoot(normalize(srcPath), policy.allowedRepoRoots());
     if (srcError != null) return srcError;
     return validateRoot(normalize(dstPath), policy.allowedRepoRoots());
   }
 
   public static String validateShell() {
-    Policy policy = CURRENT.get();
-    return policy != null && policy.brownfield()
+    Bound bound = CURRENT.get();
+    if (bound == null) return null;
+    String revoked = revokedError(bound);
+    if (revoked != null) return revoked;
+    return bound.policy().brownfield()
         ? "shell is disabled during brownfield review; use read/edit/buildProject tools"
         : null;
   }

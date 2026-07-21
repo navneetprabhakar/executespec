@@ -129,6 +129,13 @@ RUN (npm ci --legacy-peer-deps 2>/dev/null) || npm install --legacy-peer-deps
 # "Cannot find module 'hermes-compiler/package.json'" if it's missing.
 # If the worker's package.json didn't include it, add it now so the
 # bundle succeeds. No-op when already present.
+#
+# RR-385: this @latest is deliberately NOT fixed-pinned. hermes-compiler is
+# versioned in lockstep with react-native, so the version this fallback needs
+# depends on the project's own RN — a single fixed pin would break `expo export`
+# for any project not on that exact RN, which is a worse failure than the
+# supply-chain mutability. The durable fix derives the version from the resolved
+# react-native (or an SBOM/lockfile plan), not a constant here. RR-385 stays OPEN.
 RUN node -e "const p=require('./package.json');const deps=(p.dependencies||{});process.exit(deps['hermes-compiler']?0:1)" \\
     || npm install --no-save --legacy-peer-deps hermes-compiler@latest
 COPY . .

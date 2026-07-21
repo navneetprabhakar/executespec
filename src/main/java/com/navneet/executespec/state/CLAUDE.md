@@ -116,8 +116,20 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   so four of the six live V2 states (`QUEUED`, `AWAITING_APPROVAL`, `APPROVAL_RESUMING`, `WORKING`,
   `REVIEWING`) were unprotected — erasure tombstoned live runs and the 7-day sweep hard-deleted the
   row while the worker was still spending. A new or unrecognised status is now REFUSED, not
-  tombstoned. `countNonTerminalByUserId` reports what erasure refused so the result is visibly
-  incomplete rather than silently partial.
+  tombstoned.
+- **Erasure now COMPLETES rather than skipping live runs (RR-090, 2026-07-21).** The earlier fix
+  stopped tombstoning live runs but merely SKIPPED them and logged "erasure INCOMPLETE" — the
+  Article-17 obligation was left unmet. `DataRetentionService.eraseUserData` now: (1) settles every
+  live run through the real `RunLifecycleService.cancel(runId)` path (atomic `CANCELLED` + plan-gate
+  signal + pipeline-future interrupt + PR close, not a status hack), (2) waits bounded
+  (`ERASURE_SETTLE_TIMEOUT`, 10s) via `runRepository.findNonTerminalByUserId` /
+  `countNonTerminalByUserId` for terminalisation, (3) tombstones the now-terminal rows through
+  `ErasureObligationStore.softDeleteTerminal` (the transactional half, kept out of the
+  cancel/sleep orchestration so no DB connection is held across a sleep), and (4) if any run still
+  cannot be confirmed terminal, records a durable `pending_erasure_obligation` (V334) instead of a
+  log line. `DataRetentionService.retryPendingErasures` (in the daily sweep) re-drives each open
+  obligation to completion and clears it when no live run remains, so user data cannot survive
+  erasure indefinitely. The residual is a tracked, retryable state.
 - `StateStore.updateHeartbeat` delegates to `claimExecutionOwner` instead of doing
   `findById` → mutate → `save`. `PipelineRun` has no `@Version`, so that read-modify-write wrote
   back every field as loaded and could revert a concurrent terminal status, gate, token/cost or

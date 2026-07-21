@@ -185,4 +185,77 @@ class ReviewerMutationScopeTest {
                 greenfield, () -> ReviewerMutationScope.validateMove("a.java", "b.java")))
         .isNull();
   }
+
+  // ---- RR-272 / RR-1687: revocation refuses writes on BOTH brownfield and greenfield ----------
+
+  private static final ReviewerMutationScope.Policy GREENFIELD =
+      new ReviewerMutationScope.Policy(false, List.of(), List.of(), false);
+
+  @Test
+  void revokedLeaseRefusesAnOtherwiseAllowedGreenfieldWrite() {
+    // Greenfield normally admits any write; once the supervising thread revokes the lease, the same
+    // write is refused — this is the authority RR-1687 said greenfield passes did not have.
+    ReviewerMutationScope.Lease lease = new ReviewerMutationScope.Lease();
+    String allowedBefore =
+        ReviewerMutationScope.withPolicy(
+            GREENFIELD,
+            lease,
+            () -> ReviewerMutationScope.validateWriteFile("src/App.java", true, true));
+    lease.revoke();
+    String refusedAfter =
+        ReviewerMutationScope.withPolicy(
+            GREENFIELD,
+            lease,
+            () -> ReviewerMutationScope.validateWriteFile("src/App.java", true, true));
+
+    org.assertj.core.api.Assertions.assertThat(allowedBefore).isNull();
+    org.assertj.core.api.Assertions.assertThat(refusedAfter).contains("revoked");
+  }
+
+  @Test
+  void revokedLeaseRefusesAnOtherwiseAllowedBrownfieldEditAndEveryMutation() {
+    ReviewerMutationScope.Lease lease = new ReviewerMutationScope.Lease();
+    String editBefore =
+        ReviewerMutationScope.withPolicy(
+            BROWNFIELD,
+            lease,
+            () -> ReviewerMutationScope.validateEditFile("repos/api/src/AuthService.java"));
+    lease.revoke();
+
+    org.assertj.core.api.Assertions.assertThat(editBefore).isNull();
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                lease,
+                () -> ReviewerMutationScope.validateEditFile("repos/api/src/AuthService.java")))
+        .contains("revoked");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                lease,
+                () ->
+                    ReviewerMutationScope.validateWriteFile(
+                        "repos/api/src/New.java", false, false)))
+        .contains("revoked");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                lease,
+                () -> ReviewerMutationScope.validateDelete("repos/api/src/AuthService.java")))
+        .contains("revoked");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                lease,
+                () -> ReviewerMutationScope.validateMove("repos/api/a.java", "repos/api/b.java")))
+        .contains("revoked");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                GREENFIELD, lease, ReviewerMutationScope::validateShell))
+        .contains("revoked");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                GREENFIELD, lease, ReviewerMutationScope::validateBackgroundJob))
+        .contains("revoked");
+  }
 }

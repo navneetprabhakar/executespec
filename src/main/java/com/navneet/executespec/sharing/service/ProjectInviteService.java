@@ -71,6 +71,14 @@ public class ProjectInviteService {
   private final OrgRepository orgRepo;
   private final OrgMemberRepository orgMemberRepo;
   private final MailService mailService;
+
+  /**
+   * Retained for the static {@code isPaidTier} authority and for constructor compatibility. RR-973
+   * deliberately stopped calling {@code resolveUserTier} here: that resolver maxes in every
+   * external host-org tier the caller has collected, so using it to gate a HOST-scoped invite would
+   * let entitlement earned in one tenant authorise sharing in another.
+   */
+  @SuppressWarnings("unused")
   private final TierEnforcementService tierEnforcementService;
 
   /**
@@ -90,36 +98,91 @@ public class ProjectInviteService {
   private String appBaseUrl;
 
   /**
-   * Validate that the inviter is allowed to create an external invite. Three gates, in order of
-   * specificity (cheapest first):
+   * Validate that the inviter is allowed to create an external invite <b>into this project</b>.
+   *
+   * <p><b>RR-973 (2026-07-21) — the host project's org decides, not the inviter's.</b> This method
+   * previously accepted {@code projectId} and never read it: authority came entirely from the
+   * inviter's OWN home-org role and their OWN {@code external_sharing_enabled} flag. An external
+   * collaborator who happened to be ORG_ADMIN of their own paid, sharing-enabled org could
+   * therefore hand arbitrary outsiders — up to PROJECT_ADMIN — access to <i>another tenant's</i>
+   * project. Project write access got them past {@link
+   * com.navneet.executespec.project.security.ProjectAccessGuard#assertCanWrite}, and nothing after
+   * that ever looked at the host org. Read/write visibility of a project is not authority to
+   * delegate access to it; the grant is against the host, so the host's policy governs.
+   *
+   * <p>Gates, all evaluated against the <b>host</b> org that owns the project:
    *
    * <ol>
-   *   <li><b>Tier gate</b> — must be on PRO+ tier. Same as before V198.
-   *   <li><b>Role gate (V198, 2026-05-16)</b> — only SUPER_ADMIN globally or ORG_ADMIN of the
-   *       inviting org may create external invites. Project-level admins (PROJECT_ADMIN) are not
-   *       sufficient — adding outsiders to a project is an org-level decision because the outsider
-   *       sees code / runs / cost that belongs to the org.
-   *   <li><b>Org-flag gate (V198)</b> — the inviter's org must have {@code external_sharing_enabled
-   *       = true}. Default is false; SUPER_ADMIN or the org's own ORG_ADMIN can flip this via
-   *       {@code PUT /api/org} (see {@link com.navneet.executespec.auth.controller.OrgController}).
+   *   <li><b>Host resolution</b> — the project must exist and must have an owning org. A project
+   *       with no resolvable org has no policy to consult, so the invite is refused rather than
+   *       defaulted.
+   *   <li><b>Role gate</b> — the inviter must hold ORG_ADMIN <i>in the host org</i> (or be
+   *       SUPER_ADMIN). PROJECT_ADMIN is deliberately not sufficient, and neither is being an org
+   *       admin somewhere else: adding outsiders is an org-level decision because the outsider sees
+   *       code / runs / cost belonging to the host org.
+   *   <li><b>Host-org-flag gate (V198)</b> — the HOST org must have {@code external_sharing_enabled
+   *       = true}. Default is false; SUPER_ADMIN or that org's own ORG_ADMIN flips it via {@code
+   *       PUT /api/org/me/settings/external-sharing}.
+   *   <li><b>Entitlement gate</b> — external collaboration is a paid feature. Evaluated on the host
+   *       org's tier, taking the inviter's own personal tier into account only because the role
+   *       gate has already proven they are an admin of that same host org (this keeps a solo
+   *       customer whose personal-org row still carries its signup-time FREE tier from being
+   *       refused). Entitlement is never borrowed from a foreign org.
    * </ol>
    *
-   * <p>SUPER_ADMIN bypasses both the role and org-flag gates — useful for support/ops who need to
-   * provision a cross-org collaborator without the org admin needing to flip the flag first.
+   * <p>SUPER_ADMIN bypasses the role and flag gates — support/ops provisioning a cross-org
+   * collaborator without waiting on the host admin.
    */
   void assertCanInvite(AppUser inviter, String projectId) {
     if (inviter == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
+    // Resolve the HOST first — every gate below is a question about the host org.
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    String hostOrgId = project.getOrgId();
+
     boolean isSuperAdmin = "SUPER_ADMIN".equals(inviter.getGlobalRole());
-    // Tier check still applies even for SUPER_ADMIN's own org — but SUPER_ADMIN
-    // acting on behalf of any org is rare and intentional, so we keep the gate
-    // strict and rely on operator judgement.
-    // RR-1508 — resolve the canonical EFFECTIVE tier (own tier, org tier, and any inherited
-    // external host-org entitlement) and ask the single tier authority whether it is paid. The old
-    // hardcoded Set.of("PRO","TEAM","MAX","ENTERPRISE") omitted V253's first-class PRO_PLUS and
-    // BYOK, so a paying Pro+/BYOK customer was told to upgrade, and still honoured retired MAX.
-    String tier = tierEnforcementService.resolveUserTier(inviter.getId());
+    if (isSuperAdmin) {
+      // SUPER_ADMIN bypasses role + org-flag — handled centrally by ops/support.
+      return;
+    }
+
+    if (hostOrgId == null || hostOrgId.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "This project has no owning organisation, so external collaborator policy can't be"
+              + " resolved for it.");
+    }
+
+    // Role gate — ORG_ADMIN of the HOST org. orgRole lives on OrgMember, not AppUser.
+    OrgMember membership =
+        orgMemberRepo.findByOrgIdAndUserId(hostOrgId, inviter.getId()).orElse(null);
+    if (membership == null || !"ORG_ADMIN".equals(membership.getOrgRole())) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Only an admin of the organisation that owns this project can invite external"
+              + " collaborators to it.");
+    }
+
+    // Org-flag gate — the HOST org must allow project-only external collaborators.
+    Org hostOrg = orgRepo.findById(hostOrgId).orElse(null);
+    if (hostOrg == null || !hostOrg.isExternalSharingEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Project external collaborators are disabled for the organisation that owns this"
+              + " project. Enable them in Org Settings → Project external collaborators before"
+              + " sending project invites.");
+    }
+
+    // Entitlement gate — paid feature, judged on the host org.
+    // RR-1508 — ask the single tier authority whether the resolved tier is paid. The old hardcoded
+    // Set.of("PRO","TEAM","MAX","ENTERPRISE") omitted V253's first-class PRO_PLUS and BYOK, so a
+    // paying Pro+/BYOK customer was told to upgrade, and still honoured retired MAX.
+    String tier = hostEntitlementTier(hostOrg, inviter);
     if (!TierEnforcementService.isPaidTier(tier)) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
@@ -129,36 +192,29 @@ public class ProjectInviteService {
     if (cfg.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Tier config not found");
     }
+  }
 
-    if (isSuperAdmin) {
-      // SUPER_ADMIN bypasses role + org-flag — handled centrally by ops/support.
-      return;
-    }
+  /**
+   * RR-973 — the entitlement backing a host-org invite. The host org's own tier is authoritative;
+   * the inviter's PERSONAL tier is admitted only as a floor, and only because the caller has
+   * already been proven ORG_ADMIN of this same host org. That keeps a solo customer working when
+   * their auto-provisioned personal org still carries the FREE tier it was stamped with at signup
+   * (V162 mirrors the user's tier at bootstrap and does not follow later upgrades), without letting
+   * entitlement be borrowed from any org other than the host.
+   */
+  private String hostEntitlementTier(Org hostOrg, AppUser inviter) {
+    String hostTier = normalizeTier(hostOrg.getTier());
+    if (TierEnforcementService.isPaidTier(hostTier)) return hostTier;
+    String inviterOwnTier = normalizeTier(inviter.getTier());
+    return TierEnforcementService.isPaidTier(inviterOwnTier) ? inviterOwnTier : hostTier;
+  }
 
-    // Role gate — only the inviter's ORG_ADMIN row in their own org may invite.
-    // orgRole lives on OrgMember (not AppUser); look it up here.
-    String orgId = inviter.getOrgId();
-    if (orgId == null) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN,
-          "Only an org admin can invite external collaborators. You aren't a member of any org.");
-    }
-    OrgMember membership = orgMemberRepo.findByOrgIdAndUserId(orgId, inviter.getId()).orElse(null);
-    if (membership == null || !"ORG_ADMIN".equals(membership.getOrgRole())) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN,
-          "Only an org admin can invite external collaborators. Ask your org admin to send the"
-              + " invite.");
-    }
-
-    // Org-flag gate — the inviter's org must allow project-only external collaborators.
-    Org org = orgRepo.findById(orgId).orElse(null);
-    if (org == null || !org.isExternalSharingEnabled()) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN,
-          "Project external collaborators are disabled for your org. Enable them in Org Settings"
-              + " → Project external collaborators before sending project invites.");
-    }
+  private static String normalizeTier(String tier) {
+    if (tier == null || tier.isBlank()) return "FREE";
+    String normalized = tier.trim().toUpperCase();
+    // "MAX" was retired into TEAM; keep legacy rows resolving to something the tier authority
+    // knows.
+    return "MAX".equals(normalized) ? "TEAM" : normalized;
   }
 
   /**
@@ -214,7 +270,11 @@ public class ProjectInviteService {
               .projectRole(resolvedRole)
               .token(generateToken())
               .invitedByUserId(inviter.getId())
-              .invitedOrgId(inviter.getOrgId())
+              // RR-973 — record the HOST org whose resources are being shared, not the inviter's
+              // home org. The column exists ("captured at invite time so accept can validate even
+              // if the org rotates", V175) precisely so acceptance can re-consult the granting
+              // tenant; storing the inviter's org made it useless for that.
+              .invitedOrgId(project.getOrgId())
               .status("PENDING")
               .expiresAt(Instant.now().plusSeconds(DEFAULT_EXPIRY_DAYS * 24 * 3600))
               .createdAt(Instant.now())
@@ -289,6 +349,13 @@ public class ProjectInviteService {
           HttpStatus.FORBIDDEN, "Invite was sent to a different email address");
     }
 
+    // RR-973 — revalidate the HOST org's policy at acceptance, not only at issue. A pending invite
+    // is a standing grant against another tenant's project; if that tenant has external sharing
+    // disabled (including invites minted before host authority was enforced), the grant must not
+    // complete. The check is on the project's CURRENT owning org, so a project that moved tenants
+    // is judged by the tenant that holds it now.
+    assertHostStillPermitsExternalCollaborators(invite.getProjectId());
+
     // Idempotent — if a member row already exists, mark accepted + return.
     boolean memberAdded = false;
     if (!memberRepo.existsByProjectIdAndUserId(invite.getProjectId(), caller.getId())) {
@@ -313,6 +380,25 @@ public class ProjectInviteService {
       emitMemberAdded(invite, caller);
     }
     return invite.getProjectId();
+  }
+
+  /**
+   * RR-973 — the host-side half of the invite contract, evaluated at acceptance. Refuses when the
+   * project has vanished, has no owning org, or that org has external collaborators disabled.
+   */
+  private void assertHostStillPermitsExternalCollaborators(String projectId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.GONE, "Project no longer exists"));
+    String hostOrgId = project.getOrgId();
+    Org hostOrg = hostOrgId == null ? null : orgRepo.findById(hostOrgId).orElse(null);
+    if (hostOrg == null || !hostOrg.isExternalSharingEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "The organisation that owns this project no longer allows external collaborators.");
+    }
   }
 
   @Transactional

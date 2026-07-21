@@ -77,13 +77,30 @@ public class RunSandboxRuntimeDispatcher {
       RunSandboxRuntime.Provisioned started = runtime.provision(sandbox, spec);
       return store.markReady(lease, started.runtimeHandle(), started.imageDigest());
     } catch (SandboxLeaseFencedException fenced) {
-      // Ownership was lost mid-provision. Do not write state we no longer own; destroy what this
-      // JVM started so the takeover does not inherit a stray sandbox, then rethrow.
-      log.warn("sandbox {} lost its lease during provisioning", sandbox.id(), fenced);
-      safeDestroy(runtime, sandbox);
+      // RR-327 — ownership was lost mid-provision. This branch used to destroy the container, which
+      // is precisely the wrong action: a failed fenced transition is proof that ANOTHER JVM now
+      // owns
+      // this sandbox, and the takeover deliberately reattaches to the container of the same name.
+      // Cleaning up here deletes the winner's live container. Nothing leaks by leaving it: the new
+      // owner adopts the very container this JVM started, and if that owner also dies, orphan
+      // reconciliation claims the lease first and destroys it under a fence it holds.
+      log.warn(
+          "sandbox {} lost its lease during provisioning; leaving the container to its new owner",
+          sandbox.id(),
+          fenced);
       throw fenced;
     } catch (RuntimeException failure) {
       log.error("sandbox {} failed to provision", sandbox.id(), failure);
+      // Only clean up while this JVM still demonstrably owns the sandbox. A check is not a hold —
+      // the lease can lapse between here and the destroy — which is why the runtime independently
+      // proves the container's fencing labels before removing anything.
+      if (!store.holdsLiveLease(lease)) {
+        log.warn(
+            "sandbox {} failed to provision and this JVM no longer holds its lease; leaving both"
+                + " the container and the lifecycle row to the current owner",
+            sandbox.id());
+        throw failure;
+      }
       safeDestroy(runtime, sandbox);
       store.fail(lease, classify(failure), failure.getMessage());
       throw failure;

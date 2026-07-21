@@ -47,6 +47,18 @@ public interface PaymentGateway {
   }
 
   /**
+   * The current gateway-side status of a subscription, lower-cased (e.g. {@code active}, {@code
+   * cancelled}/{@code canceled}, {@code completed}, {@code expired}), or {@code null} when this
+   * gateway cannot report it. Used by the obligation drainer to decide, before re-issuing a
+   * cancellation, whether the subscription is already in a terminal state — so a retry of a failed
+   * cancel does not throw against an already-cancelled subscription and can instead record it as
+   * settled. The default returns {@code null} (unknown); gateways override.
+   */
+  default String subscriptionStatus(String gatewaySubscriptionId) {
+    return null;
+  }
+
+  /**
    * Retrieve the invoice PDF URL from the gateway (Stripe-native). For Razorpay, returns null (PDFs
    * are generated server-side).
    */

@@ -27,9 +27,9 @@ class LintAdaptersTest {
   }
 
   private static LintProcessRunner stubRunner(LintProcessRunner.Result result) {
-    return new LintProcessRunner(new LintExecutionProperties()) {
+    return new LintProcessRunner(new LintExecutionProperties(), null) {
       @Override
-      public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
+      public Result run(String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
         return result;
       }
     };
@@ -42,7 +42,7 @@ class LintAdaptersTest {
             new LintProcessRunner.Result(
                 false, -1, null, null, "linter '/opt/eslint' could not be started"));
     EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
-    LintResult r = a.run(Path.of("."), null, List.of());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
     assertThat(r.violations()).isEmpty();
     assertThat(r.tool()).isEqualTo("eslint");
@@ -52,9 +52,9 @@ class LintAdaptersTest {
   void eslint_deniedByPolicy_isUnavailableAndNeverStartsAProcess() {
     // RR-1051 — with host execution off (the default) no subprocess may start at all.
     LintProcessRunner explodingRunner =
-        new LintProcessRunner(new LintExecutionProperties()) {
+        new LintProcessRunner(new LintExecutionProperties(), null) {
           @Override
-          public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
+          public Result run(String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
             throw new AssertionError("policy denied the run; no process may be started");
           }
         };
@@ -63,7 +63,7 @@ class LintAdaptersTest {
             explodingRunner,
             new LintExecutionPolicy(new LintExecutionProperties()),
             new ObjectMapper());
-    LintResult r = a.run(Path.of("."), null, List.of());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
     assertThat(r.failureReason()).contains("host-execution-enabled=false");
   }
@@ -110,7 +110,7 @@ class LintAdaptersTest {
                 "",
                 null));
     EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
-    LintResult r = a.run(Path.of("."), null, List.of());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
     assertThat(r.violations()).hasSize(1);
   }
@@ -122,7 +122,7 @@ class LintAdaptersTest {
             new LintProcessRunner.Result(
                 false, -1, null, null, "linter '/opt/checkstyle' could not be started"));
     CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
-    LintResult r = a.run(Path.of("."), null, List.of());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
     assertThat(r.tool()).isEqualTo("checkstyle");
   }

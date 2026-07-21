@@ -45,6 +45,10 @@ public class StandardsRunner {
    * standards are skipped here — caller integrates them via {@code
    * LlmReviewEnforcer.composePromptBlock}.
    *
+   * @param runId the V2 run this enforcement belongs to; threaded into the lint adapters so an
+   *     admitted linter can be contained in the run's sandbox rather than run on the host (RR-1051
+   *     / RR-1674). Null/blank means no run scope, which — with sandbox routing on — makes lint
+   *     UNAVAILABLE by design.
    * @param effective output of {@link EffectiveStandardsResolver#resolve}
    * @param repoRoot local path of the cloned workspace
    * @param repoFilePaths repo-relative file paths (for file-pattern matching; glob globs evaluate
@@ -52,6 +56,7 @@ public class StandardsRunner {
    * @param sourceFiles Path objects for the AST checker to read content from
    */
   public RunReport run(
+      String runId,
       List<EffectiveStandardsResolver.Effective> effective,
       Path repoRoot,
       List<String> repoFilePaths,
@@ -80,7 +85,7 @@ public class StandardsRunner {
             continue;
           }
           Path config = le.configPath() == null ? null : Path.of(le.configPath());
-          LintResult lr = adapter.run(repoRoot, config, List.of());
+          LintResult lr = adapter.run(runId, repoRoot, config, List.of());
           lintResults.put(s.id(), lr);
           for (LintViolation lv : lr.violations()) {
             all.add(
