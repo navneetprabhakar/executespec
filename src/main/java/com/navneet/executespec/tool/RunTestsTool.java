@@ -1,6 +1,7 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,8 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.TestCommandResolver;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -96,18 +99,30 @@ public class RunTestsTool implements Tool {
   /** Result-envelope construction; see {@link RunTestsEnvelope}. */
   private final RunTestsEnvelope envelopes;
 
+  /**
+   * RR-282 / RR-1674 — a policy check decides what the string may say; it does not decide what the
+   * program may do once {@code /bin/sh} has it. When {@link
+   * SandboxCommandRoutingService#routingEnabled()} is on, the host branch is dispatched into the
+   * run's sandbox instead; when the sandbox cannot run it, the tool reports the tests unavailable
+   * and does NOT retry on the host. Both sandbox flags are seeded false, so the default path is
+   * unchanged.
+   */
+  private final SandboxCommandRoutingService sandboxRouting;
+
   @Autowired
   public RunTestsTool(
       ProgramBenchContainerStore programBenchContainers,
       com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
       ObjectMapper json,
       TestCommandResolver testCommandResolver,
-      ShellSandboxPolicy sandboxPolicy) {
+      ShellSandboxPolicy sandboxPolicy,
+      SandboxCommandRoutingService sandboxRouting) {
     this.programBenchContainers = programBenchContainers;
     this.swebenchContainers = swebenchContainers;
     this.json = json;
     this.testCommandResolver = testCommandResolver;
     this.sandboxPolicy = sandboxPolicy;
+    this.sandboxRouting = sandboxRouting;
     this.envelopes = new RunTestsEnvelope(json);
   }
 
@@ -126,7 +141,8 @@ public class RunTestsTool implements Tool {
         swebenchContainers,
         json,
         testCommandResolver,
-        new ShellSandboxPolicy());
+        new ShellSandboxPolicy(),
+        null);
   }
 
   @Override
@@ -288,6 +304,41 @@ public class RunTestsTool implements Tool {
             ToolResult.ErrorKind.FORBIDDEN,
             "test command blocked by sandbox: " + validation.reason());
       }
+    }
+
+    // RR-282 / RR-1674 — sandbox dispatch, ahead of any host ProcessBuilder. Bench cleanrooms keep
+    // their own container boundary and are left exactly as they were.
+    if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      SandboxExecResult sandboxed =
+          sandboxRouting.execute(
+              ctx.runId(), ctx.workspaceRoot(), cmd, Duration.ofSeconds(timeout));
+      return switch (sandboxed.status()) {
+        case COMPLETED -> {
+          String sandboxOutput = SandboxCommandRoutingService.combinedOutput(sandboxed);
+          yield ToolResult.ok(
+              framework == TestCommandResolver.Framework.PYTEST
+                  ? envelopes.parseAndEnvelope(ctx, testIds, sandboxed.exitCode(), sandboxOutput)
+                  : envelopes.genericEnvelope(
+                      ctx,
+                      framework,
+                      String.join(" ", cmd),
+                      testIds,
+                      sandboxed.exitCode(),
+                      sandboxOutput));
+        }
+        case TIMED_OUT ->
+            ToolResult.err(
+                ToolResult.ErrorKind.TIMEOUT,
+                framework + " tests exceeded " + timeout + "s inside the sandbox.");
+          // Never a host retry: an unexecuted command is the containment holding, not a licence to
+          // run repository-controlled test code as the service account.
+        case UNAVAILABLE, REFUSED ->
+            ToolResult.err(
+                ToolResult.ErrorKind.UNAVAILABLE,
+                "tests unavailable — the sandbox could not run them ("
+                    + sandboxed.detail()
+                    + "). They were NOT executed on the application host.");
+      };
     }
 
     try {

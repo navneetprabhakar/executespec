@@ -210,9 +210,27 @@ generation could in principle change between the inspect and the `rm`, and a mou
 here could be replaced by a symlink before the daemon opens it. Closing those needs
 descriptor-relative mounts or engine-managed volumes. `exec` does not re-read the labels per
 command; a stale owner is caught at `authorizeExec` in the database, but a name-colliding container
-is not. **No `tool/**` caller was
-migrated onto this seam**: the whole `sandbox/` package still has zero callers outside itself and
-all three flags remain seeded false, so no existing execution path changed.
+is not.
+
+**Callers migrated onto the seam (2026-07-21, RR-119 / RR-282 / RR-1674).**
+`sandboxroute/SandboxCommandRoutingService` is the caller-side adapter: it resolves the run's
+sandbox from `RunSandboxStore.findActiveForRun` (admitting one through `RunSandboxLifecycleService`
+when absent), keeps this JVM's lease alive across a run's many commands, and hands one argument
+vector to `RunSandboxRuntimeDispatcher.exec`. `routingEnabled()` — `sandbox.lifecycle.enabled` AND
+`sandbox.runtime.dispatch.enabled`, both still seeded false — is the only question a caller may ask.
+Four call sites now consult it ahead of any host `ProcessBuilder`: `tool/BuildProjectTool`,
+`tool/RunTestsTool`, `smoketest/WorkspaceTestRunner` and
+`standards/enforcement/lint/LintProcessRunner`. **`UNAVAILABLE` is never a host fallback** — the
+build reports "build unavailable", `runTests` reports "tests unavailable", the workspace test runner
+returns no count (the existing fail-safe to LLM-judged coverage), and lint reports UNAVAILABLE. The
+SWE-bench / ProgramBench cleanroom branches are untouched; those containers are already the boundary.
+**With the flags off every path is byte-identical**, pinned by `SandboxRoutedBuildAndLintTest`.
+**Not yet operable with the flags on:** `SandboxContainerCommand` admits a writable mount only under
+`executespec.sandbox.workspace-root/<sandboxId>` (RR-821), and a run workspace lives under
+`agent.workspace/<runId>`, so provisioning is refused and every routed command reports UNAVAILABLE.
+That is fail-closed and correct, but the flags cannot be turned on for real work until `sandbox/`
+admits the run workspace (or the workspace is staged into the sandbox-owned root). `LintAdapter` /
+`StandardsRunner` also do not thread a run id, so lint has no run scope to be contained in.
 
 Terminal-Bench 2.0 (`terminalbench/`, RL-2026-06-004) is an operator-only **local/dev** benchmark adapter, not a customer surface. `POST /api/v2/test/terminal-bench/start` (SUPER_ADMIN + `@Profile({"local","dev","benchmark"})` — the `benchmark` profile was added so TB runs on the dedicated benchmark env) persists a `TERMINAL_BENCH` run and executes `engine/WorkerAgent` directly in REMOTE-tool mode: ExecuteSpec is the brain, the Harbor adapter in `~/tbench/es_harbor_agent.py` is the local hands inside the TB container. The keystone fix is in the manual worker dispatch path: `ToolRegistry.isRemoteRun(ctx)` + `dispatchRemote(ctx,name,args)` are consulted by `WorkerAgent.dispatchOne`; `RemoteToolDispatcher` timeout is configurable via `executespec.remote-tool.timeout-ms` (default 600s). DeepSeek first-20 baseline before terminal-mode tuning: 7/20 resolved (35%) for about $0.09; 80-floor terminal tuning reached 12/20 (60%) for about $0.40. The 100-floor + terminal-finalizer run also reached 12/20 (60%) for $0.400126 in 47m52s: `openssl-selfsigned-cert` and `sanitize-git-repo` flipped to pass, while `largest-eigenval` and `query-optimize` regressed on verifier/performance thresholds. Current comparable runs should use DeepSeek, the first-20 slice, an effective 120-iteration floor, terminal-artifact checkpoints at about iterations 16 and 32, a restricted terminal finalizer at iteration 64 even when shell calls keep counting as progress, a restricted wall-clock finalizer before failure, a forced terminal finalizer after the second text-only stop, a 1410s server-side wall clock below Harbor's 1500s agent timeout with a 90s buffer for an in-flight turn/finalizer, prompt policy that inspects `/tests`, treats exact visible assertions as byte-for-byte artifact contracts, implements detection-first no-op handling for clean transform inputs, cleans helper artifacts from deliverable directories, sweeps named error patterns, benchmarks against golden/reference thresholds, and the shared verified-pass guard that mechanically preserves a passing candidate.
 
