@@ -32,6 +32,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -734,13 +735,15 @@ public class PreviewService {
                   "--order",
                   "asc")
               .redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes()).trim();
-      boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-477: BoundedProcess drains gcloud output on a separate thread so the 30s timeout is
+      // reachable while the child is alive, and caps the captured log. Reading to EOF first (the
+      // old shape) let a hung gcloud with an open pipe block the request thread indefinitely, and
+      // user-controlled preview logs could be arbitrarily large.
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(30));
+      if (!outcome.finished()) {
         return "Log fetch timed out.";
       }
+      String output = outcome.output().strip();
       return output.isEmpty() ? "No logs available yet (Cloud Run may still be starting)." : output;
     } catch (Exception e) {
       log.warn("Failed to fetch Cloud Run logs for {}: {}", serviceName, e.getMessage());

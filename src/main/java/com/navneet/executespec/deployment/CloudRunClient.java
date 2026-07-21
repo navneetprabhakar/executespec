@@ -1,20 +1,25 @@
 package com.navneet.executespec.deployment;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -127,26 +132,17 @@ public class CloudRunClient {
     }
     applyRuntimeServiceAccount(cmd);
 
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    Process process = pb.start();
-    // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
-    var stderrFuture =
-        CompletableFuture.supplyAsync(
-            () -> {
-              try {
-                return new String(process.getErrorStream().readAllBytes()).trim();
-              } catch (Exception e) {
-                return "stderr read failed: " + e.getMessage();
-              }
-            });
-    String stdout = new String(process.getInputStream().readAllBytes()).trim();
-    String stderr = stderrFuture.join();
-    boolean finished = process.waitFor(10, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
+    // RR-999: drain stdout and stderr on separate threads (kept apart so the JSON on stdout is not
+    // polluted by gcloud's progress text on stderr) with the deadline started BEFORE the reads.
+    // Reading stdout to EOF on the calling thread first let a hung gcloud that kept its pipe open
+    // defeat the 10-minute timeout entirely.
+    GcloudResult res = runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+    if (!res.finished()) {
       throw new IOException("Cloud Run deploy timed out after 10 minutes");
     }
-    int exit = process.exitValue();
+    String stdout = res.stdout();
+    String stderr = res.stderr();
+    int exit = res.exitCode();
 
     String combined = (stdout + "\n" + stderr).trim();
     if (exit != 0) {
@@ -273,27 +269,16 @@ public class CloudRunClient {
     }
 
     try {
-      ProcessBuilder pb = new ProcessBuilder(cmd);
-      Process process = pb.start();
-      // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
-      // gcloud writes progress text to stderr even with --format=json and --quiet.
-      var stderrFuture =
-          CompletableFuture.supplyAsync(
-              () -> {
-                try {
-                  return new String(process.getErrorStream().readAllBytes()).trim();
-                } catch (Exception e) {
-                  return "stderr read failed: " + e.getMessage();
-                }
-              });
-      String stdout = new String(process.getInputStream().readAllBytes()).trim();
-      String stderr = stderrFuture.join();
-      boolean finished = process.waitFor(10, TimeUnit.MINUTES);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-999: drain stdout and stderr on separate threads (gcloud writes progress text to stderr
+      // even with --format=json --quiet, so they must stay apart) with the deadline started BEFORE
+      // the reads. The old shape read stdout to EOF first, so a hung gcloud could never time out.
+      GcloudResult res = runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+      if (!res.finished()) {
         throw new IOException("Cloud Run preview deploy timed out after 10 minutes");
       }
-      int exit = process.exitValue();
+      String stdout = res.stdout();
+      String stderr = res.stderr();
+      int exit = res.exitCode();
 
       String combined = (stdout + "\n" + stderr).trim();
       if (exit != 0) {
@@ -323,8 +308,17 @@ public class CloudRunClient {
 
       log.info("Cloud Run preview deployed: {} → {}", serviceName, serviceUrl);
 
-      // Ensure public access — --allow-unauthenticated may silently fail
-      ensurePublicAccess(serviceName);
+      // Ensure public access — --allow-unauthenticated may silently fail. RR-1001: surface a failed
+      // binding rather than swallowing it. We do not hard-fail here (the deploy already passed
+      // --allow-unauthenticated); the post-deploy 2xx health check is the authoritative
+      // reachability
+      // gate and will fail the preview if the service is genuinely inaccessible.
+      if (!ensurePublicAccess(serviceName)) {
+        log.warn(
+            "Cloud Run preview {} public-access IAM binding could not be confirmed — the service"
+                + " may be unreachable; the health check will decide.",
+            serviceName);
+      }
 
       return new DeployResult(serviceUrl, null);
     } finally {
@@ -338,10 +332,15 @@ public class CloudRunClient {
   }
 
   /**
-   * Explicitly set allUsers → roles/run.invoker on the service. This is a best-effort fallback if
+   * Explicitly set allUsers → roles/run.invoker on the service. This is a fallback if
    * --allow-unauthenticated failed during deploy.
+   *
+   * <p>RR-1001: returns whether the IAM binding was actually confirmed. The prior {@code void}
+   * signature swallowed every failure as a WARN, so the caller could not distinguish a public,
+   * reachable service from one whose public-access binding never took. The reachability gate is the
+   * post-deploy 2xx health check; this signal lets the deploy path surface a binding failure.
    */
-  private void ensurePublicAccess(String serviceName) {
+  private boolean ensurePublicAccess(String serviceName) {
     try {
       ProcessBuilder pb =
           new ProcessBuilder(
@@ -358,21 +357,23 @@ public class CloudRunClient {
                   props.gcpRegion(),
                   "--quiet")
               .redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes()).trim();
-      boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-      if (!finished) {
-        process.destroyForcibly();
+      BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(2));
+      if (!outcome.finished()) {
         log.warn("Setting public access timed out for {}", serviceName);
-        return;
+        return false;
       }
-      if (process.exitValue() != 0) {
-        log.warn("Failed to set public access on {}: {}", serviceName, output);
-      } else {
-        log.info("Public access set on Cloud Run service: {}", serviceName);
+      if (outcome.exitCode() != 0) {
+        log.warn(
+            "Failed to set public access (allUsers→run.invoker) on {}: {}",
+            serviceName,
+            outcome.output());
+        return false;
       }
+      log.info("Public access set on Cloud Run service: {}", serviceName);
+      return true;
     } catch (Exception e) {
       log.warn("Failed to set public access on {}: {}", serviceName, e.getMessage());
+      return false;
     }
   }
 
@@ -413,16 +414,12 @@ public class CloudRunClient {
                 "--quiet")
             .redirectErrorStream(true);
 
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(5, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(5));
+    if (!outcome.finished()) {
       throw new IOException("Rollback timed out after 5 minutes for " + serviceName);
     }
-
-    if (process.exitValue() != 0) {
-      throw new IOException("Rollback failed: " + output);
+    if (outcome.exitCode() != 0) {
+      throw new IOException("Rollback failed: " + outcome.output());
     }
     log.info("Rolled back {} to revision {}", serviceName, revisionName);
   }
@@ -450,8 +447,14 @@ public class CloudRunClient {
   }
 
   /**
-   * Post-deploy health check: GET service URL, expect status < 500. Retries 3 times with 5-second
+   * Post-deploy health check: GET service URL, require a real 2xx. Retries 3 times with 5-second
    * delay for cold-start tolerance.
+   *
+   * <p>RR-1001: the old gate accepted any status below 500, so a service returning 401/403/404 —
+   * broken auth/IAM, a missing app route, or an unpublished revision — read as "healthy" and the
+   * preview/deployment was marked RUNNING/LIVE while genuinely inaccessible. The client follows
+   * redirects (NORMAL), so a legitimate 3xx→2xx flow still resolves to 2xx; a terminal non-2xx now
+   * fails the check.
    */
   public boolean healthCheck(String serviceUrl) {
     if (serviceUrl == null || serviceUrl.isBlank()) {
@@ -468,11 +471,15 @@ public class CloudRunClient {
                 .build();
         HttpResponse<Void> resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding());
 
-        if (resp.statusCode() < 500) {
+        if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
           log.info("Health check passed: {} → {}", serviceUrl, resp.statusCode());
           return true;
         }
-        log.warn("Health check attempt {}: {} → {}", attempt, serviceUrl, resp.statusCode());
+        log.warn(
+            "Health check attempt {}: {} → {} (not 2xx — treated as unhealthy)",
+            attempt,
+            serviceUrl,
+            resp.statusCode());
       } catch (Exception e) {
         log.warn("Health check attempt {}: {} → {}", attempt, serviceUrl, e.getMessage());
       }
@@ -491,16 +498,100 @@ public class CloudRunClient {
 
   private void exec(String... cmd) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
-    Process p = pb.start();
-    String output = new String(p.getInputStream().readAllBytes()).trim();
-    boolean finished = p.waitFor(5, TimeUnit.MINUTES);
-    if (!finished) {
-      p.destroyForcibly();
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(5));
+    if (!outcome.finished()) {
       throw new IOException("Command timed out after 5 minutes: " + String.join(" ", cmd));
     }
-    if (p.exitValue() != 0) {
+    if (outcome.exitCode() != 0) {
       throw new IOException(
-          "Command failed (exit " + p.exitValue() + "): " + String.join(" ", cmd) + "\n" + output);
+          "Command failed (exit "
+              + outcome.exitCode()
+              + "): "
+              + String.join(" ", cmd)
+              + "\n"
+              + outcome.output());
+    }
+  }
+
+  /**
+   * RR-999: run a gcloud command whose stderr is folded into stdout (combined output is fine) under
+   * a reachable wall-clock deadline via {@link BoundedProcess}. {@code pb} must already have {@code
+   * redirectErrorStream(true)}.
+   */
+  private static BoundedProcess.Outcome runBounded(ProcessBuilder pb, Duration timeout)
+      throws IOException {
+    try {
+      return BoundedProcess.run(pb, timeout);
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException(e.getMessage(), e);
+    }
+  }
+
+  /** stdout and stderr kept apart, both bounded, for the JSON-parsing deploy paths (RR-999). */
+  /** Package-private for the hung-child regression test. */
+  record GcloudResult(boolean finished, int exitCode, String stdout, String stderr) {}
+
+  /** Per-stream capture ceiling so a runaway gcloud cannot exhaust the heap. */
+  private static final int MAX_GCLOUD_STREAM_CHARS = 1_000_000;
+
+  /**
+   * RR-999: drain stdout and stderr on separate virtual threads (so the JSON on stdout stays clean
+   * of gcloud's progress text on stderr) with the deadline started BEFORE the reads. The whole
+   * process tree is destroyed on expiry. Reading either stream to EOF on the calling thread first —
+   * the shape this replaces — made the timeout unreachable for a child that keeps its pipe open.
+   */
+  static GcloudResult runGcloudSeparate(ProcessBuilder pb, Duration timeout)
+      throws IOException, InterruptedException {
+    Process process = pb.start();
+    StringBuilder out = new StringBuilder();
+    StringBuilder err = new StringBuilder();
+    Thread outDrain = startDrain(process.getInputStream(), out, "cloudrun-out");
+    Thread errDrain = startDrain(process.getErrorStream(), err, "cloudrun-err");
+
+    boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    if (!finished) {
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
+      process.destroyForcibly();
+      process.waitFor(5, TimeUnit.SECONDS);
+    }
+    joinDrain(outDrain);
+    joinDrain(errDrain);
+    return new GcloudResult(
+        finished,
+        finished ? process.exitValue() : -1,
+        out.toString().trim(),
+        err.toString().trim());
+  }
+
+  private static Thread startDrain(InputStream stream, StringBuilder sink, String name) {
+    return Thread.ofVirtual()
+        .name(name)
+        .start(
+            () -> {
+              try (BufferedReader reader =
+                  new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                  synchronized (sink) {
+                    if (sink.length() + line.length() + 1 <= MAX_GCLOUD_STREAM_CHARS) {
+                      sink.append(line).append('\n');
+                    }
+                    // Keep draining past the cap so the child is never blocked on a full pipe.
+                  }
+                }
+              } catch (Exception ended) {
+                log.debug("gcloud stream drain ended: {}", ended.getMessage());
+              }
+            });
+  }
+
+  private static void joinDrain(Thread drain) {
+    try {
+      drain.join(Duration.ofSeconds(5));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 

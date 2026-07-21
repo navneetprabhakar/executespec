@@ -1,7 +1,7 @@
 package com.navneet.executespec.deployment.preview.vm;
 
-import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -275,23 +276,30 @@ public class PreviewDeploymentService {
   private String execute(ProcessBuilder pb) {
     try {
       pb.redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes());
-      boolean finished =
-          process.waitFor(PROCESS_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-1037: BoundedProcess drains the SSH/SCP child on a separate thread so the deadline is
+      // reachable while the child is still alive, and caps captured output. Reading stdout to EOF
+      // first (the old shape) let a hung child that kept its pipe open defeat the timeout, while an
+      // unbounded read could exhaust the heap.
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, Duration.ofSeconds(PROCESS_TIMEOUT_SECONDS));
+      if (!outcome.finished()) {
         throw new PreviewDeploymentException(
             "Command timed out after " + PROCESS_TIMEOUT_SECONDS + "s");
       }
-      int exit = process.exitValue();
-      if (exit != 0) {
+      if (outcome.exitCode() != 0) {
         throw new PreviewDeploymentException(
-            "Command failed (exit " + exit + "): " + truncate(output, 2000));
+            "Command failed (exit "
+                + outcome.exitCode()
+                + "): "
+                + truncate(outcome.output(), 2000));
       }
-      return output;
-    } catch (IOException | InterruptedException e) {
-      Thread.currentThread().interrupt();
+      return outcome.output();
+    } catch (PreviewDeploymentException e) {
+      throw e;
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new PreviewDeploymentException("Execution failed: " + e.getMessage(), e);
     }
   }
