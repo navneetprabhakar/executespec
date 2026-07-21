@@ -2023,7 +2023,7 @@ to boot — skip it for those.""";
             task.id(),
             primary.outcome(),
             primary.iterations());
-        String failureReason = describeWorkerFailure(primary);
+        String failureReason = WorkerFailureDescriber.describe(primary);
         // v2.5.12 — populate a concrete failureReason for every terminal
         // worker outcome so RunMapper doesn't have to fall back to
         // "unknown — see worker logs". This closes Bug D from the eval.
@@ -2074,7 +2074,7 @@ to boot — skip it for those.""";
               + " file"
               + (fileWrites == 1 ? "" : "s")
               + " — "
-              + describeWorkerFailure(primary);
+              + WorkerFailureDescriber.describe(primary);
     } else {
       softCompletion = false;
       softWarnReason = null;
@@ -2377,7 +2377,7 @@ to boot — skip it for those.""";
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
           retry.outcome());
-      String retryFailureReason = describeWorkerFailure(retry);
+      String retryFailureReason = WorkerFailureDescriber.describe(retry);
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId,
@@ -4476,42 +4476,6 @@ to boot — skip it for those.""";
       }
     }
     return out.toString();
-  }
-
-  /**
-   * v2.5.12 — maps a non-COMPLETED worker outcome to a human-readable failure reason. Keeps the
-   * message short enough to render inline on the run detail page while preserving the most
-   * diagnostic metadata without persisting model text, tool payloads or provider responses.
-   */
-  private static String describeWorkerFailure(WorkerResult r) {
-    if (r == null || r.outcome() == null) return "Worker outcome unknown";
-    return switch (r.outcome()) {
-      case STOPPED_WITHOUT_COMPLETE ->
-          "Worker stopped without calling completeTask after " + r.iterations() + " iterations";
-      case ITERATION_LIMIT_EXCEEDED ->
-          "Iteration cap exceeded ("
-              + r.iterations()
-              + " iters, "
-              + r.toolCallsDispatched()
-              + " tool calls). Worker did not call completeTask.";
-      case WALL_CLOCK_EXCEEDED ->
-          "Wall-clock cap exceeded ("
-              + r.iterations()
-              + " iters, "
-              + r.toolCallsDispatched()
-              + " tool calls, "
-              + (r.totalLatencyMs() / 1000)
-              + "s elapsed). Worker did not call completeTask.";
-      case ABSOLUTE_DEADLINE_EXCEEDED ->
-          "Absolute execution deadline exceeded; shutdown reserve was preserved ("
-              + r.iterations()
-              + " iters, "
-              + r.toolCallsDispatched()
-              + " tool calls).";
-      case ERROR -> "Worker threw an unrecoverable exception; inspect the correlation trace.";
-      case BUDGET_EXCEEDED -> "Run hit its hard cost cap; worker stopped cleanly mid-task.";
-      default -> "Worker outcome=" + r.outcome();
-    };
   }
 
   /** Backwards-compatible 5-arg overload — used by tests. Delegates with null provider. */

@@ -1,6 +1,5 @@
 package com.navneet.executespec.integration;
 
-import static com.navneet.executespec.integration.RunPipelineSupport.computeRepoCountForEstimate;
 import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
@@ -164,6 +163,10 @@ public class RunOrchestrator implements RunControlPort {
   // 2026-05-13 audit Stage 2 — k-NN over historical run costs. Records on terminal; the
   // estimator falls back to it before the Stage-1 formula once ≥10 similar runs exist.
   private final CostHistoryService costHistoryService;
+
+  /** Prices a planned run and persists its estimate, credits and hard spend ceiling. */
+  private final RunCostEstimatePersister costEstimatePersister;
+
   private final com.navneet.executespec.cost.RunTokenAttributor tokenAttributor;
   private final RunCostLogRepository runCostLogRepo;
   private final WorkspaceInitService workspaceInit;
@@ -387,6 +390,9 @@ public class RunOrchestrator implements RunControlPort {
    * a server-internal automation surface with its own authorization step.
    */
   private final PlanGateBypassPolicy planGateBypassPolicy;
+
+  /** Resolves the durable provider/model route a submitted run advertises. */
+  private final RunRouteContractResolver routeContractResolver;
 
   /**
    * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with status {@code
@@ -930,99 +936,16 @@ public class RunOrchestrator implements RunControlPort {
       skipApproval = false;
     }
 
-    // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): only ENTERPRISE runs may
-    // pin a per-run model. The actual ROUTING is governed by the RunModelOverrides overlay bound
-    // in runPipeline (also ENTERPRISE-gated); we resolve the owner tier once here so the persisted
-    // plannerModel/workerModel/reviewerModel columns stay HONEST with that routing and never
-    // advertise a pin that routing will ignore for a non-ENTERPRISE caller.
-    String ownerTierAtSubmit =
-        createdByUserId != null
-            ? appUserRepository.findById(createdByUserId).map(u -> u.getTier()).orElse(null)
-            : null;
-    boolean enterpriseSubmit = "ENTERPRISE".equalsIgnoreCase(ownerTierAtSubmit);
-    ManagedAiProperties.TierPolicy managedTierPolicy =
-        managedAiProperties.policyFor(ownerTierAtSubmit);
-    boolean managedTierRouteLocked =
-        ownerTierAtSubmit != null
-            && !ownerTierAtSubmit.isBlank()
-            && managedTierPolicy.getLockedProvider() != null
-            && !managedTierPolicy.getLockedProvider().isBlank()
-            && managedTierPolicy.getLockedModel() != null
-            && !managedTierPolicy.getLockedModel().isBlank();
-    if (managedTierRouteLocked) {
-      provider = managedTierPolicy.getLockedProvider().trim().toLowerCase(Locale.ROOT);
-    }
-    boolean hasPin = modelName != null && !modelName.isBlank();
-    if (hasPin && !enterpriseSubmit) {
-      throw new org.springframework.web.server.ResponseStatusException(
-          org.springframework.http.HttpStatus.FORBIDDEN,
-          "Exact per-run model selection requires the Enterprise tier.");
-    }
-    String canonicalPin = null;
-    if (hasPin && enterpriseSubmit) {
-      String candidate = modelRegistry.canonicalize(modelName.trim());
-      String owner = modelRegistry.providerFor(candidate);
-      LlmProvider requestedProvider = LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT));
-      if (owner == null || !canRoutePinnedModel(requestedProvider, candidate, owner)) {
-        throw new IllegalArgumentException(
-            "Model '" + modelName + "' cannot be routed through provider '" + provider + "'.");
-      }
-      canonicalPin = candidate;
-    }
-
-    // The run-level worker model honours a supplied modelName only for ENTERPRISE; otherwise it is
-    // the YAML workhorse default (= the model the worker will actually route to). This keeps the
-    // pipeline's `model` value, the persisted workerModel column, and the tierConfigFor fallback
-    // all consistent with the overlay-driven routing.
-    String model =
-        canonicalPin != null
-            ? canonicalPin
-            : managedTierRouteLocked
-                ? modelRegistry.canonicalize(managedTierPolicy.getLockedModel().trim())
-                : contextComposer.defaultModelFor(provider);
-
-    // 2026-05-06 — defaultModelFor was a hardcoded provider→model fallback that drifted from
-    // the YAML matrix (returned Haiku/flash/mini when YAML PLANNING wanted Sonnet/Pro/gpt-5.4).
-    // After the consolidation it routes through ModelRegistry.workhouseModelFor(provider) so
-    // the run-level worker default tracks YAML.
-
-    // Resolve per-tier models so RunDetail surfaces what the planner/reviewer
-    // will actually call, not the run-level worker default — adversarial-test
-    // Finding 14. An ENTERPRISE per-run pin is honoured for all three roles to
-    // preserve the override contract.
-    //
-    // V182 PATCH-mode override: a patch run never invokes the planner or reviewer, but it *must*
-    // run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview) regardless of any
-    // caller-supplied modelName. CodeGenEngine receives `plannerDbModel` as the worker model; the
-    // reasoning gap between Haiku-class and Sonnet-class is bigger than any harness improvement on
-    // bug-fix shapes.
-    String plannerDbModel = model;
-    String reviewerDbModel = model;
-    boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
-    if (!managedTierRouteLocked && (!hasPin || isPatch || !enterpriseSubmit)) {
-      try {
-        com.navneet.executespec.router.LlmProvider p =
-            com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
-        // v2.6.2 slice 5b — agent name is now OutlinePlannerAgent;
-        // PlannerAgent was deleted along with the legacy single-phase planner.
-        plannerDbModel =
-            modelResolver
-                .resolve(
-                    "OutlinePlannerAgent", p, com.navneet.executespec.router.AgentTier.PLANNING)
-                .getModel();
-        reviewerDbModel =
-            modelResolver
-                .resolve("ReviewerAgent", p, com.navneet.executespec.router.AgentTier.PLANNING)
-                .getModel();
-      } catch (Exception ex) {
-        log.debug(
-            "Tier-based model resolution failed for run={} provider={}, falling back to run"
-                + " default: {}",
-            runId,
-            provider,
-            ex.getMessage());
-      }
-    }
+    // The durable route contract (managed-tier lock > ENTERPRISE pin > YAML tier defaults) is
+    // resolved by RunRouteContractResolver so the persisted planner/worker/reviewer columns stay
+    // honest about what routing will actually call.
+    RunRouteContractResolver.RouteContract route =
+        routeContractResolver.resolve(runId, provider, modelName, runMode, createdByUserId);
+    provider = route.provider();
+    String canonicalPin = route.canonicalPin();
+    String model = route.workerModel();
+    String plannerDbModel = route.plannerModel();
+    String reviewerDbModel = route.reviewerModel();
 
     // RR-233 / RR-234 / RR-236 — read the submit-time policy on the SUBMITTING thread, before the
     // async pipeline exists. Every one of these controls used to be written after submitRun
@@ -1457,7 +1380,8 @@ public class RunOrchestrator implements RunControlPort {
             pinProvider = LlmProvider.valueOf(provider.toUpperCase());
             String canonical = modelRegistry.canonicalize(durablePinnedModel.trim());
             String owner = modelRegistry.providerFor(canonical);
-            if (owner == null || canRoutePinnedModel(pinProvider, canonical, owner)) {
+            if (owner == null
+                || RunRouteContractResolver.canRoutePinnedModel(pinProvider, canonical, owner)) {
               validatedPin = canonical;
             } else {
               throw new IllegalStateException(
@@ -3247,97 +3171,7 @@ public class RunOrchestrator implements RunControlPort {
    * workspaces.
    */
   private void persistEstimate(String runId, String provider, String model, Plan plan) {
-    java.util.List<String> complexities =
-        plan.tasks().stream()
-            .map(t -> t.complexity() == null ? "MEDIUM" : t.complexity().name())
-            .toList();
-    // v2.6.2 slice 5 — pull the persisted plan strategy from the run row so
-    // the estimate reflects the actual hierarchical-pipeline phase costs
-    // (classifier + outline + expansion + coherence) instead of the legacy
-    // single-phase shape. Falls back to null = legacy estimate when the
-    // classifier hadn't run yet (classifier failure / pre-slice-1 row).
-    PlanStrategy strategy =
-        runRepo
-            .findById(runId)
-            .map(PipelineRun::getPlanStrategy)
-            .map(PlanStrategy::fromStringSafe)
-            .orElse(null);
-    // 2026-05-13 audit Stage 1 — feed repoCount + isProjectScoped to the estimator so
-    // post-planning costs (reviewer × per-repo wiring, codemap per repo) are accounted for.
-    // Run 6024f510 (1 LOW task × 3 repos × project-scoped × Anthropic) was estimated at
-    // $0.05-$0.09 against an actual $1.04 — the missing reviewer/codemap/cache-write
-    // overhead was the bulk of the gap.
-    PipelineRun runRow = runRepo.findById(runId).orElse(null);
-    int repoCount = computeRepoCountForEstimate(runRow);
-    boolean isProjectScoped = runRow != null && runRow.getProjectId() != null;
-
-    // Audit 2026-05-13 Stage 2 — try historical k-NN first. Falls back to the Stage-1
-    // formula when fewer than CostHistoryService.MIN_SAMPLES similar runs exist. As the
-    // historical table fills (after deploy), this kicks in for popular shapes and the
-    // formula remains the bootstrap fallback for novel shapes.
-    String providerKey = provider == null ? null : provider.toUpperCase();
-    String strategyKey = strategy == null ? null : strategy.name();
-    // Only an EXPLICIT model pin should drive a model-specific estimate. The `model` argument is
-    // always populated (it falls back to the provider's default model), so it cannot distinguish a
-    // real pin from a default. Use the persisted V275 route intent instead: an EXACT_LOCK / pinned
-    // run carries the customer-chosen model.
-    String pinnedModel =
-        runRow != null
-                && runRow.isRoutePinned()
-                && runRow.getRequestedModel() != null
-                && !runRow.getRequestedModel().isBlank()
-            ? runRow.getRequestedModel().trim()
-            : null;
-    // The historical k-NN is model-blind (keyed on strategy/provider/repoCount/taskCount only), so
-    // it would return the same number for two runs that differ only by pinned model. When the run
-    // carries an explicit model pin, skip history and price that exact model with the model-aware
-    // formula so the estimate actually changes with the selected model.
-    Optional<RunCostTracker.Estimate> historical =
-        pinnedModel != null
-            ? Optional.empty()
-            : costHistoryService.estimateFromHistory(
-                strategyKey, providerKey, repoCount, complexities.size());
-    RunCostTracker.Estimate est =
-        historical.orElseGet(
-            () ->
-                costTracker.estimateRunTierAware(
-                    provider, complexities, strategy, repoCount, isProjectScoped, pinnedModel));
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              r.setCostEstimateLow(est.lowUsd());
-              r.setCostEstimateHigh(est.highUsd());
-              r.setCreditsCharged(est.credits());
-              // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
-              // 2026-05-08 — BYOK cost-cap exemption. When the user's org is OWN_KEYS, skip
-              // OUR platform cap entirely; the customer pays their own API bill so we shouldn't
-              // hard-stop them on ours. BUT we still honour their EXPLICIT userCostCap (typed
-              // into NewRunModal) — that's their voluntary ceiling, not ours.
-              //
-              // Decision matrix:
-              //   BYOK    + userCostCap set    → userCostCap   (customer's voluntary cap honoured)
-              //   BYOK    + userCostCap null   → null          (no cap; fully BYOK)
-              //   non-BYOK + (any)             → clamp(platform, userCostCap) (existing behaviour)
-              boolean byok = apiKeyResolver.isOwnKeysMode(r.getCreatedByUserId());
-              if (byok) {
-                Double userCap = r.getUserCostCap();
-                r.setHardCapUsd(userCap != null && userCap > 0 ? userCap : null);
-              } else {
-                r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
-              }
-              runRepo.save(r);
-            });
-    log.info(
-        "RunOrchestrator run={} estimate strategy={} low=${} high=${} credits={} cap=${}"
-            + " tasks={}",
-        runId,
-        strategy,
-        String.format("%.4f", est.lowUsd()),
-        String.format("%.4f", est.highUsd()),
-        est.credits(),
-        String.format("%.2f", est.hardCapUsd()),
-        est.taskCount());
+    costEstimatePersister.persistEstimate(runId, provider, model, plan);
   }
 
   /**
@@ -4457,12 +4291,6 @@ public class RunOrchestrator implements RunControlPort {
               .build());
     }
     return out;
-  }
-
-  private static boolean canRoutePinnedModel(
-      LlmProvider provider, String canonicalModel, String ownerProvider) {
-    return com.navneet.executespec.router.ModelAccessService.canRouteModel(
-        provider, canonicalModel, ownerProvider);
   }
 
   /**
