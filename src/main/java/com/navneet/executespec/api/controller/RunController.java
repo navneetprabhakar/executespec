@@ -80,6 +80,8 @@ public class RunController {
   /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
   private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
 
+  private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
+
   private final com.navneet.executespec.run.sync.RunSyncService runSyncService;
   private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
   private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
@@ -611,6 +613,22 @@ public class RunController {
   }
 
   /** Approve or reject the plan-approval gate. */
+  /**
+   * RR-819 — what the approver must be shown before approving. Returns the durable gate report
+   * composed while the run parked at AWAITING_APPROVAL, or 204 when this plan touches no registered
+   * contract. Read-only; run-read guarded.
+   */
+  @GetMapping("/{runId}/plan-contract-gate")
+  public ResponseEntity<com.navneet.executespec.contracts.gate.PlanContractGateReport>
+      planContractGate(
+          @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    return planContractGate
+        .find(runId)
+        .map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
   @PostMapping("/{runId}/approve")
   public ResponseEntity<Void> approvePlan(
       @PathVariable String runId,
@@ -667,6 +685,37 @@ public class RunController {
                           + ". Cost estimate may have changed — please review.");
                 }
               });
+    }
+
+    // RR-819 — the breaking-change gate. PlanBreakingChangeReport's own contract says approval must
+    // be disabled until the approver types BREAKING when a touched contract has declared consumers.
+    // That was never enforced anywhere: the classifier ran AFTER the worker wrote the change and
+    // its verdict became a MINOR issue with a "[REQUIRES ACK]" suffix, so consumer-breaking API and
+    // schema changes could be approved and auto-published with no friction and no record. The gate
+    // report is composed while the run parks at AWAITING_APPROVAL; here it is enforced.
+    if (req.approved()) {
+      var ack =
+          planContractGate.acknowledge(
+              runId,
+              req.breakingChangeAck(),
+              req.breakingChangeReportDigest(),
+              userDetails == null ? null : userDetails.getUser().getId());
+      switch (ack) {
+        case MISSING ->
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This plan changes a contract that other repositories consume. Review the"
+                    + " breaking-change report and type BREAKING to acknowledge it before"
+                    + " approving.");
+        case STALE_REPORT ->
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "The breaking-change report you acknowledged is not the one currently on this run."
+                    + " Reload the plan and review the change again before approving.");
+        default -> {
+          /* NOT_REQUIRED or ACKNOWLEDGED — proceed. */
+        }
+      }
     }
 
     // M-032 + M-033 (Wave 3) — governance gates run before we ever
