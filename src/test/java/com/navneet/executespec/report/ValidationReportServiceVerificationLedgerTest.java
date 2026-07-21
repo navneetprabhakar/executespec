@@ -87,7 +87,10 @@ class ValidationReportServiceVerificationLedgerTest {
 
     assertEntry(ledger, "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(ledger, "build", "PASS", "DETERMINISTIC", "HIGH");
-    assertEntry(ledger, "tests", "WARN", "DETERMINISTIC", "HIGH");
+    // RR-1646: the persisted test counts come from runner report files read off disk with no
+    // exit-code check, so they cannot claim DETERMINISTIC/HIGH — the one label that asserts
+    // independence from an LLM. Status is unchanged; only the provenance claim is weakened.
+    assertEntry(ledger, "tests", "WARN", "UNVERIFIED_COUNT", "MEDIUM");
     assertEntry(ledger, "reviewer", "PASS", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "PASS", "LLM_ASSESSMENT", "LOW");
     assertEntry(ledger, "endpoint-coverage", "WARN", "LLM_ASSISTED_COUNT", "MEDIUM");
@@ -142,7 +145,8 @@ class ValidationReportServiceVerificationLedgerTest {
 
     assertEntry(ledger, "code-delivered", "FAIL", "DETERMINISTIC", "HIGH");
     assertEntry(ledger, "build", "UNKNOWN", "DETERMINISTIC", "MEDIUM");
-    assertEntry(ledger, "tests", "UNKNOWN", "DETERMINISTIC", "MEDIUM");
+    // RR-1646: same provenance downgrade; confidence was already MEDIUM for an unmeasured row.
+    assertEntry(ledger, "tests", "UNKNOWN", "UNVERIFIED_COUNT", "MEDIUM");
     assertEntry(ledger, "reviewer", "UNKNOWN", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
     assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "LOW");
@@ -387,6 +391,55 @@ class ValidationReportServiceVerificationLedgerTest {
 
     assertTrue(service.getByShareToken(token).isEmpty());
     assertTrue(service.getByShareToken("short").isEmpty());
+  }
+
+  /**
+   * RR-1646 — the executable-verification row keeps DETERMINISTIC only while its status rests on
+   * the build signal. Once the concrete-test counts decided the status, the row inherits their
+   * unproven provenance and must say so.
+   */
+  @Test
+  void executableVerificationRowInheritsUnprovenTestProvenanceWhenTestsDecidedIt() {
+    ValidationReport testDriven =
+        ValidationReport.builder()
+            .id("vr-exec-tests")
+            .runId("run-exec-tests")
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(3)
+            .testsTotal(3)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .executableTestsRun(true)
+            .executableTestsPassed(true)
+            .executableVerificationStatus("PASSED")
+            .build();
+    assertEntry(
+        svc.buildVerificationLedger(testDriven, List.of()),
+        "executable-verification",
+        "PASS",
+        "UNVERIFIED_COUNT",
+        "MEDIUM");
+
+    ValidationReport buildOnly =
+        ValidationReport.builder()
+            .id("vr-exec-build")
+            .runId("run-exec-build")
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .executableTestsRun(false)
+            .executableVerificationStatus("BUILD_ONLY")
+            .build();
+    assertEntry(
+        svc.buildVerificationLedger(buildOnly, List.of()),
+        "executable-verification",
+        "WARN",
+        "DETERMINISTIC",
+        "HIGH");
   }
 
   private static void assertEntry(

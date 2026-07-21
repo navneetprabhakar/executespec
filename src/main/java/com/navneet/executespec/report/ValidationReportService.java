@@ -445,14 +445,14 @@ public class ValidationReportService {
     }
 
     ValidationReport report = found.get();
-    int total = Math.max(0, summary.getTotalTests());
-    int passed = Math.max(0, Math.min(summary.getPassed(), total));
+    int incomingTotal = Math.max(0, summary.getTotalTests());
+    int incomingPassed = Math.max(0, Math.min(summary.getPassed(), incomingTotal));
     // The background HTTP/preview test generator publishes a 0/0 completion event when a run is
     // not applicable (for example a Python library with no HTTP surface). That event is not
     // evidence that the worker's already-executed tests disappeared. Never let weaker, empty
     // downstream evidence erase a positive concrete workspace-test result captured during report
     // generation.
-    if (total == 0 && report.getTestsTotal() != null && report.getTestsTotal() > 0) {
+    if (incomingTotal == 0 && report.getTestsTotal() != null && report.getTestsTotal() > 0) {
       log.info(
           "Ignoring empty downstream test summary for run={} because report already has {}/{}"
               + " concrete workspace tests",
@@ -461,19 +461,36 @@ public class ValidationReportService {
           report.getTestsTotal());
       return Optional.of(report);
     }
+    // RR-1647 — the incoming summary is the generated HTTP/preview suite, a DIFFERENT population
+    // from the worker's own workspace suite captured at report generation. Replacing one with the
+    // other silently discarded a passing 10/10 worker suite the moment a 2/3 generated smoke
+    // landed, dropping the TESTS slot and tripping the trust cap on evidence that never
+    // contradicted the worker suite. Combine the populations instead so both suites stay counted.
+    //
+    // The merge is anchored on a persisted baseline (the pre-rescore counts) rather than on the
+    // current row, so a repeated or re-delivered execution event recomputes the same result
+    // instead of stacking increments.
+    TestPopulationBaseline baseline = testPopulationBaseline(report);
+    int total = baseline.total() + incomingTotal;
+    int passed = Math.min(total, baseline.passed() + incomingPassed);
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
         verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
     int criticals = verificationLedgerBuilder.countUnfixedCriticalIssues(issues);
-    // A concrete runner returning 0/0 is evidence that no tests were executed. Do not
-    // fall back to an optimistic LLM coverage label from the original report.
+    // A concrete runner returning 0/0 with no prior population is evidence that no tests were
+    // executed. Do not fall back to an optimistic LLM coverage label from the original report.
     String concreteCoverageLevel = total == 0 ? "NONE" : accuracy.testCoverageLevel();
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
     ExecutableVerificationEvidence executableVerification =
         executableVerification(
-            report.getFinalBuildPassed(), true, passed, total, scoreEvidenceFailure(report));
+            report.getFinalBuildPassed(),
+            true,
+            passed,
+            total,
+            scoreEvidenceFailure(report),
+            baseline);
     report.setExecutableTestsRun(executableVerification.testsRun());
     report.setExecutableTestsPassed(executableVerification.testsPassed());
     report.setExecutableVerificationStatus(executableVerification.status());
@@ -539,12 +556,53 @@ public class ValidationReportService {
     return scoreEvidenceFailure(report.getFilesGenerated(), accuracy);
   }
 
+  /**
+   * RR-1647 — the pre-rescore concrete-test population (the worker's own workspace suite captured
+   * at report generation). Persisted inside the executable-evidence JSON so repeated concrete-test
+   * rescores merge against a stable anchor instead of stacking increments onto themselves.
+   */
+  private record TestPopulationBaseline(int total, int passed) {}
+
+  private TestPopulationBaseline testPopulationBaseline(ValidationReport report) {
+    String json = report.getExecutableEvidenceJson();
+    if (json != null && !json.isBlank()) {
+      try {
+        var root = objectMapper.readTree(json);
+        if (root.hasNonNull("baselineTestsTotal") && root.hasNonNull("baselineTestsPassed")) {
+          int total = Math.max(0, root.get("baselineTestsTotal").asInt());
+          int passed = Math.max(0, Math.min(root.get("baselineTestsPassed").asInt(), total));
+          return new TestPopulationBaseline(total, passed);
+        }
+      } catch (Exception ex) {
+        log.debug(
+            "Could not read the persisted test-population baseline for run={}: {}",
+            report.getRunId(),
+            ex.getMessage());
+      }
+    }
+    int total = report.getTestsTotal() == null ? 0 : Math.max(0, report.getTestsTotal());
+    int passed =
+        report.getTestsPassed() == null ? 0 : Math.max(0, Math.min(report.getTestsPassed(), total));
+    return new TestPopulationBaseline(total, passed);
+  }
+
   private ExecutableVerificationEvidence executableVerification(
       Boolean buildPassed,
       boolean testSummaryPresent,
       int testsPassed,
       int testsTotal,
       String provenanceFailure) {
+    return executableVerification(
+        buildPassed, testSummaryPresent, testsPassed, testsTotal, provenanceFailure, null);
+  }
+
+  private ExecutableVerificationEvidence executableVerification(
+      Boolean buildPassed,
+      boolean testSummaryPresent,
+      int testsPassed,
+      int testsTotal,
+      String provenanceFailure,
+      TestPopulationBaseline baseline) {
     boolean testsRun = testSummaryPresent && testsTotal > 0;
     Boolean testsPassedSignal = testsRun ? testsPassed == testsTotal : null;
     String status;
@@ -576,6 +634,10 @@ public class ValidationReportService {
     evidence.put("status", status);
     if (failureStage != null) evidence.put("failureStage", failureStage);
     if (provenanceFailure != null) evidence.put("provenanceFailure", provenanceFailure);
+    if (baseline != null) {
+      evidence.put("baselineTestsTotal", baseline.total());
+      evidence.put("baselineTestsPassed", baseline.passed());
+    }
     return new ExecutableVerificationEvidence(
         testsRun, testsPassedSignal, status, failureStage, evidence.toString());
   }
@@ -1054,8 +1116,15 @@ public class ValidationReportService {
         verificationLedger);
   }
 
-  /** Rehydrate the deterministic boot signal for a later concrete-test rescore. */
-  private static BootVerification bootVerification(ValidationReport report) {
+  /**
+   * Rehydrate the deterministic boot signal from a persisted report.
+   *
+   * <p>Package-visible on purpose (RR-1645): every path that re-derives a persisted report's score
+   * — concrete-test rescoring AND the SUPER_ADMIN {@link VerifiedScoreBackfillService} — must
+   * reconstruct boot evidence identically. Passing {@code null} merely because the original {@code
+   * ReportInput} is gone silently upgrades an UNHEALTHY boot to a full BUILD slot.
+   */
+  static BootVerification bootVerification(ValidationReport report) {
     if (report == null || report.getBootVerdict() == null) return null;
     try {
       return new BootVerification(
