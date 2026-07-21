@@ -109,6 +109,36 @@ public class ChunkStore {
         Math.max(1, k));
   }
 
+  /**
+   * Lexical search restricted to documents that have no usable vector at all. Semantic search
+   * cannot see these rows, so a semantic query must union them in or a LEXICAL_READY document stays
+   * invisible in a mixed corpus even when it is the exact answer.
+   */
+  public List<RetrievedChunk> lexicalOnlyDocuments(String projectId, String query, int k) {
+    if (query == null || query.isBlank()) return List.of();
+    return jdbc.query(
+        "SELECT dc.document_id, COALESCE(d.filename, d.path_relative) AS filename, "
+            + "dc.chunk_index, dc.content, dc.token_count, "
+            + "ts_rank_cd(to_tsvector('simple', dc.content), plainto_tsquery('simple', ?)) AS rank "
+            + "FROM project_document_chunk dc JOIN project_document d ON d.id=dc.document_id "
+            + "WHERE d.project_id=? AND d.status='LEXICAL_READY' AND d.deleted_at IS NULL "
+            + "AND dc.embedding IS NULL "
+            + "AND to_tsvector('simple', dc.content) @@ plainto_tsquery('simple', ?) "
+            + "ORDER BY rank DESC, d.created_at DESC, dc.chunk_index ASC LIMIT ?",
+        (rs, rowNum) ->
+            new RetrievedChunk(
+                rs.getString("document_id"),
+                rs.getString("filename"),
+                rs.getInt("chunk_index"),
+                rs.getString("content"),
+                rs.getInt("token_count"),
+                1.0 - Math.min(1.0, rs.getDouble("rank"))),
+        query,
+        projectId,
+        query,
+        Math.max(1, k));
+  }
+
   public void deleteByDocument(String documentId) {
     jdbc.update("DELETE FROM project_document_chunk WHERE document_id = ?", documentId);
   }

@@ -153,7 +153,20 @@ public class ProjectDocumentService {
 
   /** Idempotent worker entrypoint used by both post-commit async dispatch and restart recovery. */
   public void processDocument(String documentId) {
-    ProcessingLease lease = claim(documentId);
+    processDocument(documentId, false);
+  }
+
+  /**
+   * Upgrade path for a document that was published lexically while the semantic route was
+   * unavailable. Uses the same fence/lease protocol, so a concurrent delete or an in-flight worker
+   * still wins; an exhausted or no-longer-eligible document simply stays lexical.
+   */
+  public void reindexForSemantic(String documentId) {
+    processDocument(documentId, true);
+  }
+
+  private void processDocument(String documentId, boolean semanticReindex) {
+    ProcessingLease lease = claim(documentId, semanticReindex);
     if (lease == null) return;
     ProjectDocument claimed = lease.document();
     try {
@@ -260,57 +273,89 @@ public class ProjectDocumentService {
   record ProcessingLease(ProjectDocument document, String owner, long token) {}
 
   ProcessingLease claim(String documentId) {
+    return claim(documentId, false);
+  }
+
+  /**
+   * @param semanticReindex when true an already-published LEXICAL_READY document may be re-claimed
+   *     so a route that has since recovered can upgrade it; lexical degradation is otherwise
+   *     one-way and irreversible without delete-and-reupload.
+   */
+  ProcessingLease claim(String documentId, boolean semanticReindex) {
     String owner = UUID.randomUUID().toString();
-    return new TransactionTemplate(transactionManager)
-        .execute(
-            status -> {
-              ProjectDocument doc = repo.findByIdForUpdate(documentId).orElse(null);
-              if (doc == null
-                  || doc.getDeletedAt() != null
-                  || doc.getStatus() == ProjectDocument.Status.READY
-                  || doc.getStatus() == ProjectDocument.Status.LEXICAL_READY
-                  || doc.getStatus() == ProjectDocument.Status.FAILED
-                  || doc.getStatus() == ProjectDocument.Status.CANCELLED) return null;
-              if (doc.isCancellationRequested()) {
-                doc.setStatus(ProjectDocument.Status.CANCELLED);
-                doc.setProcessingCompletedAt(OffsetDateTime.now());
-                doc.setUpdatedAt(OffsetDateTime.now());
-                invalidateLease(doc);
-                repo.save(doc);
-                return null;
-              }
-              OffsetDateTime now = OffsetDateTime.now();
-              if ((doc.getStatus() == ProjectDocument.Status.EXTRACTING
-                      || doc.getStatus() == ProjectDocument.Status.EMBEDDING
-                      || doc.getStatus() == ProjectDocument.Status.INDEXING)
-                  && doc.getProcessingLeaseOwner() != null
-                  && doc.getProcessingLeaseExpiresAt() != null
-                  && doc.getProcessingLeaseExpiresAt().isAfter(now)) return null;
-              int attempts = doc.getProcessingAttempt() == null ? 0 : doc.getProcessingAttempt();
-              if (attempts >= properties.getMaxProcessingAttempts()) {
-                doc.setStatus(ProjectDocument.Status.FAILED);
-                doc.setErrorCode("RETRY_EXHAUSTED");
-                doc.setFailureReason("Indexing attempts exhausted.");
-                doc.setProcessingCompletedAt(OffsetDateTime.now());
-                doc.setUpdatedAt(OffsetDateTime.now());
-                invalidateLease(doc);
-                repo.save(doc);
-                return null;
-              }
-              long token =
-                  doc.getProcessingLeaseToken() == null ? 0L : doc.getProcessingLeaseToken();
-              doc.setProcessingAttempt(attempts + 1);
-              doc.setStatus(ProjectDocument.Status.EXTRACTING);
-              doc.setErrorCode(null);
-              doc.setFailureReason(null);
-              doc.setProcessingStartedAt(now);
-              doc.setUpdatedAt(now);
-              doc.setProcessingLeaseOwner(owner);
-              doc.setProcessingLeaseToken(token + 1);
-              doc.setProcessingLeaseExpiresAt(leaseExpiry(now));
-              ProjectDocument saved = repo.save(doc);
-              return new ProcessingLease(saved, owner, token + 1);
-            });
+    final String[] exhaustedPath = new String[1];
+    ProcessingLease lease =
+        new TransactionTemplate(transactionManager)
+            .execute(
+                status -> {
+                  ProjectDocument doc = repo.findByIdForUpdate(documentId).orElse(null);
+                  if (doc == null
+                      || doc.getDeletedAt() != null
+                      || doc.getStatus() == ProjectDocument.Status.FAILED
+                      || doc.getStatus() == ProjectDocument.Status.CANCELLED) return null;
+                  boolean lexicalReindex =
+                      semanticReindex && doc.getStatus() == ProjectDocument.Status.LEXICAL_READY;
+                  if (!lexicalReindex
+                      && (doc.getStatus() == ProjectDocument.Status.READY
+                          || doc.getStatus() == ProjectDocument.Status.LEXICAL_READY)) return null;
+                  return claimLocked(doc, owner, lexicalReindex, exhaustedPath);
+                });
+    if (exhaustedPath[0] != null) {
+      deleteWorkspaceCopy(projectIdOf(documentId), exhaustedPath[0], documentId);
+    }
+    return lease;
+  }
+
+  private ProcessingLease claimLocked(
+      ProjectDocument doc, String owner, boolean lexicalReindex, String[] exhaustedPath) {
+    if (doc.isCancellationRequested()) {
+      doc.setStatus(ProjectDocument.Status.CANCELLED);
+      doc.setProcessingCompletedAt(OffsetDateTime.now());
+      doc.setUpdatedAt(OffsetDateTime.now());
+      invalidateLease(doc);
+      repo.save(doc);
+      return null;
+    }
+    OffsetDateTime now = OffsetDateTime.now();
+    if ((doc.getStatus() == ProjectDocument.Status.EXTRACTING
+            || doc.getStatus() == ProjectDocument.Status.EMBEDDING
+            || doc.getStatus() == ProjectDocument.Status.INDEXING)
+        && doc.getProcessingLeaseOwner() != null
+        && doc.getProcessingLeaseExpiresAt() != null
+        && doc.getProcessingLeaseExpiresAt().isAfter(now)) return null;
+    int attempts = doc.getProcessingAttempt() == null ? 0 : doc.getProcessingAttempt();
+    if (attempts >= properties.getMaxProcessingAttempts()) {
+      // A published lexical index is usable evidence; an exhausted upgrade attempt must leave it
+      // alone rather than downgrade it to FAILED.
+      if (lexicalReindex) return null;
+      doc.setStatus(ProjectDocument.Status.FAILED);
+      doc.setErrorCode("RETRY_EXHAUSTED");
+      doc.setFailureReason("Indexing attempts exhausted.");
+      doc.setProcessingCompletedAt(OffsetDateTime.now());
+      doc.setUpdatedAt(OffsetDateTime.now());
+      invalidateLease(doc);
+      repo.save(doc);
+      // Terminal: the stored source bytes can never be reprocessed from here.
+      blobRepo.deleteById(doc.getId());
+      exhaustedPath[0] = doc.getPathRelative();
+      return null;
+    }
+    long token = doc.getProcessingLeaseToken() == null ? 0L : doc.getProcessingLeaseToken();
+    doc.setProcessingAttempt(attempts + 1);
+    doc.setStatus(ProjectDocument.Status.EXTRACTING);
+    doc.setErrorCode(null);
+    doc.setFailureReason(null);
+    doc.setProcessingStartedAt(now);
+    doc.setUpdatedAt(now);
+    doc.setProcessingLeaseOwner(owner);
+    doc.setProcessingLeaseToken(token + 1);
+    doc.setProcessingLeaseExpiresAt(leaseExpiry(now));
+    ProjectDocument saved = repo.save(doc);
+    return new ProcessingLease(saved, owner, token + 1);
+  }
+
+  private String projectIdOf(String documentId) {
+    return repo.findById(documentId).map(ProjectDocument::getProjectId).orElse(null);
   }
 
   private boolean heartbeat(ProcessingLease lease) {
@@ -380,6 +425,8 @@ public class ProjectDocumentService {
       String errorCode,
       String reason,
       boolean releaseLease) {
+    boolean terminalFailure = statusValue == ProjectDocument.Status.FAILED;
+    final String[] storedPath = new String[1];
     Boolean updated =
         new TransactionTemplate(transactionManager)
             .execute(
@@ -390,20 +437,40 @@ public class ProjectDocumentService {
                   doc.setStatus(statusValue);
                   doc.setErrorCode(errorCode);
                   doc.setFailureReason(reason);
-                  if (releaseLease && statusValue == ProjectDocument.Status.FAILED) {
+                  if (releaseLease && terminalFailure) {
                     doc.setProcessingCompletedAt(OffsetDateTime.now());
                   }
                   doc.setUpdatedAt(OffsetDateTime.now());
                   if (releaseLease) clearLease(doc);
                   else doc.setProcessingLeaseExpiresAt(leaseExpiry(OffsetDateTime.now()));
                   repo.save(doc);
+                  if (terminalFailure) {
+                    // A terminally failed document is never reprocessed, so retaining the raw
+                    // source bytes has no recovery value — and a document rejected for containing
+                    // credentials would otherwise keep that material in the primary database.
+                    storedPath[0] = doc.getPathRelative();
+                    blobRepo.deleteById(doc.getId());
+                  }
                   return true;
                 });
-    return Boolean.TRUE.equals(updated);
+    boolean applied = Boolean.TRUE.equals(updated);
+    if (applied && terminalFailure) {
+      deleteWorkspaceCopy(lease.document().getProjectId(), storedPath[0], lease.document().getId());
+    }
+    return applied;
   }
 
   private void failTerminal(ProcessingLease lease, String code, String clientSafeReason) {
     updateLeasedStatus(lease, ProjectDocument.Status.FAILED, code, clientSafeReason, true);
+  }
+
+  private void deleteWorkspaceCopy(String projectId, String relativePath, String documentId) {
+    if (projectId == null || relativePath == null) return;
+    try {
+      Files.deleteIfExists(workspace.resolve(projectId, relativePath));
+    } catch (IOException | RuntimeException e) {
+      log.warn("Project document workspace cleanup failed for id {}", documentId);
+    }
   }
 
   private void scheduleRetryOrFail(ProcessingLease lease) {

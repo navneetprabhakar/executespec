@@ -1,6 +1,9 @@
 package com.navneet.executespec.project.rag;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -66,10 +69,17 @@ public class RetrievalService {
                 .filter(this::withinSemanticThreshold)
                 .toList();
         if (!semantic.isEmpty()) {
+          // A threshold-clearing semantic hit must not suppress the lexical-only corpus: those
+          // documents carry no vector at all, so the semantic query is structurally blind to them.
+          List<ChunkStore.RetrievedChunk> lexicalOnly =
+              chunkStore.lexicalOnlyDocuments(projectId, query, k);
+          List<ChunkStore.RetrievedChunk> merged = merge(semantic, lexicalOnly);
           return new RetrievalResult(
-              render(semantic, tokenCap, "## REFERENCE DOCS"),
-              "SEMANTIC",
-              "GOVERNED_OPENAI_EMBEDDING");
+              render(merged, tokenCap, "## REFERENCE DOCS"),
+              lexicalOnly.isEmpty() ? "SEMANTIC" : "SEMANTIC_WITH_LEXICAL",
+              lexicalOnly.isEmpty()
+                  ? "GOVERNED_OPENAI_EMBEDDING"
+                  : "GOVERNED_OPENAI_EMBEDDING_UNIONED_WITH_LEXICAL_ONLY_DOCUMENTS");
         }
         semanticFallbackReason = "SEMANTIC_BELOW_RELEVANCE_THRESHOLD";
       } catch (RuntimeException semanticFailure) {
@@ -85,6 +95,28 @@ public class RetrievalService {
         render(lexical, tokenCap, "## REFERENCE DOCS (LEXICAL FALLBACK)"),
         "LEXICAL",
         availability.semanticSearchAvailable() ? semanticFallbackReason : availability.reason());
+  }
+
+  /** Interleaves the two ranked lists so neither corpus is silently starved by the token budget. */
+  private static List<ChunkStore.RetrievedChunk> merge(
+      List<ChunkStore.RetrievedChunk> semantic, List<ChunkStore.RetrievedChunk> lexicalOnly) {
+    if (lexicalOnly == null || lexicalOnly.isEmpty()) return semantic;
+    List<ChunkStore.RetrievedChunk> merged = new ArrayList<>(semantic.size() + lexicalOnly.size());
+    Set<String> seen = new HashSet<>();
+    int max = Math.max(semantic.size(), lexicalOnly.size());
+    for (int i = 0; i < max; i++) {
+      if (i < semantic.size()) addUnique(merged, seen, semantic.get(i));
+      if (i < lexicalOnly.size()) addUnique(merged, seen, lexicalOnly.get(i));
+    }
+    return merged;
+  }
+
+  private static void addUnique(
+      List<ChunkStore.RetrievedChunk> target,
+      Set<String> seen,
+      ChunkStore.RetrievedChunk candidate) {
+    if (candidate == null) return;
+    if (seen.add(candidate.documentId() + "#" + candidate.chunkIndex())) target.add(candidate);
   }
 
   private boolean withinSemanticThreshold(ChunkStore.RetrievedChunk hit) {

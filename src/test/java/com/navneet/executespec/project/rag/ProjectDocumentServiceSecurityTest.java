@@ -392,8 +392,12 @@ class ProjectDocumentServiceSecurityTest {
 
     assertThat(pending.getStatus()).isEqualTo(ProjectDocument.Status.FAILED);
     assertThat(pending.getErrorCode()).isEqualTo("CREDENTIAL_CONTENT_DETECTED");
+    // initIfMissing is the precondition for every workspace write, so never-called still proves no
+    // credential-bearing byte reached the workspace. resolve() is no longer a valid proxy for that:
+    // RR-1526 makes a terminal failure purge any workspace copy, which must resolve the path.
     verify(workspace, never()).initIfMissing(any());
-    verify(workspace, never()).resolve(any(), any());
+    // RR-1526: the stored source bytes must not survive a credential rejection on the restart path.
+    verify(blobRepo, org.mockito.Mockito.times(1)).deleteById("d-secret");
     verify(embedder, never())
         .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
     verify(chunkStore, never()).insertAll(any(), any(), any());
@@ -445,6 +449,104 @@ class ProjectDocumentServiceSecurityTest {
         .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
     verify(chunkStore).insertLexicalAll(eq("d-lexical"), any());
     verify(chunkStore, never()).insertAll(any(), any(), any());
+  }
+
+  /** RR-1527: lexical publication is a degradation, not a permanent terminal state. */
+  @Test
+  void aLexicalDocumentIsUpgradedOnceTheSemanticRouteRecovers(@TempDir Path tempDir) {
+    ProjectDocument lexical =
+        ProjectDocument.builder()
+            .id("d-upgrade")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-upgrade.bin")
+            .mimeType("text/plain")
+            .status(ProjectDocument.Status.LEXICAL_READY)
+            .retrievalMode("LEXICAL")
+            .processingAttempt(1)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    when(repo.findByIdForUpdate("d-upgrade")).thenReturn(Optional.of(lexical));
+    when(blobRepo.findById("d-upgrade"))
+        .thenReturn(
+            Optional.of(
+                ProjectDocumentBlob.builder()
+                    .documentId("d-upgrade")
+                    .contentBytes("recovered route notes".getBytes(StandardCharsets.UTF_8))
+                    .createdAt(OffsetDateTime.now())
+                    .build()));
+    when(workspace.resolve("p1", "docs/.uploads/d-upgrade.bin"))
+        .thenReturn(tempDir.resolve("docs/.uploads/d-upgrade.bin"));
+    when(extractor.extractBounded(any(), any(), anyInt()))
+        .thenReturn(new ExtractionResult("recovered route notes", 1, 21, 6));
+    when(embedder.availability("p1"))
+        .thenReturn(
+            new EmbeddingPolicyResolver.Availability(
+                EmbeddingPolicyResolver.Mode.SEMANTIC,
+                true,
+                true,
+                "openai",
+                EmbeddingService.DEFAULT_MODEL,
+                "GOVERNED_OPENAI_EMBEDDING_AVAILABLE"));
+    when(embedder.model()).thenReturn(EmbeddingService.DEFAULT_MODEL);
+    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class)))
+        .thenReturn(java.util.List.of(new float[] {0.2f}));
+
+    // The ordinary worker entrypoint must still treat a published document as terminal.
+    service.processDocument("d-upgrade");
+    assertThat(lexical.getStatus()).isEqualTo(ProjectDocument.Status.LEXICAL_READY);
+
+    service.reindexForSemantic("d-upgrade");
+
+    assertThat(lexical.getStatus()).isEqualTo(ProjectDocument.Status.READY);
+    assertThat(lexical.getRetrievalMode()).isEqualTo("SEMANTIC");
+    assertThat(lexical.getEmbeddingModel()).isEqualTo(EmbeddingService.DEFAULT_MODEL);
+  }
+
+  /** RR-1527: an exhausted upgrade must leave a usable lexical index alone, not fail it. */
+  @Test
+  void anExhaustedReindexLeavesTheLexicalDocumentPublished() {
+    ProjectDocument lexical =
+        ProjectDocument.builder()
+            .id("d-exhausted")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-exhausted.bin")
+            .mimeType("text/plain")
+            .status(ProjectDocument.Status.LEXICAL_READY)
+            .retrievalMode("LEXICAL")
+            .processingAttempt(properties.getMaxProcessingAttempts())
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    when(repo.findByIdForUpdate("d-exhausted")).thenReturn(Optional.of(lexical));
+
+    service.reindexForSemantic("d-exhausted");
+
+    assertThat(lexical.getStatus()).isEqualTo(ProjectDocument.Status.LEXICAL_READY);
+    verify(blobRepo, never()).deleteById("d-exhausted");
+  }
+
+  /** RR-1526: retry-exhausted rows must not keep their raw source bytes. */
+  @Test
+  void retryExhaustedTerminalFailurePurgesTheStoredSourceBytes() {
+    ProjectDocument stuck =
+        ProjectDocument.builder()
+            .id("d-exhausted-fail")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-exhausted-fail.bin")
+            .mimeType("text/plain")
+            .status(ProjectDocument.Status.RETRY_PENDING)
+            .processingAttempt(properties.getMaxProcessingAttempts())
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    when(repo.findByIdForUpdate("d-exhausted-fail")).thenReturn(Optional.of(stuck));
+
+    service.processDocument("d-exhausted-fail");
+
+    assertThat(stuck.getStatus()).isEqualTo(ProjectDocument.Status.FAILED);
+    assertThat(stuck.getErrorCode()).isEqualTo("RETRY_EXHAUSTED");
+    verify(blobRepo).deleteById("d-exhausted-fail");
   }
 
   @Test
