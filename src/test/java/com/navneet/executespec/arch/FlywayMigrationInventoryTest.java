@@ -30,9 +30,12 @@ class FlywayMigrationInventoryTest {
     // gate report, RR-819) for 318. The spend-admission lane then added V331 (managed-credit run
     // admission reservation, RR-1664) for 319. The GDPR-erasure lane then added V334
     // (pending-erasure obligation, RR-090) for 320. The notification/error-honesty P1 batch then
-    // added V332 (billing-reminder delivery dedupe, RR-518) for 321.
+    // renumbered its reserved V332 to V335 (billing-reminder delivery dedupe, RR-518) because V334
+    // was
+    // already the applied head — an out-of-order V332 below V334 fails Flyway validation on any DB
+    // that took V334 first. Count stays 321.
     assertThat(migrations).hasSize(321);
-    assertThat(migrations.getLast().version()).isEqualTo("334");
+    assertThat(migrations.getLast().version()).isEqualTo("335");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -66,7 +69,7 @@ class FlywayMigrationInventoryTest {
             "V323->V327",
             "V327->V329",
             "V329->V331",
-            "V332->V334");
+            "V331->V334");
   }
 
   @Test
