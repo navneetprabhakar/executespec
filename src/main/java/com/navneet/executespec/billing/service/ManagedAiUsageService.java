@@ -14,10 +14,8 @@ import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.cost.RunCostTracker;
 
 import org.springframework.data.domain.PageRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -39,6 +37,7 @@ public class ManagedAiUsageService {
   private final ManagedAiUsageMapper usageMapper;
   private final ManagedAiUsagePeriodService periodService;
   private final ManagedAiTierResolver tierResolver;
+  private final ManagedAiAdmissionGate admissionGate;
 
   @Transactional
   public CallAuthorization authorizeCall(
@@ -59,7 +58,11 @@ public class ManagedAiUsageService {
     if (!isManaged(policy)) {
       return CallAuthorization.allowed(provider, model, FULL);
     }
-    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
+    // RR-1665 (2026-07-21): the authorization DECISION is taken under the same row lock
+    // recordSuccessfulCall uses. Reading unlocked let concurrent authorizations each decide on an
+    // aiCreditsUsed that a committed sibling had already superseded; @Version bounded the damage to
+    // lost updates but did not make the decision current.
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), true);
     String state = routingPolicy.recomputeState(period);
     periodService.syncState(period, state);
     // Tier model lock (F2, founder decision 2026-07-18): a locked tier (FREE) is routed
@@ -142,7 +145,8 @@ public class ManagedAiUsageService {
     if (user == null || !isPlatform(source)) return;
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
     if (!isManaged(policy)) return;
-    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
+    // RR-1665: decide under the row lock, as authorizeCall now does.
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), true);
     String state = routingPolicy.recomputeState(period);
     periodService.syncState(period, state);
     String costClass = modelClassifier.costClass(model);
@@ -252,8 +256,13 @@ public class ManagedAiUsageService {
    * and their routing state is {@link #EXHAUSTED}. Per-call {@link #authorizeCall} stays the
    * mid-run source of truth; this is the fail-fast pre-flight so a run does not start only to die
    * on its first managed call.
+   *
+   * <p>RR-1664 (2026-07-21): this was check-then-act — an unlocked read followed by a throw, with
+   * nothing reserved — so concurrent submissions at the last credit were all admitted. Admission is
+   * now evaluated and reserved under a pessimistic row lock by {@link ManagedAiAdmissionGate}, in
+   * its own transaction, before the async pipeline can start. See that class for what the
+   * reservation does and does not promise.
    */
-  @Transactional
   public void assertCanStartRun(AppUserDetails userDetails, boolean ownKeysMode) {
     if (!properties.isEnabled() || ownKeysMode) return;
     String userId = userDetails.getUser().getId();
@@ -262,15 +271,7 @@ public class ManagedAiUsageService {
             userId, userDetails.getUser().getOrgId(), tierResolver.resolveUserTier(userId));
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
     if (!isManaged(policy)) return;
-    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), false);
-    String state = routingPolicy.recomputeState(period);
-    periodService.syncState(period, state);
-    if (EXHAUSTED.equals(state)) {
-      throw new ResponseStatusException(
-          HttpStatus.PAYMENT_REQUIRED,
-          "Your ES AI credits are exhausted for this billing period. Add your own provider keys"
-              + " (BYOK) or upgrade your plan to keep running.");
-    }
+    admissionGate.reserveRunAdmission(user, policy, Instant.now());
   }
 
   /**

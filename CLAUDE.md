@@ -651,7 +651,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V329; 318 source files; applied V-files immutable)                                                                                                                                                                                     |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V331; 319 source files; applied V-files immutable)                                                                                                                                                                                     |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -896,6 +896,23 @@ than the immediate parent's, so nesting can no longer multiply the advertised 48
 `UsageTrackingService.reserveWithinLimits` adds an atomic admit-and-increment primitive; the legacy
 `assertWithinLimits` read remains but has no production caller (RUNS admission is managed-AI
 credits).
+
+**Spend-admission serialization (2026-07-21, V331, RR-1664/RR-1665).** The live submission gate —
+`ManagedAiUsageService.assertCanStartRun` at `POST /api/runs`, not RR-186's caller-less
+`assertWithinLimits` — was itself check-then-act: an unlocked read, a recompute, and a throw only if
+the state was ALREADY `EXHAUSTED`, with nothing reserved, so N concurrent submissions at the last
+credit were all admitted. `billing/service/ManagedAiAdmissionGate` applies the RR-321 shape one layer
+up: it evaluates under a pessimistic row lock in a `REQUIRES_NEW` transaction and commits a
+`managed_ai_usage_period.reserved_ai_credits` claim before the async pipeline can start. The
+reservation is the MINIMUM a spending run consumes (1 credit), not an estimate of its cost, and is
+reconciled to `max(reserved, ai_credits_used)` on every later admission so recorded usage subsumes
+it and an unspent run leaks nothing — no release path, and therefore no crash leak. The raw-COGS
+ceiling is serialized under the same lock but still reconciled after the fact, because a future run's
+dollars are not knowable. `authorizeCall` and `authorizeFixedCapabilityCall` (RR-1665) now take the
+same row lock `recordSuccessfulCall` already used, so the per-call decision is no longer made on
+state a committed sibling has superseded. The persisted routing state stays denominated in RECORDED
+usage: a reservation is a claim on headroom, not proof of spend, and must not make an unspent period
+look exhausted to the balance and notification surfaces.
 
 **Current correction (2026-07-21):** source migration head is **V309** (310 source files). V300 adds durable idempotent
 failed-run quota compensation; V301 snapshots the human project/org/global role on immutable LLM attempt
