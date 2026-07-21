@@ -202,6 +202,82 @@ class LlmExecutionDispatchGuardTest {
     assertThat(result.keySource()).isEqualTo(RunKeyContext.Source.USER);
   }
 
+  @Test
+  void providerCapabilityResolvesTheActualPlatformKeyForSystemPolicy() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, platformPolicy(LlmPolicySnapshot.KeySourceMode.SYSTEM), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys(null, "SYSTEM", Set.of("openai")), "org-a", Map.of()));
+
+    var dispatch =
+        guard.authorizeProviderCapability(new LlmExecutionReference("ctx-1", scope), "openai");
+
+    assertThat(dispatch.keySource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(dispatch.apiKey()).isEqualTo("platform-o");
+  }
+
+  @Test
+  void providerCapabilityResolvesTheActualPlatformKeyForHybridPolicy() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, platformPolicy(LlmPolicySnapshot.KeySourceMode.HYBRID), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys(null, "HYBRID", Set.of("openai")), "org-a", Map.of()));
+
+    var dispatch =
+        guard.authorizeProviderCapability(new LlmExecutionReference("ctx-1", scope), "openai");
+
+    assertThat(dispatch.keySource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(dispatch.apiKey()).isEqualTo("platform-o");
+  }
+
+  /**
+   * An OWN_KEYS snapshot can never carry a PLATFORM source ({@link LlmPolicySnapshot} refuses to
+   * build one), so the reachable OWN_KEYS case is drift: a platform-sourced context whose org has
+   * since moved to BYOK must not keep spending the platform key.
+   */
+  @Test
+  void providerCapabilityStillRefusesPlatformCredentialsAfterAnOrgMovesToOwnKeys() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, platformPolicy(LlmPolicySnapshot.KeySourceMode.HYBRID), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys("user-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.USER)));
+
+    assertThatThrownBy(
+            () ->
+                guard.authorizeProviderCapability(
+                    new LlmExecutionReference("ctx-1", scope), "openai"))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(error -> ((LlmDispatchPolicyException) error).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.POLICY_STALE);
+  }
+
+  @Test
+  void providerCapabilityFailsLoudlyWhenThePlatformKeyIsNotConfigured() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    ReflectionTestUtils.setField(guard, "platformOpenAiKey", "");
+    stubContext(scope, platformPolicy(LlmPolicySnapshot.KeySourceMode.SYSTEM), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys(null, "SYSTEM", Set.of("openai")), "org-a", Map.of()));
+
+    assertThatThrownBy(
+            () ->
+                guard.authorizeProviderCapability(
+                    new LlmExecutionReference("ctx-1", scope), "openai"))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(error -> ((LlmDispatchPolicyException) error).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.CREDENTIAL_UNAVAILABLE);
+  }
+
   private void stubContext(
       LlmExecutionScope scope, LlmPolicySnapshot policy, Integer maxProviderCalls) {
     LlmExecutionContext context = mock(LlmExecutionContext.class);
@@ -228,6 +304,22 @@ class LlmExecutionDispatchGuardTest {
         Set.of("openai"),
         Map.of("openai", List.of("gpt-test")),
         Map.of("openai", LlmPolicySnapshot.CredentialSource.USER),
+        Map.of(),
+        "openai",
+        "gpt-test",
+        LlmPolicySnapshot.RoutingMode.EXACT,
+        true,
+        false,
+        1);
+  }
+
+  private static LlmPolicySnapshot platformPolicy(LlmPolicySnapshot.KeySourceMode mode) {
+    return new LlmPolicySnapshot(
+        mode,
+        "user-a",
+        Set.of("openai"),
+        Map.of("openai", List.of("gpt-test")),
+        Map.of("openai", LlmPolicySnapshot.CredentialSource.PLATFORM),
         Map.of(),
         "openai",
         "gpt-test",

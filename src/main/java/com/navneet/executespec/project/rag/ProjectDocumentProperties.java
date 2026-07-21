@@ -26,6 +26,16 @@ public class ProjectDocumentProperties {
   private long maxArchiveInflatedBytes = 50L * 1024 * 1024;
   private int maxCompressionRatio = 100;
   private int maxProcessingAttempts = 3;
+
+  /**
+   * Hard wall-clock budget for one Tika extraction. Output size limits do not bound parse time, so
+   * this is the only ceiling that keeps a pathological document from pinning the calling thread.
+   */
+  private long extractionTimeoutMillis = 20_000L;
+
+  /** Ceiling on simultaneously running parses, so untrusted uploads cannot fan out unbounded. */
+  private int maxConcurrentExtractions = 4;
+
   private boolean malwareScanRequired = true;
   private long staleProcessingMillis = 15L * 60 * 1000;
 }

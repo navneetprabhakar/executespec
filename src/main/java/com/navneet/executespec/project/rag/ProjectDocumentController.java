@@ -112,7 +112,13 @@ public class ProjectDocumentController {
     } else if (semantic) {
       reason = "GOVERNED_OPENAI_EMBEDDING_READY";
     } else if (document.getStatus() == ProjectDocument.Status.LEXICAL_READY) {
-      reason = availability.reason();
+      // The route-level reason is only honest when the route itself is why this document is
+      // lexical. When the route is semantic-capable, echoing GOVERNED_OPENAI_EMBEDDING_AVAILABLE
+      // would assert semantic embedding on a row that is not semantically indexed.
+      reason =
+          availability.semanticSearchAvailable()
+              ? "DOCUMENT_INDEXED_LEXICALLY_SEMANTIC_REINDEX_PENDING"
+              : availability.reason();
     }
     return new DocumentView(
         document.getId(),
