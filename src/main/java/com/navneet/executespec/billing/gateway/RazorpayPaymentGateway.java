@@ -66,6 +66,12 @@ public class RazorpayPaymentGateway implements PaymentGateway {
   }
 
   @Override
+  public String subscriptionStatus(String gatewaySubscriptionId) {
+    String status = razorpayGateway.fetchStatus(gatewaySubscriptionId);
+    return status != null ? status.toLowerCase() : null;
+  }
+
+  @Override
   public String getInvoicePdfUrl(String gatewayInvoiceId) {
     // Razorpay does not provide hosted invoice PDFs — we generate them server-side
     return null;

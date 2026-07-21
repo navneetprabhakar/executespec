@@ -43,6 +43,16 @@ public class PlanSeederService {
    * returns. A failure therefore loses at most the one plan it was working on, and a retry only
    * creates the plans that genuinely have no id. Per-plan failures no longer abort the rest of the
    * sweep; the outcome is returned so the caller can surface partial state.
+   *
+   * <p>The remaining hole — a crash BETWEEN {@code createPlan} returning and {@link
+   * #persistSeededPlanId} committing — left the Razorpay plan created but no local id saved, so a
+   * retry (seeing a null id) created a SECOND chargeable plan. Each {@code createPlan} now carries
+   * a deterministic idempotency key derived from the plan's local UUID ({@link #seedingKey}), so a
+   * retry reuses the same key and Razorpay returns the ORIGINAL plan instead of duplicating it. The
+   * key is committed to nothing local first because it does not need to be: it is reconstructable
+   * from the plan row that already exists, so it is stable across process restarts. (Razorpay's
+   * idempotency window is finite; the key protects the realistic crash-and-retry window rather than
+   * an indefinite one.)
    */
   public SeedResult seedAllPlans() {
     // Log key mode (test vs live) for visibility
@@ -77,7 +87,8 @@ public class PlanSeederService {
       int amountPaise = (int) inrAmountPaise(plan);
       try {
         JsonNode rzpPlan =
-            razorpayClient.createPlan(plan.getName(), amountPaise, rzpPeriod, rzpInterval);
+            razorpayClient.createPlan(
+                plan.getName(), amountPaise, rzpPeriod, rzpInterval, seedingKey(plan.getId()));
         String rzpPlanId = rzpPlan.get("id").asText();
 
         // Commit this id on its own, immediately. An error on a LATER plan must never roll
@@ -135,6 +146,17 @@ public class PlanSeederService {
 
   /** Outcome of one seeding sweep. Partial success is a real, reportable state. */
   public record SeedResult(int seeded, int failed, List<String> errors) {}
+
+  /**
+   * RR-400 — the deterministic Razorpay idempotency key for seeding one local plan. It is exactly
+   * the plan's immutable local UUID, so the first attempt and every retry send the same key and
+   * Razorpay dedupes to the original plan instead of creating a duplicate. A UUID is globally
+   * unique (never colliding with any other idempotency key this account uses) and comfortably
+   * within gateway key-length limits, so no prefix or truncation is needed.
+   */
+  static String seedingKey(java.util.UUID planId) {
+    return planId.toString();
+  }
 
   /**
    * Persist one plan's Razorpay id in its own committed transaction, driven by an explicit {@link

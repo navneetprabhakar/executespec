@@ -31,7 +31,14 @@ class ReviewerAgentRouteTest {
             .context(new ExecutionContext("run-1", "review", Path.of(".").toAbsolutePath()))
             .build();
 
-    agent.runPass(request, 3, "general", "system", 10, null);
+    agent.runPass(
+        request,
+        3,
+        "general",
+        "system",
+        10,
+        null,
+        new com.navneet.executespec.tool.ReviewerMutationScope.Lease());
 
     ArgumentCaptor<WorkerTaskRequest> dispatched = ArgumentCaptor.forClass(WorkerTaskRequest.class);
     verify(worker).run(dispatched.capture());

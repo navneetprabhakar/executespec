@@ -314,22 +314,39 @@ public class LlmExecutionDispatchGuard {
   }
 
   /**
-   * RR-322 — execution fencing. The durable contract increments {@code attempt} and replaces {@code
-   * leaseOwner} when a worker claims or steals a context, but nothing bound dispatch to that claim,
-   * so a worker whose lease had already been stolen could keep issuing provider calls against the
-   * same context alongside its replacement.
+   * RR-322 / RR-1666 — execution fencing, BUILT BUT NOT WIRED. The intent: a worker whose lease has
+   * been stolen must not keep issuing provider calls against the same context alongside its
+   * replacement. The two fences below are the mechanism, and they are individually correct and
+   * unit-tested — but neither can FIRE in production today, because nothing on any real dispatch
+   * path ever populates the state they read:
    *
-   * <p>Two bounded fences are applied here. (1) A context that carries a lease owner whose lease
-   * has EXPIRED is not dispatchable — that lease is stealable and the holder can no longer be
-   * trusted to be the sole writer. (2) When the caller declares which claim it holds ({@link
-   * LlmRequest#llmExecutionAttempt()}), it must match the context's current attempt, so a stale
-   * worker is fenced out the moment a replacement claims.
+   * <ul>
+   *   <li><b>Expired-lease fence.</b> Rejects when a context carries a lease owner whose lease has
+   *       expired. {@code leaseOwner}/{@code leaseExpiresAt} are set ONLY by {@link
+   *       LlmExecutionContextService#claim}, which has ZERO production callers. Every real context
+   *       is {@code QUEUED} with a null lease, so this branch is unreachable in production.
+   *   <li><b>Attempt-mismatch fence.</b> Rejects when the caller declares a claim generation
+   *       ({@link LlmRequest#llmExecutionAttempt()}) that no longer matches the context's current
+   *       {@code attempt}. No production caller sets {@code llmExecutionAttempt} — it is always
+   *       {@code null} — and {@code attempt} is only ever advanced by {@code claim}, which nothing
+   *       calls, so this branch is unreachable in production too.
+   * </ul>
    *
-   * <p>Deliberately NOT done: restricting dispatch to {@code RUNNING} only. No production caller
-   * invokes {@code LlmExecutionContextService.claim} today, so every real context is {@code
-   * QUEUED}; requiring {@code RUNNING} would fail-close all customer dispatch rather than fence a
-   * stale worker. Making the lease mandatory is a lifecycle change for the context-creation
-   * callers, not this guard, and is reported as remaining work.
+   * <p>Consequence: the durable-attempt contract in {@code executioncontext/CLAUDE.md} does not
+   * hold at runtime yet. This is NOT closed by the RR-321 budget work — a duplicate/zombie worker
+   * is still bounded only by the shared budget reservation, not fenced off.
+   *
+   * <p>What wiring remains (all outside this guard, hence not done here): the execution callers
+   * must (a) {@code claim} the context — RUNNING + lease owner + attempt — when a worker takes
+   * ownership, (b) heartbeat the lease during long work, (c) propagate the claimed {@code attempt}
+   * onto every {@code LlmRequest.llmExecutionAttempt}, and (d) release ({@code complete}/{@code
+   * fail}) on terminal — after which dispatch can be restricted to {@code RUNNING} and the lease
+   * made mandatory. The blocker is that one run context is shared across planner/worker/reviewer/
+   * compaction/report/chat, so a single per-context lease owner conflicts with concurrent
+   * multi-agent use; wiring needs per-owner sub-leases or an ownership redesign plus context
+   * hydration on the three {@code RunLifecycleService} resume/retry/re-review roots. Restricting
+   * dispatch to {@code RUNNING} today would fail-close all customer dispatch, not fence a stale
+   * worker.
    */
   private void checkFencing(LlmExecutionContext context, Integer declaredAttempt) {
     boolean leased = context.getLeaseOwner() != null && !context.getLeaseOwner().isBlank();
@@ -385,28 +402,6 @@ public class LlmExecutionDispatchGuard {
     if (provider == null || provider.isBlank()) return "";
     String value = provider.trim().toLowerCase(Locale.ROOT);
     return "google".equals(value) ? "gemini" : value;
-  }
-
-  private static long value(Long value) {
-    return value == null ? 0L : value;
-  }
-
-  private static double value(Double value) {
-    return value == null ? 0D : value;
-  }
-
-  private static long safeAdd(long left, long right) {
-    try {
-      return Math.addExact(left, right);
-    } catch (ArithmeticException overflow) {
-      return Long.MAX_VALUE;
-    }
-  }
-
-  private static LlmDispatchPolicyException budget() {
-    return reject(
-        LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED,
-        "Durable LLM execution-context budget is exhausted");
   }
 
   private static LlmDispatchPolicyException reject(

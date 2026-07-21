@@ -139,7 +139,7 @@ class CommandToolsTest {
                 .sourceDescription("test")
                 .build());
     BuildProjectTool tool =
-        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy(), null);
 
     ToolResult result = tool.execute(json("{\"command\":\"printf build-ok\"}"), ctx());
 
@@ -161,7 +161,7 @@ class CommandToolsTest {
                 .sourceDescription("fallback:no-op")
                 .build());
     BuildProjectTool tool =
-        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy(), null);
 
     ToolResult result = tool.execute(JSON.createObjectNode(), ctx());
 
@@ -184,7 +184,7 @@ class CommandToolsTest {
                 .sourceDescription("test")
                 .build());
     BuildProjectTool buildProjectTool =
-        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy(), null);
     Tool alias = new BuildAliasTool("runBuild", "alias", buildProjectTool);
 
     ToolResult result = alias.execute(json("{\"command\":\"printf alias-ok\"}"), ctx());

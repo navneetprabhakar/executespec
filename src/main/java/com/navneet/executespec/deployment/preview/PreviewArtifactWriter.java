@@ -8,6 +8,8 @@ import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import com.navneet.executespec.security.SafeWorkspacePath;
 
@@ -70,5 +72,94 @@ public final class PreviewArtifactWriter {
       StandardOpenOption.TRUNCATE_EXISTING,
       LinkOption.NOFOLLOW_LINKS
     };
+  }
+
+  /** Marker line that separates a customer's own ignore rules from the ExecuteSpec block. */
+  static final String MERGE_MARKER =
+      "# --- Added by ExecuteSpec preview (security exclusions; do not rely on this file) ---";
+
+  /**
+   * Writes the generated preview {@code .dockerignore} WITHOUT discarding a customer-authored one
+   * (RR-384).
+   *
+   * <p>Docker reads exactly one {@code .dockerignore} at the build-context root, so the two sets
+   * cannot coexist as separate files. Previously the generated deny-list overwrote whatever the
+   * customer had, silently dropping their build exclusions. This instead MERGES: the customer's
+   * file is kept verbatim first, then the ExecuteSpec security block is appended. Appending last is
+   * deliberate — {@code .dockerignore} evaluates patterns in order and a later pattern wins, so a
+   * customer re-include (e.g. {@code *} then {@code !secret.pem}) can never pull a credential or a
+   * control directory back into the build context. Generated pattern lines already present in the
+   * customer file are skipped to avoid noise.
+   *
+   * <p>The customer's original bytes are preserved to {@code .dockerignore.user} (mirroring the
+   * docker-compose backup convention) so the run workspace deliverable can be restored.
+   *
+   * <p><b>Not closed here (RR-384 remainder):</b> the merged result is still a deny-list over the
+   * customer's tree, not an allowlisted staged build context, so a repository secret under an
+   * unrecognised name is still copyable. Moving to a staged allowlist context is the durable fix.
+   */
+  public static void writeDockerIgnore(Path workspace, String generated) {
+    if (generated == null) {
+      throw new PreviewException("Refusing to write empty preview artifact .dockerignore.");
+    }
+    String existing = readExistingDockerIgnore(workspace);
+    if (existing != null && !existing.isBlank()) {
+      // Preserve the customer's original for deliverable restoration (best effort).
+      try {
+        Path backup = SafeWorkspacePath.resolveWithin(workspace, ".dockerignore.user");
+        try (OutputStream out = Files.newOutputStream(backup, openOptions())) {
+          out.write(existing.getBytes(StandardCharsets.UTF_8));
+        }
+      } catch (SecurityException | IOException ignored) {
+        // A backup failure must not block the preview; the merged file still preserves the rules.
+      }
+    }
+    write(workspace, ".dockerignore", mergeDockerIgnore(existing, generated));
+  }
+
+  private static String readExistingDockerIgnore(Path workspace) {
+    try {
+      Path target = SafeWorkspacePath.resolveWithin(workspace, ".dockerignore");
+      if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+        return null; // absent, a directory, or a symlink — nothing safe to merge
+      }
+      return Files.readString(target, StandardCharsets.UTF_8);
+    } catch (SecurityException e) {
+      // The repository shipped .dockerignore as a symlink / escaping path. Do not read through it;
+      // the subsequent safe write will reject it the same way, which is the intended fail-closed.
+      throw new PreviewException(
+          "Refusing to read preview artifact .dockerignore: " + e.getMessage());
+    } catch (IOException e) {
+      return null; // unreadable → fall back to the generated deny-list alone (still secure)
+    }
+  }
+
+  /**
+   * Merges a customer-authored {@code .dockerignore} with the generated ExecuteSpec block. Pure and
+   * package-visible for unit testing.
+   */
+  static String mergeDockerIgnore(String existing, String generated) {
+    if (existing == null || existing.isBlank()) {
+      return generated;
+    }
+    Set<String> existingPatterns = new LinkedHashSet<>();
+    for (String line : existing.split("\n", -1)) {
+      String trimmed = line.strip();
+      if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
+        existingPatterns.add(trimmed);
+      }
+    }
+    StringBuilder out = new StringBuilder();
+    out.append(existing.stripTrailing()).append("\n\n").append(MERGE_MARKER).append('\n');
+    for (String line : generated.split("\n", -1)) {
+      String trimmed = line.strip();
+      // Keep comments/blank lines from the generated block for readability; skip pattern lines the
+      // customer already declared so the merged file does not repeat them.
+      if (!trimmed.isEmpty() && !trimmed.startsWith("#") && existingPatterns.contains(trimmed)) {
+        continue;
+      }
+      out.append(line).append('\n');
+    }
+    return out.toString();
   }
 }

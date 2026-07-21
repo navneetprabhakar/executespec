@@ -795,7 +795,7 @@ public class PreviewService {
       broadcaster.emit(
           runId, RunEvent.log(runId, null, "Generating Dockerfile and compose config..."));
 
-      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
@@ -901,7 +901,7 @@ public class PreviewService {
           runId,
           new RunEvent(
               "PREVIEW_ANALYZING", runId, null, "Generating Dockerfile...", Instant.now()));
-      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
@@ -1196,7 +1196,7 @@ public class PreviewService {
               "Preview-engine handoff: building & pushing image…",
               Instant.now()));
 
-      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
       Path dockerfilePath = workspace.resolve("Dockerfile");
       PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
@@ -1321,7 +1321,7 @@ public class PreviewService {
 
       // Phase 2: Generate Dockerfile (standard, no Cloud Run port patching)
       checkDeadline(deadline, "Dockerfile generation");
-      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       // Backup user's docker-compose/Dockerfile if they exist (our generated ones take precedence)
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));

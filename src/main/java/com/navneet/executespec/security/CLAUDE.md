@@ -21,7 +21,12 @@ canonicalize against. Every failure is a refusal — the write, read or delete d
 not redirected. Callers: `integration/RunContextComposer`, `context/ContextStore` (including the
 destructive run-end cleanup), `context/ContextAgent`, `context/ContextAgentScanner`,
 `context/ContextEvidenceBundleWriter`, `context/RunJournalStore`, `codereview/CodeReviewService`,
-`testgen/TestWorkerAgent`, and `folder/ExecutespecFolderWriter`. It duplicates the rules already in
+`testgen/TestWorkerAgent`, `folder/ExecutespecFolderWriter`, and `sandbox/SandboxContainerCommand`
+(RR-328 — writable bind-mount admission was lexical, so a symlink inside the sandbox root
+bind-mounted its target read-write into a customer-controlled container; it now proves containment
+on disk and additionally requires the mount to exist already as a real directory, because a bind
+path Docker creates is created root-owned and never passed through workspace preparation). It
+duplicates the rules already in
 `tool/PathSafety` and `deployment/WorkspaceFileService`; folding those two onto this helper is a
 tracked follow-up owned by their respective lanes.
 
