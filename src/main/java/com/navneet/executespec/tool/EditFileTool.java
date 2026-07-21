@@ -131,6 +131,13 @@ public class EditFileTool implements Tool {
     if (!editsNode.isArray() || editsNode.isEmpty()) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "edits must be a non-empty array");
     }
+    // RR-1018 — unconditional reserved-namespace deny. Runs BEFORE containment/guardrail checks
+    // because it must hold at every guardrail level, including the production LOW default.
+    String reservedError = ReservedWorkspacePaths.rejectionFor(path);
+    if (reservedError != null) {
+      log.warn("editFile blocked reserved control-plane path={}", path);
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reservedError);
+    }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
       String reviewerPolicyError = ReviewerMutationScope.validateEditFile(path);

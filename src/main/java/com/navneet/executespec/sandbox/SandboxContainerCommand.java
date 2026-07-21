@@ -44,14 +44,21 @@ public final class SandboxContainerCommand {
   /**
    * The argv that starts a strict sandbox container detached.
    *
-   * @param allowedHostRoot the configured sandbox workspace root; every writable mount must resolve
-   *     inside it, so no host path outside the sandbox area can be bound
+   * <p>RR-821 — mount admission is scoped to the sandbox's OWN directory, derived here from the
+   * global root plus the sandbox's immutable id. The previous contract admitted every path starting
+   * with the configured global root, so the global root itself and any sibling tenant's directory
+   * were both bindable read-write. The caller cannot supply the admission root directly; it can
+   * only supply the identity the root is derived from.
+   *
+   * @param globalWorkspaceRoot the configured {@code sandbox.runtime.workspace-root}
+   * @param sandboxId this sandbox's immutable identifier
    */
   public static List<String> create(
-      String containerName, SandboxRuntimeSpec spec, Path allowedHostRoot) {
+      String containerName, SandboxRuntimeSpec spec, Path globalWorkspaceRoot, String sandboxId) {
     if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
       throw new IllegalArgumentException("unsafe container name: " + containerName);
     }
+    Path sandboxRoot = ownedWorkspaceRoot(globalWorkspaceRoot, sandboxId);
     var limits = spec.limits();
     List<String> argv = new ArrayList<>(List.of("docker", "run", "--detach"));
 
@@ -77,7 +84,7 @@ public final class SandboxContainerCommand {
     for (SandboxRuntimeSpec.WritableMount mount : spec.writableMounts()) {
       requireAbsolute(mount.hostPath(), "writable mount host path");
       requireAbsolute(mount.containerPath(), "writable mount container path");
-      requireContained(mount.hostPath(), allowedHostRoot);
+      requireContained(mount.hostPath(), sandboxRoot);
       argv.addAll(List.of("--volume", mount.hostPath() + ":" + mount.containerPath() + ":rw"));
     }
 
@@ -110,27 +117,51 @@ public final class SandboxContainerCommand {
   }
 
   /**
-   * Requires a writable mount to resolve inside the configured sandbox workspace root, which is the
+   * Derives the ownership-scoped workspace root for one sandbox from the configured global root and
+   * the sandbox's own immutable id (RR-821).
+   *
+   * <p>The id is validated as a single opaque path segment so a caller-influenced value can never
+   * traverse out of, or sideways within, the global root.
+   *
+   * @param globalWorkspaceRoot the configured {@code sandbox.runtime.workspace-root}
+   * @param sandboxId the sandbox's immutable identifier
+   */
+  static Path ownedWorkspaceRoot(Path globalWorkspaceRoot, String sandboxId) {
+    if (globalWorkspaceRoot == null || !globalWorkspaceRoot.isAbsolute()) {
+      throw new IllegalArgumentException("sandbox workspace root must be an absolute path");
+    }
+    if (sandboxId == null || !sandboxId.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")) {
+      throw new IllegalArgumentException("unsafe sandbox id: " + sandboxId);
+    }
+    Path root = globalWorkspaceRoot.normalize();
+    if (root.getNameCount() == 0) {
+      throw new IllegalArgumentException("refusing to treat the host root as a sandbox root");
+    }
+    return root.resolve(sandboxId).normalize();
+  }
+
+  /**
+   * Requires a writable mount to resolve inside THIS sandbox's own workspace root, which is the
    * property that keeps the container engine socket, ambient credential stores, other tenants'
-   * workspaces and the host root unbindable.
+   * workspaces, the global sandbox root and the host root unbindable.
    *
    * <p>Containment is proved by normalising both paths — traversal segments are already rejected by
    * {@link #requireAbsolute}. This is a bind-argument guard: it does not resolve symlinks on the
    * host, so a symlink planted inside the workspace root is out of scope here and must be handled
    * where the workspace is populated.
    */
-  private static void requireContained(String hostPath, Path allowedHostRoot) {
-    if (allowedHostRoot == null || !allowedHostRoot.isAbsolute()) {
+  private static void requireContained(String hostPath, Path sandboxRoot) {
+    if (sandboxRoot == null || !sandboxRoot.isAbsolute()) {
       throw new IllegalArgumentException("sandbox workspace root must be an absolute path");
     }
-    Path root = allowedHostRoot.normalize();
+    Path root = sandboxRoot.normalize();
     if (root.getNameCount() == 0) {
       throw new IllegalArgumentException("refusing to treat the host root as a sandbox root");
     }
     Path candidate = Path.of(hostPath).normalize();
     if (!candidate.startsWith(root) || candidate.equals(root.getRoot())) {
       throw new IllegalArgumentException(
-          "refusing to mount a host path outside the sandbox workspace root: " + hostPath);
+          "refusing to mount a host path outside this sandbox's workspace root: " + hostPath);
     }
   }
 }
