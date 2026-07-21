@@ -2,6 +2,66 @@
 
 Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences.
 
+## Token purpose (RR-128)
+
+- Every JWT declares `token_use` — `access`, `refresh`, or `sse` — and each consumer validates the
+  exact purpose it accepts. `JwtUtil.isAccessTokenValid` is the ONLY validator the auth filter may
+  use; `isRefreshTokenValid` is the only one rotation and logout may use.
+- `isTokenValid` proves signature/expiry/invalidation ONLY. It is not an authorization decision; do
+  not call it directly from a new consumer.
+- Legacy tolerance is narrow: a token with no `token_use` authenticates only when it also carries
+  neither `type` nor `scope`. A legacy refresh or SSE token is still rejected as a bearer.
+- Reason: a refresh cookie value, and a 5-minute SSE token deliberately designed to be safe in URLs
+  and logs, were both accepted as full-authority `Authorization: Bearer` credentials.
+
+## Signing-secret boot gate (RR-858)
+
+- `JwtSecretValidator` runs on `prod`, `dev` AND `benchmark`. Shared deployments are reachable and
+  hold real accounts and provider credentials; only `local` is unguarded.
+- It checks secrecy as well as strength: `COMPROMISED_SECRET_DIGESTS` pins the SHA-256 of every JWT
+  secret this repository has ever shipped as a committed default. Entries are permanent — never
+  delete one, and never reintroduce a burned plaintext to source, including "for the deny-list".
+  `app.jwt.denied-secret-sha256` extends the list with digests only, and ships empty.
+- A shared environment with no `JWT_SECRET` now FAILS TO BOOT. That is intended; there is no
+  built-in fallback to silently sign with.
+
+## Password reset (RR-127 / RR-1336)
+
+- `forgotPassword` is unauthenticated and therefore must never mutate a credential. It mints an
+  expiring, single-use capability, persists only its SHA-256 digest in `email_token.token`, and
+  mails a link. It previously replaced the account password with a generated temporary one and
+  emailed the plaintext, so anyone knowing an address could lock the owner out on demand.
+- `resetPassword` claims the token atomically (`EmailTokenRepository.claimIfUnused`) BEFORE touching
+  credentials, then stamps `tokenInvalidatedAt` so sessions minted with the old credential die.
+- The response is unconditionally successful for enumeration resistance.
+
+## OAuth session handoff (RR-130 / RR-1334)
+
+- No credential appears in the OAuth redirect URL. `OAuthSuccessHandler` sets the HttpOnly
+  `refresh_token` cookie (Path `/api/auth`, `SameSite=Lax`) and redirects with `?oauth=1`; the SPA
+  callback trades it for an access token via `POST /api/auth/refresh`. Never reintroduce `?token=`
+  or `?refresh=`.
+
+## Org invitation acceptance (RR-221 / RR-222)
+
+- Acceptance requires the authenticated account's canonical email to equal the invited address —
+  the bearer token alone confers nothing, including on the idempotent already-ACCEPTED path.
+- `PENDING -> ACCEPTED` is claimed atomically via `OrgInvitationRepository.claimPending` BEFORE any
+  membership or project access is created; exactly one caller can win a token.
+
+## Org membership is authoritative (RR-210)
+
+- `app_user.org_id` is a denormalized pointer, not an authority. A missing/inactive `org_member` row
+  fails closed: `RunVisibilitySpec` falls back to own-runs-only and `TierPermissionService` falls
+  back to the solo permission set. Never default an absent membership to a role.
+
+## SSO enforcement is unimplemented (RR-252)
+
+- `PUT /api/auth/sso/config` refuses `enforced=true` with `501 NOT_IMPLEMENTED`, and `SsoConfigDto`
+  reports `enforcementSupported=false`. No authentication route consults these columns, so the
+  platform must not advertise the control. Do not re-enable until domain/IdP binding, verified login
+  method, session/PAT revocation and break-glass all exist with negative tests.
+
 ## Auth Source
 
 - `JwtAuthenticationFilter` tags authenticated requests with `executespec.auth.source`.
