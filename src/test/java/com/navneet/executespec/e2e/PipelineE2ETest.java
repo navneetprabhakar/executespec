@@ -72,9 +72,10 @@ class PipelineE2ETest {
       "Create a Python script called greet.py that accepts a --name argument "
           + "and prints 'Hello, <name>!'. Include a short README.md explaining usage.";
 
-  static final ApprovalRequest APPROVE = new ApprovalRequest(true, "E2E auto-approve", null, null);
+  static final ApprovalRequest APPROVE =
+      new ApprovalRequest(true, "E2E auto-approve", null, null, null);
   static final ApprovalRequest REJECT =
-      new ApprovalRequest(false, "E2E test rejection", null, null);
+      new ApprovalRequest(false, "E2E test rejection", null, null, null);
 
   // Test 1 — Happy path: full pipeline from submit to COMPLETE
 

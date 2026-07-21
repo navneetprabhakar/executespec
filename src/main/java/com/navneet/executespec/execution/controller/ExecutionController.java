@@ -250,9 +250,38 @@ public class ExecutionController {
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
     ExecutionRun run = requireRunWriteAccess(id, principal);
+    // RR-351 — resume is a RECOVERY action for a launch that already cleared its plan gate, not a
+    // second door into execution. Previously any writable launch, including one still in SETUP /
+    // ANALYSING / PLANNING or one whose plan the user had rejected, could call this and go straight
+    // into solution execution (and therefore provider spend and PR publication) without ever
+    // proving plan approval. The durable planApprovedAt stamp is that proof; the service enforces
+    // it again, and the check is repeated here so the caller gets an honest 409 rather than a 200
+    // for work that will not happen.
+    if (run.getPlanApprovedAt() == null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "This launch has no approved plan. Approve the plan "
+              + "(PUT /api/executions/"
+              + id
+              + "/plan/approve) before resuming.");
+    }
+    if (EXECUTION_TERMINAL.contains(run.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Launch is already terminal at " + run.getStatus() + " and cannot be resumed.");
+    }
+    log.info(
+        "POST /api/executions/{}/resume — recovery requested by user {} (status={})",
+        id,
+        user.getId(),
+        run.getStatus());
     orchestrator.executeApprovedPlan(run.getId());
     return ResponseEntity.ok().build();
   }
+
+  /** RR-351 — launch states from which no recovery action is legal. */
+  private static final java.util.Set<String> EXECUTION_TERMINAL =
+      java.util.Set.of("COMPLETE", "FAILED", "CANCELLED", "ABORTED");
 
   @PostMapping("/api/executions/{id}/abort")
   public ResponseEntity<Void> abort(

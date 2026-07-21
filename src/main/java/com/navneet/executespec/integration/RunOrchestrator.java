@@ -250,6 +250,32 @@ public class RunOrchestrator implements RunControlPort {
   /** Submit-time handoff used to stamp local intent before the async pipeline can start. */
   private final ThreadLocal<Boolean> submitLocalExecutionIntent = new ThreadLocal<>();
 
+  /**
+   * RR-233 / RR-234 / RR-236 — submit-time policy that MUST be durable on the run row before the
+   * async pipeline can act on it.
+   *
+   * <p>All three findings are the same defect: a control was persisted <em>after</em> the thing it
+   * controls had already started. The customer's hard cost cap was written after {@code submitRun}
+   * returned, so a fast planner clamped to the platform cap before ever seeing the tighter customer
+   * cap; the "don't publish this" consent lived only in a Redis key whose own contract says a JVM
+   * crash silently reverts it to auto-push; and the run's tenant was stamped from the caller's home
+   * org rather than the authorized host project's org.
+   *
+   * <p>Handed over on the submitting (request) thread — the same mechanism V261 used for {@code
+   * localExecutionRequested} — and read inside the {@code PipelineRun.builder()} so the very first
+   * persisted row already carries the policy.
+   *
+   * @param userCostCap customer's "stop at $X" ceiling; null means platform cap only
+   * @param skipAutoPush true when the customer asked NOT to publish automatically
+   * @param payerOrgId org that owns/pays for this run — the authorized project's org when the run
+   *     is project-scoped, otherwise the actor's own org
+   */
+  public record SubmitPolicy(Double userCostCap, boolean skipAutoPush, String payerOrgId) {
+    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null);
+  }
+
+  private final ThreadLocal<SubmitPolicy> submitPolicyIntent = new ThreadLocal<>();
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -356,6 +382,13 @@ public class RunOrchestrator implements RunControlPort {
   private final PipelineExecutorPool pool;
 
   /**
+   * RR-241 — the single authority on plan-gate bypass. {@code skipApproval} arriving from any
+   * caller is a <em>request</em>, never a grant; it is honoured only when the submitting surface is
+   * a server-internal automation surface with its own authorization step.
+   */
+  private final PlanGateBypassPolicy planGateBypassPolicy;
+
+  /**
    * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with status {@code
    * PLANNING}; the async pipeline thread continues in the background.
    *
@@ -388,7 +421,70 @@ public class RunOrchestrator implements RunControlPort {
       Boolean requireBenchmarkPriorForAutomaticContinuation,
       String lowComplexityWorkerStartTier,
       boolean localExecutionRequested) {
+    return submitRunWithLocalExecution(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        runMode,
+        requireConfirmationBeforeExpensiveContinuation,
+        requireBenchmarkPriorForAutomaticContinuation,
+        lowComplexityWorkerStartTier,
+        localExecutionRequested,
+        SubmitPolicy.NONE);
+  }
+
+  /**
+   * RR-233 / RR-234 / RR-236 — the submit entry point that stamps submit-time policy atomically
+   * with run creation.
+   *
+   * <p>Callers that carry a customer cost cap, a "do not auto-publish" consent, or a payer org
+   * distinct from the actor's home org MUST use this overload. Persisting any of those after {@code
+   * submitRun} returns is a race against the pipeline thread that consumes them.
+   */
+  public PipelineRun submitRunWithLocalExecution(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode,
+      Boolean requireConfirmationBeforeExpensiveContinuation,
+      Boolean requireBenchmarkPriorForAutomaticContinuation,
+      String lowComplexityWorkerStartTier,
+      boolean localExecutionRequested,
+      SubmitPolicy submitPolicy) {
     submitLocalExecutionIntent.set(localExecutionRequested);
+    submitPolicyIntent.set(submitPolicy == null ? SubmitPolicy.NONE : submitPolicy);
     try {
       return submitRun(
           userRequest,
@@ -416,6 +512,7 @@ public class RunOrchestrator implements RunControlPort {
           lowComplexityWorkerStartTier);
     } finally {
       submitLocalExecutionIntent.remove();
+      submitPolicyIntent.remove();
     }
   }
 
@@ -818,6 +915,21 @@ public class RunOrchestrator implements RunControlPort {
     String runId = UUID.randomUUID().toString();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
+    // RR-241 — the plan gate is the cost/governance checkpoint before provider spend and
+    // publication. A caller-supplied skipApproval bit is a request, not a grant: it survives only
+    // for a server-internal automation surface that carries its own authorization
+    // (PlanGateBypassPolicy). Everything else — including every ordinary customer submit and every
+    // fork — falls back to the human gate. Enforced HERE rather than at each of the ~15 submit
+    // overloads/entry points so no future caller can reintroduce the bypass.
+    if (skipApproval && !planGateBypassPolicy.bypassAuthorized(source)) {
+      log.warn(
+          "RunOrchestrator run={} source={} requested skipApproval without automation authority —"
+              + " plan gate ENFORCED",
+          runId,
+          source);
+      skipApproval = false;
+    }
+
     // Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22): only ENTERPRISE runs may
     // pin a per-run model. The actual ROUTING is governed by the RunModelOverrides overlay bound
     // in runPipeline (also ENTERPRISE-gated); we resolve the owner tier once here so the persisted
@@ -912,6 +1024,28 @@ public class RunOrchestrator implements RunControlPort {
       }
     }
 
+    // RR-233 / RR-234 / RR-236 — read the submit-time policy on the SUBMITTING thread, before the
+    // async pipeline exists. Every one of these controls used to be written after submitRun
+    // returned, i.e. after the pipeline that consumes them had already started.
+    SubmitPolicy policy =
+        submitPolicyIntent.get() == null ? SubmitPolicy.NONE : submitPolicyIntent.get();
+    // RR-236 — a run's tenant is the org that OWNS the work, which for a project-scoped run is the
+    // authorized host project's org, not the actor's home org. An external collaborator's run used
+    // to carry the host projectId with their personal orgId, splitting the run away from the tenant
+    // whose project, quota and audit trail it actually belongs to. The actor stays on
+    // createdByUserId.
+    String effectiveOrgId =
+        policy.payerOrgId() != null && !policy.payerOrgId().isBlank() ? policy.payerOrgId() : orgId;
+    if (policy.payerOrgId() != null
+        && !policy.payerOrgId().isBlank()
+        && !policy.payerOrgId().equals(orgId)) {
+      log.info(
+          "RunOrchestrator run={} tenant resolved to host project org={} (actor home org={})",
+          runId,
+          policy.payerOrgId(),
+          orgId);
+    }
+
     PipelineRun run =
         PipelineRun.builder()
             .runId(runId)
@@ -938,13 +1072,22 @@ public class RunOrchestrator implements RunControlPort {
             .executionMode(executionMode != null ? executionMode : "PRODUCTION")
             .approvedExecutionMode("REALTIME")
             .createdByUserId(createdByUserId)
-            .orgId(orgId)
+            .orgId(effectiveOrgId)
             .projectId(projectId)
+            // RR-233 — the customer's hard ceiling must be visible to persistEstimate, which runs
+            // the moment the planner returns. Written after submit, a fast planner clamped to the
+            // platform cap first.
+            .userCostCap(policy.userCostCap())
+            // RR-234 — publication consent is durable, not a Redis-only intent whose documented
+            // failure mode ("crash loses the intent and resumes default auto-push") turns "do not
+            // publish" into "publish".
+            .skipAutoPush(policy.skipAutoPush())
             .queuePosition(0)
             .startedAt(Instant.now())
             .totalInputTokens(0)
             .totalOutputTokens(0)
             .figmaUrl(figmaUrl)
+            .tddMode(tddMode)
             .selectedRepoIds(serializeRepoIds(selectedRepoIds))
             .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
             .build();
@@ -2346,14 +2489,36 @@ public class RunOrchestrator implements RunControlPort {
                   && r.getRepoUrl() != null
                   && !r.getRepoUrl().isBlank();
         }
-        // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
-        // When the user submitted with skipAutoPush=true the
-        // RunController stamped a Redis key; consume it here once.
-        // The flag is one-shot — a manual re-push afterward goes
-        // through the unchanged /runs/{id}/push-github path.
-        if (shouldPush && runSkipPushFlag.consume(runId)) {
-          shouldPush = false;
-          log.info("V2 run={} auto-push skipped (skipAutoPush flag set)", runId);
+        // RR-234 — staged-PR-before-push consent, now DURABLE and FAIL-CLOSED.
+        //
+        // This gate used to read a Redis-only key whose own contract said a JVM crash loses the
+        // intent and the next attempt resumes default auto-push. That failure mode silently
+        // converts a customer's "do not publish this" into publishing it — the one direction the
+        // gate must never fail in. The consent is now a column stamped atomically with run
+        // creation (V323); the Redis key is still consumed for runs submitted before this change
+        // and for a one-shot manual override.
+        //
+        // If the run row cannot be read at all we do NOT push: without the row we cannot prove
+        // consent was given, and publication is irreversible.
+        if (shouldPush) {
+          PipelineRun policyRow = null;
+          try {
+            policyRow = runRepo.findById(runId).orElse(null);
+          } catch (Exception policyEx) {
+            log.error(
+                "V2 run={} could not load publication policy; refusing auto-push: {}",
+                runId,
+                policyEx.getMessage());
+          }
+          boolean legacyRedisConsent = runSkipPushFlag.consume(runId);
+          if (policyRow == null) {
+            shouldPush = false;
+            log.warn(
+                "V2 run={} auto-push skipped — publication policy unreadable (fail-closed)", runId);
+          } else if (policyRow.isSkipAutoPush() || legacyRedisConsent) {
+            shouldPush = false;
+            log.info("V2 run={} auto-push skipped (customer asked not to publish)", runId);
+          }
         }
         if (shouldPush) {
           try {

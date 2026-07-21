@@ -91,6 +91,9 @@ public class RunController {
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
 
+  /** RR-241 — rejects customer submits that impersonate a server-internal automation source. */
+  private final com.navneet.executespec.integration.PlanGateBypassPolicy planGateBypassPolicy;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 
@@ -137,6 +140,15 @@ public class RunController {
           "Run submissions are temporarily paused for maintenance. Please try again later.");
     }
 
+    // RR-241 — `source` is caller-supplied and is what PlanGateBypassPolicy keys plan-gate bypass
+    // authority on. Reject any attempt to claim one of the server-internal automation surfaces from
+    // the public submit API, so the allowlist cannot be spoofed by a request body.
+    if (planGateBypassPolicy.isReservedAutomationSource(req.source())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Run source '" + req.source() + "' is reserved for server-internal automation.");
+    }
+
     boolean localExecutionRequested = Boolean.TRUE.equals(req.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
       throw new ResponseStatusException(
@@ -155,8 +167,12 @@ public class RunController {
     // A project with linked repositories must submit an exact, fully-linked code boundary. Local
     // runs go through the same write guard plus the V278 LOCAL-source binding contract: a LOCAL
     // source is admitted only for the connector installation that holds an ONLINE lease.
+    // RR-236 — hold on to the authorized host project. Its org, not the caller's home org, is the
+    // tenant that owns this run: an external collaborator's run used to carry the host projectId
+    // with their personal orgId, so the work and its tenant disagreed.
+    com.navneet.executespec.auth.entity.Project hostProject = null;
     if (req.projectId() != null && !req.projectId().isBlank()) {
-      projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
+      hostProject = projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
       if (localExecutionRequested) {
         projectRepoService.resolveForLocalRunStrict(
             req.projectId(),
@@ -185,6 +201,7 @@ public class RunController {
 
     // Everything from here to run creation runs under the idempotency claim. Any failure must
     // publish a terminal claim state, otherwise the key would stay locked until its lease elapses.
+    final com.navneet.executespec.auth.entity.Project authorizedProject = hostProject;
     PipelineRun run;
     try {
       // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
@@ -256,7 +273,14 @@ public class RunController {
               req.requireConfirmationBeforeExpensiveContinuation(),
               req.requireBenchmarkPriorForAutomaticContinuation(),
               req.lowComplexityWorkerStartTier(),
-              localExecutionRequested);
+              localExecutionRequested,
+              // RR-233 / RR-234 / RR-236 — every control that governs this run is stamped
+              // atomically with run creation. Writing any of them after submit returns is a race
+              // against the pipeline thread that consumes them.
+              new com.navneet.executespec.integration.RunOrchestrator.SubmitPolicy(
+                  req.userCostCap(),
+                  Boolean.TRUE.equals(req.skipAutoPush()),
+                  authorizedProject == null ? null : authorizedProject.getOrgId()));
 
     } catch (ResponseStatusException e) {
       // A 4xx is deterministic for this exact body: retrying it would fail identically, so the key
@@ -282,22 +306,14 @@ public class RunController {
     // which is independent and used by `assertWithinLimits` for the plan-tier billing limits.
     usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
-    // GA-readiness P3.2 — stamp the customer-supplied cost cap onto the new run row so
-    // RunOrchestrator.persistEstimate picks it up when the planner returns a plan and clamps
-    // hard_cap_usd to min(platformCap, userCostCap). Validation (DTO @DecimalMin/@DecimalMax)
-    // already rejected unbounded or negative values before reaching here.
-    if (req.userCostCap() != null) {
-      stateStore.setUserCostCap(run.getRunId(), req.userCostCap());
-    }
-
-    // Audit r5 (#5, 2026-05-06) — staged-PR-before-push. The flag rides
-    // a per-run Redis key (24h TTL); RunOrchestrator's auto-push gate
-    // consumes it once on terminal-success. JVM crash during the run
-    // → flag dies with the Redis key's TTL or with the next consume()
-    // call, default behaviour (auto-push) resumes naturally.
-    if (Boolean.TRUE.equals(req.skipAutoPush())) {
-      runSkipPushFlag.mark(run.getRunId());
-    }
+    // RR-233 — the customer's hard cost cap was written HERE, after submitRunWithLocalExecution
+    // had already started the async pipeline. RunOrchestrator.persistEstimate reads userCostCap at
+    // planner completion, so a fast planner clamped hard_cap_usd to the platform cap before the
+    // customer's tighter ceiling was ever visible. It is now stamped inside run creation.
+    //
+    // RR-234 — the "do not auto-publish" consent was likewise marked here, into a Redis-only key
+    // whose documented failure mode reverts to auto-push after a crash. It is now a durable column
+    // stamped in the same builder, and the auto-push gate fails closed.
 
     // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
     // RunOrchestrator
@@ -615,6 +631,19 @@ public class RunController {
     // realtime workers with batch-only preview/notification behavior.
     rejectRetiredBatchApproval(req.approved(), req.executionMode());
 
+    // RR-1459 — bind the approval to the exact plan the approver reviewed. The credits check below
+    // is a price check, not an identity check: a client that is still displaying run A's plan while
+    // the route has already moved to run B passes it whenever the two estimates happen to match.
+    if (req.approved() && req.planFingerprint() != null && !req.planFingerprint().isBlank()) {
+      String actual = planFingerprintOf(approveRun.getPlanJson());
+      if (!req.planFingerprint().trim().equalsIgnoreCase(actual)) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "The plan you reviewed is not the plan currently on this run. Reload the plan and"
+                + " review it again before approving.");
+      }
+    }
+
     // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
     if (req.approved() && req.creditsConfirmed() != null) {
       stateStore
@@ -781,12 +810,20 @@ public class RunController {
             : source.getUserRequest();
     // Re-scan in case the user edited the spec in the fork dialog.
     inputSanitizer.scan(userRequest);
-    String execMode =
-        overrides != null && overrides.executionMode() != null
+    // RR-1217 — two different axes were being confused here. `executionMode` is the
+    // PRODUCTION/PROTOTYPE governance axis that decides whether the plan gate runs;
+    // `approvedExecutionMode` is the REALTIME/BATCH scheduling axis. The fork used to read the
+    // latter into the former, so a default source value of "REALTIME" was persisted as the run's
+    // executionMode — and because the gate opens only on an exact "PRODUCTION" match, every
+    // ordinary fork silently skipped the human plan gate and went straight to worker/provider
+    // spend. Inherit the correct field, validate any override, and fail closed to PRODUCTION.
+    String requestedExecMode =
+        overrides != null
+                && overrides.executionMode() != null
+                && !overrides.executionMode().isBlank()
             ? overrides.executionMode()
-            : (source.getApprovedExecutionMode() != null
-                ? source.getApprovedExecutionMode()
-                : "REALTIME");
+            : source.getExecutionMode();
+    String execMode = normalizeForkExecutionMode(requestedExecMode);
 
     log.info("Forking run {} as new run for user {}", runId, forkerId);
     PipelineRun forked =
@@ -805,11 +842,44 @@ public class RunController {
             userDetails.getUser().getOrgId(),
             source.getProjectId(),
             execMode,
-            null, // selectedRepoIds — source's projectId carries the repo set
+            // RR-1217 — preserve the source run's exact repository selection. Passing null meant
+            // "every linked repo", so a multi-repo fork could touch repositories the source run
+            // never selected (and that the project may have gained since).
+            com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds(
+                source.getSelectedRepoIds()),
             source.getFigmaUrl(),
-            false // tddMode — opt-in per fork
+            source.isTddMode() // RR-1217 — inherit, was hardcoded false
             );
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(forked));
+  }
+
+  /**
+   * RR-1459 — stable identity of a run's persisted plan. Returns null when the run has no plan, in
+   * which case no client-supplied fingerprint can match and the approval is rejected.
+   */
+  static String planFingerprintOf(String planJson) {
+    if (planJson == null || planJson.isBlank()) return null;
+    try {
+      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+      byte[] hash = md.digest(planJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder(hash.length * 2);
+      for (byte b : hash) sb.append(String.format("%02x", b));
+      return sb.toString();
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+  }
+
+  /**
+   * RR-1217 — a fork's execution mode is the PRODUCTION/PROTOTYPE governance axis. Only those two
+   * values are legal; anything else (including a REALTIME/BATCH value leaking in from the
+   * scheduling axis, or an unknown override) fails closed to PRODUCTION so the fork keeps its human
+   * plan gate.
+   */
+  static String normalizeForkExecutionMode(String requested) {
+    if (requested == null) return "PRODUCTION";
+    String normalized = requested.trim().toUpperCase(java.util.Locale.ROOT);
+    return "PROTOTYPE".equals(normalized) ? "PROTOTYPE" : "PRODUCTION";
   }
 
   /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
