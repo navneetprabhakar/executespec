@@ -41,6 +41,7 @@ import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.CostHistoryService;
+import com.navneet.executespec.cost.PlannerPhaseAttribution;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.CodeGenEngine;
 import com.navneet.executespec.engine.EngineRequest;
@@ -1480,6 +1481,8 @@ public class RunOrchestrator implements RunControlPort {
       String standardsBlock =
           resolveStandardsPromptBlock(runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds);
       RunCostTracker.Snapshot afterPlan;
+      // RR-1561 — PLANNER-delta baseline, taken the moment the smart classifier returns.
+      RunCostTracker.Snapshot afterClassifier = null;
       if (approvedPlanContinuation == null) {
 
         // 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
@@ -1559,6 +1562,8 @@ public class RunOrchestrator implements RunControlPort {
           PlanStrategy planStrategy =
               planningCoordinator.runClassifierShadow(
                   runId, runRow, userRequest, projectId, selectedRepoIds, provider);
+          afterClassifier = costTracker.snapshot(runId); // RR-1561 pre-planner boundary
+
           String projectMemory =
               projectId != null ? projectMemoryProvider.buildPlannerContext(projectId) : "";
           if (projectId != null) {
@@ -1788,15 +1793,10 @@ public class RunOrchestrator implements RunControlPort {
         contextComposer.writeAgentContext(workspace, plan);
         persistEstimate(runId, provider, model, plan);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
-        // Phase 1: attribute tokens used so far to the planner.
+        // Phase 1: book the planner's own delta, not the whole-run snapshot (RR-1561).
         afterPlan = costTracker.snapshot(runId);
-        tokenAttributor.attributePhase(
-            runId,
-            com.navneet.executespec.cost.RunTokenAttributor.Phase.PLANNER,
-            afterPlan.inputTokens(),
-            afterPlan.outputTokens(),
-            upperProvider,
-            model);
+        PlannerPhaseAttribution.apply(
+            runRepo, tokenAttributor, runId, afterPlan, afterClassifier, upperProvider, model);
 
         // 1b. Plan approval gate (PRODUCTION only)
         // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass the gate. A

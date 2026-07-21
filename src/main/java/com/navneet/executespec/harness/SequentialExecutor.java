@@ -3828,21 +3828,8 @@ to boot — skip it for those.""";
     if (!failure) {
       return null;
     }
-    String commandSignature = repeatedCommandFailureSignature(normalized);
+    String commandSignature = WorkerToolLogEvidence.repeatedCommandFailureSignature(normalized);
     return commandSignature == null ? normalized : commandSignature;
-  }
-
-  private static String repeatedCommandFailureSignature(String normalized) {
-    String lower = normalized.toLowerCase(Locale.ROOT);
-    if (!(lower.startsWith("shell(")
-        || lower.startsWith("bash(")
-        || lower.startsWith("buildproject(")
-        || lower.startsWith("runtests("))) {
-      return null;
-    }
-    int status = lower.indexOf("->");
-    String call = status < 0 ? normalized : normalized.substring(0, status).trim();
-    return call.isBlank() ? null : call;
   }
 
   private static int editChurnCount(WorkerResult workerResult) {
@@ -3852,7 +3839,7 @@ to boot — skip it for those.""";
       return 0;
     }
     for (String entry : workerResult.toolCallLog()) {
-      String path = mutationPathSignature(entry);
+      String path = WorkerToolLogEvidence.mutationPathSignature(entry);
       if (path == null) {
         continue;
       }
@@ -3911,49 +3898,6 @@ to boot — skip it for those.""";
         || outcome == WorkerResult.Outcome.COMPLETED_BY_STAGNATION
         || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED
         || outcome == WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED;
-  }
-
-  private static String mutationPathSignature(String entry) {
-    if (entry == null || entry.isBlank()) {
-      return null;
-    }
-    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
-    if (!(normalized.startsWith("writeFile")
-        || normalized.startsWith("write_file")
-        || normalized.startsWith("editFile")
-        || normalized.startsWith("edit_file")
-        || normalized.startsWith("multiEdit")
-        || normalized.startsWith("multi_edit"))) {
-      return null;
-    }
-    String path = quotedJsonPath(normalized);
-    if (path == null) {
-      path = keyValuePath(normalized);
-    }
-    return path == null || path.isBlank() ? null : path;
-  }
-
-  private static String quotedJsonPath(String text) {
-    int key = text.indexOf("\"path\"");
-    if (key < 0) {
-      return null;
-    }
-    int colon = text.indexOf(':', key);
-    int start = colon < 0 ? -1 : text.indexOf('"', colon + 1);
-    int end = start < 0 ? -1 : text.indexOf('"', start + 1);
-    return end > start ? text.substring(start + 1, end) : null;
-  }
-
-  private static String keyValuePath(String text) {
-    int key = text.indexOf("path=");
-    if (key < 0) {
-      return null;
-    }
-    int start = key + "path=".length();
-    int comma = text.indexOf(',', start);
-    int paren = text.indexOf(')', start);
-    int end = comma < 0 ? paren : paren < 0 ? comma : Math.min(comma, paren);
-    return end > start ? text.substring(start, end).trim() : text.substring(start).trim();
   }
 
   private static boolean blockedByEnvironment(WorkerResult workerResult, String failureReason) {
@@ -5119,26 +5063,7 @@ to boot — skip it for those.""";
         .build();
   }
 
-  /**
-   * Counts successful file-writing tool calls in a worker's tool log. The log entries look like
-   * {@code "writeFile({...})"}, {@code "writeFile → COMPLETED"}, or {@code "editFile(...)"}. We
-   * only need a count (not file paths) to decide whether an incomplete worker still produced real
-   * output.
-   */
   private static int countFileWrites(java.util.List<String> toolLog) {
-    if (toolLog == null || toolLog.isEmpty()) return 0;
-    int n = 0;
-    for (String entry : toolLog) {
-      if (entry == null) continue;
-      if (entry.startsWith("writeFile")
-          || entry.startsWith("write_file")
-          || entry.startsWith("editFile")
-          || entry.startsWith("edit_file")
-          || entry.startsWith("multiEdit")
-          || entry.startsWith("multi_edit")
-          || entry.startsWith("applyPatch")
-          || entry.startsWith("apply_patch")) n++;
-    }
-    return n;
+    return WorkerToolLogEvidence.countFileWrites(toolLog);
   }
 }
