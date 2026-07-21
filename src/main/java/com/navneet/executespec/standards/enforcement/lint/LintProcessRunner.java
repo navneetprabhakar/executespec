@@ -71,14 +71,14 @@ public class LintProcessRunner {
   }
 
   /**
-   * Legacy entry point, kept because {@code LintAdapter} carries no run identity.
+   * Compatibility entry point that carries no run scope.
    *
-   * <p>A sandbox is scoped to a run, so a lint invocation with no run scope cannot be contained.
-   * With routing on, this overload therefore reports UNAVAILABLE rather than executing on the host
-   * — "sandbox available, or UNAVAILABLE" — and the adapter degrades exactly as it already does for
-   * a missing CLI. Threading the run id from {@code StandardsRunner} through {@code LintAdapter}
-   * into {@link #run(String, Path, List, long)} is the change that makes lint usable with the flags
-   * on; those files are outside this lane.
+   * <p>{@code LintAdapter} → {@code StandardsRunner} now thread a real run id into {@link
+   * #run(String, Path, List, long)}, so the enforcement path is run-scoped and containable. This
+   * overload remains only for callers that genuinely have no run (and for focused tests). A sandbox
+   * is scoped to a run, so a lint invocation with no run scope cannot be contained: with routing on
+   * this reports UNAVAILABLE rather than executing on the host — "sandbox available, or
+   * UNAVAILABLE" — and the adapter degrades exactly as it already does for a missing CLI.
    */
   public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
     return run(null, workingDir, argv, timeoutSeconds);
