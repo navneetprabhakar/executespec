@@ -72,6 +72,46 @@ class PatScopePolicyTest {
   }
 
   @Test
+  void agentWriteAloneCannotCreateARunOrWriteLocalFiles() {
+    String chatOnly = PatScopePolicy.normalizeRequested(List.of("api:read", "agent:write"));
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/orchestrator/turn")).isTrue();
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/orchestrator/turn/confirm")).isFalse();
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/agent/sessions/s1/writer/reserve"))
+        .isFalse();
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/agent/sessions/s1/writer/mutate"))
+        .isFalse();
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/agent/sessions/s1/writer/execute"))
+        .isFalse();
+    assertThat(PatScopePolicy.allows(chatOnly, "POST", "/api/agent/sessions/s1/writer/release"))
+        .isFalse();
+  }
+
+  @Test
+  void boundaryRoutesRequireTheUnionOfBothCapabilities() {
+    String scopes = PatScopePolicy.normalizeRequested(null);
+    assertThat(scopes).contains("agent:write").contains("runs:write");
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/orchestrator/turn/confirm")).isTrue();
+    // runs:write without agent:write is equally insufficient for the agent confirmation route.
+    assertThat(
+            PatScopePolicy.allows(
+                PatScopePolicy.normalizeRequested(List.of("runs:write")),
+                "POST",
+                "/api/orchestrator/turn/confirm"))
+        .isFalse();
+    String writer = PatScopePolicy.normalizeRequested(List.of("agent:write", "local:write"));
+    assertThat(PatScopePolicy.allows(writer, "POST", "/api/agent/sessions/s1/writer/mutate"))
+        .isTrue();
+    assertThat(PatScopePolicy.allows("full", "POST", "/api/agent/sessions/s1/writer/mutate"))
+        .isTrue();
+    assertThat(PatScopePolicy.allows("full", "POST", "/api/orchestrator/turn/confirm")).isTrue();
+  }
+
+  @Test
+  void localWriteIsNotInTheClientDefaultSet() {
+    assertThat(PatScopePolicy.CLIENT_DEFAULT_SCOPES).doesNotContain(PatScopePolicy.LOCAL_WRITE);
+  }
+
+  @Test
   void normalizationRejectsUnknownAndAmbiguousFull() {
     assertThatThrownBy(() -> PatScopePolicy.normalizeRequested(List.of("root")))
         .isInstanceOf(IllegalArgumentException.class);

@@ -35,6 +35,38 @@ public class AgentIntentService {
   private static final String ROUTING_ROLE = "AgentIntentService";
   private static final String ROUTING_STEP = "orchestrator.intent.classify";
 
+  /** Deterministic-branch identifiers for {@link RouteAttribution#modelProvider()}. */
+  public static final String ATTRIBUTION_DETERMINISTIC = "deterministic";
+
+  /** Prompt identifier recorded when no classifier call shaped the route. */
+  public static final String DETERMINISTIC_PROMPT_ID = "orchestrator-deterministic-pre-router";
+
+  /**
+   * Which engine actually produced a route decision.
+   *
+   * <p>The orchestrator trace is durable routing evidence reconciled against {@code
+   * run_step_usage}. Recording every route as deterministic while a paid classify attempt exists in
+   * the usage ledger makes that reconciliation lie, so the branch is reported explicitly.
+   *
+   * @param classifierAttempted true when a provider classify call was actually dispatched, even if
+   *     its output was unusable and the deterministic fallback decided the route
+   */
+  public record RouteAttribution(
+      String modelProvider, String model, String promptId, boolean classifierAttempted) {
+
+    public static RouteAttribution deterministic(boolean classifierAttempted) {
+      return new RouteAttribution(
+          ATTRIBUTION_DETERMINISTIC, "none", DETERMINISTIC_PROMPT_ID, classifierAttempted);
+    }
+
+    public static RouteAttribution classifier(String provider, String model, String promptId) {
+      return new RouteAttribution(provider, model, promptId, true);
+    }
+  }
+
+  /** A route decision together with the engine that produced it. */
+  public record RoutedDecision(OrchestratorDecision decision, RouteAttribution attribution) {}
+
   private record StructuredDecision(
       String route,
       Double confidence,
@@ -120,6 +152,25 @@ public class AgentIntentService {
    */
   public OrchestratorDecision decide(
       InterpretIntentRequest request, String effectiveProvider, String effectiveModel) {
+    return decideWithAttribution(request, effectiveProvider, effectiveModel).decision();
+  }
+
+  /**
+   * Classify and report which engine decided. Callers that persist durable routing evidence must
+   * use this so the trace cannot claim a deterministic rule for a paid classifier decision.
+   */
+  public RoutedDecision decideWithAttribution(
+      InterpretIntentRequest request, String effectiveProvider, String effectiveModel) {
+    RouteAttribution[] attribution = {RouteAttribution.deterministic(false)};
+    OrchestratorDecision decision = route(request, effectiveProvider, effectiveModel, attribution);
+    return new RoutedDecision(decision, attribution[0]);
+  }
+
+  private OrchestratorDecision route(
+      InterpretIntentRequest request,
+      String effectiveProvider,
+      String effectiveModel,
+      RouteAttribution[] attribution) {
     String raw = request == null || request.message() == null ? "" : request.message().trim();
     String message = sanitizeMessage(raw);
     if (request != null) {
@@ -158,7 +209,8 @@ public class AgentIntentService {
     // safety guards above remain deterministic so an unavailable or malformed model response can
     // never turn a guarded request into a run.
     var structuredDecision =
-        decideWithStructuredClassifier(message, lower, request, effectiveProvider, effectiveModel);
+        decideWithStructuredClassifier(
+            message, lower, request, effectiveProvider, effectiveModel, attribution);
     if (structuredDecision.isPresent()) {
       return structuredDecision.get();
     }
@@ -190,7 +242,8 @@ public class AgentIntentService {
       String lower,
       InterpretIntentRequest request,
       String effectiveProvider,
-      String effectiveModel) {
+      String effectiveModel,
+      RouteAttribution[] attribution) {
     if (llmRouter == null || modelRegistry == null || promptCatalog == null) {
       return java.util.Optional.empty();
     }
@@ -208,6 +261,7 @@ public class AgentIntentService {
     if (model == null || model.isBlank()) {
       return java.util.Optional.empty();
     }
+    String promptId = "orchestrator-routing-" + promptProvider(provider);
     try {
       String userPrompt =
           "Classify this orchestrator turn. Return only one JSON object matching the schema.\n\n"
@@ -219,6 +273,9 @@ public class AgentIntentService {
               new UserMessage(userPrompt));
       ChatResponse response;
       if (executionPolicyFactory == null) {
+        // The attempt is a fact from here on, regardless of outcome: a transport failure or a
+        // malformed reply must still record classifierAttempted in the durable trace.
+        attribution[0] = RouteAttribution.deterministic(true);
         response =
             llmRouter.callText(
                 provider,
@@ -235,6 +292,7 @@ public class AgentIntentService {
         var executionReference =
             executionPolicyFactory.forAgentSession(
                 request.sessionId(), "intent-" + Integer.toHexString(message.hashCode()));
+        attribution[0] = RouteAttribution.deterministic(true);
         response =
             llmRouter.callText(
                 provider,
@@ -253,7 +311,11 @@ public class AgentIntentService {
                   || response.getResult().getOutput() == null
               ? ""
               : response.getResult().getOutput().getText();
-      return parseStructuredDecision(raw, message, lower, request);
+      var parsed = parseStructuredDecision(raw, message, lower, request);
+      if (parsed.isPresent()) {
+        attribution[0] = RouteAttribution.classifier(provider, model, promptId);
+      }
+      return parsed;
     } catch (RuntimeException | java.io.IOException e) {
       // Routing is advisory. The deterministic fallback below remains the source of truth when a
       // provider, prompt resource, serializer, or transport is unavailable.

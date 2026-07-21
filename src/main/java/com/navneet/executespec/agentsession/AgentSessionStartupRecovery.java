@@ -26,6 +26,12 @@ import lombok.extern.slf4j.Slf4j;
  * descendant budget forever and make a parent appear to have an active child that can never
  * complete. Marking it CANCELLED is deliberately conservative; the parent can request a fresh,
  * bounded child after reconnect, and the durable recovery event explains why the old child ended.
+ *
+ * <p>Scope limit: this sweep reads the whole {@code agent_session} table and has no owner/instance
+ * identity to fence on, so it cannot prove a candidate belongs to THIS JVM. It relies entirely on
+ * the executing turn keeping its lease fresh; a child whose owner is alive but wedged for longer
+ * than {@link #STALE_AFTER_SECONDS} without renewing is still cancelled. Fencing recovery to an
+ * owning node requires a durable owner id and lease token, which this class does not have.
  */
 @Component
 @Slf4j
@@ -35,7 +41,17 @@ public class AgentSessionStartupRecovery {
   private static final String READY = "READY";
   private static final String SUBAGENT = "SUBAGENT";
   private static final String CANCELLED = "CANCELLED";
-  private static final long STALE_AFTER_SECONDS = 120;
+
+  /**
+   * A child is only presumed abandoned once its lease has gone this long without renewal.
+   *
+   * <p>The executing turn renews the lease every 30s (see {@code
+   * SubagentExecutionService.HEARTBEAT_INTERVAL_MILLIS}), so this window tolerates several missed
+   * renewals. It is deliberately far larger than one model round: this sweep is global over the
+   * whole table and cannot tell a peer JVM's live child from an orphan, so the only protection a
+   * concurrently executing child has is a lease that is still fresh when the peer boots.
+   */
+  private static final long STALE_AFTER_SECONDS = 300;
 
   private final AgentSessionRepository sessionRepository;
   private final AgentEventRecorder eventRecorder;

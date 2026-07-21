@@ -51,20 +51,23 @@ class AgentOrchestratorTurnService {
     }
 
     String projectId = AgentText.firstNonBlank(request.projectId(), session.getProjectId());
+    Boolean writeAuthorized = null;
     if (projectId != null) {
       projectAccessGuard.assertCanRead(projectId, user);
+      writeAuthorized = AgentWriteAuthority.resolve(projectAccessGuard, projectId, user);
     }
-    OrchestratorDecision rawDecision =
-        intentService.decide(
+    AgentIntentService.RoutedDecision routed =
+        intentService.decideWithAttribution(
             new InterpretIntentRequest(
                 session.getId(),
                 AgentText.firstNonBlank(request.message(), ""),
                 projectId,
                 toRepoContext(request),
-                toClientCapabilities(request)),
+                toClientCapabilities(request),
+                writeAuthorized),
             session.getDefaultProvider(),
             session.getDefaultModel());
-    OrchestratorDecision decision = applyRequestPolicy(rawDecision, request);
+    OrchestratorDecision decision = applyRequestPolicy(routed.decision(), request);
     OrchestratorTurnResponse response =
         new OrchestratorTurnResponse(
             turnId,
@@ -99,7 +102,8 @@ class AgentOrchestratorTurnService {
             request.message(),
             false,
             null,
-            "deterministic_pre_router"));
+            "deterministic_pre_router",
+            routed.attribution()));
     session.setUpdatedAt(Instant.now());
     if (request.message() != null
         && !request.message().isBlank()

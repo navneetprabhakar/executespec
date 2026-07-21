@@ -13,11 +13,16 @@ import org.junit.jupiter.api.Test;
 class AgentIntentPatternsTest {
 
   @Test
-  void runIdExtractionAcceptsUuidAndShortHexIds() {
+  void runIdExtractionAcceptsOnlyTheCanonicalRunIdShape() {
     assertThat(AgentIntentPatterns.extractRunId("approve run 9586cfee-f442-4927-90f4-ba4f5f645d0b"))
         .isEqualTo("9586cfee-f442-4927-90f4-ba4f5f645d0b");
-    assertThat(AgentIntentPatterns.extractRunId("cancel deadbeef")).isEqualTo("deadbeef");
     assertThat(AgentIntentPatterns.extractRunId("approve it")).isNull();
+    // A bare hex run is not a run id: commit SHAs, hex-looking words and long digit strings all
+    // matched the old pattern and produced a credit-charging card for the wrong target.
+    assertThat(AgentIntentPatterns.extractRunId("cancel deadbeef")).isNull();
+    assertThat(AgentIntentPatterns.extractRunId("approve the fix in commit abc1234def")).isNull();
+    assertThat(AgentIntentPatterns.extractRunId("cancel order 12345678")).isNull();
+    assertThat(AgentIntentPatterns.extractRunId(null)).isNull();
   }
 
   @Test
