@@ -106,6 +106,11 @@ public class AgentRunSubmissionGate {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
     projectAccessGuard.assertCanWrite(projectId, user);
+    // RR-825 — this surface has no bean validation, so a caller could send "NaN"/"Infinity" as the
+    // hard cost cap and disable the worker ceiling. Reject before the claim, the quota accounting
+    // and any provider spend rather than after the asynchronous pipeline has already started.
+    com.navneet.executespec.cost.CostCapValues.requireValidOptional(
+        request == null ? null : request.userCostCap());
     boolean localExecutionRequested =
         request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {

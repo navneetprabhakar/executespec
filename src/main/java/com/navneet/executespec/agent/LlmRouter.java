@@ -114,6 +114,16 @@ public class LlmRouter {
   private final ManagedAiUsageService managedAiUsageService;
   private final com.navneet.executespec.router.RunRoutePolicyService runRoutePolicyService;
 
+  /**
+   * RR-392 (2026-07-20) — the shared last-mile spend authorization. This router previously
+   * re-implemented the live-LLM kill switch and the test-reservation guard inline from its own
+   * {@code @Value} fields, so {@link ProviderDispatchAuthorization} — the class documented as
+   * guarding "every provider-spending transport" — existed only on operator fixture controllers and
+   * was not the production boundary it claimed to be. There is now exactly one implementation of
+   * the rule, and it is injected here.
+   */
+  private final ProviderDispatchAuthorization providerDispatchAuthorization;
+
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
   /** Model-specific Anthropic clients whose defaults never include deprecated temperature. */
@@ -123,22 +133,8 @@ public class LlmRouter {
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformAnthropicApiKey;
 
-  /**
-   * Provider-transport kill switch. Maven test forks force this off; live tests must opt in
-   * explicitly after reserving provider budget. Initialized true so constructor-only unit tests
-   * that use mocked transports remain unchanged outside a Spring context.
-   */
-  @Value("${executespec.live-llm.enabled:true}")
-  private boolean liveLlmEnabled = true;
-
   @Value("${executespec.llm.execution-context-enforcement.enabled:true}")
   private boolean executionContextEnforcementEnabled = true;
-
-  @Value("${executespec.live-llm.test-mode:false}")
-  private boolean liveLlmTestMode;
-
-  @Value("${executespec.live-llm.reservation-id:}")
-  private String liveLlmReservationId;
 
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
@@ -434,15 +430,9 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
-    if (!liveLlmEnabled) {
-      throw new IllegalStateException(
-          "Live LLM transport is disabled. Explicitly authorize the live-llm-test profile and"
-              + " reserve provider budget before dispatch.");
-    }
-    if (liveLlmTestMode) {
-      ProviderTestBudgetGuard.authorize(
-          liveLlmReservationId, request.provider(), request.model(), request.context().runId());
-    }
+    // RR-392 — one shared fail-closed authorization for every provider-spending dispatch.
+    providerDispatchAuthorization.authorize(
+        request.provider(), request.model(), request.context().runId());
     if (executionContextEnforcementEnabled && request.llmExecutionContextId() == null) {
       throw new com.navneet.executespec.executioncontext.LlmDispatchPolicyException(
           com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
