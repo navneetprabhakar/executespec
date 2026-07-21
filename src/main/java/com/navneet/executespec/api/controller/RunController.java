@@ -1570,15 +1570,19 @@ public class RunController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     PipelineRun run = guard.requireRunAccess(id, userDetails);
     try {
-      // "repo" format — clean archive with .gitignore and README
+      // "repo" format — clean archive with .gitignore and README. RR-165: streamed from a
+      // quota-bounded temp file instead of a heap-materialized byte[].
       if ("repo".equals(format)) {
-        byte[] repoZip = workspaceExportService.exportAsRepoZip(id);
+        Path repoZipPath = workspaceExportService.exportAsRepoZip(id);
         String runId8 = id.substring(0, Math.min(8, id.length()));
+        Resource repoResource = new FileSystemResource(repoZipPath);
+        repoZipPath.toFile().deleteOnExit();
         return ResponseEntity.ok()
             .header(
                 HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + runId8 + "-repo.zip\"")
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .body(repoZip);
+            .contentLength(Files.size(repoZipPath))
+            .body(repoResource);
       }
 
       // Local workspaces are zipped and scanned on the fly. Archived workspaces are downloaded
@@ -1626,6 +1630,9 @@ public class RunController {
 
     } catch (ResponseStatusException e) {
       throw e;
+    } catch (WorkspaceExportService.ExportTooLargeException e) {
+      // RR-165: an over-quota export is refused explicitly rather than degrading to an OOM.
+      throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, e.getMessage());
     } catch (IOException e) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "Failed to export workspace: " + e.getMessage());
