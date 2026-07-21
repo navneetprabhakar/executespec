@@ -26,9 +26,10 @@ class FlywayMigrationInventoryTest {
     // V60_1 is fractional. V1..V309 is 310 files; the audit-remediation fix wave added seven more
     // (V310 billing, V315 execution-gate, V316 provider-call reservation, V317 test-execution
     // provenance, V320 integration ownership, V323 run publication policy, V327 solution decision
-    // authority) for 317.
-    assertThat(migrations).hasSize(317);
-    assertThat(migrations.getLast().version()).isEqualTo("327");
+    // authority) for 317, and the orchestrator-remainder lane added V329 (plan-approval contract
+    // gate report, RR-819) for 318.
+    assertThat(migrations).hasSize(318);
+    assertThat(migrations.getLast().version()).isEqualTo("329");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -38,7 +39,8 @@ class FlywayMigrationInventoryTest {
         .containsExactly("60_1");
     // Deliberate, permanent gaps. The audit-remediation fix wave ran parallel lanes, each
     // pre-assigned one migration number so two lanes could not claim the same one. Several lanes
-    // turned out not to need theirs (V311-V314, V318-V319, V321-V322, V324-V326) — several found
+    // turned out not to need theirs (V311-V314, V318-V319, V321-V322, V324-V326, V328) — several
+    // found
     // the fix needed no schema change at all, which is a better outcome than a migration written
     // to justify a reservation.
     //
@@ -50,7 +52,7 @@ class FlywayMigrationInventoryTest {
     // here must mean "a number was reserved and deliberately not used", never "a migration went
     // missing".
     assertThat(majorGaps(migrations))
-        .containsExactly("V310->V315", "V317->V320", "V320->V323", "V323->V327");
+        .containsExactly("V310->V315", "V317->V320", "V320->V323", "V323->V327", "V327->V329");
   }
 
   @Test

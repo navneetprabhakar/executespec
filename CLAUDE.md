@@ -442,7 +442,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`, optional `requireConfirmationBeforeExpensiveContinuation`, optional `requireBenchmarkPriorForAutomaticContinuation`, optional `lowComplexityWorkerStartTier` (`WORKHORSE\|LIGHTWEIGHT`, non-pinning LOW-task start tier), optional `modelName` (ENTERPRISE per-run model pin, Beta — overrides org matrix + YAML via `RunModelOverrides.withRunPin`), optional `localInstallationId` (V278 — required when `localExecution=true` selects LOCAL project sources; admission verifies installation match + ONLINE lease before quota/spend). |
 | GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                                                                                                                                                       |
 | GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs, and durable `requestedProvider` / `requestedModel` / `routingMode` / `routePinned` intent).                                                                                           |
-| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?, planFingerprint?}`. Charges credits. `planFingerprint` (RR-1459) is the SHA-256 of the exact plan JSON the approver reviewed and 409s on mismatch; the web plan gate now sends it, because `creditsConfirmed` is a price check that passes whenever two runs happen to cost the same.                                                                                                                                                                                                                  |
+| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?, planFingerprint?, breakingChangeAck?, breakingChangeReportDigest?}`. Charges credits. `planFingerprint` (RR-1459) is the SHA-256 of the exact plan JSON the approver reviewed and 409s on mismatch; the web plan gate sends it, because `creditsConfirmed` is a price check that passes whenever two runs happen to cost the same. **RR-819:** when the run has a pending contract gate with `requiresTypedAck`, approval is refused with 409 unless `breakingChangeAck` is the literal `BREAKING` and `breakingChangeReportDigest` matches the persisted report. |
+| GET    | `/api/runs/{id}/plan-contract-gate`   | **RR-819** — the durable plan-approval contract gate report the approver must be shown (`reportJson` rows, `reportDigest`, `requiresTypedAck`). 204 when the plan touches no registered contract. Run-read guarded. |
 | POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                                                                                                                                                        |
 | POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                                                                                                                                                        |
 | DELETE | `/api/runs/{id}`                      | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs.                                                                                                                                                                                 |
@@ -650,7 +651,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V309; 310 source files; applied V-files immutable)                                                                                                                                                                                     |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V329; 318 source files; applied V-files immutable)                                                                                                                                                                                     |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -780,6 +781,39 @@ selections fail closed on both sides — an unparseable or non-UUID value is an 
 "every linked repository" — and re-review's task reconstruction no longer maps null/unknown/
 non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
 LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
+
+**Breaking-change approval gate + continuation locality + publication fencing (2026-07-21, V329).**
+Four orchestrator-side corrections. (1) **RR-819** — `PlanBreakingChangeReport.requiresTypedAck`
+demanded a typed `BREAKING` and a disabled approve button, but nothing in the API, frontend or CLI
+consumed it: the classifier ran AFTER the worker wrote the change and its verdict became a MINOR
+issue with a `[REQUIRES ACK]` suffix, so consumer-breaking API/schema changes could be approved and
+auto-published with no friction and no record. `contracts/gate/PlanContractGateService` now composes
+a report while the run parks at `AWAITING_APPROVAL` — which registered contracts this plan's
+`touchesFiles` name, and which repositories declare themselves consumers — persists it with a
+SHA-256 digest (V329 `plan_contract_gate_report`), and `POST /api/runs/{id}/approve` refuses with
+409 until the approver's typed `BREAKING` arrives bound to that exact digest. It asserts INTENT, not
+BREAKING-ness: no new content exists at approval time, so the post-run classifier
+(`integration/RunBreakingChangeDetector`, extracted from the orchestrator) stays as the second,
+tighten-only gate. Composition is gated by the run reaching the plan gate with a project and
+selected repositories; a run with no persisted report is `NOT_REQUIRED`. (2) **RR-1693** — post-review
+and post-validation continuation built a plain server-side `ExecutionRequest` with no
+`localHandsMode`, so the RR-479 defect was reachable through a path that fires automatically.
+`maybeActOnPostReviewContinuation` now refuses when `pipeline_run.local_execution_requested` is set.
+(3) **RR-826 remainder** — an absent final validation report was being stamped
+`PARTIAL / VALIDATION_REPORT_LOW_QUALITY`, which claims a measurement that never happened, and it
+fed post-validation continuation, so a persistent report-generation bug would have triggered an
+automatic model-upgrade rerun on every run. `PostReviewQualityPolicy.finalVerification` is now
+`PASSED | LOW_QUALITY | UNAVAILABLE`; UNAVAILABLE stamps `PARTIAL / VALIDATION_REPORT_UNAVAILABLE`
+and does NOT escalate. The RR-826 fail-closed behaviour itself is unchanged. (4) **RR-1689** —
+`integration/RunPublicationFence` refuses auto-push from an Execution-View child that the current
+solution row no longer names (superseded by a RETRY) or whose solution an operator skipped. It fails
+OPEN on repository error and never touches ordinary customer runs.
+
+**Not closed:** the RR-819 gate is server-enforced but has no frontend yet, so a web approver on a
+gated run currently receives a 409 they cannot satisfy from the UI; the frontend contract is
+`GET /api/runs/{id}/plan-contract-gate` → render rows → typed input → echo
+`breakingChangeAck` + `breakingChangeReportDigest` on approve. Manual push endpoints do not consult
+`RunPublicationFence`. The V278 `localInstallationId` is still not re-checked on retry.
 
 **Solution decision authority + child fencing (2026-07-21, V327).** The Execution-View per-solution
 gate had no state machine. `SolutionExecutionService.processDecision` applied SKIP / RETRY / FIX /
