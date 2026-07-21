@@ -1,13 +1,12 @@
 package com.navneet.executespec.deployment.preview;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
 
@@ -20,8 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class ComposeExecutor {
-
-  private static final int MAX_OUTPUT_BYTES = 1_048_576; // 1 MB
 
   /** Common tool directories that may be missing from the JVM's inherited PATH. */
   private static final String PATH_AUGMENT =
@@ -276,22 +273,12 @@ public class ComposeExecutor {
         pb.directory(workDir.toFile());
       }
 
-      Process process = pb.start();
-
-      String output;
-      try (InputStream is = process.getInputStream()) {
-        byte[] buf = is.readNBytes(MAX_OUTPUT_BYTES);
-        output = new String(buf);
-      }
-
-      boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-      if (!finished) {
-        process.destroyForcibly();
-        return new ProcessResult(-1, output, true);
-      }
-
-      return new ProcessResult(process.exitValue(), output, false);
-    } catch (IOException | InterruptedException e) {
+      // RR-154: drain stdout+stderr on a separate thread (BoundedProcess) so the wall-clock
+      // deadline is actually reachable. Reading the pipe synchronously before waitFor() let a
+      // stalled compose command that kept its pipe open below the byte cap defeat the timeout.
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, timeout);
+      return new ProcessResult(outcome.exitCode(), outcome.output(), !outcome.finished());
+    } catch (Exception e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }

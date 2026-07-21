@@ -1,5 +1,7 @@
 package com.navneet.executespec.agent;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +21,9 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,8 +58,35 @@ public class AnthropicForcedToolClient {
 
   private final ObjectMapper objectMapper;
 
+  /**
+   * RR-1180 fallback HTTP read ceiling when the caller does not (yet) forward a live worker
+   * deadline. Matches {@code AgentModelConfig}'s platform-wide LLM read window so a forced salvage
+   * cannot block forever while staying long enough for any legitimate single-turn tool response.
+   */
+  private static final int DEFAULT_FORCED_READ_TIMEOUT_SECONDS = 300;
+
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformApiKey;
+
+  /**
+   * A RestClient builder with a bounded connect + read timeout for the low-level {@link
+   * AnthropicApi} forced-call client (RR-1180). Without this the client uses the JDK default (no
+   * read timeout), so a silent/stalled provider socket blocks {@code chatCompletionEntity} forever.
+   */
+  private static RestClient.Builder boundedRestClientBuilder(Integer readTimeoutSeconds) {
+    int readSeconds =
+        (readTimeoutSeconds != null && readTimeoutSeconds > 0)
+            ? readTimeoutSeconds
+            : DEFAULT_FORCED_READ_TIMEOUT_SECONDS;
+    HttpClient httpClient =
+        HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
+    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+    factory.setReadTimeout(Duration.ofSeconds(readSeconds));
+    return RestClient.builder().requestFactory(factory);
+  }
 
   /**
    * Force one Anthropic tool call. {@code apiKeyOverride} wins (BYOK) over the platform key.
@@ -98,6 +129,30 @@ public class AnthropicForcedToolClient {
       List<ToolCallback> tools,
       Integer maxTokens,
       String apiKeyOverride) {
+    return forcedToolCallOutcome(model, messages, tools, maxTokens, apiKeyOverride, null);
+  }
+
+  /**
+   * RR-1180 deadline-aware overload. The low-level {@link AnthropicApi} used here builds its OWN
+   * RestClient and does NOT inherit the application's 300s read-timeout customizer, so the previous
+   * {@code chatCompletionEntity} call could block indefinitely — a forced salvage / terminal
+   * finalizer could then spend past the worker's shutdown reserve and task wall clock. This binds a
+   * bounded HTTP read timeout to the physical client.
+   *
+   * <p><b>Honest limits.</b> A read timeout aborts a stalled/silent socket, which is the RR-1180
+   * hazard, but it is a fixed HTTP ceiling, not the worker's live remaining budget: the caller
+   * ({@code LlmRouter}, which is outside this file's ownership) does not yet forward {@code
+   * LlmRequest.readTimeoutSeconds} here, so {@code readTimeoutSeconds} is null in production and
+   * the {@link #DEFAULT_FORCED_READ_TIMEOUT_SECONDS} ceiling applies. Wiring the live deadline is a
+   * caller-side change tracked separately.
+   */
+  public ForcedToolCallOutcome forcedToolCallOutcome(
+      String model,
+      List<Message> messages,
+      List<ToolCallback> tools,
+      Integer maxTokens,
+      String apiKeyOverride,
+      Integer readTimeoutSeconds) {
     if (!canAttempt(messages, tools, apiKeyOverride)) {
       return new ForcedToolCallOutcome(null, false, null, false);
     }
@@ -183,7 +238,11 @@ public class AnthropicForcedToolClient {
               .toolChoice(new AnthropicApi.ToolChoiceAny())
               .build();
 
-      AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
+      AnthropicApi api =
+          AnthropicApi.builder()
+              .apiKey(key)
+              .restClientBuilder(boundedRestClientBuilder(readTimeoutSeconds))
+              .build();
       AnthropicApi.ChatCompletionResponse resp = api.chatCompletionEntity(req).getBody();
       if (resp == null || resp.content() == null) {
         return new ForcedToolCallOutcome(

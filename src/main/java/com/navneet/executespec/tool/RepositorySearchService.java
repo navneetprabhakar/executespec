@@ -1,6 +1,8 @@
 package com.navneet.executespec.tool;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -9,6 +11,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -18,8 +21,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -413,6 +419,12 @@ public class RepositorySearchService {
    * files through {@code --others}. A plain directory (tests, unpacked uploads, or a local-hands
    * workspace without Git metadata) uses the bounded tree-walk fallback above.
    */
+  /** Bound the git NUL-separated path listing so a huge repository cannot exhaust the heap. */
+  private static final int MAX_GIT_INVENTORY_BYTES = 32 * 1024 * 1024; // 32 MiB
+
+  /** Wall-clock ceiling for the inventory subprocess so a hung git cannot block a search thread. */
+  private static final Duration GIT_INVENTORY_TIMEOUT = Duration.ofSeconds(30);
+
   private static List<Path> gitInventory(Path root, Path searchRoot) {
     Process process = null;
     try {
@@ -428,9 +440,37 @@ public class RepositorySearchService {
                   "-z")
               .redirectErrorStream(false)
               .start();
-      byte[] output = process.getInputStream().readAllBytes();
-      if (process.waitFor() != 0) return null;
-      String listing = new String(output, StandardCharsets.UTF_8);
+      // RR-554: the NUL-separated (`-z`) listing has no newlines, so the line-oriented
+      // BoundedProcess would still allocate the whole blob before its char cap. Drain stdout into a
+      // byte-bounded buffer and stderr into a discard drain, both on separate threads, with the
+      // deadline started BEFORE the reads — the old shape read stdout to EOF then called an untimed
+      // waitFor(), so a hung or enormous ls-files pinned the search thread and grew the heap
+      // without
+      // limit. Destroy the whole tree on expiry.
+      ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+      Process proc = process;
+      Thread outDrain =
+          Thread.ofVirtual()
+              .name("repo-inventory-out")
+              .start(() -> drainBounded(proc.getInputStream(), buffer, MAX_GIT_INVENTORY_BYTES));
+      Thread errDrain =
+          Thread.ofVirtual()
+              .name("repo-inventory-err")
+              .start(() -> drainDiscard(proc.getErrorStream()));
+
+      boolean finished = process.waitFor(GIT_INVENTORY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      if (!finished) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        process.waitFor(5, TimeUnit.SECONDS);
+        joinDrainQuietly(outDrain);
+        joinDrainQuietly(errDrain);
+        return null;
+      }
+      joinDrainQuietly(outDrain);
+      joinDrainQuietly(errDrain);
+      if (process.exitValue() != 0) return null;
+      String listing = buffer.toString(StandardCharsets.UTF_8);
       List<Path> files = new ArrayList<>();
       for (String relativeName : listing.split("\\u0000")) {
         if (relativeName.isBlank()) continue;
@@ -448,6 +488,44 @@ public class RepositorySearchService {
     } catch (Exception ignored) {
       if (process != null) process.destroyForcibly();
       return null;
+    }
+  }
+
+  /**
+   * Drain a stream into a byte-bounded buffer, continuing to read past the cap so the pipe frees.
+   */
+  private static void drainBounded(InputStream in, ByteArrayOutputStream sink, int maxBytes) {
+    try {
+      byte[] buf = new byte[8192];
+      int n;
+      while ((n = in.read(buf)) != -1) {
+        int room = maxBytes - sink.size();
+        if (room > 0) {
+          sink.write(buf, 0, Math.min(n, room));
+        }
+      }
+    } catch (Exception ignored) {
+      // Expected when the tree is destroyed mid-read; whatever was captured stays valid.
+    }
+  }
+
+  /** Read a stream to EOF and discard — keeps a secondary pipe from blocking the child. */
+  private static void drainDiscard(InputStream in) {
+    try {
+      byte[] buf = new byte[8192];
+      while (in.read(buf) != -1) {
+        // discard
+      }
+    } catch (Exception ignored) {
+      // best-effort
+    }
+  }
+
+  private static void joinDrainQuietly(Thread drain) {
+    try {
+      drain.join(Duration.ofSeconds(5));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -492,13 +570,17 @@ public class RepositorySearchService {
 
   private static String gitSha(Path root) {
     try {
-      Process process =
+      // RR-554: bound the subprocess. rev-parse output is one short line, so BoundedProcess (which
+      // drains on a separate thread with a reachable deadline and a char cap) is the right reuse —
+      // the old shape read stdout to EOF then called an untimed waitFor().
+      ProcessBuilder pb =
           new ProcessBuilder("git", "-C", root.toString(), "rev-parse", "HEAD")
-              .redirectErrorStream(true)
-              .start();
-      String value =
-          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-      return process.waitFor() == 0 && !value.isBlank() ? value : "WORKTREE_ONLY";
+              .redirectErrorStream(true);
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(10));
+      String value = outcome.output().strip();
+      return outcome.finished() && outcome.exitCode() == 0 && !value.isBlank()
+          ? value
+          : "WORKTREE_ONLY";
     } catch (Exception ignored) {
       return "WORKTREE_ONLY";
     }
