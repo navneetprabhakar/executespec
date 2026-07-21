@@ -47,6 +47,16 @@ public class ManagedAiUsagePeriod {
   @Column(name = "ai_credits_used", nullable = false)
   private long aiCreditsUsed;
 
+  /**
+   * RR-1664 (V331) — tighten-only admission reservation. Incremented under the period row lock when
+   * a run is admitted, before the run can spend anything, so concurrent submissions at the last
+   * credit cannot each observe the same remaining allowance. Reconciled as {@code max(reserved,
+   * aiCreditsUsed)} on every later admission, so recorded usage subsumes stale reservations and a
+   * run that never spends does not permanently consume grant.
+   */
+  @Column(name = "reserved_ai_credits", nullable = false)
+  private long reservedAiCredits;
+
   @Column(name = "raw_cogs_cap_usd", nullable = false)
   private double rawCogsCapUsd;
 

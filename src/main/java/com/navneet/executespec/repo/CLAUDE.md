@@ -38,8 +38,22 @@ never offered to a destination chosen at push time.
 - **Credential-bearing git runs no repository-controlled code.** `GitProcessAuth` pins
   `core.hooksPath` to a path that cannot hold a hook, disables `fsmonitor` and the `ext::`
   transport, ignores system/global config and strips inherited `GIT_*`/`*ASKPASS` variables, so a
-  `pre-push` hook cannot read `GIT_AUTH_TOKEN` (RR-874). Repository config can still rewrite a push
-  URL via `url.<base>.insteadOf`; that remains the open host-binding item below.
+  `pre-push` hook cannot read `GIT_AUTH_TOKEN` (RR-874).
+- **The credential must reach the host we named.** No git switch ignores repository-local config
+  while operating inside that repository, so `url.<base>.insteadOf` / `pushInsteadOf` could silently
+  redirect an authenticated push to an attacker host (RR-1669). Every credential-bearing invocation
+  that resolves a remote URL — `push`, `fetch`, `pull`, `ls-remote`, `remote`, `submodule`,
+  `archive`; `clone` is exempt because no repository config exists yet — is now preceded by a
+  `git config --get-regexp ^url\.` read run under `GitProcessAuth`'s own hardened environment, so it
+  resolves exactly the rewrite set the real command would apply, including rules delivered through
+  `include.path` / `includeIf` (a `--local`-scoped read does not follow those; verified against git
+  2.50.1). Any hit **refuses** the invocation, with a count and never the attacker-chosen URL. This
+  is safe rather than restrictive because `.git/config` is not repository content — ExecuteSpec
+  creates it by cloning and no legitimate flow writes a `url.*` rule into a run workspace — so a
+  benign rewrite cannot arrive through a customer's tracked files. Callers that select the working
+  directory with `ProcessBuilder.directory` instead of `-C` must use the explicit-directory overload;
+  an invocation whose repository cannot be determined is refused. Residual: the scan is a pre-flight,
+  so a config write landing between the scan and process start is not covered.
 
 ## Credentials and HTTP
 

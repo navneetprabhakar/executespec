@@ -221,8 +221,11 @@ public class RunSyncService {
   private void runGit(Path dir, GitCredential credential, String... gitArgs) throws Exception {
     GitCredential cred = credential == null ? GitCredential.NONE : credential;
     ProcessBuilder pb =
+        // RR-1669: this caller selects the repository via ProcessBuilder.directory rather than a
+        // -C argument, so the directory must be passed explicitly or the authenticated fetch
+        // cannot be proven un-rewritten and is refused.
         com.navneet.executespec.repo.GitProcessAuth.git(
-            cred.present() ? cred.secret() : null, cred.username(), List.of(gitArgs));
+            cred.present() ? cred.secret() : null, cred.username(), dir, List.of(gitArgs));
     pb.directory(dir.toFile());
     pb.redirectErrorStream(true);
     ExecResult result = runBounded(pb);

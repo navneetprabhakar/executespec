@@ -37,8 +37,17 @@ class ManagedAiRoutingPolicy {
    * customer-purchasable allowance.
    */
   String recomputeState(ManagedAiUsagePeriod period) {
+    return recomputeState(period, 0L);
+  }
+
+  /**
+   * RR-1664: the same policy evaluated as if {@code additionalCredits} had already been debited.
+   * Run admission uses this so an in-flight reservation is visible to a concurrent admission
+   * decision, without persisting a routing state the recorded usage does not yet justify.
+   */
+  String recomputeState(ManagedAiUsagePeriod period, long additionalCredits) {
     long included = period.getIncludedAiCredits() + period.getPurchasedAiCredits();
-    long usedCredits = period.getAiCreditsUsed();
+    long usedCredits = period.getAiCreditsUsed() + Math.max(0L, additionalCredits);
     if (included > 0 && usedCredits >= included) return EXHAUSTED;
     double hardRaw =
         period.getHardStopAfterRawUsd() > 0
