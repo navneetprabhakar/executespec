@@ -217,15 +217,15 @@ public class WorkspaceFileService {
 
     String pat = resolveGitHubPat(run);
     log.debug("[WorkspaceFileService] Reading {} from GitHub for run {}", relativePath, runId);
-    String content = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, pat);
+    var result = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, pat);
 
-    // If the GitHub response starts with "// " it's an error message from the service
-    if (content.startsWith("// File not found")
-        || content.startsWith("// No GitHub PAT")
-        || content.startsWith("// Invalid repo URL")) {
+    // RR-1631 — failure is out-of-band. Previously a transport failure returned its message AS the
+    // file content ("// Error reading file from GitHub: …"), which then flowed into model context;
+    // and a real source file whose first line was "// File not found…" would 404. Neither now.
+    if (!result.successful()) {
       throw new NoSuchFileException(relativePath);
     }
-    return content;
+    return result.content();
   }
 
   /**

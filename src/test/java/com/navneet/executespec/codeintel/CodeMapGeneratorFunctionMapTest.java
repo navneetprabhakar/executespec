@@ -225,10 +225,13 @@ class CodeMapGeneratorFunctionMapTest {
 
     lenient()
         .when(gh.readRepoFile(any(), eq("src/services/user.service.ts"), any(), any()))
-        .thenReturn("export const getUser = async (): Promise<User> => null;");
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                "export const getUser = async (): Promise<User> => null;"));
     lenient()
         .when(gh.readRepoFile(any(), eq("src/components/Button.tsx"), any(), any()))
-        .thenReturn("export function Button() { return null; }");
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success("export function Button() { return null; }"));
     // Test/vendor/dist files: even if accidentally read, we shouldn't hit the wire — but stub
     // them to throw so a regression that scans them blows up obviously.
     lenient()
@@ -267,7 +270,7 @@ class CodeMapGeneratorFunctionMapTest {
             .toList();
     lenient()
         .when(gh.readRepoFile(any(), any(), any(), any()))
-        .thenReturn("export function fn() { return 1; }");
+        .thenReturn(GitHubRepoService.RepoFileResult.success("export function fn() { return 1; }"));
 
     Map<String, List<String>> out = gen.scanFunctions("owner/repo", "main", files, "pat");
     assertEquals(CodeMapGenerator.MAX_FUNCTION_FILES, out.size());
@@ -292,7 +295,7 @@ class CodeMapGeneratorFunctionMapTest {
 
     lenient()
         .when(gh.readRepoFile(any(), eq("src/many.ts"), any(), any()))
-        .thenReturn(content.toString());
+        .thenReturn(GitHubRepoService.RepoFileResult.success(content.toString()));
 
     Map<String, List<String>> out =
         gen.scanFunctions("owner/repo", "main", List.of("src/many.ts"), "pat");
@@ -313,7 +316,9 @@ class CodeMapGeneratorFunctionMapTest {
         .thenReturn(List.of("src/services/user.service.ts", "package.json", "README.md"));
     lenient()
         .when(gh.readRepoFile(any(), eq("src/services/user.service.ts"), any(), any()))
-        .thenReturn("export const getUser = (): void => null;\nexport function listUsers() {}");
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                "export const getUser = (): void => null;\nexport function listUsers() {}"));
 
     String md = gen.generate("owner/repo", "main", "pat");
 
