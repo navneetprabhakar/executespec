@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 /**
  * RR-518 — durable, unique delivery claim for a billing reminder. One row per {@code (subscription,
  * billing-period, reminder-type, stage, channel)}; the unique index {@code
- * ux_billing_reminder_dispatch_once} (V332) makes the insert the atomic winner so each reminder
+ * ux_billing_reminder_dispatch_once} (V335) makes the insert the atomic winner so each reminder
  * stage is delivered exactly once per billing period regardless of how often the daily schedule (or
  * how many replicas) revisit the subscription.
  */
