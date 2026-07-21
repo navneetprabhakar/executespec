@@ -17,7 +17,9 @@ public class StubAnonymousRunDispatcher implements AnonymousRunDispatcher {
   @Override
   public AnonymousRunSession dispatch(AnonymousRunSession session) {
     log.info(
-        "v3 anon-run stub-dispatch token={} specLen={}", session.token(), session.spec().length());
+        "v3 anon-run stub-dispatch session={} specLen={}",
+        AnonymousRunSessionStore.fingerprint(session.token()),
+        session.spec().length());
     return session.withStatus("STUB_COMPLETE", "Sign up to ship a real run with this spec.");
   }
 }

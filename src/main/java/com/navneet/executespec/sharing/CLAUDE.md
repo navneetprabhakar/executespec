@@ -11,6 +11,24 @@
 > or SUPER_ADMIN only) on `ProjectInviteService.createInvite`. PROJECT_ADMIN
 > on its own is no longer enough — adding outsiders is an org-level decision.
 > Flag is toggled via `PUT /api/org/me/settings/external-sharing`.
+>
+> **RR-973 (2026-07-21) — the HOST org decides, not the inviter's.**
+> `assertCanInvite` accepted `projectId` and never read it: role, flag and
+> entitlement all came from the inviter's own home org. An external
+> collaborator who administered their own paid, sharing-enabled org could
+> therefore invite arbitrary outsiders (up to PROJECT_ADMIN) into another
+> tenant's project — project write access got them past `ProjectAccessGuard`
+> and nothing afterwards consulted the host. All three gates now resolve the
+> project first and evaluate the org that OWNS it: ORG_ADMIN **in the host
+> org** (or SUPER_ADMIN), the **host** org's `external_sharing_enabled`, and
+> the **host** org's tier (with the proven host admin's own paid tier as a
+> floor, so a personal org still carrying its signup-time FREE tier isn't
+> locked out). `project_invite.invited_org_id` now stores the host org, which
+> is what V175's own column comment always intended, and `accept` re-consults
+> the host org's flag so a standing grant minted under the old rule cannot
+> complete. **Customer-visible:** external project writers, and org admins of
+> some *other* org, lose the ability to invite into a host project; only
+> host-org admins (and SUPER_ADMIN) can.
 
 ## Files
 
@@ -18,7 +36,7 @@
 - `entity/ProjectShareLink.java` — public read-only link with `Surface` enum (PROJECT_OVERVIEW / RUN_DETAIL / CODE_REVIEW / PR_REVIEW / VALIDATION_REPORT / ARCHITECTURE_DOC) + scope id, bounded expiry, aggregate view counter and revocation. V287 stores only SHA-256(token) + an eight-character display prefix; plaintext is returned once on create and never reloadable.
 - `entity/ProjectShareLinkAudit.java` — V287 append-only CREATE / ACCESS / DENIED / REVOKE fact with keyed hashes of IP/user-agent, never raw request identifiers.
 - `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`, `ProjectShareLinkAuditRepository.java`.
-- `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite). **RL-2026-05-066:** `createInvite` ALSO writes an in-app `Notification` (`InAppNotificationService.create`, type `PROJECT_INVITE`, link `/invites/accept?token=…`) when the invitee already has an account — best-effort, never fails the invite. The email link is `{appBaseUrl}/invites/accept?token=…`; the matching SPA route was missing (only `/accept-invite`, the org-invite path, existed) so the magic link dead-ended and the invitee never became a `ProjectMember` — fixed by adding the `/invites/accept` route in `frontend/src/App.tsx` (`AcceptInvitePage` now takes a `kind: 'org' | 'project'` prop so the two flows call their own accept endpoint: org → `/api/org/accept-invite`, project → `/api/invites/accept`).
+- `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Host-org-gated per RR-973 above; tier-gated to a paid tier for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite). **RL-2026-05-066:** `createInvite` ALSO writes an in-app `Notification` (`InAppNotificationService.create`, type `PROJECT_INVITE`, link `/invites/accept?token=…`) when the invitee already has an account — best-effort, never fails the invite. The email link is `{appBaseUrl}/invites/accept?token=…`; the matching SPA route was missing (only `/accept-invite`, the org-invite path, existed) so the magic link dead-ended and the invitee never became a `ProjectMember` — fixed by adding the `/invites/accept` route in `frontend/src/App.tsx` (`AcceptInvitePage` now takes a `kind: 'org' | 'project'` prop so the two flows call their own accept endpoint: org → `/api/org/accept-invite`, project → `/api/invites/accept`).
 - `service/ProjectShareLinkService.java` — link lifecycle (create / digest lookup / revoke / atomic view-counter / audit). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited). New expiry defaults to 7 days and is bounded to 1..90 days. Finite-cap admission takes the existing project-row pessimistic lock before count + insert, so concurrent nodes cannot each observe `cap-1` and over-allocate links.
 - `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api/projects.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected management endpoints (create/list/revoke/latest-100 audit). List responses expose only the token prefix; the full bearer appears in the create response once.
