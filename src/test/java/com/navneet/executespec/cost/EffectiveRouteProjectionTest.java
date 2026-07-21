@@ -105,4 +105,48 @@ class EffectiveRouteProjectionTest {
 
     assertThat(EffectiveRouteProjection.UNATTRIBUTED.divergesFrom("deepseek", "d1")).isFalse();
   }
+
+  /**
+   * RR-1560 — {@code RunStepUsageRecorder} writes the literal {@code "unknown"} when neither the
+   * caller nor the provider response named a provider/model. That is an ABSENCE marker. Admitting
+   * it produced Attribution.LEDGER for a provider called {@code unknown}, i.e. a sentinel laundered
+   * into ledger-grade proof, and made divergence fire against every real requested provider.
+   */
+  @Test
+  void theRecorderUnknownSentinelIsTreatedAsAbsenceNotAsAProvenRoute() {
+    var projection = EffectiveRouteProjection.from(List.of(row("unknown", "unknown", "SUCCESS")));
+
+    assertThat(projection.attribution())
+        .isEqualTo(EffectiveRouteProjection.Attribution.UNATTRIBUTED);
+    assertThat(projection.provider()).isNull();
+    assertThat(projection.model()).isNull();
+    assertThat(projection.divergesFrom("deepseek", "deepseek-v4-pro-native")).isFalse();
+    assertThat(projection.divergesFromRequestedRoute("deepseek", "deepseek-v4-pro-native"))
+        .isFalse();
+  }
+
+  @Test
+  void aSentinelRowDoesNotMakeAnOtherwiseSingleRouteRunLookMixed() {
+    var projection =
+        EffectiveRouteProjection.from(
+            List.of(
+                row("anthropic", "claude-sonnet-5", "SUCCESS"),
+                row("unknown", "unknown", "SUCCESS")));
+
+    assertThat(projection.attribution()).isEqualTo(EffectiveRouteProjection.Attribution.LEDGER);
+    assertThat(projection.provider()).isEqualTo("anthropic");
+  }
+
+  @Test
+  void aHalfSentinelRowIsAlsoNotAdmitted() {
+    // A named provider with an unknown model cannot prove a route either.
+    assertThat(
+            EffectiveRouteProjection.from(List.of(row("anthropic", "unknown", "SUCCESS")))
+                .attribution())
+        .isEqualTo(EffectiveRouteProjection.Attribution.UNATTRIBUTED);
+    assertThat(
+            EffectiveRouteProjection.from(List.of(row("UNKNOWN", "claude-sonnet-5", "SUCCESS")))
+                .attribution())
+        .isEqualTo(EffectiveRouteProjection.Attribution.UNATTRIBUTED);
+  }
 }
