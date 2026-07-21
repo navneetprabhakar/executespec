@@ -1,5 +1,6 @@
 package com.navneet.executespec.compliance;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -7,12 +8,12 @@ import java.util.List;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
+import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -61,10 +62,24 @@ public class DataRetentionService {
    */
   private static final int ARCHIVED_RUN_PURGE_DAYS = 90;
 
+  /**
+   * RR-090 — how long erasure waits for a user's just-cancelled live runs to reach a terminal
+   * status before recording a durable retry obligation. {@code cancel()} flips the run to {@code
+   * CANCELLED} synchronously, so this is a safety margin for a run that raced in or a cancel that
+   * threw, not the common path.
+   */
+  private static final Duration ERASURE_SETTLE_TIMEOUT = Duration.ofSeconds(10);
+
+  /** Poll interval while waiting for cancelled runs to terminalise. */
+  private static final long ERASURE_SETTLE_POLL_MILLIS = 500;
+
   private final PipelineRunRepository runRepository;
   private final ProjectRepository projectRepository;
   private final TierConfigRepository tierConfigRepository;
   private final MeterRegistry meterRegistry;
+  private final RunLifecycleService runLifecycleService;
+  private final PendingErasureObligationRepository obligationRepository;
+  private final ErasureObligationStore obligationStore;
 
   @Scheduled(cron = "0 0 3 * * *") // 03:00 daily — low-traffic window
   public void runRetentionSweep() {
@@ -78,46 +93,110 @@ public class DataRetentionService {
     // accumulated forever. The methods below close the loop.
     hardDeleteTombstonedProjects();
     hardDeleteArchivedRuns();
+    // RR-090: finish any GDPR erasure that could not confirm every live run terminal on the first
+    // pass. The obligation is the durable "not done yet" marker; this is where it gets retried.
+    retryPendingErasures();
     log.info("[DataRetention] Retention sweep complete");
   }
 
   /**
-   * Soft-deletes the user's TERMINAL runs (GDPR right-to-erasure).
+   * RR-090 — re-attempts every open erasure obligation. Each retry runs the full {@link
+   * #eraseUserData} flow again: it re-cancels any still-live run (by now usually already terminal),
+   * tombstones the newly terminal rows, and clears the obligation once no live run remains. An
+   * obligation therefore cannot linger indefinitely — every daily sweep drives it toward
+   * completion.
+   */
+  private void retryPendingErasures() {
+    List<PendingErasureObligation> pending = obligationRepository.findAllByOrderByRequestedAtAsc();
+    if (pending.isEmpty()) return;
+    log.info("[DataRetention] Retrying {} pending GDPR erasure obligation(s)", pending.size());
+    for (PendingErasureObligation obligation : pending) {
+      try {
+        eraseUserData(obligation.getUserId());
+      } catch (Exception e) {
+        log.warn(
+            "[DataRetention] Pending GDPR erasure retry failed for user {} (attempt {}): {}",
+            obligation.getUserId(),
+            obligation.getAttempts(),
+            e.getMessage());
+      }
+    }
+  }
+
+  /**
+   * Settles then erases a user's runs (GDPR / Article-17 right-to-erasure).
    *
-   * <p>RR-090 (2026-07-21): the underlying query used to be a denylist naming only obsolete status
-   * spellings, so a live {@code QUEUED} / {@code AWAITING_APPROVAL} / {@code APPROVAL_RESUMING} /
-   * {@code WORKING} / {@code REVIEWING} run was tombstoned while its worker kept spending and
-   * writing, and {@link #hardDeleteGracedRuns()} could then delete the row seven days later. It is
-   * now a terminal-status allowlist: anything not positively proven finished is REFUSED, not
-   * guessed at.
+   * <p>RR-090 (2026-07-21) — this used to merely SKIP live runs and log "erasure INCOMPLETE",
+   * leaving the obligation unmet with no follow-up. It now actually completes:
    *
-   * <p>This method deliberately does not cancel live runs. Cancellation is a same-JVM operation
-   * owned by the run orchestrator (it must signal the plan gate, interrupt the pipeline future and
-   * close opened PRs); reaching into it from a scheduled compliance service would be a best-effort
-   * call that could report success without stopping anything. Instead the residual count is
-   * returned and logged so erasure is visibly INCOMPLETE rather than silently partial, and the next
-   * sweep picks the runs up once they terminalise.
+   * <ol>
+   *   <li><b>Cancel first.</b> Every one of the user's live (non-terminal) runs is settled through
+   *       the real cancellation path, {@link RunLifecycleService#cancel(String)} — which atomically
+   *       flips the run to {@code CANCELLED}, signals the plan gate, interrupts the pipeline future
+   *       and closes opened PRs. This is not a status hack; it is the same operation the cancel
+   *       endpoint uses.
+   *   <li><b>Wait bounded.</b> {@link #awaitTerminal(String)} then confirms the runs have reached a
+   *       terminal status, up to {@link #ERASURE_SETTLE_TIMEOUT}. Because {@code cancel()} is
+   *       synchronous this is usually immediate.
+   *   <li><b>Erase.</b> Terminal rows (now including the just-cancelled ones) are tombstoned via
+   *       the terminal-status allowlist, so nothing live is tombstoned out from under an active
+   *       worker.
+   *   <li><b>Track the remainder.</b> If any run still cannot be confirmed terminal within the
+   *       bound, a durable {@link PendingErasureObligation} is recorded so the daily sweep retries
+   *       it ({@link #retryPendingErasures()}) — the incompleteness is a tracked, retryable state,
+   *       not a dropped log line. When nothing remains live, any prior obligation is cleared.
+   * </ol>
    *
    * @param userId user requesting erasure
-   * @return outcome carrying both the tombstoned count and the live runs erasure refused to touch
+   * @return outcome carrying the tombstoned count and any runs still live after the settle window
    */
-  @Transactional
   public ErasureResult eraseUserData(String userId) {
-    int deleted =
-        runRepository.softDeleteTerminalByUserId(
-            userId, Instant.now(), PipelineRunRepository.TERMINAL_STATUSES);
-    long stillLive =
-        runRepository.countNonTerminalByUserId(userId, PipelineRunRepository.TERMINAL_STATUSES);
-    log.info(
-        "[DataRetention] GDPR erasure: soft-deleted {} terminal runs for user {}", deleted, userId);
-    if (stillLive > 0) {
-      log.warn(
-          "[DataRetention] GDPR erasure INCOMPLETE for user {}: {} run(s) are still live and were"
-              + " NOT tombstoned. They must terminalise (or be cancelled) before erasure covers"
-              + " them.",
-          userId,
-          stillLive);
+    // 1. Settle live runs through the real cancellation path before erasing anything.
+    List<PipelineRun> live =
+        runRepository.findNonTerminalByUserId(userId, PipelineRunRepository.TERMINAL_STATUSES);
+    int cancelled = 0;
+    for (PipelineRun run : live) {
+      try {
+        if (runLifecycleService.cancel(run.getRunId())) {
+          cancelled++;
+        }
+      } catch (Exception e) {
+        log.warn(
+            "[DataRetention] GDPR erasure: cancel failed for run {} (user {}): {}",
+            run.getRunId(),
+            userId,
+            e.getMessage());
+      }
     }
+
+    // 2. Wait bounded for the cancelled runs to terminalise.
+    long stillLive = awaitTerminal(userId);
+
+    // 3. Tombstone the terminal rows (includes the runs cancelled in step 1).
+    int deleted = obligationStore.softDeleteTerminal(userId);
+
+    // 4. Record or clear the durable obligation so incompleteness is retried, not dropped.
+    if (stillLive > 0) {
+      obligationStore.recordObligation(
+          userId, stillLive, "runs did not terminalise within the settle window");
+      log.warn(
+          "[DataRetention] GDPR erasure INCOMPLETE for user {}: cancelled {} run(s), tombstoned {}"
+              + " terminal run(s), but {} run(s) are still live. A durable erasure obligation was"
+              + " recorded and will be retried by the daily sweep.",
+          userId,
+          cancelled,
+          deleted,
+          stillLive);
+    } else {
+      obligationStore.clearObligation(userId);
+      log.info(
+          "[DataRetention] GDPR erasure complete for user {}: cancelled {} live run(s), tombstoned"
+              + " {} terminal run(s).",
+          userId,
+          cancelled,
+          deleted);
+    }
+
     Counter.builder("executespec.data.retention.deleted_runs")
         .tag("trigger", "GDPR")
         .register(meterRegistry)
@@ -126,10 +205,34 @@ public class DataRetentionService {
   }
 
   /**
+   * RR-090 — waits up to {@link #ERASURE_SETTLE_TIMEOUT} for the user's runs to reach a terminal
+   * status, polling the non-terminal count. Returns the count still live when the wait ends (0 on
+   * the happy path). This runs OUTSIDE any transaction so the poll sleeps never hold a DB
+   * connection open.
+   */
+  private long awaitTerminal(String userId) {
+    long remaining =
+        runRepository.countNonTerminalByUserId(userId, PipelineRunRepository.TERMINAL_STATUSES);
+    long deadline = System.nanoTime() + ERASURE_SETTLE_TIMEOUT.toNanos();
+    while (remaining > 0 && System.nanoTime() < deadline) {
+      try {
+        Thread.sleep(ERASURE_SETTLE_POLL_MILLIS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        break;
+      }
+      remaining =
+          runRepository.countNonTerminalByUserId(userId, PipelineRunRepository.TERMINAL_STATUSES);
+    }
+    return remaining;
+  }
+
+  /**
    * Outcome of a GDPR erasure pass.
    *
    * @param runsSoftDeleted terminal runs tombstoned by this pass
-   * @param liveRunsSkipped non-terminal runs erasure refused to tombstone (RR-090)
+   * @param liveRunsSkipped non-terminal runs still live after the bounded settle window (RR-090);
+   *     when non-zero a durable {@link PendingErasureObligation} is recorded for retry
    */
   public record ErasureResult(int runsSoftDeleted, long liveRunsSkipped) {}
 

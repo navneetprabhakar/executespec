@@ -479,6 +479,17 @@ public interface PipelineRunRepository
       @Param("userId") String userId, @Param("terminalStatuses") List<String> terminalStatuses);
 
   /**
+   * RR-090 — a user's live (non-terminal) runs. GDPR erasure settles each one through the real
+   * cancellation path BEFORE tombstoning terminal rows, so no live run is left un-erased and none
+   * is tombstoned out from under an active worker.
+   */
+  @Query(
+      "SELECT r FROM PipelineRun r WHERE r.createdByUserId = :userId "
+          + "AND r.deletedAt IS NULL AND r.status NOT IN :terminalStatuses")
+  List<PipelineRun> findNonTerminalByUserId(
+      @Param("userId") String userId, @Param("terminalStatuses") List<String> terminalStatuses);
+
+  /**
    * V183 (2026-05-08) — find an active patch-mode run already dispatched for a finding. Used by
    * {@code FindingPatchSubmitter} to dedupe: if a finding has a non-terminal run, the submit
    * endpoint returns it instead of dispatching a duplicate (saves credits + prevents double-PRs on
