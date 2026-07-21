@@ -56,6 +56,10 @@ import lombok.extern.slf4j.Slf4j;
  * the {@code spec.chat.enabled} flag is ON (V229, default OFF); when OFF the endpoint returns an
  * explicit not-enabled {@code done} event so the default pipeline is byte-identical.
  *
+ * <p>The enabled loop is dispatched through {@link SpecChatTurnDispatcher} — bounded globally and
+ * per user — instead of running on the servlet thread, so provider latency cannot consume the HTTP
+ * worker pool. Over-ceiling turns are rejected with HTTP 429 before any emitter is streamed.
+ *
  * <p>RL-2026-05-052.
  */
 @RestController
@@ -73,6 +77,13 @@ public class SpecChatController {
   private final InputSanitizer inputSanitizer;
   private final ContextSanitizer contextSanitizer;
   private final ChatSecurityAuditService chatSecurityAuditService;
+  private final SpecChatTurnDispatcher turnDispatcher;
+
+  /**
+   * Hard ceiling on one compatibility chat turn. The old emitter had no timeout at all, so a wedged
+   * provider call held the response open indefinitely.
+   */
+  static final long TURN_TIMEOUT_MS = 10 * 60 * 1000L;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
@@ -161,7 +172,7 @@ public class SpecChatController {
         audit.getTurnCount(),
         ipHash);
 
-    SseEmitter emitter = new SseEmitter(0L);
+    SseEmitter emitter = new SseEmitter(TURN_TIMEOUT_MS);
 
     // Flag OFF (default) → explicit not-enabled response; the real loop never runs, so the default
     // pipeline is byte-identical. The audit row above is still written (an unenabled session
@@ -185,11 +196,42 @@ public class SpecChatController {
       return emitter;
     }
 
-    // Flag ON → run the real agentic loop. Phase 1 runs it inline in the request thread (the
-    // feature
-    // is flag-gated); SpecChatService documents the async-before-prod requirement.
+    // Flag ON → run the real agentic loop OFF the servlet thread. The loop performs multiple
+    // provider rounds plus outbound web calls; running it inline pinned one Tomcat worker (and its
+    // connection) for that entire duration, so a handful of slow turns could exhaust the web tier
+    // and block auth/billing/run-control. Admission is bounded per user and per JVM.
+    final SpecChatRequest turnRequest = request;
+    boolean admitted =
+        turnDispatcher.submit(
+            userId,
+            request.sessionId(),
+            () ->
+                runTurnOffRequestThread(
+                    emitter,
+                    turnRequest,
+                    userDetails,
+                    userId,
+                    orgId,
+                    effectiveProvider,
+                    audit.getId()));
+    if (!admitted) {
+      throw new ResponseStatusException(
+          HttpStatus.TOO_MANY_REQUESTS,
+          "too many concurrent chat turns — wait for the current turn to finish");
+    }
+    return emitter;
+  }
+
+  private void runTurnOffRequestThread(
+      SseEmitter emitter,
+      SpecChatRequest request,
+      AppUserDetails userDetails,
+      String userId,
+      String orgId,
+      String effectiveProvider,
+      String auditId) {
     try {
-      emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", audit.getId())));
+      emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", auditId)));
       // Emit the same typed route evidence used by the v2 agent-session endpoint. This keeps the
       // compatibility path observable without granting the legacy chat loop any new authority:
       // the route classifier can only propose a route, while existing chat tools still enforce
@@ -205,14 +247,19 @@ public class SpecChatController {
           effectiveProvider);
       emitter.complete();
     } catch (Exception e) {
+      // A client disconnect surfaces here as an IO failure from the sink and stops the loop, which
+      // is the intended cancellation: no further provider round is started for a gone caller.
       log.warn(
           "spec-chat turn failed (session {}, user {}): {}",
           request.sessionId(),
           userId,
           contextSanitizer.sanitizeException(e));
-      emitter.completeWithError(e);
+      try {
+        emitter.completeWithError(e);
+      } catch (RuntimeException ignored) {
+        log.debug("spec-chat emitter already closed for session {}", request.sessionId());
+      }
     }
-    return emitter;
   }
 
   private void emitRouteDecision(
