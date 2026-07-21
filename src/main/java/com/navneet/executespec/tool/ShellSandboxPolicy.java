@@ -202,9 +202,14 @@ public class ShellSandboxPolicy {
           Pattern.compile("\\bsed\\b[^|;&\\n]*--in-place"), // sed --in-place
           Pattern.compile("\\bawk\\b[^|;&\\n]*-i\\s+inplace")); // gawk -i inplace
 
-  // Docker subcommands that are safe — all others are blocked
+  // Docker subcommands that are safe — all others are blocked.
+  // 2026-07-20 (RR-120) — `compose` was REMOVED. Scanning the command line for dangerous strings
+  // cannot see a generated compose file that declares `privileged: true`, host PID/network, or a
+  // bind mount of `/` or the Docker socket: none of those values appears in `docker compose up`.
+  // Where the app user can reach the daemon that is host-root-equivalent control. Compose-based
+  // preview/deploy paths are server-owned and do not route through this worker policy.
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =
-      Set.of("build", "compose", "ps", "logs", "images", "inspect");
+      Set.of("build", "ps", "logs", "images", "inspect");
 
   // Commands explicitly allowed (exact first token match)
   private static final Set<String> ALLOWED_PREFIXES =
@@ -288,31 +293,31 @@ public class ShellSandboxPolicy {
           "wget", // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload,
           // exfil) are caught by BLOCKED_PATTERNS
 
-          // 2026-05-07 — chmod was previously left out as "chains unknown binaries". In
-          // practice every binary the worker can chain is already in this allowlist (gcc,
-          // cargo, go, mvn, etc.), and forbidding chmod blocks the legitimate `chmod +x
-          // compile.sh && ./compile.sh` that ProgramBench tasks need to verify their build
-          // before declaring done. With chmod blocked, every cmatrix run on 2026-05-07
-          // stagnated because the worker could not validate its own compile script. The
-          // dangerous variants (`chmod -R 777 /`, chmod against /etc, /usr, /var, /root,
-          // etc.) are caught by BLOCKED_COMMANDS + the chmod-system-path BLOCKED_PATTERN
-          // entry above, so widening the allowlist with chmod does not widen the abuse
-          // surface in any meaningful way — within workspace it can only flip permission
-          // bits on files the worker already owns; in cleanroom + --network none, even
-          // dangerous chmod has no exfiltration path.
+          // 2026-05-07 — chmod is needed for the legitimate `chmod +x compile.sh` that
+          // ProgramBench tasks use to verify their build. Dangerous variants (`chmod -R 777 /`,
+          // chmod against /etc, /usr, /root, …) are caught by BLOCKED_COMMANDS + the
+          // chmod-system-path BLOCKED_PATTERN above; within the workspace it can only flip
+          // permission bits on files the worker already owns.
           "chmod",
 
-          // 2026-07-20 (RR-1545) — toolchain binaries that ExecuteSpec's OWN command detection
-          // emits but the allowlist rejected, making testProject / installDependencies /
-          // lintProject / formatProject permanently FORBIDDEN for Gradle-wrapper, Ruff and Go
-          // projects while blaming "the sandbox" rather than an unsupported toolchain.
-          //   `gradlew` — the wrapper form of the already-allowed `gradle`; identical risk model
-          //               (a Gradle build script executes arbitrary code either way).
-          //   `ruff`    — Python lint/format only; no network, no process spawning.
-          //   `gofmt`   — Go source formatter shipped with the already-allowed `go` toolchain.
+          // 2026-07-20 (RR-1545) — toolchain binaries ExecuteSpec's OWN command detection emits
+          // but the allowlist rejected, making testProject / installDependencies / lintProject /
+          // formatProject permanently FORBIDDEN for Gradle-wrapper, Ruff and Go projects.
+          // `gradlew` is the wrapper form of the already-allowed `gradle` (identical risk model:
+          // a Gradle build script executes arbitrary code either way); `ruff` is lint/format
+          // only; `gofmt` ships with the already-allowed `go` toolchain.
           "gradlew",
           "ruff",
-          "gofmt");
+          "gofmt",
+
+          // 2026-07-20 (RR-281) — `buildProject` now validates its resolved build command through
+          // this policy. `BuildCommandResolver`'s no-op fallback is literally `true`, so the two
+          // shell no-ops must be nameable or every marker-less workspace would fail its smoke.
+          // `printf` joins the already-allowed `echo` for the same reason and with the same risk.
+          "mvnw",
+          "true",
+          "false",
+          "printf");
 
   /** Matches $(...) subshell syntax. */
   private static final Pattern SUBSHELL_PATTERN = Pattern.compile("\\$\\(");
@@ -407,7 +412,7 @@ public class ShellSandboxPolicy {
       String seg = segment.trim();
       if (seg.isEmpty()) continue;
 
-      ValidationResult segResult = validateSegment(seg, trimmed, effective);
+      ValidationResult segResult = validateSegment(seg, trimmed, effective, workspacePath);
       if (!segResult.permitted()) return segResult;
     }
 
@@ -484,14 +489,21 @@ public class ShellSandboxPolicy {
 
   /** Validates a single command segment (after splitting on chain operators). */
   private ValidationResult validateSegment(
-      String segment, String originalCommand, GuardrailLevel level) {
-    String[] tokens = segment.split("\\s+");
-    String firstToken = tokens[0];
+      String segment, String originalCommand, GuardrailLevel level, String workspacePath) {
+    String[] tokens = segment.trim().split("\\s+");
 
-    // Strip path prefix (e.g. /usr/bin/mvn → mvn)
-    if (firstToken.contains("/")) {
-      firstToken = firstToken.substring(firstToken.lastIndexOf('/') + 1);
+    // 2026-07-20 (RR-833) — resolve the EXECUTABLE ORIGIN, not just the basename. The old code
+    // stripped every directory prefix and authorized the remainder, so `./git` / `/tmp/npm`
+    // (files the worker had just written) validated as the canonical allowlisted tool while
+    // /bin/sh executed the worker's file. Path-qualified commands are now refused unless they
+    // live in a trusted system executable directory or are a governed workspace build wrapper.
+    ShellCommandConfinement.CommandOrigin origin =
+        ShellCommandConfinement.resolveCommandName(tokens[0]);
+    if (origin.isRejected()) {
+      log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], originalCommand);
+      return ValidationResult.block(origin.rejection());
     }
+    String firstToken = origin.commandName();
 
     if (!ALLOWED_PREFIXES.contains(firstToken)) {
       log.warn(
@@ -500,6 +512,17 @@ public class ShellSandboxPolicy {
           originalCommand);
       return ValidationResult.block(
           "Chained command '" + firstToken + "' is not in the allowed command list");
+    }
+
+    // 2026-07-20 (RR-118) — the policy previously ignored `workspacePath` entirely, so allowed
+    // tools accepted arbitrary absolute paths (`cat /proc/self/environ`, `find / -maxdepth 2`).
+    // Confine unquoted absolute / `~/` arguments to the run workspace plus a small allowlist of
+    // scratch, device, container and toolchain roots. This is textual inspection only — see
+    // ShellCommandConfinement's javadoc for what it cannot see.
+    String unconfined = ShellCommandConfinement.rejectUnconfinedAbsolutePath(tokens, workspacePath);
+    if (unconfined != null) {
+      log.warn("SHELL BLOCKED (workspace confinement): {}", originalCommand);
+      return ValidationResult.block(unconfined);
     }
 
     // 2026-05-02 — dependency-install security enforcement (MEDIUM+).
@@ -548,7 +571,7 @@ public class ShellSandboxPolicy {
     return switch (firstToken) {
       case "npm" -> ShellGuardrailVerbs.NPM;
       case "npx" -> ShellGuardrailVerbs.NPX;
-      case "mvn" -> ShellGuardrailVerbs.MVN;
+      case "mvn", "mvnw" -> ShellGuardrailVerbs.MVN;
       case "gradle", "gradlew" -> ShellGuardrailVerbs.GRADLE;
       case "ruff" -> ShellGuardrailVerbs.RUFF;
       case "expo" -> ShellGuardrailVerbs.EXPO;
