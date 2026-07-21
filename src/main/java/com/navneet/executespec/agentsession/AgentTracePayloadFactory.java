@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 @Component
 class AgentTracePayloadFactory {
 
+  /** Compatibility overload for traces produced without any classifier call. */
   Map<String, Object> build(
       OrchestratorTurnResponse response,
       AgentSession session,
@@ -24,6 +25,38 @@ class AgentTracePayloadFactory {
       boolean calledRunApi,
       String createdRunId,
       String deterministicRule) {
+    return build(
+        response,
+        session,
+        surface,
+        clientVersion,
+        message,
+        calledRunApi,
+        createdRunId,
+        deterministicRule,
+        AgentIntentService.RouteAttribution.deterministic(false));
+  }
+
+  /**
+   * @param attribution which engine actually decided this route. It must reflect the real classify
+   *     path: this trace is reconciled against {@code run_step_usage}, so hardcoding
+   *     "deterministic" for a paid classifier decision produces evidence that contradicts the usage
+   *     ledger.
+   */
+  Map<String, Object> build(
+      OrchestratorTurnResponse response,
+      AgentSession session,
+      String surface,
+      String clientVersion,
+      String message,
+      boolean calledRunApi,
+      String createdRunId,
+      String deterministicRule,
+      AgentIntentService.RouteAttribution attribution) {
+    AgentIntentService.RouteAttribution route =
+        attribution == null
+            ? AgentIntentService.RouteAttribution.deterministic(false)
+            : attribution;
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("response", response);
     payload.put("traceId", response.traceId());
@@ -41,12 +74,16 @@ class AgentTracePayloadFactory {
     payload.put("runApiAllowed", response.policy().runApiAllowed());
     payload.put("calledRunApi", calledRunApi);
     payload.put("createdRunId", createdRunId);
-    payload.put("modelProvider", "deterministic");
-    payload.put("model", "none");
-    payload.put("promptId", "orchestrator-deterministic-pre-router");
+    payload.put("modelProvider", route.modelProvider());
+    payload.put("model", route.model());
+    payload.put("promptId", route.promptId());
     payload.put("promptVersion", OrchestratorRoutingPromptCatalog.PROMPT_VERSION);
+    payload.put("classifierAttempted", route.classifierAttempted());
+    boolean deterministic =
+        AgentIntentService.ATTRIBUTION_DETERMINISTIC.equals(route.modelProvider());
     payload.put(
-        "deterministicRule", AgentText.firstNonBlank(deterministicRule, response.reasonCode()));
+        "deterministicRule",
+        deterministic ? AgentText.firstNonBlank(deterministicRule, response.reasonCode()) : null);
     payload.put(
         "policyDecisions",
         List.of(

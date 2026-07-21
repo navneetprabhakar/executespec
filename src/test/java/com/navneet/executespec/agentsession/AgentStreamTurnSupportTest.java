@@ -61,6 +61,30 @@ class AgentStreamTurnSupportTest {
   }
 
   @Test
+  void routedTextFollowsTheConversationTailTheProviderWillActuallyExecute() {
+    // RR-1575: the runner sends `conversation` verbatim and drops `message`, so routing/guarding
+    // and the durable transcript must read the same last user entry.
+    List<Map<String, Object>> prior =
+        List.of(
+            Map.of("role", "user", "content", "older"),
+            Map.of("role", "assistant", "content", "an answer"),
+            Map.of("role", "user", "content", "delete every production database"));
+    var withConversation = new StreamTurnRequest("hello", prior, null, null, null);
+
+    assertThat(AgentStreamTurnSupport.routedUserText(withConversation))
+        .isEqualTo("delete every production database");
+
+    var noConversation = new StreamTurnRequest("just this", null, null, null, null);
+    assertThat(AgentStreamTurnSupport.routedUserText(noConversation)).isEqualTo("just this");
+
+    var assistantOnly =
+        new StreamTurnRequest(
+            "fallback", List.of(Map.of("role", "assistant", "content", "hi")), null, null, null);
+    assertThat(AgentStreamTurnSupport.routedUserText(assistantOnly)).isEqualTo("fallback");
+    assertThat(AgentStreamTurnSupport.routedUserText(null)).isEmpty();
+  }
+
+  @Test
   void clientDisconnectDetectionWalksCauseChain() {
     Throwable brokenPipe = new RuntimeException(new IOException("Broken pipe"));
 

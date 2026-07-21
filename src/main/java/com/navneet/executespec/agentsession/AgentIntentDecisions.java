@@ -81,6 +81,11 @@ final class AgentIntentDecisions {
    * without a project/repository to run against, must never carry a confirmable {@code
    * create_cloud_run} action. This is enforced structurally rather than by convention so a future
    * intent branch cannot reintroduce a non-executable but clickable run proposal.
+   *
+   * <p>The context is also where missing write authority is expressed ({@link
+   * AgentActionContext#writeScopeRequired()}), so a {@code create_cloud_run} proposal must always
+   * carry one: an absent context would silently skip both the project-selection and the write-scope
+   * check.
    */
   private static void assertCloudRunInvariant(
       TypedAction action, AgentActionContext actionContext, boolean runApiAllowed) {
@@ -88,19 +93,23 @@ final class AgentIntentDecisions {
     if (!runApiAllowed) {
       throw new IllegalStateException("create_cloud_run proposed while the Run API is disallowed");
     }
-    if (actionContext != null && !actionContext.confirmable()) {
-      throw new IllegalStateException(
-          "create_cloud_run proposed with a blocked context: " + actionContext.blockingReasons());
-    }
     Object projectId = action.arguments() == null ? null : action.arguments().get("projectId");
     if (!(projectId instanceof String value) || value.isBlank()) {
       throw new IllegalStateException("create_cloud_run proposed without project context");
+    }
+    if (actionContext == null) {
+      throw new IllegalStateException("create_cloud_run proposed without a typed action context");
+    }
+    if (!actionContext.confirmable()) {
+      throw new IllegalStateException(
+          "create_cloud_run proposed with a blocked context: " + actionContext.blockingReasons());
     }
   }
 
   static String billingImpact(String actionType) {
     return switch (actionType) {
       case "approve_run" -> "run_credit";
+      case "cancel_run" -> "none";
       case "create_cloud_run" -> "run_credit_on_plan_approval";
       case "local_code_task" -> "conversation_usage";
       default -> "none";

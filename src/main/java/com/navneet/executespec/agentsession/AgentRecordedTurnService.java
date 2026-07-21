@@ -52,13 +52,15 @@ class AgentRecordedTurnService {
     this.chatSecurityAuditService = chatSecurityAuditService;
   }
 
-  TurnResponse record(AgentSession session, String sessionId, TurnRequest request) {
-    return record(session, sessionId, request, null);
-  }
-
   TurnResponse record(
       AgentSession session, String sessionId, TurnRequest request, AppUserDetails principal) {
-    if (session.getProjectId() != null && !session.getProjectId().isBlank() && principal != null) {
+    // A recorded turn spends provider budget and can produce a run proposal, so the actor is
+    // mandatory. The guard used to be opt-in by argument nullability: any caller passing null
+    // silently obtained an unauthorized, unaudited turn on a project-scoped session.
+    if (principal == null || principal.getUser() == null) {
+      throw new SecurityException("authenticated user is required to record an agent turn");
+    }
+    if (session.getProjectId() != null && !session.getProjectId().isBlank()) {
       if (projectAccessGuard == null) {
         throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
@@ -100,14 +102,18 @@ class AgentRecordedTurnService {
             message,
             session.getProjectId(),
             request == null ? null : request.repoContext(),
-            request == null ? null : request.clientCapabilities());
+            request == null ? null : request.clientCapabilities(),
+            // Project-scoped recorded turns only reach here after assertCanWrite above.
+            session.getProjectId() == null || session.getProjectId().isBlank()
+                ? null
+                : Boolean.TRUE);
     OrchestratorDecision orchestratorDecision;
     try {
       orchestratorDecision =
           intentService.decide(
               intentRequest, session.getDefaultProvider(), session.getDefaultModel());
     } catch (org.springframework.web.server.ResponseStatusException inputDenied) {
-      if (chatSecurityAuditService != null && principal != null) {
+      if (chatSecurityAuditService != null) {
         chatSecurityAuditService.record(
             "CHAT_INPUT_DENIED",
             sessionId,

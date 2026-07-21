@@ -84,4 +84,32 @@ class AgentActionCatalogTest {
           .contains("web_search", "web_fetch");
     }
   }
+
+  @Test
+  void paidTiersAreNotRankedAsFreeAndUnknownTiersFailLoudly() {
+    for (String tier : java.util.List.of("PRO", "PRO_PLUS", "BYOK", "TEAM", "ENTERPRISE")) {
+      assertThat(catalog.capabilities("CLI", tier))
+          .as("paid capability list for %s", tier)
+          .extracting("name")
+          .contains("run_code_review");
+    }
+    assertThat(catalog.capabilities("CLI", "FREE"))
+        .extracting("name")
+        .doesNotContain("run_code_review");
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> catalog.capabilities("CLI", "PLATINUM"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void everyRouterEmittedActionTypeResolvesInTheCatalog() {
+    var known =
+        catalog.allCapabilities().stream()
+            .map(c -> c.name())
+            .collect(java.util.stream.Collectors.toSet());
+    // Types the deterministic routers can emit. A proposal whose type is absent here cannot be
+    // validated by a client against /v2/capabilities and carries no surface/tier/billing metadata.
+    assertThat(known)
+        .contains("approve_run", "reject_run", "cancel_run", "create_cloud_run", "local_code_task");
+  }
 }

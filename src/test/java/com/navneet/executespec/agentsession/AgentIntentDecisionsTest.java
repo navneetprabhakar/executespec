@@ -130,6 +130,35 @@ class AgentIntentDecisionsTest {
   }
 
   @Test
+  void aCloudRunProposalWithoutATypedContextIsRejected() {
+    // The context is where both missing-project and missing-write-scope blocking live; an absent
+    // one would skip every structural check that keeps a clickable card executable.
+    assertThatThrownBy(
+            () ->
+                AgentIntentDecisions.decision(
+                    "CODE_RUN_REQUIRED",
+                    0.8,
+                    "explicit_code_mutation_request",
+                    true,
+                    "reply",
+                    new TypedAction(
+                        "create_cloud_run",
+                        Map.of("spec", "fix", "projectId", "p1"),
+                        true,
+                        "run",
+                        "?"),
+                    true,
+                    true,
+                    "submit only after confirmation"))
+        .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void cancelRunHasAnExplicitBillingImpact() {
+    assertThat(AgentIntentDecisions.billingImpact("cancel_run")).isEqualTo("none");
+  }
+
+  @Test
   void fullDecisionPreservesExplicitPolicy() {
     var decision =
         AgentIntentDecisions.decision(
@@ -139,10 +168,16 @@ class AgentIntentDecisionsTest {
             true,
             "reply",
             new TypedAction(
-                "create_cloud_run", Map.of("spec", "fix", "projectId", "p1"), true, "run", "?"),
+                "create_cloud_run",
+                Map.of("spec", "fix", "projectId", "p1"),
+                true,
+                "run",
+                "?",
+                AgentActionContext.ready()),
             true,
             true,
-            "submit only after confirmation");
+            "submit only after confirmation",
+            AgentActionContext.ready());
 
     assertThat(decision.policy().runApiAllowed()).isTrue();
     assertThat(decision.policy().confirmationRequiredBeforeSubmit()).isTrue();
