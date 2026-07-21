@@ -20,6 +20,7 @@ import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.UserDataExportService;
+import com.navneet.executespec.auth.service.UserSettingsUpdateService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -49,6 +50,7 @@ public class AuthController {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final TierEnforcementService tierEnforcementService;
   private final ExternalConnectionValidator externalConnectionValidator;
+  private final UserSettingsUpdateService userSettingsUpdateService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -332,26 +334,17 @@ public class AuthController {
       }
     }
 
-    user.setGithubPat(newPat);
-    user.setGithubOwner(newOwner);
-    userRepo.save(user);
+    // RR-008: refetch + row-lock + narrow write + same-transaction audit (see
+    // UserSettingsUpdateService). The external PAT probe above stays out of the DB transaction.
+    AppUser saved = userSettingsUpdateService.updateGitHub(user.getId(), newPat, newOwner);
     log.info(
         "User {} updated GitHub settings — owner={}, hasPat={}, patValidated={}",
-        user.getId(),
-        user.getGithubOwner(),
-        user.getGithubPat() != null,
+        saved.getId(),
+        saved.getGithubOwner(),
+        saved.getGithubPat() != null,
         patChangedToNonEmpty);
 
-    recordSettingsAudit(
-        user,
-        "USER_GITHUB_SETTINGS_CHANGED",
-        "{\"hasToken\":"
-            + (user.getGithubPat() != null)
-            + ",\"owner\":\""
-            + user.getGithubOwner()
-            + "\"}");
-
-    return ResponseEntity.ok(currentUserDto(user, userDetails));
+    return ResponseEntity.ok(currentUserDto(saved, userDetails));
   }
 
   record BitbucketSettingsRequest(
@@ -368,28 +361,21 @@ public class AuthController {
   public ResponseEntity<UserDto> updateBitbucketSettings(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestBody BitbucketSettingsRequest req) {
-    AppUser user = userDetails.getUser();
-    user.setBitbucketUsername(blankToNull(req.bitbucketUsername()));
-    user.setBitbucketAppPassword(blankToNull(req.bitbucketAppPassword()));
-    user.setBitbucketWorkspace(blankToNull(req.bitbucketWorkspace()));
-    user.setBitbucketRepoSlug(blankToNull(req.bitbucketRepoSlug()));
-    userRepo.save(user);
+    // RR-008: refetch + row-lock + narrow write + same-transaction audit.
+    AppUser saved =
+        userSettingsUpdateService.updateBitbucket(
+            userDetails.getUser().getId(),
+            blankToNull(req.bitbucketUsername()),
+            blankToNull(req.bitbucketAppPassword()),
+            blankToNull(req.bitbucketWorkspace()),
+            blankToNull(req.bitbucketRepoSlug()));
     log.info(
         "User {} updated Bitbucket settings — workspace={}, hasApiToken={}",
-        user.getId(),
-        user.getBitbucketWorkspace(),
-        user.getBitbucketAppPassword() != null);
+        saved.getId(),
+        saved.getBitbucketWorkspace(),
+        saved.getBitbucketAppPassword() != null);
 
-    recordSettingsAudit(
-        user,
-        "USER_BITBUCKET_SETTINGS_CHANGED",
-        "{\"hasAppPassword\":"
-            + (user.getBitbucketAppPassword() != null)
-            + ",\"workspace\":\""
-            + user.getBitbucketWorkspace()
-            + "\"}");
-
-    return ResponseEntity.ok(currentUserDto(user, userDetails));
+    return ResponseEntity.ok(currentUserDto(saved, userDetails));
   }
 
   record AiKeySettingsRequest(
@@ -409,52 +395,29 @@ public class AuthController {
           HttpStatus.FORBIDDEN,
           "AI key management requires a PRO or ENTERPRISE plan with org admin access");
     }
-    AppUser user = userDetails.getUser();
     // Patch semantics: the Web settings surface saves one provider at a time. Omitted/blank
     // fields therefore mean "leave unchanged". Destructive removal has a separate authenticated
     // DELETE route below so a UI serialization detail can never erase unrelated credentials.
-    if (blankToNull(req.openAiApiKey()) != null) {
-      user.setOpenAiApiKey(req.openAiApiKey().strip());
-    }
-    if (blankToNull(req.anthropicApiKey()) != null) {
-      user.setAnthropicApiKey(req.anthropicApiKey().strip());
-    }
-    if (blankToNull(req.geminiApiKey()) != null) {
-      user.setGeminiApiKey(req.geminiApiKey().strip());
-    }
-    if (blankToNull(req.deepSeekApiKey()) != null) {
-      user.setDeepSeekApiKey(req.deepSeekApiKey().strip());
-    }
-    if (blankToNull(req.fireworksApiKey()) != null) {
-      user.setFireworksApiKey(req.fireworksApiKey().strip());
-    }
-    userRepo.save(user);
+    // RR-008: refetch + row-lock + narrow patch + same-transaction audit.
+    AppUser saved =
+        userSettingsUpdateService.updateAiKeys(
+            userDetails.getUser().getId(),
+            req.openAiApiKey(),
+            req.anthropicApiKey(),
+            req.geminiApiKey(),
+            req.deepSeekApiKey(),
+            req.fireworksApiKey());
     log.info(
         "User {} updated AI key settings — openai={}, anthropic={}, gemini={}, deepseek={},"
             + " fireworks={}",
-        user.getId(),
-        user.getOpenAiApiKey() != null,
-        user.getAnthropicApiKey() != null,
-        user.getGeminiApiKey() != null,
-        user.getDeepSeekApiKey() != null,
-        user.getFireworksApiKey() != null);
+        saved.getId(),
+        saved.getOpenAiApiKey() != null,
+        saved.getAnthropicApiKey() != null,
+        saved.getGeminiApiKey() != null,
+        saved.getDeepSeekApiKey() != null,
+        saved.getFireworksApiKey() != null);
 
-    recordSettingsAudit(
-        user,
-        "USER_AI_KEYS_CHANGED",
-        "{\"openai\":"
-            + (user.getOpenAiApiKey() != null)
-            + ",\"anthropic\":"
-            + (user.getAnthropicApiKey() != null)
-            + ",\"gemini\":"
-            + (user.getGeminiApiKey() != null)
-            + ",\"deepseek\":"
-            + (user.getDeepSeekApiKey() != null)
-            + ",\"fireworks\":"
-            + (user.getFireworksApiKey() != null)
-            + "}");
-
-    return ResponseEntity.ok(currentUserDto(user, userDetails));
+    return ResponseEntity.ok(currentUserDto(saved, userDetails));
   }
 
   @DeleteMapping("/settings/ai-keys/{provider}")
@@ -467,25 +430,8 @@ public class AuthController {
           "AI key management requires a PRO or ENTERPRISE plan with org admin access");
     }
     String normalized = normalizeAiProvider(provider);
-    AppUser user = userDetails.getUser();
-    boolean existed =
-        switch (normalized) {
-          case "openai" -> clearPresent(user.getOpenAiApiKey(), () -> user.setOpenAiApiKey(null));
-          case "anthropic" ->
-              clearPresent(user.getAnthropicApiKey(), () -> user.setAnthropicApiKey(null));
-          case "gemini" -> clearPresent(user.getGeminiApiKey(), () -> user.setGeminiApiKey(null));
-          case "deepseek" ->
-              clearPresent(user.getDeepSeekApiKey(), () -> user.setDeepSeekApiKey(null));
-          case "fireworks" ->
-              clearPresent(user.getFireworksApiKey(), () -> user.setFireworksApiKey(null));
-          default ->
-              throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported provider");
-        };
-    userRepo.save(user);
-    recordSettingsAudit(
-        user,
-        "USER_AI_KEY_REVOKED",
-        "{\"provider\":\"" + normalized + "\",\"previouslyPresent\":" + existed + "}");
+    // RR-008: refetch + row-lock + narrow clear + same-transaction audit.
+    userSettingsUpdateService.revokeAiKey(userDetails.getUser().getId(), normalized);
     return ResponseEntity.noContent().build();
   }
 
@@ -494,27 +440,20 @@ public class AuthController {
   @PutMapping("/settings/jira")
   public ResponseEntity<UserDto> updateJiraSettings(
       @AuthenticationPrincipal AppUserDetails userDetails, @RequestBody JiraSettingsRequest req) {
-    AppUser user = userDetails.getUser();
-    user.setJiraBaseUrl(blankToNull(req.jiraBaseUrl()));
-    user.setJiraEmail(blankToNull(req.jiraEmail()));
-    user.setJiraApiToken(blankToNull(req.jiraApiToken()));
-    userRepo.save(user);
+    // RR-008: refetch + row-lock + narrow write + same-transaction audit.
+    AppUser saved =
+        userSettingsUpdateService.updateJira(
+            userDetails.getUser().getId(),
+            blankToNull(req.jiraBaseUrl()),
+            blankToNull(req.jiraEmail()),
+            blankToNull(req.jiraApiToken()));
     log.info(
         "User {} updated JIRA settings — url={}, hasToken={}",
-        user.getId(),
-        user.getJiraBaseUrl(),
-        user.getJiraApiToken() != null);
+        saved.getId(),
+        saved.getJiraBaseUrl(),
+        saved.getJiraApiToken() != null);
 
-    recordSettingsAudit(
-        user,
-        "USER_JIRA_SETTINGS_CHANGED",
-        "{\"hasToken\":"
-            + (user.getJiraApiToken() != null)
-            + ",\"baseUrl\":\""
-            + user.getJiraBaseUrl()
-            + "\"}");
-
-    return ResponseEntity.ok(currentUserDto(user, userDetails));
+    return ResponseEntity.ok(currentUserDto(saved, userDetails));
   }
 
   record ConfluenceSettingsRequest(
@@ -524,27 +463,20 @@ public class AuthController {
   public ResponseEntity<UserDto> updateConfluenceSettings(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestBody ConfluenceSettingsRequest req) {
-    AppUser user = userDetails.getUser();
-    user.setConfluenceBaseUrl(blankToNull(req.confluenceBaseUrl()));
-    user.setConfluenceEmail(blankToNull(req.confluenceEmail()));
-    user.setConfluenceApiToken(blankToNull(req.confluenceApiToken()));
-    userRepo.save(user);
+    // RR-008: refetch + row-lock + narrow write + same-transaction audit.
+    AppUser saved =
+        userSettingsUpdateService.updateConfluence(
+            userDetails.getUser().getId(),
+            blankToNull(req.confluenceBaseUrl()),
+            blankToNull(req.confluenceEmail()),
+            blankToNull(req.confluenceApiToken()));
     log.info(
         "User {} updated Confluence settings — url={}, hasToken={}",
-        user.getId(),
-        user.getConfluenceBaseUrl(),
-        user.getConfluenceApiToken() != null);
+        saved.getId(),
+        saved.getConfluenceBaseUrl(),
+        saved.getConfluenceApiToken() != null);
 
-    recordSettingsAudit(
-        user,
-        "USER_CONFLUENCE_SETTINGS_CHANGED",
-        "{\"hasToken\":"
-            + (user.getConfluenceApiToken() != null)
-            + ",\"baseUrl\":\""
-            + user.getConfluenceBaseUrl()
-            + "\"}");
-
-    return ResponseEntity.ok(currentUserDto(user, userDetails));
+    return ResponseEntity.ok(currentUserDto(saved, userDetails));
   }
 
   record ViewModeRequest(String viewMode) {}
@@ -753,12 +685,6 @@ public class AuthController {
           HttpStatus.BAD_REQUEST, "Unsupported personal-key provider: " + provider);
     }
     return normalized;
-  }
-
-  private static boolean clearPresent(String current, Runnable clear) {
-    boolean present = current != null && !current.isBlank();
-    clear.run();
-    return present;
   }
 
   private void recordSettingsAudit(AppUser user, String eventType, String newValueJson) {
