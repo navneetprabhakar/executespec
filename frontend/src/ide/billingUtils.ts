@@ -81,27 +81,20 @@ export const PLAN_SUBCOPY: Record<string, string> = {
 
 const TIER_ORDER = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
 
-export const FALLBACK_PLAN_CARDS: PlanCard[] = [
-  {tier: 'FREE', monthly: 0, yearly: null, yearlySavePct: null, currency: 'USD', perSeat: false},
-  {tier: 'PRO', monthly: 29, yearly: 289, yearlySavePct: 17, currency: 'USD', perSeat: false},
-  {
-    tier: 'TEAM',
-    monthly: 39,
-    yearly: null,
-    yearlySavePct: null,
-    currency: 'USD',
-    perSeat: true,
-    recommended: true,
-  },
-  {
-    tier: 'ENTERPRISE',
-    monthly: null,
-    yearly: null,
-    yearlySavePct: null,
-    currency: 'USD',
-    perSeat: false,
-  },
-];
+/*
+ * RR-357 — there is deliberately NO hardcoded fallback plan ladder here.
+ *
+ * `/plans` used to substitute a `FALLBACK_PLAN_CARDS` constant whenever the plans fetch failed or
+ * returned an empty 200, and it left checkout enabled. That constant had drifted badly: it
+ * advertised PRO $29 / $289-yearly and TEAM $39/seat and omitted BYOK entirely, while V253's
+ * canonical rows are PRO $20, PRO+ $100, BYOK $50 and TEAM $50/seat. So during exactly the
+ * backend/config outage in which price truth is unavailable, customers were shown materially wrong
+ * prices and could click Upgrade into a checkout that charged a different amount than the screen.
+ *
+ * Commerce fails closed instead: no prices, no purchase, a retry. If a cached catalogue is ever
+ * wanted, it must be a signed/versioned last-known-good artifact served by the backend with an age
+ * and a checkout-time price/version check — never a constant compiled into the bundle.
+ */
 
 export function money(n?: number | null): string {
   return n == null ? '—' : `$${n.toFixed(2)}`;

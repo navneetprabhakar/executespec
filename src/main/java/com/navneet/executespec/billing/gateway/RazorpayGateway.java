@@ -34,8 +34,12 @@ public class RazorpayGateway implements BillingGateway {
     // 1. Get or create Razorpay customer
     String customerId = getOrCreateCustomer(userId, userName, userEmail);
 
-    // 2. Compute max total_count
-    int totalCount = "ANNUAL".equals(plan.getPeriod()) ? 50 : 600;
+    // 2. Compute max total_count. RR-418: the exact-match on "ANNUAL" silently treated
+    //    every migration-seeded 'YEARLY' plan as monthly; go through the canonical alias.
+    int totalCount =
+        com.navneet.executespec.billing.service.BillingPeriodService.isAnnual(plan.getPeriod())
+            ? 50
+            : 600;
 
     // 3. Create Razorpay subscription. quantity = seats so per-seat (TEAM) plans
     //    charge seats × the per-seat price; flat plans (Pro/Solo) pass seats=1.
