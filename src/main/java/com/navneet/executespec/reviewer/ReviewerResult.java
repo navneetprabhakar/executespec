@@ -16,6 +16,13 @@ import lombok.Builder;
  * @param finalBuildPassed final build result after all review fixes
  * @param finalBuildExitCode exit code from the final build check
  * @param finalBuildOutput truncated build output (null if build wasn't run)
+ * @param finalTestsPassed concrete workspace tests that passed in the FINAL workspace generation,
+ *     or null when no concrete suite was executed (RR-273)
+ * @param finalTestsTotal concrete workspace tests executed in the FINAL workspace generation, or
+ *     null when no concrete suite was executed (RR-273)
+ * @param concreteTestsRed true when a concrete suite was known red and was not subsequently proven
+ *     green in the final workspace generation. Tighten-only: this forces {@code UNRESOLVED_ISSUES}
+ *     so a clean verdict can never be returned over failing or unprovable tests (RR-273)
  * @param totalLatencyMs wall-clock across both passes + final build
  */
 @Builder
@@ -28,6 +35,9 @@ public record ReviewerResult(
     Boolean finalBuildPassed,
     Integer finalBuildExitCode,
     String finalBuildOutput,
+    Integer finalTestsPassed,
+    Integer finalTestsTotal,
+    boolean concreteTestsRed,
     long totalLatencyMs) {
 
   public enum Overall {
@@ -35,7 +45,7 @@ public record ReviewerResult(
     CLEAN,
     /** Passes completed, issues were fixed, final build passes. */
     FIXED_ISSUES,
-    /** Passes completed but final build still fails after fixes. */
+    /** Passes completed but the final build or the final test suite still fails after fixes. */
     UNRESOLVED_ISSUES,
     /** A review pass did not reach COMPLETED (worker timeout / error). */
     REVIEW_FAILED

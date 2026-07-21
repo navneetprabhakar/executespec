@@ -2442,36 +2442,40 @@ to boot — skip it for those.""";
           .build();
     }
 
-    // If the primary + retry worker wrote zero files, the task did not change
-    // the codebase — a smoke failure here is almost always environmental
-    // (wrong directory, missing toolchain, flaky network). Downgrading to
-    // COMPLETE avoids poisoning the run's overall status on a tautological
-    // verify-only task. The smoke output is still preserved on the outcome
-    // so the reviewer / report can surface it if relevant.
+    // RR-262 — the primary AND retry worker both wrote zero files and the build smoke is still
+    // red. This was previously assumed to be environmental and promoted to COMPLETE/SUCCESS, but
+    // "the worker delivered nothing and verification is red" is the exact shape of a real broken
+    // baseline, an unimplemented task or a wrong build command — and it is precisely the state in
+    // which a success claim is least defensible. There is no environment-failure classifier and no
+    // verify-only task contract, so the failure cannot be attributed. It terminalises as PARTIAL:
+    // the run keeps its evidence and continues, but nothing is vouched for.
     int totalFileWrites =
         countFileWrites(primary.toolCallLog()) + countFileWrites(retry.toolCallLog());
     if (totalFileWrites == 0) {
+      String zeroWriteReason =
+          "Build smoke failed after retry (exit "
+              + retrySmoke.exitCode()
+              + ") and the worker wrote no files; delivery is unverified";
       log.warn(
-          "Executor task={} smoke failed after retry but worker wrote 0 files — "
-              + "demoting to COMPLETE (verify-only task, smoke failure is environmental)",
+          "Executor task={} smoke failed after retry and worker wrote 0 files — marking PARTIAL"
+              + " (failed verification is never reported as success)",
           task.id());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      persistTaskStatus(runId, task.id(), "PARTIAL", zeroWriteReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId,
               task,
               retry,
-              TaskOutcome.Status.SUCCESS,
+              TaskOutcome.Status.COMPLETED_WITH_WARNING,
               false,
-              "Smoke failed after retry but no files were written; treated as"
-                  + " verify-only/environmental",
+              zeroWriteReason,
               cfg.provider,
               cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(TaskOutcome.Status.SUCCESS)
+          .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
           .workerOutcome(primary)
           .retryAttempted(true)
           .retryWorkerOutcome(retry)

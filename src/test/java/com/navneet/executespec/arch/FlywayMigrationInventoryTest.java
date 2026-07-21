@@ -23,11 +23,12 @@ class FlywayMigrationInventoryTest {
     List<MigrationFile> migrations = readMigrations();
 
     // V119 is an applied historical migration and must remain on the classpath.
-    // V60_1 is fractional, so V1..V309 contains 310 migration files.
+    // V60_1 is fractional, so V1..V309 plus V317 contains 311 migration files.
     // (Phase 5 bumped this for V307__run_sandbox_lifecycle; the audit remediation added
-    // V308__contract_version_inline_content_text and V309__file_lock_run_scoped_identity.)
-    assertThat(migrations).hasSize(310);
-    assertThat(migrations.getLast().version()).isEqualTo("309");
+    // V308__contract_version_inline_content_text and V309__file_lock_run_scoped_identity, and the
+    // scoring-verification lane added V317__validation_report_test_execution_provenance.)
+    assertThat(migrations).hasSize(311);
+    assertThat(migrations.getLast().version()).isEqualTo("317");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -35,7 +36,10 @@ class FlywayMigrationInventoryTest {
 
     assertThat(migrations.stream().filter(MigrationFile::fractional).map(MigrationFile::version))
         .containsExactly("60_1");
-    assertThat(majorGaps(migrations)).isEmpty();
+    // V310..V316 are reserved by parallel audit-remediation lanes that have not merged yet. The
+    // gap is expected and temporary; it must be empty again once those lanes land, so this stays
+    // an exact assertion rather than a relaxed one.
+    assertThat(majorGaps(migrations)).containsExactly("V309->V317");
   }
 
   @Test
