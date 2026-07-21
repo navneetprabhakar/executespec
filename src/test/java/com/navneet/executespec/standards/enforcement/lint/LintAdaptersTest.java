@@ -27,7 +27,7 @@ class LintAdaptersTest {
   }
 
   private static LintProcessRunner stubRunner(LintProcessRunner.Result result) {
-    return new LintProcessRunner(new LintExecutionProperties()) {
+    return new LintProcessRunner(new LintExecutionProperties(), null) {
       @Override
       public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
         return result;
@@ -52,7 +52,7 @@ class LintAdaptersTest {
   void eslint_deniedByPolicy_isUnavailableAndNeverStartsAProcess() {
     // RR-1051 — with host execution off (the default) no subprocess may start at all.
     LintProcessRunner explodingRunner =
-        new LintProcessRunner(new LintExecutionProperties()) {
+        new LintProcessRunner(new LintExecutionProperties(), null) {
           @Override
           public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
             throw new AssertionError("policy denied the run; no process may be started");
