@@ -844,7 +844,55 @@ public class GitHubRepoService {
   }
 
   /**
+   * RR-146 — the outcome of a PR-creation attempt, distinguishing "this call opened a new PR" from
+   * "GitHub already has a PR for this head" and from a real failure.
+   *
+   * <p>The untyped {@code null} return conflated all three, and callers read {@code null} as
+   * failure and enqueued deletion of the head branch — so republishing an existing PR could
+   * schedule destruction of the branch that PR is reviewing. Only {@link Outcome#FAILED} may
+   * authorize branch cleanup.
+   */
+  public record PullRequestCreation(
+      Outcome outcome, String prUrl, Integer prNumber, String detail) {
+
+    public enum Outcome {
+      /** This invocation created the pull request. */
+      CREATED,
+      /** GitHub reports an open pull request already exists for this head branch. */
+      ALREADY_EXISTS,
+      /** No pull request exists as a result of this invocation, and none was found. */
+      FAILED
+    }
+
+    public static PullRequestCreation created(String prUrl, Integer prNumber) {
+      return new PullRequestCreation(Outcome.CREATED, prUrl, prNumber, "created");
+    }
+
+    public static PullRequestCreation alreadyExists(String prUrl, Integer prNumber) {
+      return new PullRequestCreation(
+          Outcome.ALREADY_EXISTS, prUrl, prNumber, "pull request already exists for this branch");
+    }
+
+    public static PullRequestCreation failed(String detail) {
+      return new PullRequestCreation(Outcome.FAILED, null, null, detail);
+    }
+
+    /** True when a pull request exists for the branch, whoever created it. */
+    public boolean prExists() {
+      return outcome != Outcome.FAILED;
+    }
+
+    public boolean failed() {
+      return outcome == Outcome.FAILED;
+    }
+  }
+
+  /**
    * Creates a pull request on a GitHub repository.
+   *
+   * <p>Compatibility shape: returns the PR URL, or {@code null} for BOTH "already exists" and real
+   * failure. Callers that take a destructive action on failure MUST use {@link
+   * #createPullRequestDetailed} instead — see RR-146.
    *
    * @param repoUrl HTTPS clone URL
    * @param head source branch name (e.g. "executespec/abc123")
@@ -856,16 +904,27 @@ public class GitHubRepoService {
    */
   public String createPullRequest(
       String repoUrl, String head, String base, String title, String prBody, String overridePat) {
+    return createPullRequestDetailed(repoUrl, head, base, title, prBody, overridePat).prUrl();
+  }
+
+  /**
+   * RR-146 — typed PR creation. On GitHub's 422 "A pull request already exists" the existing open
+   * PR for {@code head} is looked up and returned as {@link
+   * PullRequestCreation.Outcome#ALREADY_EXISTS}; the branch is live review material, never an
+   * orphan.
+   */
+  public PullRequestCreation createPullRequestDetailed(
+      String repoUrl, String head, String base, String title, String prBody, String overridePat) {
     String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) {
       log.warn("[GitHubRepoService] No PAT — cannot create PR");
-      return null;
+      return PullRequestCreation.failed("no GitHub credential");
     }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
     if (ownerRepo == null) {
       log.warn("[GitHubRepoService] Cannot parse owner/repo from {}", repoUrl);
-      return null;
+      return PullRequestCreation.failed("unparseable repository URL");
     }
 
     String safeTitle = sanitiseDescription(title);
@@ -906,12 +965,12 @@ public class GitHubRepoService {
           int end = responseBody.indexOf("\"", start);
           String prUrl = responseBody.substring(start, end);
           log.info("[GitHubRepoService] Created PR: {}", prUrl);
-          return prUrl;
+          return PullRequestCreation.created(prUrl, prNumberFromUrl(prUrl));
         }
       }
-      // 422 with "A pull request already exists" is normal for continue-on-PR
-      // flows — the push already updated the branch, and GitHub auto-updates
-      // the existing PR. Return null gracefully (caller should not treat as error).
+      // 422 "A pull request already exists" is normal for continue-on-PR flows — the push already
+      // updated the branch and GitHub auto-updated the existing PR. RR-146: this is explicitly NOT
+      // a failure; the head branch is under active review and must never be queued for deletion.
       if (response.statusCode() == 422
           && response.body() != null
           && response.body().contains("already exists")) {
@@ -920,18 +979,182 @@ public class GitHubRepoService {
             ownerRepo[0],
             ownerRepo[1],
             head);
-        return null;
+        OpenPullRequestLookup existing =
+            findOpenPullRequestForHead(ownerRepo[0] + "/" + ownerRepo[1], head, effectivePat);
+        return PullRequestCreation.alreadyExists(existing.prUrl(), existing.prNumber());
       }
       log.warn(
-          "[GitHubRepoService] Failed to create PR for {}/{}: status {} — {}",
+          "[GitHubRepoService] Failed to create PR for {}/{}: status {}",
           ownerRepo[0],
           ownerRepo[1],
-          response.statusCode(),
-          response.body());
+          response.statusCode());
+      return PullRequestCreation.failed("GitHub returned status " + response.statusCode());
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error creating PR: {}", e.getMessage());
+      return PullRequestCreation.failed("transport error contacting GitHub");
     }
-    return null;
+  }
+
+  /** Extract the trailing {@code /pull/<n>} number from a PR HTML URL; null when absent. */
+  static Integer prNumberFromUrl(String prUrl) {
+    if (prUrl == null) return null;
+    int idx = prUrl.lastIndexOf("/pull/");
+    if (idx < 0) return null;
+    String tail = prUrl.substring(idx + "/pull/".length()).trim();
+    int end = 0;
+    while (end < tail.length() && Character.isDigit(tail.charAt(end))) end++;
+    if (end == 0) return null;
+    try {
+      return Integer.valueOf(tail.substring(0, end));
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  /**
+   * RR-146 / RR-380 — result of asking GitHub whether an OPEN pull request currently exists for a
+   * head branch. {@code known=false} means the question could not be answered (no credential,
+   * transport error, unexpected status) and callers must fail closed rather than assume "none".
+   */
+  public record OpenPullRequestLookup(
+      boolean known, boolean present, String prUrl, Integer prNumber) {
+
+    public static OpenPullRequestLookup unknown() {
+      return new OpenPullRequestLookup(false, false, null, null);
+    }
+
+    public static OpenPullRequestLookup none() {
+      return new OpenPullRequestLookup(true, false, null, null);
+    }
+
+    public static OpenPullRequestLookup found(String prUrl, Integer prNumber) {
+      return new OpenPullRequestLookup(true, true, prUrl, prNumber);
+    }
+
+    /** True only when GitHub positively answered that no open PR references the branch. */
+    public boolean provenAbsent() {
+      return known && !present;
+    }
+  }
+
+  /**
+   * Look up the OPEN pull request whose head is {@code branch} in {@code repoFullName}. Bounded
+   * timeouts; never throws.
+   */
+  public OpenPullRequestLookup findOpenPullRequestForHead(
+      String repoFullName, String branch, String overridePat) {
+    if (overridePat == null || overridePat.isBlank()) return OpenPullRequestLookup.unknown();
+    if (repoFullName == null || !repoFullName.contains("/")) return OpenPullRequestLookup.unknown();
+    if (branch == null || branch.isBlank()) return OpenPullRequestLookup.unknown();
+    String owner = repoFullName.substring(0, repoFullName.indexOf('/'));
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/"
+                          + repoFullName
+                          + "/pulls?state=open&per_page=100&head="
+                          + URLEncoder.encode(owner + ":" + branch, StandardCharsets.UTF_8)))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) {
+        log.warn(
+            "[GitHubRepoService] open-PR lookup {} head={} status {}",
+            repoFullName,
+            branch,
+            response.statusCode());
+        return OpenPullRequestLookup.unknown();
+      }
+      JsonNode array = JSON_MAPPER.readTree(response.body());
+      if (!array.isArray()) return OpenPullRequestLookup.unknown();
+      for (JsonNode pr : array) {
+        // GitHub's head filter is a prefix-tolerant query; require an exact ref match.
+        if (branch.equals(pr.path("head").path("ref").asText(""))) {
+          return OpenPullRequestLookup.found(
+              pr.path("html_url").asText(null),
+              pr.hasNonNull("number") ? pr.path("number").asInt() : null);
+        }
+      }
+      return OpenPullRequestLookup.none();
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] open-PR lookup {} head={} failed: {}",
+          repoFullName,
+          branch,
+          e.getMessage());
+      return OpenPullRequestLookup.unknown();
+    }
+  }
+
+  /**
+   * RR-380 — current state of a remote branch ref. {@code known=false} means GitHub did not answer,
+   * so a caller about to delete must abort rather than proceed on an assumption.
+   */
+  public record BranchRefState(boolean known, boolean present, String sha) {
+
+    public static BranchRefState unknown() {
+      return new BranchRefState(false, false, null);
+    }
+
+    public static BranchRefState absent() {
+      return new BranchRefState(true, false, null);
+    }
+
+    public static BranchRefState at(String sha) {
+      return new BranchRefState(true, true, sha);
+    }
+  }
+
+  /**
+   * Read the exact current SHA of {@code refs/heads/<branch>} in {@code repoFullName}. Used as the
+   * freshness check immediately before an irreversible branch deletion.
+   */
+  public BranchRefState getBranchRef(String repoFullName, String branch, String overridePat) {
+    if (overridePat == null || overridePat.isBlank()) return BranchRefState.unknown();
+    if (repoFullName == null || !repoFullName.contains("/")) return BranchRefState.unknown();
+    if (branch == null || branch.isBlank()) return BranchRefState.unknown();
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/"
+                          + repoFullName
+                          + "/git/ref/heads/"
+                          + URLEncoder.encode(branch, StandardCharsets.UTF_8).replace("%2F", "/")))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() == 404) return BranchRefState.absent();
+      if (response.statusCode() != 200) {
+        log.warn(
+            "[GitHubRepoService] branch ref {} on {} status {}",
+            branch,
+            repoFullName,
+            response.statusCode());
+        return BranchRefState.unknown();
+      }
+      JsonNode node = JSON_MAPPER.readTree(response.body());
+      String sha = node.path("object").path("sha").asText("");
+      return sha.isBlank() ? BranchRefState.unknown() : BranchRefState.at(sha);
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] branch ref {} on {} failed: {}",
+          branch,
+          repoFullName,
+          e.getMessage());
+      return BranchRefState.unknown();
+    }
   }
 
   /**

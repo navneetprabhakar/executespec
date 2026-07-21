@@ -169,6 +169,20 @@ public class StaleScmCleanupJob {
         continue;
       }
       try {
+        String skipReason = remoteDeleteRefusalReason(pr, pat);
+        if (skipReason != null) {
+          Counter.builder("executespec.scm.cleanup.skipped")
+              .tag("reason", skipReason)
+              .tag("kind", "branch")
+              .register(meterRegistry)
+              .increment();
+          log.info(
+              "[StaleScmCleanup] retained branch {} on {} — {}",
+              pr.getHeadBranch(),
+              pr.getRepoFullName(),
+              skipReason);
+          continue;
+        }
         if (gitHub.deleteBranch(pr.getRepoFullName(), pr.getHeadBranch(), pat)) {
           deleted++;
         }
@@ -189,6 +203,48 @@ public class StaleScmCleanupJob {
     log.debug(
         "[StaleScmCleanup] deleteStaleBranches scanned={} deleted={}", candidates.size(), deleted);
     return deleted;
+  }
+
+  /**
+   * RR-380 — decide, against the LIVE remote, whether this branch may be deleted. The local {@code
+   * pull_request_record} row is a cached belief: a missed or reordered webhook, a manual reopen,
+   * branch reuse, or new commits pushed after local closure all leave it stale, and the delete is
+   * irreversible. Every unproven condition refuses.
+   *
+   * @return null when deletion is proven safe, otherwise a short metric-safe refusal reason.
+   */
+  String remoteDeleteRefusalReason(PullRequestRecord pr, String pat) {
+    String branch = pr.getHeadBranch();
+    if (branch == null || branch.isBlank()) return "no_branch";
+
+    // 1. The pull request must still be terminal at GitHub, not merely terminal in our table.
+    GitHubRepoService.PullRequestSnapshot snapshot =
+        pr.getPrNumber() == null
+            ? null
+            : gitHub.getPullRequestSnapshot(pr.getRepoFullName(), pr.getPrNumber(), pat, 0);
+    if (snapshot == null) return "pr_state_unknown";
+    if (!snapshot.merged() && !"closed".equalsIgnoreCase(snapshot.state())) {
+      return "pr_reopened_or_open";
+    }
+    // 2. The record must actually describe this branch (guards renamed/reused rows).
+    if (!branch.equals(snapshot.headBranch())) return "head_branch_mismatch";
+
+    // 3. No OTHER open pull request may reference the branch.
+    GitHubRepoService.OpenPullRequestLookup open =
+        gitHub.findOpenPullRequestForHead(pr.getRepoFullName(), branch, pat);
+    if (!open.provenAbsent()) return open.known() ? "open_pr_on_branch" : "open_pr_unknown";
+
+    // 4. The branch tip must still be exactly the commit the closed PR ended on. Anything else is
+    //    work pushed after closure, which is live customer work.
+    GitHubRepoService.BranchRefState ref = gitHub.getBranchRef(pr.getRepoFullName(), branch, pat);
+    if (!ref.known()) return "branch_ref_unknown";
+    if (!ref.present()) return "branch_already_gone";
+    if (snapshot.headSha() == null
+        || snapshot.headSha().isBlank()
+        || !snapshot.headSha().equals(ref.sha())) {
+      return "branch_advanced_since_pr";
+    }
+    return null;
   }
 
   private static boolean isFailedTerminal(String status) {
