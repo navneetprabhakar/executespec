@@ -130,6 +130,13 @@ public class ModelProviderCapabilityRegistry {
   }
 
   private static double clampQuality(double value) {
+    // RR-397 fail-closed: Math.max/min preserve NaN, so a NaN quality signal (e.g. a malformed
+    // benchmark rate) would propagate into the weighted quality sum and then defeat the
+    // below-threshold rejection, because every comparison against NaN is false. Collapse a
+    // non-finite quality to 0.0 so a corrupt input fails the quality bar instead of passing it.
+    if (!Double.isFinite(value)) {
+      return 0.0;
+    }
     return Math.max(0.0, Math.min(100.0, value));
   }
 

@@ -28,6 +28,21 @@ import lombok.extern.slf4j.Slf4j;
  * Score = success_rate, but only trusted when {@code total ≥ MIN_SAMPLE_COUNT}. Below that
  * threshold, returns {@link #UNKNOWN_SCORE} so routing ignores performance and relies on health
  * circuit breakers only.
+ *
+ * <h3>RR-393 — the writer is currently inert (confirmed 2026-07-22)</h3>
+ *
+ * <p>{@link #recordCall} has NO production caller: no transport-completion path writes success or
+ * latency, so {@link #getScore}/{@link #getAvgLatencyMs} return {@link #UNKNOWN_SCORE}/{@code -1}
+ * indefinitely and {@link #isMateriallyBetter} always returns {@code false}. This is fail-closed
+ * and honest — {@code ModelResolver}'s adaptive routing then never swaps a provider on a phantom
+ * score, and {@code ModelProviderCandidateService} reports the local-performance signal as
+ * "unavailable" rather than manufacturing evidence — but it also means the advertised 24h local
+ * signal contributes nothing. Wiring a live writer is deliberately deferred: it must record the
+ * EFFECTIVE physical route (the {@code run_step_usage} / {@code agent_task.effective_*} identity,
+ * not the requested route — cf. RR-395) with per-attempt/retry attribution, AND it depends on the
+ * sliding-window/atomicity fix (RR-394) — writing into the current cumulative, TTL-reset,
+ * non-atomic hash would let ancient lifetime data dominate current behaviour the moment it went
+ * live. Do not wire this without both.
  */
 @Slf4j
 @Component
