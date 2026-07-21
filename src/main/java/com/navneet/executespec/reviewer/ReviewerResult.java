@@ -24,6 +24,10 @@ import lombok.Builder;
  *     green in the final workspace generation. Tighten-only: this forces {@code UNRESOLVED_ISSUES}
  *     so a clean verdict can never be returned over failing or unprovable tests (RR-273)
  * @param totalLatencyMs wall-clock across both passes + final build
+ * @param workspaceQuiescent false when a timed-out review pass could NOT be proven terminated
+ *     within the abandonment reserve, so the workspace may still be mutating after {@code review}
+ *     returned. Every later evidence stage is skipped in that case, because build/test output and
+ *     the published diff would describe different workspace generations (RR-272). Defaults to true.
  */
 @Builder
 public record ReviewerResult(
@@ -38,7 +42,13 @@ public record ReviewerResult(
     Integer finalTestsPassed,
     Integer finalTestsTotal,
     boolean concreteTestsRed,
-    long totalLatencyMs) {
+    long totalLatencyMs,
+    Boolean workspaceQuiescent) {
+
+  /** True unless a timed-out pass was left running with unrevoked write authority (RR-272). */
+  public boolean isWorkspaceQuiescent() {
+    return workspaceQuiescent == null || workspaceQuiescent;
+  }
 
   public enum Overall {
     /** Both passes completed, no issues found or all fixes verified by final build. */
