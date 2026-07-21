@@ -4603,3 +4603,34 @@
     padding: 4px 0;
   }
 }
+
+/* RR-623: sandboxed artifact preview. The isolation is in the iframe's sandbox
+ * attribute (see SandboxedArtifactPreview) — this is presentation only. */
+.agent-artifact-preview {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  background: var(--ide-bg-widget);
+}
+.agent-artifact-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ide-border);
+  font-size: 12px;
+}
+.agent-artifact-preview-note {
+  margin-left: auto;
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+}
+.agent-artifact-preview-frame {
+  width: 100%;
+  height: 320px;
+  border: 0;
+  background: #fff;
+}

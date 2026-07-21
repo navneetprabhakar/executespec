@@ -929,9 +929,18 @@ describe('IdeAgent', () => {
         await Promise.resolve();
       });
       expect(host.textContent).toContain('Clipboard access was denied. Use Download instead.');
-      expect(host.textContent).toContain(
-        'Preview was blocked. Allow pop-ups or use Download instead.',
-      );
+      // RR-623: preview must NOT open a blob: URL in a window. A blob URL inherits the creator's
+      // origin, so model-authored HTML would run as first-party and could read localStorage (where
+      // access_token lives). It renders into a sandboxed iframe with an opaque origin instead.
+      expect(window.open).not.toHaveBeenCalled();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      const frame = host.querySelector('iframe.agent-artifact-preview-frame');
+      if (!frame) throw new Error('Sandboxed preview frame was not rendered.');
+      const sandbox = frame.getAttribute('sandbox') ?? '';
+      expect(sandbox.split(/\s+/)).toContain('allow-scripts');
+      // allow-same-origin alongside allow-scripts would let the document remove its own sandbox.
+      expect(sandbox).not.toContain('allow-same-origin');
+      expect(frame.getAttribute('srcdoc') ?? '').toContain('Content-Security-Policy');
     } finally {
       Object.defineProperty(navigator, 'clipboard', {configurable: true, value: originalClipboard});
       Object.defineProperty(window, 'open', {configurable: true, value: originalOpen});

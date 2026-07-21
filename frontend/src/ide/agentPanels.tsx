@@ -691,6 +691,7 @@ function ArtifactRail({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
   const [previewErrorId, setPreviewErrorId] = useState<string | null>(null);
+  const [previewArtifactState, setPreviewArtifact] = useState<AgentArtifact | null>(null);
   if (!artifacts.length) return null;
 
   async function copyArtifact(artifact: AgentArtifact) {
@@ -723,17 +724,27 @@ function ArtifactRail({
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * RR-623: preview model-generated markup in an OPAQUE origin, never the app origin.
+   *
+   * This used to `URL.createObjectURL` the artifact and `window.open` it. A blob: URL **inherits the
+   * origin of the document that created it**, so the model's HTML/SVG ran as first-party on the app
+   * origin — able to read `localStorage` (where `access_token` lives), call the API with the user's
+   * ambient session, and read anything else same-origin. `noopener,noreferrer` does not help: it
+   * severs the window handle, not the origin.
+   *
+   * The artifact is now rendered into a sandboxed iframe via `srcdoc` with `sandbox="allow-scripts"`
+   * and deliberately WITHOUT `allow-same-origin`, which gives the document an opaque origin with no
+   * access to app storage, cookies or same-origin fetch. The CSP is embedded as a `<meta>` inside
+   * the document because a response header does not govern `srcdoc` — the same reason
+   * `previewrender/` embeds it server-side.
+   *
+   * Do not "simplify" this back to a blob URL or add `allow-same-origin`; either one restores the
+   * hole.
+   */
   function previewArtifact(artifact: AgentArtifact) {
-    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
-    const url = URL.createObjectURL(blob);
-    try {
-      const preview = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!preview) throw new Error('Preview popup blocked');
-      setPreviewErrorId(null);
-    } catch {
-      setPreviewErrorId(artifact.id);
-    }
-    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    setPreviewErrorId(null);
+    setPreviewArtifact(artifact);
   }
 
   // Honest naming (Phase 4, item 29): this only drafts a message into the
@@ -748,6 +759,12 @@ function ArtifactRail({
 
   return (
     <div className='agent-artifact-rail' aria-label='Generated artifacts'>
+      {previewArtifactState && (
+        <SandboxedArtifactPreview
+          artifact={previewArtifactState}
+          onClose={() => setPreviewArtifact(null)}
+        />
+      )}
       <div className='agent-artifact-head'>
         <span>Generated artifacts</span>
         <span>
@@ -814,6 +831,62 @@ function ArtifactRail({
       </div>
     </div>
   );
+}
+
+/**
+ * Renders a model-generated artifact in an opaque origin (RR-623).
+ *
+ * `sandbox="allow-scripts"` WITHOUT `allow-same-origin` is the load-bearing part: the combination
+ * gives the frame a unique opaque origin, so scripts may run but cannot reach app `localStorage`,
+ * cookies, or same-origin API calls. Adding `allow-same-origin` alongside `allow-scripts` would let
+ * the document remove its own sandbox attribute and defeats the whole control.
+ *
+ * The CSP travels inside the document as a `<meta>` element, because a response header cannot govern
+ * a `srcdoc` frame. `previewrender/` does the same thing server-side for the same reason.
+ */
+function SandboxedArtifactPreview({
+  artifact,
+  onClose,
+}: {
+  artifact: AgentArtifact;
+  onClose: () => void;
+}) {
+  const mime = mimeForArtifact(artifact);
+  const doc =
+    mime === 'text/html'
+      ? `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">${artifact.content}`
+      : `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"><body style="margin:0"><pre style="white-space:pre-wrap;word-break:break-word;font:12px ui-monospace,monospace;padding:12px">${escapeHtmlText(
+          artifact.content,
+        )}</pre>`;
+
+  return (
+    <div
+      className='agent-artifact-preview'
+      role='dialog'
+      aria-label={`Preview ${artifact.filename}`}
+    >
+      <div className='agent-artifact-preview-head'>
+        <span>{artifact.filename}</span>
+        <span className='agent-artifact-preview-note'>
+          Sandboxed preview — isolated from your session
+        </span>
+        <button className='ide-btn ghost' onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <iframe
+        title={`Preview of ${artifact.filename}`}
+        sandbox='allow-scripts'
+        srcDoc={doc}
+        className='agent-artifact-preview-frame'
+      />
+    </div>
+  );
+}
+
+/** Escapes artifact text so a non-HTML artifact cannot inject markup into its own viewer. */
+function escapeHtmlText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function mimeForArtifact(artifact: AgentArtifact): string {
