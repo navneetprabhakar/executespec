@@ -25,10 +25,21 @@ final class PostReviewQualityPolicy {
         || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
   }
 
+  /**
+   * RR-826 — final verification is {@code PASSED | FAILED | UNAVAILABLE}, and only PASSED may leave
+   * a run success-shaped.
+   *
+   * <p>A null report means report generation threw, the run row vanished, or persistence failed —
+   * i.e. the deterministic verification artifact this product's central claim rests on does not
+   * exist. This previously returned false, so the caller retained its pre-report COMPLETE and
+   * continued to publication: verification became optional exactly when the verifier failed. The
+   * companion goal decision already labelled the same absence {@code FAILED/STOP_FAILED}, so the
+   * policy computed failed evidence and the boolean gate discarded it.
+   */
   static boolean validationReportQualityFailed(
       ValidationReport report, double requiredQualityThreshold) {
     if (report == null) {
-      return false;
+      return true;
     }
     if (report.getPipelineResult() == PipelineResult.FAILED
         || report.getPipelineResult() == PipelineResult.NEEDS_ATTENTION) {

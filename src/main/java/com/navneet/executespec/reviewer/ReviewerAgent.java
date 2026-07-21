@@ -370,13 +370,28 @@ public class ReviewerAgent {
     boolean autoVerifyEnabled =
         featureFlagService != null && featureFlagService.isEnabled("worker.auto-verify.enabled");
     WorkerResult fixTests = null;
+    // RR-273 — build and test evidence must describe ONE immutable final workspace generation.
+    // Previously the post-repair rerun existed only as a log line: its counts were discarded, the
+    // verdict was computed from the PRE-repair build bit, and no build was rerun even though the
+    // fix-tests worker had just mutated source. CLEAN could therefore be returned with the suite
+    // still red, or with code that no longer compiled.
+    Integer finalTestsPassed = null;
+    Integer finalTestsTotal = null;
+    boolean concreteTestsRed = false;
     if (buildPassed && autoVerifyEnabled && workspaceTestRunner != null) {
       try {
+        var initial =
+            workspaceTestRunner.runTestsDetailed(
+                req.context().runId(), req.context().workspaceRoot());
+        if (initial.isPresent() && initial.get().summary().getTotalTests() > 0) {
+          finalTestsPassed = initial.get().summary().getPassed();
+          finalTestsTotal = initial.get().summary().getTotalTests();
+        }
         var red =
-            workspaceTestRunner
-                .runTestsDetailed(req.context().runId(), req.context().workspaceRoot())
+            initial
                 .filter(d -> d.summary().getTotalTests() > 0)
                 .filter(d -> d.summary().getFailed() > 0 || d.summary().getErrors() > 0);
+        concreteTestsRed = red.isPresent();
         if (red.isPresent()) {
           var d = red.get();
           log.info(
@@ -404,11 +419,37 @@ public class ReviewerAgent {
                   loadPrompt("prompts/reviewer-general.md"),
                   FIX_BUILD_PASS_TIMEOUT_SECONDS,
                   testSpec);
+          // The fix-tests worker just mutated source. Re-establish BOTH gates against the workspace
+          // as it now stands: a repair that fixes a test but breaks compilation is not a repair.
+          ObjectNode postFixArgs = objectMapper.createObjectNode();
+          if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
+            postFixArgs.put("plannerCommand", req.buildCommand());
+          }
+          ToolResult postFixBuild = buildProjectTool.execute(postFixArgs, req.context());
+          if (postFixBuild instanceof ToolResult.Ok ok3) {
+            buildOutput = ok3.content();
+            buildExit = extractExitCode(buildOutput);
+            buildPassed = isBuildVerifiedEvidence(buildOutput);
+          } else if (postFixBuild instanceof ToolResult.Err err3) {
+            buildOutput = "tool error: " + err3.message();
+            buildPassed = false;
+          }
+
           var after =
               workspaceTestRunner.runTestsDetailed(
                   req.context().runId(), req.context().workspaceRoot());
+          if (after.isPresent() && after.get().summary().getTotalTests() > 0) {
+            finalTestsPassed = after.get().summary().getPassed();
+            finalTestsTotal = after.get().summary().getTotalTests();
+            concreteTestsRed =
+                after.get().summary().getFailed() > 0 || after.get().summary().getErrors() > 0;
+          } else {
+            // The suite was provably red before the repair and cannot now be proven green. An
+            // unavailable rerun is not evidence of success — the red finding stands.
+            concreteTestsRed = true;
+          }
           log.info(
-              "ReviewerAgent run={} fix-tests pass DONE — after: {}",
+              "ReviewerAgent run={} fix-tests pass DONE — after: {}; buildPassedAfter={}",
               req.context().runId(),
               after
                   .map(
@@ -418,17 +459,24 @@ public class ReviewerAgent {
                               + a.summary().getErrors()
                               + " errored of "
                               + a.summary().getTotalTests())
-                  .orElse("unresolvable"));
+                  .orElse("unresolvable"),
+              buildPassed);
         }
       } catch (Exception e) {
         log.warn(
-            "ReviewerAgent run={} fix-tests pass failed (fail-open): {}",
+            "ReviewerAgent run={} fix-tests evidence failed: {}",
             req.context().runId(),
             e.getMessage());
+        // A crashed verification pass never upgrades the verdict; keep whatever was already proven.
       }
     }
 
     ReviewerResult.Overall overall = determineOverall(general, wiring, buildPassed);
+    if (concreteTestsRed && overall != ReviewerResult.Overall.REVIEW_FAILED) {
+      // Tighten-only: red concrete tests cannot coexist with a clean verdict, whatever the
+      // reviewer LLM claimed about its own work.
+      overall = ReviewerResult.Overall.UNRESOLVED_ISSUES;
+    }
     long elapsed = System.currentTimeMillis() - start;
     log.info(
         "ReviewerAgent DONE run={} overall={} buildPassed={} thirdPassFired={} fixTestsFired={}"
@@ -460,6 +508,9 @@ public class ReviewerAgent {
         .finalBuildPassed(buildPassed)
         .finalBuildExitCode(buildExit)
         .finalBuildOutput(buildOutput)
+        .finalTestsPassed(finalTestsPassed)
+        .finalTestsTotal(finalTestsTotal)
+        .concreteTestsRed(concreteTestsRed)
         .totalLatencyMs(elapsed)
         .build();
   }
