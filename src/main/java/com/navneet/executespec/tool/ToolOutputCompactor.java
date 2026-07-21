@@ -10,6 +10,7 @@ import java.util.Set;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.LlmProvider;
@@ -176,7 +177,13 @@ public class ToolOutputCompactor {
     // run's provider boundary (BYOK key resolution + implicit-cache prefix affinity). A BYOK OpenAI
     // or Gemini run must compact via its own LIGHTWEIGHT model (gpt-*-mini / Flash), never silently
     // bill an Anthropic Haiku call. ModelResolver maps the provider → its LIGHTWEIGHT model.
-    LlmProvider provider = resolveProvider(workerProvider);
+    LlmProvider provider = resolveProvider(workerProvider).orElse(null);
+    if (provider == null) {
+      // RR-1549 — an unresolvable provider must NOT fall back to a foreign one: under an OWN_KEYS
+      // policy that call is ineligible, and it is exactly the cross-provider billing this method's
+      // contract exists to prevent. Skip compaction; the caller keeps the raw output.
+      return Optional.empty();
+    }
     ResolvedModel resolved;
     try {
       resolved = modelResolver.resolve(AGENT_NAME, provider);
@@ -201,8 +208,12 @@ public class ToolOutputCompactor {
                   String.valueOf(rawOutput.length()),
                   "WORKER_GOAL",
                   truncate(workerGoal, GOAL_TRUNCATE_CHARS),
+                  // RR-1549 — tool output is repository/shell-controlled text. Substituting it raw
+                  // let an embedded instruction steer the summary, and the SUMMARY is what enters
+                  // the worker's decision context: an indirect injection channel into the worker.
+                  // Delimiter-safe framing is the standing rule for every evidence block.
                   "RAW_OUTPUT",
-                  rawOutput));
+                  PromptTrustBoundary.wrap("TOOL_OUTPUT", rawOutput)));
     } catch (Exception e) {
       log.warn(
           "ToolOutputCompactor prompt assemble failed (tool={}): {} — using raw output",
@@ -299,21 +310,24 @@ public class ToolOutputCompactor {
    * compactIfNeeded} (RL-2026-05-052 follow-up — replaces the earlier hard-coded ANTHROPIC, which
    * routed every OpenAI / Gemini / BYOK run's bulk-output compaction through Anthropic Haiku:
    * wrong-key on BYOK + a cross-provider cache miss). Parse mirrors {@code SequentialExecutor}'s
-   * {@code LlmProvider.valueOf(provider.toUpperCase())}; null / blank / unknown → ANTHROPIC
-   * (platform default) so a missing value degrades safely rather than throwing.
+   * {@code LlmProvider.valueOf(provider.toUpperCase())}.
+   *
+   * <p>RR-1549: null / blank / unrecognised now returns EMPTY rather than ANTHROPIC. Defaulting
+   * reintroduced exactly the cross-provider dispatch this method was written to prevent — and under
+   * an {@code OWN_KEYS} policy that call is not merely mis-billed, it is ineligible. Compaction is
+   * a pure optimisation, so declining it is always safe.
    */
-  private LlmProvider resolveProvider(String workerProvider) {
+  private Optional<LlmProvider> resolveProvider(String workerProvider) {
     if (workerProvider == null || workerProvider.isBlank()) {
-      return LlmProvider.ANTHROPIC;
+      log.warn("ToolOutputCompactor has no worker provider — skipping compaction");
+      return Optional.empty();
     }
     try {
-      return LlmProvider.valueOf(workerProvider.trim().toUpperCase(Locale.ROOT));
+      return Optional.of(LlmProvider.valueOf(workerProvider.trim().toUpperCase(Locale.ROOT)));
     } catch (IllegalArgumentException e) {
       log.warn(
-          "ToolOutputCompactor unknown worker provider '{}' — defaulting LIGHTWEIGHT tier to"
-              + " ANTHROPIC",
-          workerProvider);
-      return LlmProvider.ANTHROPIC;
+          "ToolOutputCompactor unknown worker provider '{}' — skipping compaction", workerProvider);
+      return Optional.empty();
     }
   }
 

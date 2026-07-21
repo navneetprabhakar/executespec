@@ -25,6 +25,13 @@ public class ShellSandboxPolicy {
           );
 
   /** HIGH-level strict npm/mvn/gradle verb allowlist. */
+  // RR-1545 considered adding bare `run` here so `npm run <script>` (what ProjectCommandTool's
+  // Node detection emits) would pass at HIGH. It is deliberately NOT added: a package.json script
+  // is arbitrary user-authored code, and blocking it is the whole point of the HIGH verb allowlist
+  // (pinned by ShellSandboxPolicyLevelTest.highStrictNpmVerbs). At HIGH, `lintProject` /
+  // `testProject`
+  // on a Node project are correctly unavailable rather than defectively unavailable; the detected
+  // command is instead reported honestly by ProjectCommandTool.
   private static final Set<String> HIGH_STRICT_NPM_VERBS =
       Set.of("install", "ci", "build", "test", "start", "run-script");
 
@@ -52,7 +59,10 @@ public class ShellSandboxPolicy {
   private static final Set<String> HIGH_STRICT_MVN_VERBS =
       Set.of("compile", "test", "package", "verify", "install", "clean", "spring-boot:run");
   private static final Set<String> HIGH_STRICT_GRADLE_VERBS =
-      Set.of("build", "test", "check", "clean", "assemble");
+      Set.of("build", "test", "check", "clean", "assemble", "dependencies");
+
+  /** HIGH-level strict ruff verb allowlist (lint + format only; no {@code server}). */
+  private static final Set<String> HIGH_STRICT_RUFF_VERBS = Set.of("check", "format", "rule");
 
   /** HIGH-level strict expo verb allowlist (direct {@code expo <verb>} invocation). */
   private static final Set<String> HIGH_STRICT_EXPO_VERBS =
@@ -335,7 +345,19 @@ public class ShellSandboxPolicy {
           // surface in any meaningful way — within workspace it can only flip permission
           // bits on files the worker already owns; in cleanroom + --network none, even
           // dangerous chmod has no exfiltration path.
-          "chmod");
+          "chmod",
+
+          // 2026-07-20 (RR-1545) — toolchain binaries that ExecuteSpec's OWN command detection
+          // emits but the allowlist rejected, making testProject / installDependencies /
+          // lintProject / formatProject permanently FORBIDDEN for Gradle-wrapper, Ruff and Go
+          // projects while blaming "the sandbox" rather than an unsupported toolchain.
+          //   `gradlew` — the wrapper form of the already-allowed `gradle`; identical risk model
+          //               (a Gradle build script executes arbitrary code either way).
+          //   `ruff`    — Python lint/format only; no network, no process spawning.
+          //   `gofmt`   — Go source formatter shipped with the already-allowed `go` toolchain.
+          "gradlew",
+          "ruff",
+          "gofmt");
 
   /** Matches $(...) subshell syntax. */
   private static final Pattern SUBSHELL_PATTERN = Pattern.compile("\\$\\(");
@@ -572,7 +594,8 @@ public class ShellSandboxPolicy {
       case "npm" -> HIGH_STRICT_NPM_VERBS;
       case "npx" -> HIGH_STRICT_NPX_VERBS;
       case "mvn" -> HIGH_STRICT_MVN_VERBS;
-      case "gradle" -> HIGH_STRICT_GRADLE_VERBS;
+      case "gradle", "gradlew" -> HIGH_STRICT_GRADLE_VERBS;
+      case "ruff" -> HIGH_STRICT_RUFF_VERBS;
       case "expo" -> HIGH_STRICT_EXPO_VERBS;
       case "eas" -> HIGH_STRICT_EAS_VERBS;
       default -> null;

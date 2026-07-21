@@ -76,4 +76,113 @@ class ReviewerMutationScopeTest {
     assertThat(brownfield).contains("shell is disabled");
     assertThat(outside).isNull();
   }
+
+  // ---- RR-1543: containment must be evaluated on the canonical path ------------------------
+
+  @Test
+  void dotSegmentEscapeToSiblingRepositoryIsRejected() {
+    for (String escaping :
+        List.of(
+            "repos/api/../web/x.java",
+            "repos/api/./../web/x.java",
+            "./repos/api/../../etc/x",
+            "repos/api/src/../../web/x.java")) {
+      String write =
+          ReviewerMutationScope.withPolicy(
+              BROWNFIELD, () -> ReviewerMutationScope.validateWriteFile(escaping, true, true));
+      String edit =
+          ReviewerMutationScope.withPolicy(
+              BROWNFIELD, () -> ReviewerMutationScope.validateEditFile(escaping));
+      org.assertj.core.api.Assertions.assertThat(write).as(escaping).isNotNull();
+      org.assertj.core.api.Assertions.assertThat(edit).as(escaping).isNotNull();
+    }
+  }
+
+  @Test
+  void absolutePathIsRejected() {
+    String error =
+        ReviewerMutationScope.withPolicy(
+            BROWNFIELD, () -> ReviewerMutationScope.validateEditFile("/etc/passwd"));
+    org.assertj.core.api.Assertions.assertThat(error).isNotNull();
+  }
+
+  @Test
+  void redundantDotSegmentsInsideTheRootStillResolveInside() {
+    String error =
+        ReviewerMutationScope.withPolicy(
+            BROWNFIELD,
+            () -> ReviewerMutationScope.validateEditFile("repos/api/src/../src/Main.java"));
+    org.assertj.core.api.Assertions.assertThat(error).isNull();
+  }
+
+  @Test
+  void approvedBasenameDoesNotAuthorizeThatFilenameElsewhere() {
+    // "repos/api/src/AuthServiceTest.java" is approved; the same BASENAME in another directory
+    // inside the same root must NOT inherit that approval.
+    String error =
+        ReviewerMutationScope.withPolicy(
+            BROWNFIELD,
+            () ->
+                ReviewerMutationScope.validateWriteFile(
+                    "repos/api/other/AuthServiceTest.java", false, false));
+    org.assertj.core.api.Assertions.assertThat(error).contains("cannot create an unplanned file");
+  }
+
+  // ---- RR-1542: destructive tools are inside the scope -------------------------------------
+
+  @Test
+  void deleteOutsideAdmittedRootIsRejectedAndInsideIsAllowed() {
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD, () -> ReviewerMutationScope.validateDelete("repos/web/x.java")))
+        .contains("outside admitted repository roots");
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD, () -> ReviewerMutationScope.validateDelete("repos/api/x.java")))
+        .isNull();
+  }
+
+  @Test
+  void moveIsRejectedWhenEitherEndpointLeavesTheAdmittedRoot() {
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                () -> ReviewerMutationScope.validateMove("repos/api/a.java", "repos/web/a.java")))
+        .isNotNull();
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                () -> ReviewerMutationScope.validateMove("repos/web/a.java", "repos/api/a.java")))
+        .isNotNull();
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD,
+                () -> ReviewerMutationScope.validateMove("repos/api/a.java", "repos/api/b.java")))
+        .isNull();
+  }
+
+  @Test
+  void backgroundJobIsRefusedWheneverShellIs() {
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                BROWNFIELD, ReviewerMutationScope::validateBackgroundJob))
+        .isEqualTo(
+            ReviewerMutationScope.withPolicy(BROWNFIELD, ReviewerMutationScope::validateShell));
+    org.assertj.core.api.Assertions.assertThat(ReviewerMutationScope.validateBackgroundJob())
+        .isNull();
+  }
+
+  @Test
+  void nonBrownfieldPolicyLeavesDestructiveToolsUnrestricted() {
+    ReviewerMutationScope.Policy greenfield =
+        new ReviewerMutationScope.Policy(false, List.of(), List.of(), false);
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                greenfield, () -> ReviewerMutationScope.validateDelete("anything/at/all.java")))
+        .isNull();
+    org.assertj.core.api.Assertions.assertThat(
+            ReviewerMutationScope.withPolicy(
+                greenfield, () -> ReviewerMutationScope.validateMove("a.java", "b.java")))
+        .isNull();
+  }
 }

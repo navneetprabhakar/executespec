@@ -90,7 +90,34 @@ public class ToolRegistry {
    * worker behavior. Remote/local-hands runs explicitly retain the compatibility surface below.
    */
   public static final Set<String> SERVER_WORKER_EXCLUDED_TOOLS =
-      Set.of("ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+      Set.of(
+          // misleading / unwired capability claims
+          "ast_search",
+          "astSearch",
+          "ast_edit",
+          "astEdit",
+          "lsp",
+          "mcp_client",
+          "mcpClient",
+          // RR-1599 — redundant alias spellings of a capability the worker already has under its
+          // canonical name. `executeCommand`/`runCommand`/`terminalCommand` ARE `shell`,
+          // `build`/`runBuild` ARE `buildProject`, `rename` IS `move`, `deletePath` IS `delete`,
+          // `backgroundProcess` IS `background_process`. Every worker safety/evidence gate
+          // downstream (WorkerAgent's write/shell/verified-pass classification,
+          // SequentialExecutor's
+          // repeated-failure and mutation-path signatures) matches on the literal tool NAME, so an
+          // alias executed a privileged action while staying invisible to the guard policing it.
+          // Until those gates key on ToolCapability, a server worker is never shown a second
+          // spelling for a capability it already has. Dispatch compatibility is unaffected —
+          // find(String) still resolves the alias for a persisted or replayed call.
+          "executeCommand",
+          "runCommand",
+          "terminalCommand",
+          "build",
+          "runBuild",
+          "rename",
+          "deletePath",
+          "backgroundProcess");
 
   /**
    * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
@@ -187,6 +214,18 @@ public class ToolRegistry {
   /** Names of all registered tools. */
   public List<String> toolNames() {
     return allTools.stream().map(Tool::name).sorted().toList();
+  }
+
+  /**
+   * Canonical capability behind a tool NAME (RR-1599). Empty when the name is unregistered or
+   * unclassified — callers must fail closed on empty, never treat it as harmless.
+   */
+  public java.util.Optional<ToolCapability> capabilityOf(String toolName) {
+    Tool tool = find(toolName);
+    if (tool != null && tool.capability() != null) {
+      return java.util.Optional.of(tool.capability());
+    }
+    return ToolCapabilities.of(toolName);
   }
 
   /** Look up a tool by name; null if not registered. */
@@ -438,8 +477,7 @@ public class ToolRegistry {
       }
       try {
         ToolResult result =
-            authorizedMutation != null
-                    && ("writeFile".equals(tool.name()) || "editFile".equals(tool.name()))
+            authorizedMutation != null && requiresMutationAuthorization(tool)
                 ? authorizedMutation.apply(tool.name(), args)
                 : tool.execute(args, ctx);
         return switch (result) {
@@ -457,6 +495,25 @@ public class ToolRegistry {
             ToolResult.ErrorKind.INTERNAL,
             unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
       }
+    }
+
+    /**
+     * RR-1607 — inverted predicate. This used to be {@code name.equals("writeFile") ||
+     * name.equals("editFile")}, so adding any other write-capable name to the implementer's
+     * allowlist ({@code multiEdit}, {@code applyPatch}, {@code move}, {@code delete}, …) would have
+     * silently bypassed the persisted single-writer reservation this seam exists to enforce. The
+     * predicate is now capability-derived and fail-closed: any capability that can change files (or
+     * git history) is authorized, and an UNCLASSIFIED name is authorized too rather than executed.
+     *
+     * <p>Build/test capabilities deliberately still execute directly — the reservation is a
+     * single-WRITER lease, and the current authorizer only knows how to arbitrate file mutations.
+     * Widening it to command execution is a separate change with its own contract.
+     */
+    private static boolean requiresMutationAuthorization(Tool tool) {
+      ToolCapability capability = tool.capability();
+      return capability == null
+          || capability.mutatesFiles()
+          || capability == ToolCapability.GIT_WRITE;
     }
 
     private String okEnvelope(String content) {

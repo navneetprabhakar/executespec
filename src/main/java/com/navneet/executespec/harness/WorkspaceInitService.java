@@ -33,6 +33,57 @@ public class WorkspaceInitService {
   private final VendoredPathGuard vendoredPathGuard;
 
   /**
+   * Exclusions written into every greenfield run workspace. {@code .agent-context/} is the internal
+   * evidence directory (full tool logs, run journal, file locks) and must never reach a customer
+   * pull request (RR-1546).
+   */
+  static final String AGENT_WORKSPACE_GITIGNORE =
+      "target/\n"
+          + "build/\n"
+          + "node_modules/\n"
+          + ".gradle/\n"
+          + "__pycache__/\n"
+          + "*.class\n"
+          + "*.pyc\n"
+          + "*.log\n"
+          + ".batch_output/\n"
+          + ".agent-context/\n";
+
+  /** Exclusion appended to a CLONED repository's {@code .git/info/exclude} (RR-1546). */
+  static final String AGENT_CONTEXT_EXCLUDE_ENTRY = ".agent-context/";
+
+  /**
+   * Appends {@code .agent-context/} to a cloned repository's {@code .git/info/exclude}.
+   *
+   * <p>Brownfield clones use the CUSTOMER's {@code .gitignore}, which has no reason to mention an
+   * ExecuteSpec-internal directory, and mutating that tracked file would show up as a spurious diff
+   * in the pull request. {@code .git/info/exclude} is per-clone, untracked, and never pushed — the
+   * correct place for a host-side exclusion. Best-effort: a failure here degrades to the previous
+   * behaviour and must not fail the clone.
+   */
+  void excludeAgentContextInClone(Path repoRoot) {
+    try {
+      Path infoDir = repoRoot.resolve(".git").resolve("info");
+      if (!Files.isDirectory(repoRoot.resolve(".git"))) return;
+      Files.createDirectories(infoDir);
+      Path exclude = infoDir.resolve("exclude");
+      String existing = Files.exists(exclude) ? Files.readString(exclude) : "";
+      if (existing.lines().anyMatch(l -> l.strip().equals(AGENT_CONTEXT_EXCLUDE_ENTRY))) return;
+      String prefix = existing.isEmpty() || existing.endsWith("\n") ? "" : "\n";
+      Files.writeString(
+          exclude,
+          existing
+              + prefix
+              + "# ExecuteSpec internal execution evidence — never publish (RR-1546)\n"
+              + AGENT_CONTEXT_EXCLUDE_ENTRY
+              + "\n");
+    } catch (IOException e) {
+      log.warn(
+          "Could not add .agent-context exclusion to clone at {}: {}", repoRoot, e.getMessage());
+    }
+  }
+
+  /**
    * Creates and initialises a fresh, isolated workspace for {@code runId}.
    *
    * <ul>
@@ -65,18 +116,14 @@ public class WorkspaceInitService {
       runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
       runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
 
-      // Standard build-artifact exclusions
-      Files.writeString(
-          workspace.resolve(".gitignore"),
-          "target/\n"
-              + "build/\n"
-              + "node_modules/\n"
-              + ".gradle/\n"
-              + "__pycache__/\n"
-              + "*.class\n"
-              + "*.pyc\n"
-              + "*.log\n"
-              + ".batch_output/\n");
+      // Standard build-artifact exclusions.
+      //
+      // `.agent-context/` (RR-1546) holds INTERNAL execution evidence: full un-budgeted shell /
+      // build / test output spilled by ToolOutput.persistFull, the rolling run journal, and file
+      // locks. GitCommitTool and GitTool stage with `git add -A`, so without this entry every one
+      // of those files was committed and pushed into the customer's pull request — the class
+      // javadoc's claim that it "is not pushed on product runs" had nothing enforcing it.
+      Files.writeString(workspace.resolve(".gitignore"), AGENT_WORKSPACE_GITIGNORE);
 
       // Every worker MUST update README.md (hard requirement in worker.txt step 7).
       // Parallel workers all modify README.md independently from the same base, causing
@@ -143,6 +190,9 @@ public class WorkspaceInitService {
     // path lands the clone at the workspace root rather than a repos/<name>/ subdir, but the
     // class of bug is identical (committed node_modules/ etc.).
     vendoredPathGuard.augmentGitignore(workspace);
+    // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
+    // without mutating their tracked .gitignore.
+    excludeAgentContextInClone(workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
 
@@ -318,6 +368,7 @@ public class WorkspaceInitService {
       // running. Closes the run-b171fa52 class of bug where the worker added Node code to a
       // Python repo whose .gitignore was Python-only and committed 9605 node_modules/ files.
       vendoredPathGuard.augmentGitignore(target);
+      excludeAgentContextInClone(target); // RR-1546
     }
   }
 
