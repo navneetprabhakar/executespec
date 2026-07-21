@@ -24,6 +24,8 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.tool.GitToolResult;
 
@@ -98,6 +100,54 @@ public class ScmPushService {
   private final ArtifactPublicationGuard publicationGuard;
   // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
   private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
+  // RR-1668 — per-run cloned-branch SHA snapshots, used to pin --force-with-lease on the push.
+  private final RunRepoSnapshotRepository runRepoSnapshotRepository;
+
+  /**
+   * RR-1668 — the exact remote SHA to pin a {@code --force-with-lease} against for {@code
+   * branchName} in this repo, or {@code null} when this run did not clone that branch (so the push
+   * must NOT force).
+   *
+   * <p>A run records a {@code run_repo_snapshot} row only for a branch it actually cloned,
+   * capturing that branch's HEAD SHA at clone time. When the branch the run pushes to is that same
+   * branch, the captured SHA is what the remote is expected to still be at — so a commit a human
+   * pushed to the branch after the run cloned it makes the lease fail and the push abort, instead
+   * of being silently overwritten. A fresh {@code executespec/<runId>} branch (or a re-run's {@code
+   * branchNamingPattern} output) was never cloned, so there is no matching snapshot and this
+   * returns {@code null}: the caller then does a plain, non-forced push that creates the branch
+   * when absent and refuses a divergent remote rather than clobbering it.
+   *
+   * <p>Fails SAFE: any lookup error returns {@code null} (plain non-forced push), never a blind
+   * force. A plain push still fast-forwards the run's own branch and rejects a human-advanced one,
+   * so the null fallback keeps the RR-1668 protection.
+   */
+  private String expectedRemoteShaFor(String runId, String repoFullName, String branchName) {
+    if (!StringUtils.hasText(runId) || !StringUtils.hasText(branchName)) return null;
+    try {
+      return runRepoSnapshotRepository.findByRunId(runId).stream()
+          .filter(s -> branchName.equals(s.getBranch()))
+          .filter(s -> repoFullName == null || sameRepo(repoFullName, s.getRepoFullName()))
+          .map(RunRepoSnapshot::getCommitSha)
+          .filter(StringUtils::hasText)
+          .findFirst()
+          .orElse(null);
+    } catch (Exception e) {
+      log.warn(
+          "[{}] RR-1668 could not resolve clone snapshot for branch {} (defaulting to non-forced"
+              + " push): {}",
+          runId,
+          branchName,
+          e.getMessage());
+      return null;
+    }
+  }
+
+  /** Match a snapshot repo to a push repo by full name, tolerating {@code owner/repo} vs slug. */
+  private static boolean sameRepo(String a, String b) {
+    if (a == null || b == null) return false;
+    if (a.equalsIgnoreCase(b)) return true;
+    return lastPathSegment(a).equalsIgnoreCase(lastPathSegment(b));
+  }
 
   /**
    * Entry point for manual SCM push from {@code RunController}. Resolves the user creds off the
@@ -236,9 +286,12 @@ public class ScmPushService {
               : null;
       String branchName = resolveBranchName(project, run);
       String cloneUrl = "https://bitbucket.org/" + workspace + "/" + repoSlug + ".git";
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), workspace + "/" + repoSlug, branchName);
 
       publicationGuard.assertGitWorkspaceSafe(run.getRunId());
-      gitTool.pushToBranchBitbucket(run.getRunId(), cloneUrl, username, appPassword, branchName);
+      gitTool.pushToBranchBitbucket(
+          run.getRunId(), cloneUrl, username, appPassword, branchName, expectedRemoteSha);
 
       String title =
           StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
@@ -391,7 +444,10 @@ public class ScmPushService {
               ? projectRepository.findById(run.getProjectId()).orElse(null)
               : null;
       String branchName = resolveBranchName(project, run);
-      GitToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+      GitToolResult result =
+          gitTool.pushToBranch(run.getRunId(), remote, pat, branchName, expectedRemoteSha);
       if (!result.isOk()) {
         log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
         return PushResult.failed("GitHub branch push failed: " + result.value(), "GITHUB");
@@ -621,8 +677,11 @@ public class ScmPushService {
         continue;
       }
 
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName);
       var pushResult =
-          gitTool.commitAndPushSubdir(run.getRunId(), subPath, remote, pat, branchName, commitMsg);
+          gitTool.commitAndPushSubdir(
+              run.getRunId(), subPath, remote, pat, branchName, commitMsg, expectedRemoteSha);
       if (!pushResult.isOk()) {
         log.warn(
             "[{}] multi-repo push failed for {}: {}",
