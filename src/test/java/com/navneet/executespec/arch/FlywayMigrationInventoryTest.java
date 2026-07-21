@@ -23,10 +23,11 @@ class FlywayMigrationInventoryTest {
     List<MigrationFile> migrations = readMigrations();
 
     // V119 is an applied historical migration and must remain on the classpath.
-    // V60_1 is fractional, so V1..V307 contains 308 migration files.
-    // (Phase 5 bumped this for V307__run_sandbox_lifecycle.)
-    assertThat(migrations).hasSize(308);
-    assertThat(migrations.getLast().version()).isEqualTo("307");
+    // V60_1 is fractional, so V1..V309 contains 310 migration files.
+    // (Phase 5 bumped this for V307__run_sandbox_lifecycle; the audit remediation added
+    // V308__contract_version_inline_content_text and V309__file_lock_run_scoped_identity.)
+    assertThat(migrations).hasSize(310);
+    assertThat(migrations.getLast().version()).isEqualTo("309");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
