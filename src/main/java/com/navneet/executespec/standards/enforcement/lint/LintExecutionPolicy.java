@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.navneet.executespec.security.SafeWorkspacePath;
+
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -78,8 +80,7 @@ public class LintExecutionPolicy {
               + "(executespec.standards.lint.host-execution-enabled=false); a linter config is "
               + "customer-authored executable code and is not run on the application host");
     }
-    Path root = realDirectory(repoRoot);
-    if (root == null) {
+    if (!isExistingDirectory(repoRoot)) {
       return Admission.denied("workspace root is not an existing directory");
     }
 
@@ -105,7 +106,7 @@ public class LintExecutionPolicy {
 
     String configArgument = null;
     if (configPath != null) {
-      Path contained = containedPath(root, configPath);
+      Path contained = containedPath(repoRoot, configPath);
       if (contained == null) {
         return Admission.denied(
             "lint config must resolve inside the workspace root and may not be a symlink");
@@ -119,7 +120,7 @@ public class LintExecutionPolicy {
     List<String> targets = new ArrayList<>();
     if (targetFiles != null) {
       for (Path file : targetFiles) {
-        Path contained = containedPath(root, file);
+        Path contained = containedPath(repoRoot, file);
         if (contained == null) {
           return Admission.denied(
               "lint target must resolve inside the workspace root and may not be a symlink");
@@ -130,35 +131,29 @@ public class LintExecutionPolicy {
     return new Admission(executable.toString(), configArgument, List.copyOf(targets), null);
   }
 
-  private static Path realDirectory(Path candidate) {
-    if (candidate == null) return null;
+  private static boolean isExistingDirectory(Path candidate) {
+    if (candidate == null) return false;
     try {
-      Path real = candidate.toRealPath();
-      return Files.isDirectory(real) ? real : null;
+      return Files.isDirectory(candidate.toRealPath());
     } catch (IOException unreadable) {
-      return null;
+      return false;
     }
   }
 
   /**
    * Resolve {@code candidate} against {@code root} and prove the result is inside it.
    *
-   * <p>Uses {@link Path#toRealPath()} on the parent so a symlink anywhere in the chain is resolved
-   * before containment is judged, then rejects the leaf itself being a symlink. A repository can
-   * plant links freely, so containment must be decided on real paths rather than on the literal
-   * string.
+   * <p>Delegates to the shared {@link SafeWorkspacePath} boundary rather than repeating the rules:
+   * a repository can plant a symlink at any component of the chain, so containment has to be judged
+   * on canonical paths with no link in any existing component. Returns null on refusal because the
+   * caller turns that into an UNAVAILABLE lint result rather than an exception.
    */
   private static Path containedPath(Path root, Path candidate) {
     try {
-      Path resolved = candidate.isAbsolute() ? candidate : root.resolve(candidate);
-      Path normalised = resolved.normalize();
-      if (Files.isSymbolicLink(normalised)) return null;
-      Path parent = normalised.getParent();
-      if (parent == null) return null;
-      Path realParent = parent.toRealPath();
-      if (!realParent.startsWith(root)) return null;
-      return realParent.resolve(normalised.getFileName());
-    } catch (IOException | RuntimeException unresolvable) {
+      Path resolved = (candidate.isAbsolute() ? candidate : root.resolve(candidate)).normalize();
+      SafeWorkspacePath.requireWithin(root, resolved);
+      return resolved;
+    } catch (IOException | RuntimeException refused) {
       return null;
     }
   }
