@@ -895,10 +895,14 @@ public class ProjectRepoService {
    */
   String detectMonorepoSubdir(String repoUrl, String branch, String overridePat) {
     try {
-      String body = gitHub.readRepoFile(repoUrl, ".executespec/root.yml", branch, overridePat);
-      // GitHubRepoService surfaces failures as a "// ..." sentinel
-      // rather than throwing; treat those as "no marker present".
-      if (body == null || body.isBlank() || body.startsWith("// ")) return null;
+      // RR-1631 — failure is out-of-band now, so a root.yml that legitimately opens with a "#
+      // "/"//"
+      // comment is no longer mistaken for a failed read.
+      String body =
+          gitHub
+              .readRepoFile(repoUrl, ".executespec/root.yml", branch, overridePat)
+              .contentOrNull();
+      if (body == null || body.isBlank()) return null;
       return parseRootYamlSubdir(body);
     } catch (Exception e) {
       log.debug(

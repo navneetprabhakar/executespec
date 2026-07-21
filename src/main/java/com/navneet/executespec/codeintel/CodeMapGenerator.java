@@ -219,12 +219,17 @@ public class CodeMapGenerator {
               // already paid for this read, but we don't keep it around to bound memory. The
               // service handles its own cache so repeated regens on the same SHA pay once.
               try {
+                // RR-1631 — a failed read is null, not a "// …" sentinel masquerading as source.
                 String content =
-                    github.readRepoFile(
-                        "https://github.com/" + repoFullName, path, defaultBranch, pat);
-                summarizer
-                    .summariseFile(repoFullName, path, content, null)
-                    .ifPresent(s -> md.append("**Purpose:** ").append(s).append("\n\n"));
+                    github
+                        .readRepoFile(
+                            "https://github.com/" + repoFullName, path, defaultBranch, pat)
+                        .contentOrNull();
+                if (content != null) {
+                  summarizer
+                      .summariseFile(repoFullName, path, content, null)
+                      .ifPresent(s -> md.append("**Purpose:** ").append(s).append("\n\n"));
+                }
               } catch (Exception e) {
                 log.debug(
                     "CodeMapGenerator: purpose-summary read failed for {}:{}: {}",
@@ -255,7 +260,9 @@ public class CodeMapGenerator {
               String content;
               try {
                 content =
-                    github.readRepoFile("https://github.com/" + repoFullName, path, branch, pat);
+                    github
+                        .readRepoFile("https://github.com/" + repoFullName, path, branch, pat)
+                        .contentOrNull();
               } catch (Exception e) {
                 return;
               }
@@ -299,7 +306,10 @@ public class CodeMapGenerator {
     for (String path : candidates) {
       String content;
       try {
-        content = github.readRepoFile("https://github.com/" + repoFullName, path, branch, pat);
+        content =
+            github
+                .readRepoFile("https://github.com/" + repoFullName, path, branch, pat)
+                .contentOrNull();
       } catch (Exception e) {
         continue;
       }

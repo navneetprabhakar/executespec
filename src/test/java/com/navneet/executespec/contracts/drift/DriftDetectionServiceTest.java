@@ -92,7 +92,8 @@ class DriftDetectionServiceTest {
     when(folderWriter.readFile(eq(repo), anyString(), any()))
         .thenReturn(
             Optional.of(new ExecutespecFolderWriter.FileSnapshot(content, "blob-sha", hash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(content);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(content));
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
@@ -113,7 +114,8 @@ class DriftDetectionServiceTest {
             Optional.of(
                 new ExecutespecFolderWriter.FileSnapshot(
                     snapshotContent, "blob-sha", snapshotHash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(sourceContent);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
     when(driftRepo.save(any(ContractDriftEvent.class)))
         .thenAnswer(
             inv -> {
@@ -162,7 +164,8 @@ class DriftDetectionServiceTest {
             Optional.of(
                 new ExecutespecFolderWriter.FileSnapshot(
                     snapshotContent, "blob-sha", snapshotHash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(sourceContent);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
     when(driftRepo.findUnresolvedByContractId(contractId)).thenReturn(List.of(existing));
 
     DriftDetectionService.DriftCheckResult result = service.runCheck(contract, projectId, "ghp_x");
@@ -193,7 +196,7 @@ class DriftDetectionServiceTest {
     when(folderWriter.readFile(any(), anyString(), any()))
         .thenReturn(Optional.of(new ExecutespecFolderWriter.FileSnapshot("x", "y", "z")));
     when(gitHub.readRepoFile(anyString(), anyString(), any()))
-        .thenReturn("// File not found on GitHub (status 404)");
+        .thenReturn(GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404));
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
@@ -234,7 +237,8 @@ class DriftDetectionServiceTest {
             Optional.of(
                 new ExecutespecFolderWriter.FileSnapshot(
                     snapshotContent, "blob-sha", snapshotHash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(sourceContent);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
     when(driftRepo.findUnresolvedByContractId(any())).thenReturn(java.util.List.of());
     when(driftRepo.save(any(ContractDriftEvent.class)))
         .thenAnswer(
@@ -258,36 +262,39 @@ class DriftDetectionServiceTest {
     when(folderWriter.readFile(eq(repo), anyString(), any()))
         .thenReturn(
             Optional.of(new ExecutespecFolderWriter.FileSnapshot(content, "blob-sha", hash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(content);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(content));
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
     assertThat(r.status()).isEqualTo(DriftDetectionService.Status.NO_DRIFT);
   }
 
+  /**
+   * RR-1631 — the reader no longer signals failure in-band, so there is nothing to string-match.
+   * These assertions pin the replacement contract: a typed failure is a failure regardless of what
+   * it says, and a successful read is a success even when its content reproduces an old sentinel.
+   */
   @Test
-  void isSourceReadFailure_matchesEveryReaderSentinel_butNotOrdinaryComments() {
-    // Verbatim from GitHubRepoService.readRepoFile / decodeGitHubContent.
-    assertThat(DriftDetectionService.isSourceReadFailure(null)).isTrue();
-    assertThat(DriftDetectionService.isSourceReadFailure("// No GitHub PAT configured")).isTrue();
-    assertThat(DriftDetectionService.isSourceReadFailure("// Invalid repo URL")).isTrue();
+  void readFailureIsTypedNotInferredFromContent() {
     assertThat(
-            DriftDetectionService.isSourceReadFailure("// File not found on GitHub (status 404)"))
-        .isTrue();
-    assertThat(DriftDetectionService.isSourceReadFailure("// Error reading file from GitHub: boom"))
-        .isTrue();
-    assertThat(DriftDetectionService.isSourceReadFailure("// No content field in response"))
-        .isTrue();
-    assertThat(DriftDetectionService.isSourceReadFailure("// Failed to decode file content: x"))
-        .isTrue();
-
-    assertThat(
-            DriftDetectionService.isSourceReadFailure("// Copyright 2026 Acme\nsyntax=\"proto3\";"))
+            GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404).successful())
         .isFalse();
     assertThat(
-            DriftDetectionService.isSourceReadFailure("// Code generated by protoc. DO NOT EDIT."))
-        .isFalse();
-    assertThat(DriftDetectionService.isSourceReadFailure("openapi: 3.0.0")).isFalse();
+            GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404)
+                .contentOrNull())
+        .isNull();
+    assertThat(
+            GitHubRepoService.RepoFileResult.success("// Copyright 2026 Acme\nsyntax=\"proto3\";")
+                .successful())
+        .isTrue();
+    // Even a file whose bytes literally reproduce an old sentinel is now a successful read.
+    assertThat(
+            GitHubRepoService.RepoFileResult.success("// File not found on GitHub (status 404)")
+                .successful())
+        .isTrue();
+    assertThat(DriftDetectionService.describe(GitHubRepoService.RepoFileResult.failed("X", 500)))
+        .isEqualTo("X (status 500)");
   }
 
   @Test

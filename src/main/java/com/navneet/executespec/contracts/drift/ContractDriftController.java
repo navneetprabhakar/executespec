@@ -104,14 +104,16 @@ public class ContractDriftController {
     }
     String pat = patFor(auth);
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
-    String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
-    // RR-1631 — match the exact reader sentinels, not any "// " prefix: a proto/GraphQL source
-    // file whose first line is `// Copyright …` is a successful read, and treating it as an error
-    // here made such a contract permanently un-refreshable.
-    if (DriftDetectionService.isSourceReadFailure(sourceContent)) {
+    var sourceRead = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
+    // RR-1631 — failure is out-of-band now. A proto/GraphQL source file whose first line is
+    // `// Copyright …` is a successful read and stays refreshable; only a real transport/auth/
+    // missing-file failure raises here, and the response carries a code, never file bytes.
+    if (!sourceRead.successful()) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_GATEWAY, "could not read source: " + sourceContent);
+          HttpStatus.BAD_GATEWAY,
+          "could not read source: " + DriftDetectionService.describe(sourceRead));
     }
+    String sourceContent = sourceRead.content();
     String folderPath =
         ".executespec/contracts/produced/"
             + contract.getName()
