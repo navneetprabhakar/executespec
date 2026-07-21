@@ -532,6 +532,9 @@ public class CodeReviewService {
             .languages(new ArrayList<>(languages))
             .fileCount(totalFiles)
             .totalLoc(totalLoc)
+            // RR-1685 — carry WHY the walk ended so the prompt can state a bounded count as a
+            // lower bound instead of asserting it as the repository's size.
+            .scanCoverage(samples.coverage())
             .staticFindings(staticForAgent)
             .fileSamples(samples.samples())
             .provider(
@@ -780,13 +783,22 @@ public class CodeReviewService {
             Comparator.comparingInt(FileMeta::score)
                 .thenComparing(Comparator.comparingLong(FileMeta::sequence).reversed()));
     long sequence = 0;
+    // RR-1685 — the walk below is bounded three ways (file cap, read budget, wall clock). Record
+    // WHY it ended so the counts are not later reported as a measured repository size.
+    CodeReviewAgent.ScanCoverage coverage = CodeReviewAgent.ScanCoverage.COMPLETE;
     if (!Files.isDirectory(root)) {
-      return new SampleResult(List.of(), languages, 0, 0);
+      return new SampleResult(
+          List.of(), languages, 0, 0, CodeReviewAgent.ScanCoverage.TRUNCATED_WALK_FAILED);
     }
     try (Stream<Path> stream = Files.walk(root)) {
       var iter = stream.iterator();
-      while (iter.hasNext() && totalFiles < MAX_FILES_SCANNED) {
+      while (iter.hasNext()) {
+        if (totalFiles >= MAX_FILES_SCANNED) {
+          coverage = CodeReviewAgent.ScanCoverage.TRUNCATED_FILE_LIMIT;
+          break;
+        }
         if (System.currentTimeMillis() > deadline) {
+          coverage = CodeReviewAgent.ScanCoverage.TRUNCATED_TIME_BUDGET;
           log.warn(
               "CodeReview sampling stopped at the {}ms time budget after {} files",
               MAX_SAMPLE_DURATION_MILLIS,
@@ -821,6 +833,7 @@ public class CodeReviewService {
         // RR-433 — the size is known BEFORE the file is opened, so the cumulative read budget is
         // enforced ahead of the allocation rather than after it.
         if (totalReadBytes + size > MAX_TOTAL_READ_BYTES) {
+          coverage = CodeReviewAgent.ScanCoverage.TRUNCATED_READ_BUDGET;
           log.warn(
               "CodeReview sampling stopped at the {}-byte read budget after {} files",
               MAX_TOTAL_READ_BYTES,
@@ -846,6 +859,7 @@ public class CodeReviewService {
         if (best.size() > MAX_FILES_IN_PROMPT) best.poll();
       }
     } catch (IOException e) {
+      coverage = CodeReviewAgent.ScanCoverage.TRUNCATED_WALK_FAILED;
       log.warn("CodeReview file walk failed: {}", e.getMessage());
     }
 
@@ -859,7 +873,7 @@ public class CodeReviewService {
       samples.add(new CodeReviewAgent.FileSample(m.path(), m.lang(), m.content()));
     }
     return new SampleResult(
-        samples, languages, (int) Math.min(totalLoc, Integer.MAX_VALUE), totalFiles);
+        samples, languages, (int) Math.min(totalLoc, Integer.MAX_VALUE), totalFiles, coverage);
   }
 
   /** Bounded head of a file plus the line count of the WHOLE file. */
@@ -1071,7 +1085,9 @@ public class CodeReviewService {
       List<CodeReviewAgent.FileSample> samples,
       Set<String> languages,
       int totalLoc,
-      int totalFiles) {}
+      int totalFiles,
+      /** RR-1685 — whether {@code totalLoc}/{@code totalFiles} are exact or lower bounds. */
+      CodeReviewAgent.ScanCoverage coverage) {}
 
   /** Summary of a completed scan — returned by {@link #completeScan} for SSE log lines. */
   public record CodeReviewSummary(
