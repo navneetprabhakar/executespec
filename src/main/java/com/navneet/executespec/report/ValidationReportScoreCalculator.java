@@ -117,7 +117,8 @@ final class ValidationReportScoreCalculator {
             testsTotal,
             reviewerVerdict,
             unfixedCriticals,
-            coverageLevel));
+            coverageLevel,
+            bootVerification));
   }
 
   static int multiplicative(
@@ -168,7 +169,8 @@ final class ValidationReportScoreCalculator {
             testsTotal,
             reviewerVerdict,
             unfixedCriticals,
-            coverageLevel));
+            coverageLevel,
+            bootVerification));
   }
 
   static int rubric(
@@ -218,7 +220,8 @@ final class ValidationReportScoreCalculator {
       int total,
       String reviewer,
       int criticals,
-      String coverage) {
+      String coverage,
+      BootVerification bootVerification) {
     int cap = 100;
     if ("REVIEW_FAILED".equals(reviewer)) cap = Math.min(cap, 70);
     else if ("UNRESOLVED_ISSUES".equals(reviewer)) cap = Math.min(cap, 80);
@@ -229,6 +232,20 @@ final class ValidationReportScoreCalculator {
     else if (total <= 0) {
       if ("NONE".equalsIgnoreCase(coverage)) cap = Math.min(cap, 75);
       else if ("UNKNOWN".equalsIgnoreCase(coverage) || coverage == null) cap = Math.min(cap, 90);
+    }
+    // RR-296 — the BUILD slot already scores a non-healthy boot below full (UNHEALTHY=55 etc.), but
+    // the trust cap only saw the compile bit, so a service that compiled + tested + reviewed clean
+    // could show a passing 89 headline while its own health probe failed. Apply the cap from the
+    // strongest available BUILD evidence: ANY non-HEALTHY boot bounds the headline below the 85
+    // PASS threshold. The more-broken verdicts already drive the BUILD slot low enough that this
+    // cap
+    // does not bite them; it exists to stop the borderline UNHEALTHY case reading PASS. Inert on
+    // default runs (verify-boot flag off ⇒ bootVerification == null), tighten-only when present.
+    if (bootVerification != null
+        && bootVerification.verdict()
+            != com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict
+                .HEALTHY) {
+      cap = Math.min(cap, 84);
     }
     return Math.max(0, Math.min(100, Math.min(raw, cap)));
   }

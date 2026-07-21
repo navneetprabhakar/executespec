@@ -159,10 +159,38 @@ class RunValidationKickoff {
         review.setReviewerModel(run.getReviewerModel());
         review.setIssues(List.of());
       } else {
-        review.setVerdict(ReviewVerdict.APPROVED);
-        review.setSummary("Review did not run.");
+        // RR-289 — a missing/failed reviewer is a quality gate that did NOT run. It must never be
+        // recorded as an APPROVED verdict (which would add reviewer points and drop the reviewer
+        // trust cap exactly when review is unknown). Persist the FAIL side of unknown so scoring
+        // treats it as REVIEW_FAILED, not CLEAN.
+        review.setVerdict(ReviewVerdict.REJECTED);
+        review.setSummary("Review did not run — reviewer unavailable; verdict unknown.");
         review.setIssues(List.of());
       }
+
+      // The compile signal only depends on the reviewer's final-build outcome, so build it before
+      // the accuracy assessment (RR-291): the assessor must be given the deterministic build +
+      // reviewer findings, never told "code passed review" while the reviewer failed.
+      CompileResult compile =
+          (reviewResult != null
+                  && reviewResult.finalBuildPassed() != null
+                  && reviewResult.finalBuildPassed())
+              ? CompileResult.passed(1)
+              : CompileResult.failed(
+                  1,
+                  reviewResult == null
+                      ? "n/a"
+                      : (reviewResult.finalBuildOutput() == null
+                          ? ""
+                          : reviewResult.finalBuildOutput()));
+
+      // RR-291 — deterministic review evidence (final-build failure + reviewer verdict) that does
+      // NOT depend on the accuracy report. Passing this to assess() replaces the old empty
+      // List.of(), so the assessor no longer inserts "No issues found — code passed review" when
+      // the
+      // reviewer actually failed or flagged unresolved issues.
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> deterministicReviewIssues =
+          synthesiseReviewIssues(reviewResult, compile, null);
 
       // Run accuracy assessment — V1 does this inside ReviewerAgentV2 phase 3,
       // but V2's ReviewerAgent skips it, so the ValidationReport was coming
@@ -184,25 +212,12 @@ class RunValidationKickoff {
                 planningModel.providerName(),
                 planningModel,
                 run.getUserRequest() == null ? "" : run.getUserRequest(),
-                List.of());
+                deterministicReviewIssues);
         review.setAccuracyReport(accuracy);
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} accuracy assessment failed: {}", runId, e.getMessage());
         // leave accuracyReport null — ValidationReportService treats null as "not assessed"
       }
-
-      CompileResult compile =
-          (reviewResult != null
-                  && reviewResult.finalBuildPassed() != null
-                  && reviewResult.finalBuildPassed())
-              ? CompileResult.passed(1)
-              : CompileResult.failed(
-                  1,
-                  reviewResult == null
-                      ? "n/a"
-                      : (reviewResult.finalBuildOutput() == null
-                          ? ""
-                          : reviewResult.finalBuildOutput()));
 
       // V2's ReviewerAgent doesn't emit structured ReviewIssues — it just returns
       // a verdict enum + summary text. That leaves ReviewScoringService with an empty

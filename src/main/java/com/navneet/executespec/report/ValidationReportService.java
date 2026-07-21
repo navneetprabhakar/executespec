@@ -854,13 +854,8 @@ public class ValidationReportService {
         && !input.compileResult().skipped()) {
       passed.add("COMPILATION");
     }
-    if (input.review() != null) {
-      // V2: check mergeBlockers (populated from unfixed CRITICAL issues)
-      boolean hasBlockers =
-          input.review().getMergeBlockers() != null && !input.review().getMergeBlockers().isEmpty();
-      if (!hasBlockers) {
-        passed.add("CODE_REVIEW");
-      }
+    if (input.review() != null && reviewCheckPassed(input.review())) {
+      passed.add("CODE_REVIEW");
     }
     // Integration tests
     if (input.testSummary() != null && input.testSummary().getTotalTests() > 0) {
@@ -869,6 +864,30 @@ public class ValidationReportService {
       }
     }
     return passed;
+  }
+
+  /**
+   * RR-290 — single chokepoint for the CODE_REVIEW badge. Previously the badge was granted whenever
+   * the unused V1 {@code mergeBlockers} list was empty, which kickoff never populates, so an
+   * UNRESOLVED_ISSUES / REVIEW_FAILED verdict (or a reviewer that never ran, RR-289) still showed a
+   * passing code-review check. The badge is now derived from the reviewer's actual verdict AND its
+   * unresolved structured issues: it passes only for an APPROVED / APPROVED_WITH_NOTES verdict with
+   * no unresolved CRITICAL issue. This is tighten-only — it can only remove a badge, never add one.
+   */
+  static boolean reviewCheckPassed(ReviewReport review) {
+    if (review == null) return false;
+    ReviewVerdict verdict = review.getVerdict();
+    boolean verdictPassed =
+        verdict == ReviewVerdict.APPROVED || verdict == ReviewVerdict.APPROVED_WITH_NOTES;
+    if (!verdictPassed) return false;
+    if (review.getIssues() != null) {
+      boolean hasUnresolvedCritical =
+          review.getIssues().stream()
+              .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+              .anyMatch(i -> !i.isAutoFixed() || !i.isFixSucceeded());
+      if (hasUnresolvedCritical) return false;
+    }
+    return true;
   }
 
   private int countFilesGenerated(ReportInput input) {
@@ -995,9 +1014,16 @@ public class ValidationReportService {
     PipelineResult fromReason =
         switch (reason) {
           case "CLEAN_COMPLETION", "CLEAN_WITH_INTERMEDIATE_WARNINGS" ->
-              heuristic == PipelineResult.PASSED_WITH_FIXES
-                  ? PipelineResult.PASSED_WITH_FIXES
-                  : PipelineResult.PASSED;
+              // RR-288 — status text may tighten a result but must never upgrade failed
+              // deterministic evidence. The heuristic returns FAILED only on a compilation failure
+              // or an unresolved CRITICAL issue; a racy/erroneous CLEAN_* terminal reason cannot
+              // rewrite that into PASSED (which would let a shared report say PASSED while its own
+              // issue ledger says FAIL). Preserve FAILED; otherwise report PASSED[_WITH_FIXES].
+              heuristic == PipelineResult.FAILED
+                  ? PipelineResult.FAILED
+                  : (heuristic == PipelineResult.PASSED_WITH_FIXES
+                      ? PipelineResult.PASSED_WITH_FIXES
+                      : PipelineResult.PASSED);
           case "FINAL_BUILD_FAILED", "ALL_TASKS_FAILED", "EXECUTION_ABORTED" ->
               PipelineResult.FAILED;
           case "REVIEWER_UNRESOLVED",

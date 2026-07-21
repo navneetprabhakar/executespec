@@ -39,13 +39,14 @@ class ValidationReportServiceR09Test {
   }
 
   @Test
-  void clean_completion_promotes_failed_heuristic_to_passed() {
-    // The classic R-09 contradiction: reviewer overall verdict + final build pass
-    // produced status_reason=CLEAN_COMPLETION but the heuristic saw an unresolved
-    // CRITICAL issue and returned FAILED. After reconciliation: PASSED.
+  void clean_completion_does_not_upgrade_failed_deterministic_evidence() {
+    // RR-288 — status text may tighten a result but must never upgrade failed deterministic
+    // evidence. When the heuristic is FAILED (compilation failure or an unresolved CRITICAL issue)
+    // a CLEAN_COMPLETION terminal reason no longer rewrites it to PASSED; the contradiction is
+    // preserved as FAILED rather than papered over into a passing headline.
     PipelineResult result =
         svc.reconcileForTest(PipelineResult.FAILED, inputWith("CLEAN_COMPLETION"));
-    assertEquals(PipelineResult.PASSED, result);
+    assertEquals(PipelineResult.FAILED, result);
   }
 
   @Test

@@ -248,9 +248,16 @@ public class ReviewerAgent {
     }
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
       log.warn("ReviewerAgent general pass errored: {}", general.outcome());
+      // RR-275 — do not discard cheap deterministic verification on a provider/tool ERROR. Run the
+      // final build on the frozen workspace and attach its verdict; REVIEW_FAILED is preserved as
+      // an independent signal so downstream sees a real build state, not null/unknown.
+      FinalBuildEvidence fb = runFinalBuild(req);
       return ReviewerResult.builder()
           .overall(ReviewerResult.Overall.REVIEW_FAILED)
           .generalPassOutcome(general)
+          .finalBuildPassed(fb.passed())
+          .finalBuildExitCode(fb.exitCode())
+          .finalBuildOutput(fb.output())
           .totalLatencyMs(System.currentTimeMillis() - start)
           .build();
     }
@@ -284,11 +291,17 @@ public class ReviewerAgent {
       }
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
         log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
+        // RR-275 — same as the general-pass ERROR branch: keep REVIEW_FAILED but still run the
+        // deterministic final build on the frozen workspace so the build verdict is not lost.
+        FinalBuildEvidence fb = runFinalBuild(req);
         return ReviewerResult.builder()
             .overall(ReviewerResult.Overall.REVIEW_FAILED)
             .generalPassOutcome(general)
             .generalPassSummary(general.completionSummary())
             .wiringPassOutcome(wiring)
+            .finalBuildPassed(fb.passed())
+            .finalBuildExitCode(fb.exitCode())
+            .finalBuildOutput(fb.output())
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
@@ -560,6 +573,31 @@ public class ReviewerAgent {
         .totalLatencyMs(elapsed)
         .build();
   }
+
+  /**
+   * RR-275 — deterministic final build on the frozen workspace, factored out so the reviewer ERROR
+   * branches can preserve REVIEW_FAILED as an independent signal AND still attach the cheap non-LLM
+   * build verdict (rather than leaving downstream with a null/unknown build state that mis-applies
+   * the trust cap). Only called when the workspace is quiescent — an ERROR outcome surfaces at an
+   * iteration boundary, so no pass thread is still mutating the tree.
+   */
+  private FinalBuildEvidence runFinalBuild(ReviewerRequest req) {
+    ObjectNode buildArgs = objectMapper.createObjectNode();
+    if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
+      buildArgs.put("plannerCommand", req.buildCommand());
+    }
+    ToolResult buildResult = buildProjectTool.execute(buildArgs, req.context());
+    if (buildResult instanceof ToolResult.Ok ok) {
+      String out = ok.content();
+      return new FinalBuildEvidence(isBuildVerifiedEvidence(out), extractExitCode(out), out);
+    }
+    if (buildResult instanceof ToolResult.Err err) {
+      return new FinalBuildEvidence(false, -1, "tool error: " + err.message());
+    }
+    return new FinalBuildEvidence(false, -1, null);
+  }
+
+  private record FinalBuildEvidence(boolean passed, int exitCode, String output) {}
 
   WorkerResult runPass(
       ReviewerRequest req,
