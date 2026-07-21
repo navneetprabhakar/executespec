@@ -15,11 +15,17 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   (`USER`, `ORG`, or `PLATFORM`). Dispatch must resolve the current credential later.
 - `LlmExecutionPolicyFactory` reconstructs a customer context from the authoritative run, agent
   session or project plus the current org/user policy. OWN_KEYS never adds a PLATFORM source.
-- Operator-controlled benchmark/SWE-bench runs (`pipeline_run.sourceType` starting `benchmark` or
-  `swebench`) set `allowProviderFailover=false` and use the distinct `route-v3-controlled-worker`
+- Operator-controlled benchmark runs — SWE-bench + ProgramBench (`pipeline_run.sourceType`
+  `benchmark`), **Terminal-Bench (`TERMINAL_BENCH`)**, and defensive `swebench`/`programbench`
+  spellings — set `allowProviderFailover=false` and use the distinct `route-v3-controlled-worker`
   policy generation, so `LlmExecutionDispatchGuard` rejects every alternate provider inside
   `LlmRouter.maybeFailover` and a fixed-route campaign cannot be silently served by another
-  provider. The generation key must stay distinct from `route-v1`: contexts are recovered by that
+  provider. `isControlledWorkerRun` delegates to the shared `state.BenchmarkSourceType`
+  classifier — the exact same set `CodeGenEngineImpl.requireTestVerification` consults — so the
+  no-failover and test-gate-off behaviours cannot drift; before RR-1590 each site carried its own
+  `benchmark`/`swebench` literal and `TERMINAL_BENCH` matched neither, leaving TB runs on the
+  permissive route-v1 policy with failover ENABLED and the internal TB matrix comparing routes, not
+  models. The generation key must stay distinct from `route-v1`: contexts are recovered by that
   key, so reusing it would let resumed runs keep the old permissive policy. `!ownKeysProviderLock`
   remains a separate leading term — BYOK containment must not depend on the controlled-worker term.
 - Customer `OWN_KEYS` contexts narrow `allowedProviders`, credential provenance and model policy
