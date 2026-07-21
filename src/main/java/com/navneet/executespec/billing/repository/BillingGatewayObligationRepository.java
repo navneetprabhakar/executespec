@@ -30,4 +30,21 @@ public interface BillingGatewayObligationRepository
   List<BillingGatewayObligation> findUnresolvedByKind(@Param("kind") String kind);
 
   List<BillingGatewayObligation> findBySubscriptionId(UUID subscriptionId);
+
+  /**
+   * Drainer candidate pool: retryable obligations that have not yet exhausted their attempt budget.
+   * {@code UNSUPPORTED} is excluded on purpose — it means no automated gateway path exists, so it
+   * is an operator task, not a retry candidate. Per-row backoff (skip rows touched too recently)
+   * and dead-lettering are applied by the drainer; this only bounds the row set it examines.
+   */
+  @Query(
+      "SELECT o FROM BillingGatewayObligation o WHERE o.status IN ('PENDING', 'FAILED') AND"
+          + " o.attempts < :maxAttempts ORDER BY o.updatedAt ASC")
+  List<BillingGatewayObligation> findRetryable(@Param("maxAttempts") int maxAttempts);
+
+  /** Count unresolved obligations grouped by kind + status — backs the admin visibility surface. */
+  @Query(
+      "SELECT o.kind, o.status, COUNT(o) FROM BillingGatewayObligation o WHERE o.status IN"
+          + " ('PENDING', 'FAILED', 'UNSUPPORTED') GROUP BY o.kind, o.status")
+  List<Object[]> countUnresolvedByKindAndStatus();
 }
