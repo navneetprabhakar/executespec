@@ -35,9 +35,30 @@ class DetectorsTest {
   @Test
   void basenameWithoutExtension_handlesCommonShapes() {
     assertThat(DetectorUtils.basenameWithoutExtension("api/openapi.yaml")).isEqualTo("openapi");
-    assertThat(DetectorUtils.basenameWithoutExtension("a/b/c.openapi.json")).isEqualTo("c");
+    // RR-1653 — this asserted "c" (cut at the FIRST dot). That collapsed distinct contract files
+    // onto one (repo_id, name) registry row; only the trailing known extension is stripped now.
+    assertThat(DetectorUtils.basenameWithoutExtension("a/b/c.openapi.json")).isEqualTo("c.openapi");
     assertThat(DetectorUtils.basenameWithoutExtension("standalone.proto")).isEqualTo("standalone");
     assertThat(DetectorUtils.basenameWithoutExtension(null)).isEqualTo("unknown");
+    // The compound .schema.json extension wins over the plain .json suffix, matching
+    // DriftDetectionService.extensionFor(JSON_SCHEMA).
+    assertThat(DetectorUtils.basenameWithoutExtension("schemas/user.schema.json"))
+        .isEqualTo("user");
+    // Unrecognised extension → full basename (documented fallback), not a first-dot truncation.
+    assertThat(DetectorUtils.basenameWithoutExtension("a/b/notes.v2.txt"))
+        .isEqualTo("notes.v2.txt");
+  }
+
+  @Test
+  void basenameWithoutExtension_keepsVersionQualifiersDistinct_rr1653() {
+    // The exact collision from RR-1653: two versioned protos in one repo used to resolve to the
+    // single name "api", causing perpetual version flip-flop on one registry row.
+    assertThat(DetectorUtils.basenameWithoutExtension("proto/api.v1.proto")).isEqualTo("api.v1");
+    assertThat(DetectorUtils.basenameWithoutExtension("proto/api.v2.proto")).isEqualTo("api.v2");
+    assertThat(DetectorUtils.basenameWithoutExtension("payments.openapi.yaml"))
+        .isEqualTo("payments.openapi");
+    assertThat(DetectorUtils.basenameWithoutExtension("payments.internal.yaml"))
+        .isEqualTo("payments.internal");
   }
 
   @Test

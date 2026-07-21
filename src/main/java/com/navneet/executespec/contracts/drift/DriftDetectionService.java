@@ -76,7 +76,7 @@ public class DriftDetectionService {
   public DriftCheckResult checkContract(UUID contractId, UUID projectId, String actorPat) {
     ContractRegistry contract = registryRepo.findById(contractId).orElse(null);
     if (contract == null) {
-      return new DriftCheckResult(contractId, false, "contract not found", null);
+      return DriftCheckResult.unavailable(contractId, "contract not found");
     }
     return runCheck(contract, projectId, actorPat);
   }
@@ -90,7 +90,7 @@ public class DriftDetectionService {
       } catch (Exception ex) {
         log.warn(
             "[DriftDetectionService] check failed for contract {}: {}", c.getId(), ex.getMessage());
-        out.add(new DriftCheckResult(c.getId(), false, "check failed: " + ex.getMessage(), null));
+        out.add(DriftCheckResult.unavailable(c.getId(), "check failed: " + ex.getMessage()));
       }
     }
     return out;
@@ -108,7 +108,7 @@ public class DriftDetectionService {
   DriftCheckResult runCheck(ContractRegistry contract, UUID projectId, String actorPat) {
     ProjectRepo repo = projectRepoRepo.findById(contract.getRepoId()).orElse(null);
     if (repo == null) {
-      return new DriftCheckResult(contract.getId(), false, "repo not found", null);
+      return DriftCheckResult.unavailable(contract.getId(), "repo not found");
     }
     // Read .executespec/contracts/produced/<name>.<ext> from customer git
     String folderPath =
@@ -116,27 +116,28 @@ public class DriftDetectionService {
     Optional<ExecutespecFolderWriter.FileSnapshot> folderContent =
         folderWriter.readFile(repo, folderPath, actorPat);
     if (folderContent.isEmpty()) {
-      // .executespec/ not yet bootstrapped — nothing to compare against; not drift.
-      return new DriftCheckResult(
-          contract.getId(), false, "no .executespec/ snapshot yet (bootstrap pending?)", null);
+      // .executespec/ not yet bootstrapped — there is nothing to compare against, so we cannot
+      // claim "no drift"; this is an unverified state (RR-1631).
+      return DriftCheckResult.unavailable(
+          contract.getId(), "no .executespec/ snapshot yet (bootstrap pending?)");
     }
     // Read the live source file from the customer repo
     if (contract.getDetectedPath() == null) {
-      return new DriftCheckResult(
-          contract.getId(), false, "no detected source path on contract", null);
+      return DriftCheckResult.unavailable(contract.getId(), "no detected source path on contract");
     }
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
     String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), actorPat);
-    if (sourceContent == null || sourceContent.startsWith("// ")) {
-      // GitHubRepoService prefixes its error sentinels with "// "
-      return new DriftCheckResult(
-          contract.getId(), false, "could not read source path: " + truncate(sourceContent), null);
+    if (isSourceReadFailure(sourceContent)) {
+      // RR-1631 — a GitHub outage / expired PAT / rate limit is NOT "no drift". Report it as an
+      // explicitly unverified check so callers can distinguish it from a verified clean result.
+      return DriftCheckResult.unavailable(
+          contract.getId(), "could not read source path: " + truncate(sourceContent));
     }
     String folderHash = folderContent.get().contentHash();
     String sourceHash = DetectorUtils.sha256(sourceContent);
     if (folderHash != null && folderHash.equals(sourceHash)) {
       // No drift — quiet success per plan §2.8.
-      return new DriftCheckResult(contract.getId(), false, "no drift", null);
+      return new DriftCheckResult(contract.getId(), false, "no drift", null, Status.NO_DRIFT);
     }
 
     // Drift detected — persist event, fire activity feed, return id.
@@ -151,7 +152,7 @@ public class DriftDetectionService {
             .findFirst();
     if (existingOpenEvent.isPresent()) {
       return new DriftCheckResult(
-          contract.getId(), true, diffSummary, existingOpenEvent.get().getId());
+          contract.getId(), true, diffSummary, existingOpenEvent.get().getId(), Status.DRIFT);
     }
     ContractDriftEvent event =
         ContractDriftEvent.builder()
@@ -180,8 +181,39 @@ public class DriftDetectionService {
               "diff",
               diffSummary));
     }
-    return new DriftCheckResult(contract.getId(), true, diffSummary, saved.getId());
+    return new DriftCheckResult(contract.getId(), true, diffSummary, saved.getId(), Status.DRIFT);
   }
+
+  /**
+   * RR-1631 — {@code GitHubRepoService.readRepoFile} signals every failure IN-BAND, as a string
+   * whose first characters are {@code "// "}. The old check treated ANY {@code "// "}-prefixed body
+   * as an error, which silently misread a perfectly valid proto / GraphQL / C-style source file
+   * beginning with {@code // Copyright …} as an unreadable one — permanently reporting "no drift"
+   * for exactly the file types most likely to start with a line comment, and permanently failing
+   * refresh with {@code BAD_GATEWAY}.
+   *
+   * <p>Matching the exact known sentinels instead narrows the collision to a file whose first line
+   * literally reproduces one of GitHub-reader's error strings. The real fix is for {@code
+   * readRepoFile} to signal failure out-of-band (Optional / typed result / exception); that is
+   * tracked separately because it lives outside this package.
+   */
+  static boolean isSourceReadFailure(String sourceContent) {
+    if (sourceContent == null) return true;
+    for (String sentinel : READ_FAILURE_SENTINELS) {
+      if (sourceContent.startsWith(sentinel)) return true;
+    }
+    return false;
+  }
+
+  /** Verbatim prefixes of every failure sentinel {@code GitHubRepoService.readRepoFile} returns. */
+  private static final List<String> READ_FAILURE_SENTINELS =
+      List.of(
+          "// No GitHub PAT configured",
+          "// Invalid repo URL",
+          "// File not found on GitHub (status ",
+          "// Error reading file from GitHub: ",
+          "// No content field in response",
+          "// Failed to decode file content: ");
 
   static String extensionFor(ContractRegistry.ContractType type) {
     return switch (type) {
@@ -204,13 +236,39 @@ public class DriftDetectionService {
   }
 
   /**
+   * Outcome of a drift check.
+   *
+   * <p>RR-1631 — {@code hasDrift=false} used to mean BOTH "verified identical" and "we could not
+   * check", so a GitHub outage, an expired PAT or a missing snapshot all rendered as a confident
+   * clean result. {@link #UNAVAILABLE} is the third, distinct state.
+   */
+  public enum Status {
+    /** Snapshot and source were both read and their hashes match. */
+    NO_DRIFT,
+    /** Snapshot and source were both read and they differ. */
+    DRIFT,
+    /** The check could not be performed — nothing may be concluded about drift. */
+    UNAVAILABLE
+  }
+
+  /**
    * Result of a single contract drift check.
    *
    * @param contractId the contract that was checked
-   * @param hasDrift true when the snapshot diverges from the source
+   * @param hasDrift true when the snapshot diverges from the source. Retained for wire
+   *     compatibility; it is false for BOTH {@link Status#NO_DRIFT} and {@link Status#UNAVAILABLE},
+   *     so consult {@link #status} before treating it as a clean verdict.
    * @param summary human-readable summary of the result
    * @param eventId {@code contract_drift_event.id} when an event was persisted; null when there was
    *     no drift OR the check couldn't run (no source path, no snapshot)
+   * @param status the tri-state verdict — the authoritative field
    */
-  public record DriftCheckResult(UUID contractId, boolean hasDrift, String summary, UUID eventId) {}
+  public record DriftCheckResult(
+      UUID contractId, boolean hasDrift, String summary, UUID eventId, Status status) {
+
+    /** The check could not be performed; nothing may be concluded about drift. */
+    static DriftCheckResult unavailable(UUID contractId, String summary) {
+      return new DriftCheckResult(contractId, false, summary, null, Status.UNAVAILABLE);
+    }
+  }
 }

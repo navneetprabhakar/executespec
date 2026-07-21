@@ -3,6 +3,7 @@ package com.navneet.executespec.contracts.detection;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,15 +32,37 @@ public final class DetectorUtils {
   }
 
   /**
-   * Strip directory + extension to get a stable contract name. Falls back to the full basename when
-   * the extension isn't recognised.
+   * Known contract file extensions, longest-first so compound extensions win. {@code .schema.json}
+   * must precede {@code .json} because {@link
+   * com.navneet.executespec.contracts.drift.DriftDetectionService#extensionFor} re-appends the
+   * whole {@code .schema.json} suffix for JSON_SCHEMA contracts.
+   */
+  private static final List<String> KNOWN_EXTENSIONS =
+      List.of(".schema.json", ".graphqls", ".graphql", ".proto", ".yaml", ".json", ".yml", ".gql");
+
+  /**
+   * Strip directory + the recognised extension to get a stable contract name. Falls back to the
+   * full basename when the extension isn't recognised.
+   *
+   * <p>RR-1653 — this used to cut at the FIRST dot, so {@code api.v1.proto} and {@code
+   * api.v2.proto} (or {@code payments.openapi.yaml} and {@code payments.internal.yaml}) both
+   * collapsed onto the single {@code UNIQUE (repo_id, name)} registry row {@code api} / {@code
+   * payments}. Every detection pass then bumped that row's version once per colliding file,
+   * spamming {@code CONTRACT_VERSION_CHANGED} and leaving the breaking-change baseline pointing at
+   * whichever file happened to be iterated last. Only the trailing known extension is removed now,
+   * so intermediate qualifiers stay part of the identity.
    */
   public static String basenameWithoutExtension(String path) {
     if (path == null || path.isBlank()) return "unknown";
     int lastSlash = path.lastIndexOf('/');
     String basename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
-    int firstDot = basename.indexOf('.');
-    return firstDot > 0 ? basename.substring(0, firstDot) : basename;
+    for (String ext : KNOWN_EXTENSIONS) {
+      if (basename.length() > ext.length()
+          && basename.regionMatches(true, basename.length() - ext.length(), ext, 0, ext.length())) {
+        return basename.substring(0, basename.length() - ext.length());
+      }
+    }
+    return basename;
   }
 
   /**
