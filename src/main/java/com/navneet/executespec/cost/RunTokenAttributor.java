@@ -156,11 +156,20 @@ public class RunTokenAttributor {
     int residualOut = Math.max(0, persistedTotalOut - sumOut);
     int residualPerTaskIn = residualIn / n;
     int residualPerTaskOut = residualOut / n;
+    // RR-1561 — integer division drops up to n-1 tokens per direction. The run total at addTokens
+    // above already counted them, so discarding the remainder made exact reconciliation between
+    // the per-task columns and the run total impossible BY CONSTRUCTION, defeating the stated
+    // purpose of this residual pass. The remainder is handed to the first tasks, one token each.
+    int remainderIn = residualIn - residualPerTaskIn * n;
+    int remainderOut = residualOut - residualPerTaskOut * n;
+    int taskIndex = 0;
     for (var outcome : execResult.perTask()) {
       String taskRowId = idPrefix + outcome.taskId();
       int[] real = realPerTask.get(outcome.taskId());
-      int finalIn = saturatingAdd(real[0], residualPerTaskIn);
-      int finalOut = saturatingAdd(real[1], residualPerTaskOut);
+      int finalIn = saturatingAdd(real[0], residualPerTaskIn + (taskIndex < remainderIn ? 1 : 0));
+      int finalOut =
+          saturatingAdd(real[1], residualPerTaskOut + (taskIndex < remainderOut ? 1 : 0));
+      taskIndex++;
       // 2026-05-02 — write the model the worker ACTUALLY ran on (tier-resolved from
       // SequentialExecutor.tierConfigFor) instead of the run-level default. Previously every
       // task row got the run default (e.g. claude-haiku for anthropic), masking the workhorse/

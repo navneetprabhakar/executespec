@@ -217,4 +217,49 @@ class RunTokenAttributorTest {
     assertThat(saved.getValue().getProvider()).isEqualTo("ANTHROPIC");
     assertThat(saved.getValue().getModel()).isEqualTo("claude-sonnet-4-6");
   }
+
+  /**
+   * RR-1561 — the residual pass exists so per-task token columns reconcile to the worker aggregate.
+   * Integer division discarded up to n-1 tokens per direction, which made exact reconciliation
+   * impossible by construction. 7 residual input tokens across 3 tasks must land as 3/2/2, not
+   * 2/2/2 with 1 silently lost.
+   */
+  @Test
+  void theResidualRemainderIsDistributedSoPerTaskTokensReconcileToTheWorkerTotal() {
+    List<TaskOutcome> outcomes =
+        List.of(
+            TaskOutcome.builder().taskId("T1").status(TaskOutcome.Status.SUCCESS).build(),
+            TaskOutcome.builder().taskId("T2").status(TaskOutcome.Status.SUCCESS).build(),
+            TaskOutcome.builder().taskId("T3").status(TaskOutcome.Status.SUCCESS).build());
+    for (var outcome : outcomes) {
+      String rowId = "12345678_" + outcome.taskId();
+      when(taskRepo.findById(rowId))
+          .thenReturn(Optional.of(AgentTask.builder().taskId(rowId).runId(UUID_RUN_ID).build()));
+      // No per-task snapshot at all: the whole aggregate is residual.
+      when(costTracker.snapshotTask(UUID_RUN_ID, outcome.taskId()))
+          .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+      when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, outcome.taskId()))
+          .thenReturn(List.of());
+    }
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        ExecutionResult.builder().perTask(outcomes).build(),
+        7,
+        5,
+        "DEEPSEEK",
+        "deepseek-v4-pro-native");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo, org.mockito.Mockito.times(3)).save(saved.capture());
+    int totalIn = saved.getAllValues().stream().mapToInt(AgentTask::getInputTokens).sum();
+    int totalOut = saved.getAllValues().stream().mapToInt(AgentTask::getOutputTokens).sum();
+
+    assertThat(totalIn)
+        .as("per-task input tokens must sum exactly to the worker aggregate")
+        .isEqualTo(7);
+    assertThat(totalOut)
+        .as("per-task output tokens must sum exactly to the worker aggregate")
+        .isEqualTo(5);
+  }
 }
