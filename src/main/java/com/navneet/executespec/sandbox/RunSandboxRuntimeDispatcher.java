@@ -21,8 +21,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Flag separation is deliberate and is the rollback contract:
  *
  * <ul>
- *   <li>{@code sandbox.runtime.dispatch.enabled} gates {@link #provision} only. Turning it off
- *       stops new execution; it does not strand live sandboxes.
+ *   <li>{@code sandbox.runtime.dispatch.enabled} gates {@link #provision} and {@link #exec} — the
+ *       two operations that start work. Turning it off stops new execution; it does not strand live
+ *       sandboxes, because teardown is deliberately outside the gate.
  *   <li>{@link #release} and {@link #reconcileOrphan} never consult a flag, so cancellation,
  *       teardown and orphan cleanup keep working while dispatch is disabled.
  *   <li>{@code sandbox.runtime.container-strict-v1.enabled} selects the hardened runtime. Off
@@ -86,6 +87,56 @@ public class RunSandboxRuntimeDispatcher {
       safeDestroy(runtime, sandbox);
       store.fail(lease, classify(failure), failure.getMessage());
       throw failure;
+    }
+  }
+
+  /**
+   * Runs one command inside a sandbox this JVM currently owns.
+   *
+   * <p>This is the seam that makes provisioning worth doing. Without it the only way to run a
+   * customer's build or test command is on the application host, as the service account, with the
+   * host's network reach — including the cloud metadata endpoint, which a stripped environment does
+   * not hide.
+   *
+   * <p>Three gates, in this order, each for a different reason:
+   *
+   * <ol>
+   *   <li>{@link #FLAG_DISPATCH}. Turning dispatch off must stop new execution. It stops new
+   *       commands as well as new sandboxes; it does not stop {@link #release} or {@link
+   *       #reconcileOrphan}, so a live sandbox is never stranded by the switch that silences it.
+   *   <li>The lease fence, via {@link RunSandboxStore#authorizeExec}. A JVM that lost a takeover
+   *       must not execute into the container the new owner is now responsible for. A fenced caller
+   *       gets {@link SandboxLeaseFencedException} rather than a status, because "you no longer own
+   *       this" is not a command outcome and must not be reachable by reading an exit code.
+   *   <li>State. Only READY executes. Provisioning, cancelling and terminal sandboxes are {@link
+   *       SandboxExecResult.Status#REFUSED}.
+   * </ol>
+   *
+   * <p>Unlike {@link #provision}, an unavailable runtime here does <em>not</em> fail the sandbox: a
+   * command that could not run is not evidence that the sandbox is broken, and failing the row
+   * would destroy a workspace over a transient engine hiccup.
+   *
+   * @return what happened; callers must read {@link SandboxExecResult#status()} and must never
+   *     treat {@link SandboxExecResult#unexecuted()} as licence to run the command on the host
+   */
+  public SandboxExecResult exec(
+      RunSandbox sandbox, RunSandbox.Lease lease, SandboxExecRequest request) {
+    if (!dispatchEnabled()) {
+      return SandboxExecResult.unavailable(FLAG_DISPATCH + " is off; nothing was executed");
+    }
+    RunSandboxStore.SandboxExecAuthorization authorization = store.authorizeExec(lease);
+    if (authorization == RunSandboxStore.SandboxExecAuthorization.FENCED) {
+      log.warn("sandbox {} refused a command from a stale or foreign owner", sandbox.id());
+      throw new SandboxLeaseFencedException(sandbox.id());
+    }
+    if (authorization == RunSandboxStore.SandboxExecAuthorization.NOT_READY) {
+      return SandboxExecResult.refused("sandbox " + sandbox.id() + " is not READY");
+    }
+    RunSandboxRuntime runtime = requireRuntime(sandbox.isolationProfile());
+    try {
+      return runtime.exec(sandbox, request);
+    } catch (RunSandboxRuntime.RuntimeUnavailableException unavailable) {
+      return SandboxExecResult.unavailable(unavailable.getMessage());
     }
   }
 

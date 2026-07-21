@@ -32,6 +32,32 @@ public interface RunSandboxRuntime {
   Provisioned provision(RunSandbox sandbox, SandboxRuntimeSpec spec);
 
   /**
+   * Runs one command inside an already-provisioned sandbox and waits for it, bounded.
+   *
+   * <p>This is the method that makes the sandbox useful rather than merely allocatable: without it,
+   * the only way to run a customer's build or test command is on the application host, where it
+   * executes as the service account with the service account's network reach. Provisioning a
+   * network-isolated container and then not being able to run anything in it is not containment.
+   *
+   * <p>Contract every implementation must honour:
+   *
+   * <ul>
+   *   <li>{@code request.argv()} is executed as a vector. An implementation must never join it into
+   *       a string for a shell.
+   *   <li>The result is bounded. Output is capped and a runaway child cannot exhaust the heap.
+   *   <li>{@code request.timeout()} must be reachable — an implementation that drains the child's
+   *       output to EOF before waiting has no timeout at all — and expiry must destroy the host
+   *       process tree, not only the direct child.
+   *   <li>Unavailability is reported as {@link SandboxExecResult.Status#UNAVAILABLE}, never as a
+   *       zero exit code and never by executing on the host instead.
+   * </ul>
+   *
+   * <p>Implementations do not check ownership; {@link RunSandboxRuntimeDispatcher#exec} enforces
+   * the lease fence before calling, for the same reason runtimes do not write lifecycle state.
+   */
+  SandboxExecResult exec(RunSandbox sandbox, SandboxExecRequest request);
+
+  /**
    * Destroys the sandbox and everything it spawned. Must be idempotent and must succeed for a
    * handle that is already gone, because reconciliation calls it for orphans whose owning JVM died.
    * Must never delete lifecycle rows or retained artifacts.
