@@ -141,7 +141,8 @@ class CodeReviewConfirmedRouteTest {
             mock(ModelResolver.class),
             projects,
             users,
-            new com.fasterxml.jackson.databind.ObjectMapper());
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            new com.navneet.executespec.security.GeneratedSecretScanner());
     LlmExecutionReference reference =
         new LlmExecutionReference("ctx-confirmed", LlmExecutionScope.customer("org-1"));
     CodeReviewScan scan =
