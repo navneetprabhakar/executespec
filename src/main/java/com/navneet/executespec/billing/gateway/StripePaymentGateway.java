@@ -248,6 +248,23 @@ public class StripePaymentGateway implements PaymentGateway {
   }
 
   @Override
+  public String subscriptionStatus(String gatewaySubscriptionId) {
+    try {
+      Subscription subscription = Subscription.retrieve(gatewaySubscriptionId);
+      String status = subscription.getStatus();
+      return status != null ? status.toLowerCase() : null;
+    } catch (StripeException e) {
+      // The drainer treats an unreadable status as "unknown" and falls through to attempting the
+      // cancel; it never treats a failed status read as proof the subscription is gone.
+      log.warn(
+          "Failed to read Stripe subscription status for {}: {}",
+          gatewaySubscriptionId,
+          e.getMessage());
+      return null;
+    }
+  }
+
+  @Override
   public String getInvoicePdfUrl(String gatewayInvoiceId) {
     try {
       Invoice invoice = Invoice.retrieve(gatewayInvoiceId);
