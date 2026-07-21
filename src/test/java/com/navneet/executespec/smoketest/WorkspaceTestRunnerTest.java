@@ -19,14 +19,14 @@ class WorkspaceTestRunnerTest {
   @Test
   void noRecognizedRunner_returnsEmpty(@TempDir Path emptyWorkspace) {
     WorkspaceTestRunner runner =
-        new WorkspaceTestRunner(new TestCommandResolver(), null, null, null);
+        new WorkspaceTestRunner(new TestCommandResolver(), null, null, null, null);
     assertTrue(runner.runTests("run-1", emptyWorkspace).isEmpty());
   }
 
   @Test
   void nullWorkspace_returnsEmpty() {
     WorkspaceTestRunner runner =
-        new WorkspaceTestRunner(new TestCommandResolver(), null, null, null);
+        new WorkspaceTestRunner(new TestCommandResolver(), null, null, null, null);
     assertTrue(runner.runTests("run-1", null).isEmpty());
   }
 }

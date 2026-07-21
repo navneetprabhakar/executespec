@@ -11,6 +11,8 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
 import com.navneet.executespec.swebench.SwebenchContainerStore;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -55,6 +57,15 @@ public class WorkspaceTestRunner {
   private final ShellSandboxPolicy sandboxPolicy;
   private final ProgramBenchContainerStore programBenchContainers;
   private final SwebenchContainerStore swebenchContainers;
+
+  /**
+   * RR-282 / RR-1674 — generated tests are executable repository content, so the plain BUILD-mode
+   * host shell path above is the same host-RCE surface {@code buildProject} had. When {@link
+   * SandboxCommandRoutingService#routingEnabled()} is on, the suite runs in the run's sandbox; when
+   * the sandbox cannot run it, this returns {@link Optional#empty()} — no count, and no host retry.
+   * Both sandbox flags are seeded false, so the default path is unchanged.
+   */
+  private final SandboxCommandRoutingService sandboxRouting;
 
   /**
    * Detailed run result (harness-resolution task 8): the parsed counts PLUS the raw output tail and
@@ -134,32 +145,63 @@ public class WorkspaceTestRunner {
 
     Instant start = Instant.now();
     try {
-      ProcessBuilder pb;
-      if (containerId != null) {
-        pb =
-            new ProcessBuilder(
-                List.of(
-                    "docker", "exec", "-w", workdir, containerId, "/bin/sh", "-c", cmd.command()));
+      String output;
+      int exit;
+      // RR-282 / RR-1674 — sandbox dispatch, ahead of any host ProcessBuilder. Bench cleanrooms
+      // keep their own container boundary and are left exactly as they were.
+      if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
+        SandboxExecResult sandboxed =
+            sandboxRouting.executeShell(
+                runId, workspaceRoot, cmd.command(), Duration.ofSeconds(cmd.timeoutSeconds()));
+        if (!sandboxed.completed()) {
+          // Fail-safe, never fail-open: an unavailable, refused or timed-out sandbox yields NO
+          // test count. The caller falls back to LLM-judged coverage, which is the documented
+          // behaviour for "cannot produce a trustworthy count" — it does NOT re-run on the host.
+          log.warn(
+              "WorkspaceTestRunner run={} sandbox status={} ({}) — no count; the suite was NOT run"
+                  + " on the application host",
+              runId,
+              sandboxed.status(),
+              sandboxed.detail());
+          return Optional.empty();
+        }
+        output = SandboxCommandRoutingService.combinedOutput(sandboxed);
+        exit = sandboxed.exitCode();
       } else {
-        pb = new ProcessBuilder(List.of("/bin/sh", "-c", cmd.command()));
-        pb.directory(workspaceRoot.toFile());
-      }
-      hardenEnv(pb);
-      pb.redirectErrorStream(true);
+        ProcessBuilder pb;
+        if (containerId != null) {
+          pb =
+              new ProcessBuilder(
+                  List.of(
+                      "docker",
+                      "exec",
+                      "-w",
+                      workdir,
+                      containerId,
+                      "/bin/sh",
+                      "-c",
+                      cmd.command()));
+        } else {
+          pb = new ProcessBuilder(List.of("/bin/sh", "-c", cmd.command()));
+          pb.directory(workspaceRoot.toFile());
+        }
+        hardenEnv(pb);
+        pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(cmd.timeoutSeconds(), TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
-        log.warn(
-            "WorkspaceTestRunner run={} test command exceeded {}s — fallback to coverage: {}",
-            runId,
-            cmd.timeoutSeconds(),
-            cmd.command());
-        return Optional.empty();
+        Process proc = pb.start();
+        boolean finished = proc.waitFor(cmd.timeoutSeconds(), TimeUnit.SECONDS);
+        if (!finished) {
+          proc.destroyForcibly();
+          log.warn(
+              "WorkspaceTestRunner run={} test command exceeded {}s — fallback to coverage: {}",
+              runId,
+              cmd.timeoutSeconds(),
+              cmd.command());
+          return Optional.empty();
+        }
+        output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        exit = proc.exitValue();
       }
-      String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      int exit = proc.exitValue();
 
       Optional<TestExecutionSummary> parsed = TestOutputParser.parse(cmd.framework(), output, exit);
       boolean fromXmlRecovery = false;

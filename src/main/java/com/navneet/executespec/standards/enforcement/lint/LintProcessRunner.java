@@ -6,10 +6,14 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 
 import org.springframework.stereotype.Component;
 
@@ -47,6 +51,18 @@ public class LintProcessRunner {
 
   private final LintExecutionProperties properties;
 
+  /**
+   * RR-1051 / RR-1674 — an admitted ESLint or Checkstyle run executes repository-controlled plugin
+   * code as the service account. Stripping the environment does not stop it reaching the network,
+   * including the cloud metadata endpoint. When {@link
+   * SandboxCommandRoutingService#routingEnabled()} is on the linter runs in the run's sandbox; when
+   * the sandbox cannot run it, the adapter is told UNAVAILABLE and the linter is NOT run on the
+   * host. Both sandbox flags are seeded false, so the default path is unchanged.
+   *
+   * <p>Nullable so the focused adapter tests can construct a runner without the Spring context.
+   */
+  private final SandboxCommandRoutingService sandboxRouting;
+
   public record Result(
       boolean executed, int exitCode, String stdout, String stderr, String unavailableReason) {
     public boolean ok() {
@@ -54,12 +70,62 @@ public class LintProcessRunner {
     }
   }
 
+  /**
+   * Legacy entry point, kept because {@code LintAdapter} carries no run identity.
+   *
+   * <p>A sandbox is scoped to a run, so a lint invocation with no run scope cannot be contained.
+   * With routing on, this overload therefore reports UNAVAILABLE rather than executing on the host
+   * — "sandbox available, or UNAVAILABLE" — and the adapter degrades exactly as it already does for
+   * a missing CLI. Threading the run id from {@code StandardsRunner} through {@code LintAdapter}
+   * into {@link #run(String, Path, List, long)} is the change that makes lint usable with the flags
+   * on; those files are outside this lane.
+   */
   public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
+    return run(null, workingDir, argv, timeoutSeconds);
+  }
+
+  /** Run-scoped entry point. {@code runId} is what allows the command to be contained. */
+  public Result run(String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
+    if (argv == null || argv.isEmpty()) {
+      return new Result(false, -1, null, null, "refusing to run an empty command");
+    }
+    if (sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      return runInSandbox(runId, workingDir, argv, timeoutSeconds);
+    }
+    return runOnHost(workingDir, argv, timeoutSeconds);
+  }
+
+  private Result runInSandbox(
+      String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
+    SandboxExecResult sandboxed =
+        sandboxRouting.execute(runId, workingDir, argv, Duration.ofSeconds(timeoutSeconds));
+    return switch (sandboxed.status()) {
+      case COMPLETED ->
+          new Result(true, sandboxed.exitCode(), sandboxed.stdout(), sandboxed.stderr(), null);
+      case TIMED_OUT ->
+          new Result(
+              true,
+              -1,
+              sandboxed.stdout(),
+              "(timeout)",
+              "linter exceeded " + timeoutSeconds + "s timeout in the sandbox");
+        // Never a host retry. UNAVAILABLE is the honest answer and the adapters already treat it as
+        // "this linter did not verify anything", which is what standards enforcement must record.
+      case UNAVAILABLE, REFUSED ->
+          new Result(
+              false,
+              -1,
+              null,
+              null,
+              "linter unavailable — the sandbox could not run it ("
+                  + sandboxed.detail()
+                  + "); it was NOT run on the application host");
+    };
+  }
+
+  private Result runOnHost(Path workingDir, List<String> argv, long timeoutSeconds) {
     Path scratchHome = null;
     try {
-      if (argv == null || argv.isEmpty()) {
-        return new Result(false, -1, null, null, "refusing to run an empty command");
-      }
       ProcessBuilder pb = new ProcessBuilder(argv);
       if (workingDir != null) pb.directory(workingDir.toFile());
       pb.redirectErrorStream(false);
