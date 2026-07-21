@@ -54,6 +54,21 @@ public class ProtoBreakingChangeClassifier implements BreakingChangeClassifier {
           ContractDiff.Confidence.UNCLASSIFIED,
           name());
     }
+    // A hard tool error (invalid proto, missing buf.yaml, parse failure) exits non-zero with the
+    // message on stderr and nothing on stdout. Without this guard the loop below iterated empty
+    // stdout and returned "0 breaking changes … DETERMINISTIC" — reporting a tool failure as an
+    // authoritative all-clear, the strongest possible false negative (RR-1652). Mirrors the
+    // oasdiff guard in OpenApiBreakingChangeClassifier.
+    if (result.exitCode() != 0
+        && (result.stdout() == null || result.stdout().isBlank())
+        && result.stderr() != null
+        && !result.stderr().isBlank()) {
+      return new ContractDiff(
+          "buf stderr: " + result.stderr().strip(),
+          List.of(),
+          ContractDiff.Confidence.UNCLASSIFIED,
+          name());
+    }
     List<ContractDiff.Change> changes = new ArrayList<>();
     // Empty stdout + exit 0 = no breaking changes.
     if (result.exitCode() == 0 && (result.stdout() == null || result.stdout().isBlank())) {
