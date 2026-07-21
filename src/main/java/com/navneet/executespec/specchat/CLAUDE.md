@@ -68,6 +68,13 @@ bounded terminal explanation. Provider text, tool envelopes, SSE fields, and exc
 descriptions pass through `ContextSanitizer`; raw credentials and raw provider exception messages
 must never reach a client/model.
 
+The compatibility `POST /api/spec/chat` turn does not run on the servlet thread. `SpecChatController`
+hands the loop to `SpecChatTurnDispatcher`, which admits it onto a context-propagating virtual thread
+under a global (`spec.chat.max-concurrent-turns`, default 8) and per-user
+(`spec.chat.max-concurrent-turns-per-user`, default 2) ceiling; an over-ceiling turn is refused with
+HTTP 429 before any emitter streams, and the emitter carries a 10-minute hard timeout. A client
+disconnect surfaces as an emitter IO failure and stops the loop rather than continuing to spend.
+
 Provider routing is fail-closed at this spending boundary. `SpecChatService` requires the caller to
 pass the provider already resolved from the explicit turn/session/account/org policy. Missing or
 unknown providers are rejected, and failure to resolve the selected provider's model returns 503;

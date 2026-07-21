@@ -179,6 +179,26 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(controlPort, never()).putActiveRun(eq(RUN_ID), any());
   }
 
+  /**
+   * RR-479 — a run the customer submitted as local-hands must never be retried through the
+   * server-side worker/tool path. With no usable local transport the retry is refused visibly and
+   * nothing is dispatched.
+   */
+  @Test
+  void localHandsRunRetryIsRefusedInsteadOfFallingBackToServerExecution() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = approvedPlanRun("PARTIAL");
+    run.setLocalExecutionRequested(true);
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    assertThatThrownBy(() -> service.retryTask(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("local hands");
+
+    verify(pool, never()).submit(any(Runnable.class));
+    verify(executor, never()).execute(any(), any());
+    verify(taskRepo, never()).save(any());
+  }
+
   private PipelineRun approvedPlanRun(String status) {
     return PipelineRun.builder()
         .runId(RUN_ID)

@@ -155,13 +155,24 @@ turns separately from runs.
   PAT transport proven by `JwtAuthenticationFilter`; a caller-declared CLI surface is never an
   authentication credential. `ImplementerMutationService` is the deliberately narrow opt-in execution
   seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
-  sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
-  `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded WORKHORSE model loop
-  behind that seam: read/search/diff plus file mutation and build/test tools are allowlisted, the
-  reservation is rechecked before every round and mutation, checkpoints are persisted before and
-  after the pass, terminal turns are recorded, and the reservation is released on success/failure.
-  It remains disabled by default and WEB sessions are rejected. Read-only child behavior remains
-  unchanged.
+  sessions, proven session ownership, a server-derived workspace scope, an active exact-scope
+  reservation, and only `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded
+  WORKHORSE model loop behind that seam: read/search/diff plus file mutation and build/test tools
+  are allowlisted, the reservation is rechecked before every round and mutation, checkpoints are
+  persisted before and after the pass, terminal turns are recorded, and the reservation is released
+  on success/failure. It remains disabled by default and WEB sessions are rejected. Read-only child
+  behavior remains unchanged.
+- **The writer seam executes on the SERVER, not on the caller's machine (RR-495).** The CLI/VS Code
+  gate describes who may call it, not where the bytes land: every tool it binds is a server tool. The
+  scope is therefore derived from server state by `subagent/ImplementerWorkspaceScope` — the run
+  workspace for a run-scoped session, otherwise
+  `<agent.workspace>/agent-sessions/<sessionId>` — and the request may only narrow it with a
+  *relative* subpath proven contained by `security/SafeWorkspacePath`. A caller-supplied absolute
+  path is refused with an explicit message rather than reinterpreted, because a client that sent one
+  believed it was addressing its own filesystem. Previously any existing writable server directory
+  was accepted, which made an enabled flag a remote write/read/build-execution primitive. A genuine
+  client-side writer still needs the signed tool-call/result envelope protocol the run pipeline
+  uses; this containment is not that protocol.
 - Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
@@ -215,7 +226,8 @@ turns separately from runs.
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns from one canonical orchestrator decision; adapts that decision to the legacy DTO without a second classifier call, then writes the turn, title/timestamp, `INTENT` event, and response. |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned role contracts (read-only SCOUT/VERIFIER/REPRODUCER/REVIEWER/DOCS_SCOUT plus disabled-by-default IMPLEMENTER_V1), depth/child/turn/cost guards, explicit start, completion handoff, cancellation propagation, and single-writer reservation events. |
-| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, ownership, local-hands surface, workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, session ownership, local-hands surface, server-derived workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerWorkspaceScope.java` | Server-authoritative scope binder for the writer seam: derives the root from the session (run workspace or per-session sandbox), accepts only relative narrowing proven contained by `SafeWorkspacePath`, and refuses caller-supplied absolute host paths. |
 | `subagent/ImplementerExecutionService.java` | Disabled-by-default bounded WORKHORSE IMPLEMENTER loop; binds the allowlisted read/edit/build/test tools, routes mutations through the reservation seam, persists checkpoints and terminal turn evidence, and releases the reservation on terminal paths. |
 | `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
