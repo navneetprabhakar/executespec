@@ -356,7 +356,11 @@ class RunPlanningCoordinator {
                                       .build()));
                         }
                       }),
-              pool.executor()));
+              // RR-442 — the level-1 expansion pool, deliberately NOT the orchestration pool this
+              // thread is running on. The blocking allOf(...).get(20 min) below would otherwise be
+              // waiting for children that cannot be scheduled once enough concurrent LARGE runs
+              // occupy every orchestration worker.
+              pool.expansionExecutor()));
     }
     try {
       java.util.concurrent.CompletableFuture.allOf(
@@ -599,7 +603,9 @@ class RunPlanningCoordinator {
                                   .build());
                         }
                       }),
-              pool.executor()));
+              // RR-442 — this EPIC expander is itself running on the level-1 expansion pool and
+              // blocks on its children below, so the grandchildren need their own executor.
+              pool.nestedExpansionExecutor()));
     }
     try {
       java.util.concurrent.CompletableFuture.allOf(

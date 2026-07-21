@@ -11,8 +11,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, String> {
   /**
@@ -55,6 +57,39 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
           + "WHERE e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED') "
           + "AND e.updatedAt < :cutoff")
   List<ExecutionRun> findStaleNonTerminal(@Param("cutoff") Instant cutoff);
+
+  /**
+   * V315 (RR-905) — atomically claim boot-recovery ownership of one interrupted launch.
+   *
+   * <p>This is the fence that stops every instance in a rolling deploy or a scaled-out fleet from
+   * re-dispatching the same {@code EXECUTING} launch simultaneously. Exactly one caller can advance
+   * {@code recovery_attempts} from the value it observed; the others see {@code 0} rows updated and
+   * must not touch the launch. A live {@code recovery_heartbeat} additionally protects an instance
+   * that is already recovering the row from being taken over, and the attempt cap stops a launch
+   * from being recovered forever across repeated crashes.
+   *
+   * <p>{@code version} is bumped in the same statement so a concurrently-loaded stale entity cannot
+   * write the lease columns back to their pre-claim values.
+   *
+   * @return 1 when this caller owns the recovery, 0 when it lost or is ineligible
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE ExecutionRun e SET e.recoveryAttempts = :nextAttempt, "
+          + "e.recoveringInstance = :instanceId, e.recoveryHeartbeat = :now, "
+          + "e.version = e.version + 1 "
+          + "WHERE e.id = :id AND e.status = 'EXECUTING' "
+          + "AND (e.recoveryAttempts = :expectedAttempt "
+          + "     OR (e.recoveryAttempts IS NULL AND :expectedAttempt = 0)) "
+          + "AND (e.recoveryHeartbeat IS NULL OR e.recoveryHeartbeat < :staleBefore)")
+  int claimBootRecovery(
+      @Param("id") String id,
+      @Param("expectedAttempt") int expectedAttempt,
+      @Param("nextAttempt") int nextAttempt,
+      @Param("now") Instant now,
+      @Param("staleBefore") Instant staleBefore,
+      @Param("instanceId") String instanceId);
 
   /**
    * v2.5.7 — count non-terminal executions for a project. Used to gate {@code POST

@@ -663,6 +663,49 @@ served route alongside the requested one. `cost/EffectiveRouteProjection` is the
 **Proven by tests only** — no live provider campaign has been run, so a zero-divergence rate in
 practice is not claimed.
 
+**Submit-time control ordering (2026-07-21, V323):** three controls were persisted AFTER the thing
+they control had already started. `RunOrchestrator.SubmitPolicy` now carries all of them across the
+submit boundary on the submitting thread (same mechanism V261 used for `localExecutionRequested`)
+and they are stamped inside the initial `PipelineRun.builder()`. `userCostCap` was written after
+`submitRun` returned, so a fast planner clamped `hard_cap_usd` to the platform cap before the
+customer's tighter ceiling existed. The "stage this, do not publish it" consent was a Redis-only key
+whose own contract loses the intent on a JVM crash and resumes default auto-push — it is now
+`pipeline_run.skip_auto_push`, and the auto-push gate fails CLOSED when the policy row cannot be
+read (the legacy Redis key is still honoured for in-flight runs). A project-scoped run's `orgId` is
+now derived from the authorized host `Project` returned by `ProjectAccessGuard.assertCanWrite`
+rather than the caller's home org, so an external collaborator's run no longer carries a host
+`projectId` with a personal `orgId`; the actor remains `createdByUserId`. V323 backfills existing
+rows and adds a `NOT VALID` project/org check for operators to validate after the backfill is
+confirmed. Follow-up: managed-AI policy should resolve from the run's payer org rather than from the
+submitting user now that the payer org is correct.
+
+**Execution-gate integrity (2026-07-21, V315):** the plan gate is now the single authoritative
+checkpoint before provider spend and publication, and it cannot be disabled by a request field.
+`integration/PlanGateBypassPolicy` is the only place that decides bypass authority: `skipApproval`
+is honoured solely for server-internal automation surfaces (`finding:*`, inbound integration source
+types, operator benchmark harnesses, and the approval-proven `EXECUTION_VIEW_APPROVED` solution
+executor), and `POST /api/runs` rejects a customer-supplied `source` that names one of them. Ordinary
+REST submits, forks and agent submissions always take the human gate. `POST /api/runs/{id}/fork` now
+inherits `executionMode` (the PRODUCTION/PROTOTYPE governance axis) instead of
+`approvedExecutionMode` (the REALTIME/BATCH scheduling axis) — the confusion meant every fork
+persisted "REALTIME", failed the exact-`PRODUCTION` gate test, and executed unapproved; forks also
+preserve the source run's exact repository selection and its (now durable, V315) `tdd_mode`.
+`POST /api/runs/{id}/approve` accepts an optional `planFingerprint` (SHA-256 of the persisted plan
+JSON) and rejects a mismatch with 409, because `creditsConfirmed` is a price check, not a plan
+identity. Launch-side: `approvePlanAndExecute` fails the launch instead of executing when approval
+cannot be durably recorded or the V2 gate cannot be resolved, and refuses to start on an
+already-REJECTED gate; `executeApprovedPlan` (and therefore `POST /api/executions/{id}/resume`)
+requires a durable `planApprovedAt` and a non-terminal launch; terminal status is derived from the
+per-solution outcomes rather than unconditionally COMPLETE, and FAILED/CANCELLED joined the
+protected terminal set; abort atomically claims cancellation from a non-terminal state and performs
+PR-closing compensations only for the caller that won that claim. Boot recovery takes a V315 fenced
+lease (`execution_run.recovery_attempts` / `recovering_instance` / `recovery_heartbeat`) so a rolling
+deploy no longer re-dispatches every EXECUTING launch on every instance. Persisted repository
+selections fail closed on both sides — an unparseable or non-UUID value is an error, never
+"every linked repository" — and re-review's task reconstruction no longer maps null/unknown/
+non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
+LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
+
 **Route truth (Adaptive C1 Steps 4-7, 2026-07-19):** the per-task poisoned-feedback finding is now
 corrected at the task layer. V305 adds `agent_task.effective_provider` / `effective_model` /
 `effective_route_attribution`, populated by `RunTokenAttributor.attributeWorker` from the
