@@ -1,76 +1,17 @@
 /**
- * Tiny helpers for rendering run summaries and project rows in Signal pages.
- * Centralises the field-name normalisation across api.RunSummary /
- * api.RunDetail / api.ProjectDto so per-page code stays readable.
+ * Tiny helpers for rendering project rows and run labels in Signal pages.
+ *
+ * Run *status* vocabulary deliberately does NOT live here. This file used to
+ * carry a fifth private copy of it (`isLiveStatus` / `isTerminalStatus` /
+ * `statusToDot` / `toRunView`), and that copy was wrong: it matched `COMPLETED`,
+ * which the backend never emits — the terminal status is `COMPLETE`. Nothing
+ * imported it, so the bug was latent, but any future caller would have
+ * classified every finished run as non-terminal. The four exports were deleted
+ * (RR-1659) in favour of the single shared map in `@/lib/runStatus`. Import
+ * status helpers from there; do not reintroduce a local copy.
  */
 
-import type {RunSummary, RunDetail, ProjectDto} from '@/lib/api';
-
-export interface RunView {
-  id: string;
-  short: string;
-  status: string;
-  isLive: boolean;
-  isTerminal: boolean;
-  title: string;
-  projectName?: string | null;
-  projectId?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  cost?: number | null;
-  score?: number | null;
-  prUrl?: string | null;
-  archived: boolean;
-}
-
-const LIVE_STATUSES = new Set([
-  'CLASSIFYING',
-  'PLANNING',
-  'EXECUTING',
-  'AWAITING_APPROVAL',
-  'RUNNING',
-  'PROVIDER_SWITCHING',
-  'PAUSED',
-]);
-
-export function isLiveStatus(status?: string | null): boolean {
-  return LIVE_STATUSES.has((status || '').toUpperCase());
-}
-
-export function isTerminalStatus(status?: string | null): boolean {
-  const s = (status || '').toUpperCase();
-  return s === 'COMPLETED' || s === 'PARTIAL' || s === 'FAILED' || s === 'CANCELLED';
-}
-
-export function toRunView(r: RunSummary | RunDetail): RunView {
-  const id = (r as unknown as {runId?: string}).runId || '';
-  const status = (r.status || '').toUpperCase();
-  // accuracyScore is a legacy LLM assessment and must not be displayed as a
-  // verified correctness score when the deterministic field is absent.
-  const score = (r as unknown as {verifiedScore?: number}).verifiedScore ?? null;
-  return {
-    id,
-    short: id ? `R-${id.slice(0, 6)}` : 'R-—',
-    status,
-    isLive: isLiveStatus(status),
-    isTerminal: isTerminalStatus(status),
-    title:
-      (r as unknown as {runTitle?: string; userRequest?: string}).runTitle ||
-      r.userRequest ||
-      `Run R-${id.slice(0, 6)}`,
-    projectName: (r as unknown as {projectName?: string | null}).projectName ?? null,
-    projectId: (r as unknown as {projectId?: string | null}).projectId ?? null,
-    startedAt: r.startedAt ?? null,
-    completedAt: r.completedAt ?? null,
-    cost: (r as unknown as {actualCostUsd?: number | null}).actualCostUsd ?? null,
-    score,
-    prUrl:
-      (r as unknown as {scmPrUrl?: string | null}).scmPrUrl ??
-      (r as unknown as {githubPrUrl?: string | null}).githubPrUrl ??
-      null,
-    archived: !!(r as unknown as {archivedAt?: string | null}).archivedAt,
-  };
-}
+import type {ProjectDto} from '@/lib/api';
 
 export function relTime(input?: string | null): string {
   if (!input) return '—';
@@ -85,15 +26,6 @@ export function relTime(input?: string | null): string {
   const d = Math.round(h / 24);
   if (d < 30) return `${d}d ago`;
   return new Date(input).toLocaleDateString();
-}
-
-export function statusToDot(s?: string): 'live' | 'mint' | 'coral' | 'signal' | 'lavender' {
-  const x = (s || '').toUpperCase();
-  if (LIVE_STATUSES.has(x)) return 'live';
-  if (x === 'COMPLETED') return 'mint';
-  if (x === 'FAILED' || x === 'CANCELLED') return 'coral';
-  if (x === 'PARTIAL') return 'signal';
-  return 'lavender';
 }
 
 export function scoreKind(score?: number | null): 'good' | 'warn' | 'fail' | 'default' {
