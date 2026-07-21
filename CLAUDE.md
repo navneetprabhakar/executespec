@@ -340,10 +340,20 @@ termination proof — after cancelling it re-interrupts and waits up to
 pass counts down in its own `finally`. If that latch trips the review proceeds as before. If it
 does not, the review is ABANDONED at that stage: `REVIEW_FAILED` with
 `ReviewerResult.workspaceQuiescent=false` and **no** build, formatter or test evidence attached,
-because none of it can be attributed to a stable workspace generation. **Not closed:** write
-authority is not yet lease/generation-scoped, so an abandoned thread that outlives the reserve can
-still mutate the workspace — the reviewer refuses to vouch for it, it does not stop it.
-`tool/ReviewerMutationScope` is the seam for revocation and is owned by the tool lane.
+because none of it can be attributed to a stable workspace generation. **Write authority is now
+revocable (RR-272 / RR-1687, 2026-07-21).** `tool/ReviewerMutationScope` binds a shared `Lease`
+alongside the thread-local policy; the reviewer control thread holds that lease and calls
+`revoke()` the moment it cancels a pass (before the reserve wait begins). Every mutation check
+(`validateWriteFile`/`validateEditFile`/`validateDelete`/`validateMove`/`validateShell`/
+`validateBackgroundJob`) consults the lease FIRST, before the brownfield gate, so a
+`writeFile`/`editFile` from an abandoned pass thread is REFUSED on BOTH the brownfield and
+greenfield paths — the runaway thread loses authority, not merely the reviewer's willingness to
+vouch for it. **RR-1686:** an unproven-terminated pass records its workspace root in a JVM-scoped
+non-quiescent set, and `capturePreReviewBuildError` skips the pre-review build smoke for a
+workspace in that set, so a concurrent review of the same workspace does not measure a tree an
+abandoned thread may still hold. **Residual:** revocation refuses the tool call but cannot preempt
+an in-flight provider/tool turn already past its dispatch check; and the non-quiescent set is
+append-only (a workspace flagged once stays flagged for the JVM's lifetime).
 
 Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
 
