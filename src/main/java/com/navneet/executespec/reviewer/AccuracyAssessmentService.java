@@ -374,7 +374,8 @@ SCORE COMPUTATION GUIDANCE:
    * in the workspace evidence the accuracy LLM was given. Mutates the report in-place. Audit
    * 2026-05-13 run 6024f510 RC-2.
    */
-  private void filterExecutionTimeRequirements(String runId, AccuracyReport report) {
+  // Package-private for RR-292 regression pinning (ValidationReport-free unit test).
+  void filterExecutionTimeRequirements(String runId, AccuracyReport report) {
     java.util.List<String> missing = report.getMissingRequirements();
     if (missing == null || missing.isEmpty()) return;
 
@@ -398,13 +399,27 @@ SCORE COMPUTATION GUIDANCE:
 
     if (!dropped.isEmpty()) {
       log.info(
-          "[AccuracyAssessment] run {}: dropped {} of {} missingRequirements as"
-              + " execution-time/VCS (not verifiable from workspace snapshot): {}",
+          "[AccuracyAssessment] run {}: reclassified {} of {} missingRequirements as"
+              + " execution-time/VCS UNKNOWN (not verifiable from workspace snapshot): {}",
           runId,
           dropped.size(),
           missing.size(),
           dropped);
       report.setMissingRequirements(kept);
+      // RR-292 — do NOT delete an execution-time / VCS requirement from the assessment. Its truth
+      // is unknown from the workspace snapshot, not proven done: no VCS / command / build / test /
+      // publication evidence is consulted here, so a user who explicitly asked for a commit / push
+      // /
+      // PR / successful verification must not silently lose the requirement (which would remove its
+      // critical penalty and could upgrade the score). Retain it as UNKNOWN with a marker instead.
+      java.util.List<String> existingUnknown =
+          report.getUnknownRequirements() != null
+              ? new java.util.ArrayList<>(report.getUnknownRequirements())
+              : new java.util.ArrayList<>();
+      for (String req : dropped) {
+        existingUnknown.add(req + " [execution-time/VCS — not verifiable from workspace snapshot]");
+      }
+      report.setUnknownRequirements(existingUnknown);
     }
   }
 

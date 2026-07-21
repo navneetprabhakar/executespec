@@ -104,6 +104,23 @@ class ValidationReportServiceBootVerificationTest {
   }
 
   @Test
+  void unhealthy_boot_cannot_read_pass_even_with_everything_else_green() {
+    // RR-296 — the exact reported gap: CODE delivered, compile green, ALL tests passing, CLEAN
+    // review, no criticals, but the health probe fails (UNHEALTHY). Before the boot-aware trust
+    // cap this computed to 89 — a passing headline above the 85 PASS threshold for a service that
+    // does not actually come up. The cap now bounds any non-HEALTHY boot below PASS.
+    ValidationReportService svc = svcAdditiveOn();
+    int unhealthy =
+        svc.computeVerifiedScore(true, 5, 5, "CLEAN", 0, null, null, 4, boot(Verdict.UNHEALTHY));
+    assertTrue(unhealthy < 85, "UNHEALTHY boot must not read PASS (>=85); was " + unhealthy);
+    // A HEALTHY boot on the same otherwise-perfect run keeps its full passing headline.
+    int healthy =
+        svc.computeVerifiedScore(true, 5, 5, "CLEAN", 0, null, null, 4, boot(Verdict.HEALTHY));
+    assertTrue(healthy >= 85, "HEALTHY boot on an all-green run should still read PASS");
+    assertTrue(healthy > unhealthy);
+  }
+
+  @Test
   void multiplicative_path_is_also_boot_aware() {
     ValidationReportService svc = svcMultiplicative();
     // A failed boot zeroes buildFactor → the whole multiplicative product collapses to 0, even
