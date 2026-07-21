@@ -153,8 +153,7 @@ public final class StringEditMatcher {
     String replacement = newStr;
     if (indentFlexible) {
       String baseIndent = leadingWhitespace(lineContent(content, lineStarts, i));
-      String oldIndent = leadingWhitespace(oldLines[0]);
-      replacement = reindent(newStr, oldIndent, baseIndent);
+      replacement = reindent(newStr, baseIndent);
     }
     // Preserve the matched block's trailing-newline shape.
     if (trailingNewline && !replacement.endsWith("\n")) {
@@ -180,23 +179,55 @@ public final class StringEditMatcher {
     return contentLine.stripTrailing().equals(oldLine.stripTrailing());
   }
 
-  /** Re-indent each line of {@code text}: strip {@code oldIndent}, prepend {@code newIndent}. */
-  private static String reindent(String text, String oldIndent, String newIndent) {
+  /**
+   * Re-base the indentation of {@code text} onto {@code newIndent} while preserving every line's
+   * indentation RELATIVE to the block.
+   *
+   * <p>The strip base is {@code text}'s OWN minimum common leading whitespace (the longest leading
+   * whitespace prefix shared by all non-blank lines) — never the matched block's indent. Stripping
+   * a foreign prefix (or, when that prefix was empty, calling {@code stripLeading()} on every line
+   * as the pre-RR-1541 implementation did) flattened every line of a multi-line replacement to one
+   * uniform indent, silently destroying nesting in Python / YAML and mangling formatting elsewhere
+   * while still reporting the edit as applied. Re-basing off the common prefix is idempotent: an
+   * already-correctly-indented {@code newStr} round-trips unchanged.
+   */
+  private static String reindent(String text, String newIndent) {
     String[] lines = text.split("\n", -1);
+    String stripBase = commonLeadingWhitespace(lines);
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < lines.length; i++) {
       String line = lines[i];
       if (line.isBlank()) {
         sb.append(line); // keep blank lines blank
-      } else if (!oldIndent.isEmpty() && line.startsWith(oldIndent)) {
-        sb.append(newIndent).append(line.substring(oldIndent.length()));
       } else {
-        // Line shallower than oldIndent (or oldIndent empty): shift by the new base indent.
-        sb.append(newIndent).append(line.stripLeading());
+        sb.append(newIndent).append(line.substring(stripBase.length()));
       }
       if (i < lines.length - 1) sb.append('\n');
     }
     return sb.toString();
+  }
+
+  /**
+   * Longest leading-whitespace prefix shared by every non-blank line. Returns "" when the lines
+   * disagree on the first indent character (e.g. mixed tabs and spaces), which makes {@link
+   * #reindent} a pure prefix-shift — still relative-indentation preserving.
+   */
+  private static String commonLeadingWhitespace(String[] lines) {
+    String common = null;
+    for (String line : lines) {
+      if (line.isBlank()) continue;
+      String indent = leadingWhitespace(line);
+      if (common == null) {
+        common = indent;
+        continue;
+      }
+      int max = Math.min(common.length(), indent.length());
+      int k = 0;
+      while (k < max && common.charAt(k) == indent.charAt(k)) k++;
+      common = common.substring(0, k);
+      if (common.isEmpty()) return "";
+    }
+    return common == null ? "" : common;
   }
 
   private static String leadingWhitespace(String s) {

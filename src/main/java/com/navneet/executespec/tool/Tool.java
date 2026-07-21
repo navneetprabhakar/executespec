@@ -25,6 +25,20 @@ public interface Tool {
   /** Tool name as the LLM sees it (camelCase by convention; e.g. {@code "readFile"}). */
   String name();
 
+  /**
+   * Canonical capability this tool exposes, independent of {@link #name()} (RR-1599).
+   *
+   * <p>Safety and evidence policy must key on THIS, not on the literal name: the registry mints
+   * several names over one implementation for client-vocabulary parity, and a name-keyed guard
+   * silently fails open for every alias it did not enumerate.
+   *
+   * <p>The default resolves through the {@link ToolCapabilities} table, so a tool only needs to
+   * override this when it wraps another tool whose name is not its own.
+   */
+  default ToolCapability capability() {
+    return ToolCapabilities.of(name()).orElse(null);
+  }
+
   /** Human/LLM-readable description of what this tool does and when to use it. */
   String description();
 
