@@ -918,7 +918,12 @@ public class ProjectRepoService {
       ScmCredential credential) {
     try {
       String body = client.readFile(repository, branch, ".executespec/root.yml", credential);
-      if (body == null || body.isBlank() || body.startsWith("// ")) return null;
+      // No `startsWith("// ")` guard: read failures now surface as ScmProviderException (caught
+      // below) rather than as an in-band "// ..." sentinel string, so inspecting content for
+      // failure is both dead and wrong — it would discard a legitimate file whose first line
+      // happens to start with "// " (RR-1631 root cause). The sibling overload above was already
+      // migrated; this second call site was missed.
+      if (body == null || body.isBlank()) return null;
       return parseRootYamlSubdir(body);
     } catch (Exception ex) {
       log.debug(
