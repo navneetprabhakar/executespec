@@ -130,21 +130,21 @@ public class StackDetector {
   private String detectVersion(String repoUrl, String pat, StackInfo info, List<String> files) {
     try {
       if ("Java".equals(info.language()) && hasRoot(files, "pom.xml")) {
-        String pom = gitHub.readRepoFile(repoUrl, "pom.xml", pat);
+        String pom = gitHub.readRepoFile(repoUrl, "pom.xml", pat).contentOrNull();
         if (pom != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("<version>([^<]+)</version>").matcher(pom);
           if (m.find()) return m.group(1);
         }
       } else if ("TypeScript/JS".equals(info.language()) && hasRoot(files, "package.json")) {
-        String pkg = gitHub.readRepoFile(repoUrl, "package.json", pat);
+        String pkg = gitHub.readRepoFile(repoUrl, "package.json", pat).contentOrNull();
         if (pkg != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"").matcher(pkg);
           if (m.find()) return m.group(1);
         }
       } else if ("Python".equals(info.language()) && hasRoot(files, "pyproject.toml")) {
-        String py = gitHub.readRepoFile(repoUrl, "pyproject.toml", pat);
+        String py = gitHub.readRepoFile(repoUrl, "pyproject.toml", pat).contentOrNull();
         if (py != null) {
           java.util.regex.Matcher m =
               java.util.regex.Pattern.compile("(?m)^version\\s*=\\s*\"([^\"]+)\"").matcher(py);

@@ -129,18 +129,26 @@ public class ArchitectureDiffService {
         continue;
       }
       if (base.equals(head)) continue; // deterministically unchanged; no call needed
-      List<ChangedFile> files = gitHub.compareCommits(repo, base, head, pat);
-      if (files.isEmpty()) {
-        // RR-1589 — GitHubRepoService.compareCommits returns an empty list BOTH for a successful
-        // compare with no files and for a failed one (non-200, network error, missing PAT on a
-        // private repo). This used to `continue`, rendering a failed compare as "no source
-        // changes" and understating totalFiles. It is now reported as explicitly unverified.
+      GitHubRepoService.CompareResult compare = gitHub.compareCommits(repo, base, head, pat);
+      if (!compare.successful()) {
+        // RR-1656 — the compare could not be performed (non-200, network error, auth failure).
+        // That is an unverified repo, NOT a repo with no source changes; totalFiles deliberately
+        // excludes it and the caller can show the failure distinctly.
         unverified.add(
             new RepoDiffIssue(
                 repo,
-                "COMPARE_EMPTY",
-                "GitHub compare returned no files — either no source changes, or the compare could"
-                    + " not be fetched (auth, rate limit, or repo access)"));
+                "COMPARE_FAILED",
+                "GitHub compare could not be fetched ("
+                    + compare.errorCode()
+                    + (compare.upstreamStatus() == null
+                        ? ""
+                        : ", status " + compare.upstreamStatus())
+                    + ") — source changes for this repo are unknown"));
+        continue;
+      }
+      List<ChangedFile> files = compare.files();
+      if (files.isEmpty()) {
+        // RR-1656 — now a VERIFIED no-change compare: GitHub answered, and it listed no files.
         continue;
       }
       perRepo.add(new RepoChanges(repo, files));

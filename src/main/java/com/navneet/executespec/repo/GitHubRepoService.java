@@ -274,15 +274,23 @@ public class GitHubRepoService {
    */
   /**
    * v2.5.5 (UX-4.2) — list files changed between two commits via GitHub's compare API. Returns one
-   * {@link ChangedFile} per file (added / modified / removed / renamed) or empty on failure. No
-   * pagination — the compare endpoint caps at 300 files per response which is plenty for an arch
-   * diff. Uses the caller's PAT for private-repo access.
+   * {@link ChangedFile} per file (added / modified / removed / renamed). No pagination — the
+   * compare endpoint caps at 300 files per response which is plenty for an arch diff. Uses the
+   * caller's PAT for private-repo access.
+   *
+   * <p>RR-1656 — the result is typed because an empty file list is NOT evidence of "these two SHAs
+   * are identical": a non-200 response, an auth failure and a transport error all produce no files
+   * as well. Callers that render or score the diff must branch on {@link
+   * CompareResult#successful()} rather than on emptiness.
    */
-  public List<ChangedFile> compareCommits(
+  public CompareResult compareCommits(
       String repoFullName, String baseSha, String headSha, String overridePat) {
     String effectivePat = overridePat;
-    if (repoFullName == null || baseSha == null || headSha == null) return List.of();
-    if (baseSha.equals(headSha)) return List.of();
+    if (repoFullName == null || baseSha == null || headSha == null) {
+      return CompareResult.failed("INVALID_COMPARE_ARGUMENTS", null);
+    }
+    // Identical SHAs are a genuine, verified no-change compare — never a failure.
+    if (baseSha.equals(headSha)) return CompareResult.success(List.of());
     try {
       HttpClient client = HttpClient.newHttpClient();
       HttpRequest.Builder b =
@@ -308,11 +316,12 @@ public class GitHubRepoService {
             baseSha,
             headSha,
             res.statusCode());
-        return List.of();
+        return CompareResult.failed("GITHUB_COMPARE_HTTP_ERROR", res.statusCode());
       }
       JsonNode root = new ObjectMapper().readTree(res.body());
       JsonNode files = root.path("files");
-      if (!files.isArray()) return List.of();
+      // A compare payload with no "files" array is a shape we cannot read — not a clean compare.
+      if (!files.isArray()) return CompareResult.failed("GITHUB_COMPARE_UNREADABLE_BODY", 200);
       List<ChangedFile> out = new ArrayList<>(files.size());
       for (JsonNode f : files) {
         out.add(
@@ -322,10 +331,30 @@ public class GitHubRepoService {
                 f.path("additions").asInt(0),
                 f.path("deletions").asInt(0)));
       }
-      return out;
+      return CompareResult.success(out);
     } catch (Exception e) {
       log.warn("[GitHubRepoService] compareCommits {}: {}", repoFullName, e.getMessage());
-      return List.of();
+      return CompareResult.failed("GITHUB_COMPARE_REQUEST_FAILED", null);
+    }
+  }
+
+  /**
+   * Typed GitHub compare result (RR-1656). {@code successful=true} with an empty {@code files} list
+   * means the compare ran and found no changed files; {@code successful=false} means the question
+   * could not be asked and the caller must not present the result as a clean diff.
+   */
+  public record CompareResult(
+      List<ChangedFile> files, boolean successful, String errorCode, Integer upstreamStatus) {
+    public CompareResult {
+      files = files == null ? List.of() : List.copyOf(files);
+    }
+
+    public static CompareResult success(List<ChangedFile> files) {
+      return new CompareResult(files, true, null, 200);
+    }
+
+    public static CompareResult failed(String errorCode, Integer upstreamStatus) {
+      return new CompareResult(List.of(), false, errorCode, upstreamStatus);
     }
   }
 
@@ -340,7 +369,10 @@ public class GitHubRepoService {
   public boolean diffConfinedTo(
       String repoFullName, String baseSha, String headSha, String prefix, String overridePat) {
     if (baseSha == null || headSha == null || baseSha.equals(headSha)) return false;
-    List<ChangedFile> files = compareCommits(repoFullName, baseSha, headSha, overridePat);
+    CompareResult compare = compareCommits(repoFullName, baseSha, headSha, overridePat);
+    // Fail-safe: an unavailable compare is "in doubt", which this contract treats as a real change.
+    if (!compare.successful()) return false;
+    List<ChangedFile> files = compare.files();
     if (files.isEmpty()) return false;
     for (ChangedFile f : files) {
       if (f.filename() == null || !f.filename().startsWith(prefix)) return false;
@@ -544,22 +576,28 @@ public class GitHubRepoService {
   /**
    * Reads a single file from a GitHub repo via the Contents API.
    *
+   * <p>RR-1631 — failures are signalled OUT OF BAND. This method previously returned a {@code "//
+   * …"} sentinel string in the same channel as file content, which is indistinguishable from a
+   * legitimate C-style/proto/GraphQL source file whose first line is a {@code //} comment. Callers
+   * must branch on {@link RepoFileResult#successful()} and never inspect the content prefix.
+   *
    * @param repoUrl HTTPS clone URL
    * @param relativePath file path relative to repo root
-   * @param overridePat per-user PAT (null falls back to system PAT)
-   * @return file content as string, or error message on failure
+   * @param overridePat per-user PAT
    */
-  public String readRepoFile(String repoUrl, String relativePath, String overridePat) {
+  public RepoFileResult readRepoFile(String repoUrl, String relativePath, String overridePat) {
     return readRepoFile(repoUrl, relativePath, null, overridePat);
   }
 
-  public String readRepoFile(
+  public RepoFileResult readRepoFile(
       String repoUrl, String relativePath, String branch, String overridePat) {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return "// No GitHub PAT configured";
+    if (effectivePat == null || effectivePat.isBlank()) {
+      return RepoFileResult.failed("MISSING_GITHUB_PAT", null);
+    }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
-    if (ownerRepo == null) return "// Invalid repo URL";
+    if (ownerRepo == null) return RepoFileResult.failed("INVALID_REPOSITORY_URL", null);
 
     String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
     try {
@@ -586,14 +624,41 @@ public class GitHubRepoService {
 
       HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() != 200) {
-        return "// File not found on GitHub (status " + response.statusCode() + ")";
+        return RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", response.statusCode());
       }
 
       // Extract base64-encoded "content" field and decode
       return decodeGitHubContent(response.body());
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error reading repo file {}: {}", relativePath, e.getMessage());
-      return "// Error reading file from GitHub: " + e.getMessage();
+      return RepoFileResult.failed("GITHUB_CONTENTS_REQUEST_FAILED", null);
+    }
+  }
+
+  /**
+   * Typed single-file read result (RR-1631). {@code successful=false} carries a stable, secret-free
+   * {@code errorCode} and never a content string, so an unavailable read can never be mistaken for
+   * file bytes — nor a real file whose first line is a comment mistaken for a failure.
+   */
+  public record RepoFileResult(
+      String content, boolean successful, String errorCode, Integer upstreamStatus) {
+
+    public static RepoFileResult success(String content) {
+      return new RepoFileResult(content == null ? "" : content, true, null, 200);
+    }
+
+    public static RepoFileResult failed(String errorCode, Integer upstreamStatus) {
+      return new RepoFileResult(null, false, errorCode, upstreamStatus);
+    }
+
+    /** Content when the read succeeded, else {@code null}. Never a failure sentinel. */
+    public String contentOrNull() {
+      return successful ? content : null;
+    }
+
+    /** True when GitHub answered that the path does not exist on the requested ref. */
+    public boolean notFound() {
+      return !successful && upstreamStatus != null && upstreamStatus == 404;
     }
   }
 
@@ -1502,19 +1567,23 @@ public class GitHubRepoService {
    * Decodes the base64 "content" field from a GitHub Contents API response. The GitHub API returns
    * content in base64 with newlines every 60 chars.
    */
-  private String decodeGitHubContent(String json) {
+  private RepoFileResult decodeGitHubContent(String json) {
     int contentIdx = json.indexOf("\"content\":");
-    if (contentIdx < 0) return "// No content field in response";
+    if (contentIdx < 0) return RepoFileResult.failed("GITHUB_CONTENTS_NO_CONTENT_FIELD", 200);
 
     int start = json.indexOf("\"", contentIdx + 10) + 1;
     int end = json.indexOf("\"", start);
+    if (start <= 0 || end < start) {
+      return RepoFileResult.failed("GITHUB_CONTENTS_UNREADABLE_BODY", 200);
+    }
     String base64 = json.substring(start, end).replace("\\n", "").replace("\n", "").trim();
 
     try {
       byte[] decoded = Base64.getDecoder().decode(base64);
-      return new String(decoded);
+      return RepoFileResult.success(new String(decoded, StandardCharsets.UTF_8));
     } catch (Exception e) {
-      return "// Failed to decode file content: " + e.getMessage();
+      log.warn("[GitHubRepoService] Failed to decode file content: {}", e.getMessage());
+      return RepoFileResult.failed("GITHUB_CONTENTS_DECODE_FAILED", 200);
     }
   }
 }

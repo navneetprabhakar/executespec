@@ -126,13 +126,15 @@ public class DriftDetectionService {
       return DriftCheckResult.unavailable(contract.getId(), "no detected source path on contract");
     }
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
-    String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), actorPat);
-    if (isSourceReadFailure(sourceContent)) {
+    GitHubRepoService.RepoFileResult source =
+        gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), actorPat);
+    if (!source.successful()) {
       // RR-1631 — a GitHub outage / expired PAT / rate limit is NOT "no drift". Report it as an
       // explicitly unverified check so callers can distinguish it from a verified clean result.
       return DriftCheckResult.unavailable(
-          contract.getId(), "could not read source path: " + truncate(sourceContent));
+          contract.getId(), "could not read source path: " + describe(source));
     }
+    String sourceContent = source.content();
     String folderHash = folderContent.get().contentHash();
     String sourceHash = DetectorUtils.sha256(sourceContent);
     if (folderHash != null && folderHash.equals(sourceHash)) {
@@ -185,35 +187,20 @@ public class DriftDetectionService {
   }
 
   /**
-   * RR-1631 — {@code GitHubRepoService.readRepoFile} signals every failure IN-BAND, as a string
-   * whose first characters are {@code "// "}. The old check treated ANY {@code "// "}-prefixed body
-   * as an error, which silently misread a perfectly valid proto / GraphQL / C-style source file
-   * beginning with {@code // Copyright …} as an unreadable one — permanently reporting "no drift"
-   * for exactly the file types most likely to start with a line comment, and permanently failing
-   * refresh with {@code BAD_GATEWAY}.
+   * RR-1631 — the string-sentinel matching this method used to perform is GONE. {@code
+   * GitHubRepoService.readRepoFile} now signals failure out-of-band via {@code
+   * RepoFileResult.successful()}, so a valid proto / GraphQL / C-style source file whose first line
+   * is {@code // Copyright …} can no longer be misread as an unreadable one (which permanently
+   * reported "no drift" and permanently failed refresh with {@code BAD_GATEWAY}).
    *
-   * <p>Matching the exact known sentinels instead narrows the collision to a file whose first line
-   * literally reproduces one of GitHub-reader's error strings. The real fix is for {@code
-   * readRepoFile} to signal failure out-of-band (Optional / typed result / exception); that is
-   * tracked separately because it lives outside this package.
+   * <p>This renders the failure code for operator-facing messages; it never inspects content.
    */
-  static boolean isSourceReadFailure(String sourceContent) {
-    if (sourceContent == null) return true;
-    for (String sentinel : READ_FAILURE_SENTINELS) {
-      if (sourceContent.startsWith(sentinel)) return true;
-    }
-    return false;
+  static String describe(GitHubRepoService.RepoFileResult result) {
+    if (result == null) return "(no result)";
+    if (result.successful()) return "ok";
+    return result.errorCode()
+        + (result.upstreamStatus() == null ? "" : " (status " + result.upstreamStatus() + ")");
   }
-
-  /** Verbatim prefixes of every failure sentinel {@code GitHubRepoService.readRepoFile} returns. */
-  private static final List<String> READ_FAILURE_SENTINELS =
-      List.of(
-          "// No GitHub PAT configured",
-          "// Invalid repo URL",
-          "// File not found on GitHub (status ",
-          "// Error reading file from GitHub: ",
-          "// No content field in response",
-          "// Failed to decode file content: ");
 
   static String extensionFor(ContractRegistry.ContractType type) {
     return switch (type) {
