@@ -35,6 +35,20 @@ public class RazorpayRestClient {
 
   /** POST /v1/plans One-time setup — creates a plan in Razorpay. */
   public JsonNode createPlan(String planName, int amountPaise, String period, int interval) {
+    return createPlan(planName, amountPaise, period, interval, null);
+  }
+
+  /**
+   * POST /v1/plans with a caller-supplied idempotency key (RR-400).
+   *
+   * <p>When {@code idempotencyKey} is non-blank it is sent as the {@code X-Razorpay-Idempotency}
+   * header. Razorpay dedupes a repeated create carrying the same key and returns the ORIGINAL plan
+   * rather than minting a second chargeable plan. That is what makes plan seeding safe to retry
+   * after a crash between the gateway call returning and the local id being committed: the retry
+   * reuses the same deterministic key, so it reconciles instead of duplicating.
+   */
+  public JsonNode createPlan(
+      String planName, int amountPaise, String period, int interval, String idempotencyKey) {
     Map<String, Object> body =
         Map.of(
             "period", period,
@@ -45,9 +59,18 @@ public class RazorpayRestClient {
                     "amount", amountPaise,
                     "currency", "INR"));
 
+    boolean idempotent = idempotencyKey != null && !idempotencyKey.isBlank();
     log.info(
-        "Creating Razorpay plan: name={}, amount={}, period={}", planName, amountPaise, period);
-    return restClient.post().uri("/plans").body(body).retrieve().body(JsonNode.class);
+        "Creating Razorpay plan: name={}, amount={}, period={}, idempotent={}",
+        planName,
+        amountPaise,
+        period,
+        idempotent);
+    RestClient.RequestBodySpec request = restClient.post().uri("/plans");
+    if (idempotent) {
+      request = request.header("X-Razorpay-Idempotency", idempotencyKey);
+    }
+    return request.body(body).retrieve().body(JsonNode.class);
   }
 
   /** POST /v1/subscriptions */
@@ -96,15 +119,47 @@ public class RazorpayRestClient {
 
   /** POST /v1/payments/{paymentId}/refund — partial or full refund */
   public JsonNode createRefund(String paymentId, long amountPaise, Map<String, String> notes) {
+    return createRefund(paymentId, amountPaise, notes, null);
+  }
+
+  /**
+   * POST /v1/payments/{paymentId}/refund with a caller-supplied idempotency key (RR-049 drainer).
+   *
+   * <p>A non-blank {@code idempotencyKey} is sent as {@code X-Razorpay-Idempotency}, so a retried
+   * refund carrying the same key returns the ORIGINAL refund instead of moving the customer's money
+   * a second time. Combined with the pre-flight {@link #fetchPaymentRefunds} check this makes the
+   * obligation drainer safe to re-run a failed refund.
+   */
+  public JsonNode createRefund(
+      String paymentId, long amountPaise, Map<String, String> notes, String idempotencyKey) {
     Map<String, Object> body = new HashMap<>();
     body.put("amount", amountPaise);
     if (notes != null && !notes.isEmpty()) body.put("notes", notes);
 
-    log.info("Creating Razorpay refund: paymentId={}, amount={} paise", paymentId, amountPaise);
+    boolean idempotent = idempotencyKey != null && !idempotencyKey.isBlank();
+    log.info(
+        "Creating Razorpay refund: paymentId={}, amount={} paise, idempotent={}",
+        paymentId,
+        amountPaise,
+        idempotent);
+    RestClient.RequestBodySpec request = restClient.post().uri("/payments/{id}/refund", paymentId);
+    if (idempotent) {
+      request = request.header("X-Razorpay-Idempotency", idempotencyKey);
+    }
+    return request.body(body).retrieve().body(JsonNode.class);
+  }
+
+  /**
+   * GET /v1/payments/{paymentId}/refunds — the refunds already issued against a payment.
+   *
+   * <p>Used by the obligation drainer to prove, before re-issuing, whether a prior refund attempt
+   * actually landed at the gateway (the ambiguous case where the create call threw AFTER Razorpay
+   * had accepted it). Returns the raw collection JSON ({@code items[]}).
+   */
+  public JsonNode fetchPaymentRefunds(String paymentId) {
     return restClient
-        .post()
-        .uri("/payments/{id}/refund", paymentId)
-        .body(body)
+        .get()
+        .uri("/payments/{id}/refunds", paymentId)
         .retrieve()
         .body(JsonNode.class);
   }

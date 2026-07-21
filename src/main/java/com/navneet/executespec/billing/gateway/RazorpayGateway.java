@@ -86,8 +86,17 @@ public class RazorpayGateway implements BillingGateway {
 
   /** Issue a partial refund against a payment. Returns the Razorpay refund ID. */
   public String refundPartial(String paymentId, long amountPaise, String reason) {
+    return refundPartial(paymentId, amountPaise, reason, null);
+  }
+
+  /**
+   * Issue a partial refund, optionally carrying a caller-supplied gateway idempotency key so a
+   * retry cannot move the customer's money twice. Returns the Razorpay refund ID.
+   */
+  public String refundPartial(
+      String paymentId, long amountPaise, String reason, String idempotencyKey) {
     var notes = java.util.Map.of("reason", reason);
-    JsonNode result = client.createRefund(paymentId, amountPaise, notes);
+    JsonNode result = client.createRefund(paymentId, amountPaise, notes, idempotencyKey);
     String refundId = result.has("id") ? result.get("id").asText() : null;
     log.info(
         "Razorpay partial refund issued: paymentId={}, amount={} paise, refundId={}",
@@ -95,6 +104,30 @@ public class RazorpayGateway implements BillingGateway {
         amountPaise,
         refundId);
     return refundId;
+  }
+
+  /**
+   * The id of a non-failed refund already issued against {@code paymentId} for exactly {@code
+   * amountPaise}, or {@code null} when none exists. The obligation drainer calls this BEFORE
+   * re-issuing a failed refund: a payment that already carries a matching refund must never be
+   * refunded again, even if the first attempt's local bookkeeping failed.
+   */
+  public String findExistingRefundId(String paymentId, long amountPaise) {
+    JsonNode refunds = client.fetchPaymentRefunds(paymentId);
+    JsonNode items = refunds != null ? refunds.get("items") : null;
+    if (items == null || !items.isArray()) {
+      return null;
+    }
+    for (JsonNode refund : items) {
+      long refundAmount = refund.has("amount") ? refund.get("amount").asLong(-1) : -1;
+      String status = refund.has("status") ? refund.get("status").asText() : null;
+      // Razorpay refund statuses: created / pending / processed / failed. Only a "failed" refund
+      // did not move money, so any other status for the matching amount counts as already-refunded.
+      if (refundAmount == amountPaise && !"failed".equalsIgnoreCase(status)) {
+        return refund.has("id") ? refund.get("id").asText() : null;
+      }
+    }
+    return null;
   }
 
   @Override
