@@ -3,7 +3,9 @@ package com.navneet.executespec.codereview;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -40,6 +42,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -734,7 +737,14 @@ public class CodeReviewService {
       var iter = stream.iterator();
       while (iter.hasNext() && totalFiles < MAX_FILES_SCANNED) {
         Path p = iter.next();
-        if (Files.isDirectory(p)) continue;
+        // RR-434 — the reviewed tree is a customer-controlled clone. Every following-link
+        // operation below (isDirectory / size / readAllBytes) would happily resolve a repository
+        // symlink to a readable host file and ship its contents to an external LLM. Files.walk
+        // does not descend into symlinked directories, so rejecting the leaf link plus proving
+        // real-path containment closes the escape.
+        if (Files.isSymbolicLink(p)) continue;
+        if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) continue;
+        if (!SafeWorkspacePath.isWithin(root, p)) continue;
         Path rel = root.relativize(p);
         String relStr = rel.toString().replace('\\', '/');
         if (shouldSkip(relStr)) continue;
@@ -743,7 +753,8 @@ public class CodeReviewService {
         if (!lang.isBlank()) languages.add(lang);
         long size;
         try {
-          size = Files.size(p);
+          size =
+              Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).size();
         } catch (IOException e) {
           continue;
         }
@@ -753,7 +764,10 @@ public class CodeReviewService {
         int loc = 0;
         if (!lang.isBlank()) {
           try {
-            byte[] bytes = Files.readAllBytes(p);
+            byte[] bytes;
+            try (var in = Files.newInputStream(p, LinkOption.NOFOLLOW_LINKS)) {
+              bytes = in.readAllBytes();
+            }
             String content = new String(bytes, StandardCharsets.UTF_8);
             loc = (int) content.lines().count();
             totalLoc += loc;

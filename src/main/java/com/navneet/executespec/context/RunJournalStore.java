@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 /**
  * Small workspace-local journal for cross-task execution context.
@@ -45,8 +46,11 @@ public final class RunJournalStore {
   public static List<String> load(Path workspace, String expectedRunId) {
     if (workspace == null) return List.of();
     try {
-      Path path = path(workspace);
-      if (!Files.isRegularFile(path)) return List.of();
+      // Sibling of RR-465/RR-500 (not in the ledger): the journal lives under `.agent-context`
+      // inside a customer-controlled workspace, so the directory may be a repository symlink.
+      Path path =
+          SafeWorkspacePath.resolveWithin(workspace, JOURNAL_DIRECTORY + "/" + JOURNAL_FILE);
+      if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return List.of();
       JsonNode root = MAPPER.readTree(Files.readString(path));
       if (root == null) return List.of();
       // Read the pre-v2 bare-array representation so upgrading a workspace does not erase its
@@ -82,10 +86,17 @@ public final class RunJournalStore {
   /** Persist the bounded journal with the run identity used for restart validation. */
   public static void save(Path workspace, List<String> entries, String runId) {
     if (workspace == null) return;
-    Path target = path(workspace);
-    Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+    Path target;
+    Path temp;
+    try {
+      target = SafeWorkspacePath.resolveWithin(workspace, JOURNAL_DIRECTORY + "/" + JOURNAL_FILE);
+      temp = target.resolveSibling(target.getFileName() + ".tmp");
+    } catch (java.io.IOException | SecurityException e) {
+      return;
+    }
     try {
       Files.createDirectories(target.getParent());
+      SafeWorkspacePath.requireWithin(workspace, target.getParent());
       List<String> bounded = sanitize(entries);
       ObjectNode envelope = MAPPER.createObjectNode();
       envelope.put("schemaVersion", SCHEMA_VERSION);

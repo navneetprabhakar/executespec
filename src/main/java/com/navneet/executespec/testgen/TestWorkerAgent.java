@@ -12,6 +12,7 @@ import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.testgen.model.TestPlan;
 import com.navneet.executespec.testgen.model.TestTask;
@@ -336,10 +337,29 @@ public class TestWorkerAgent {
     }
   }
 
+  /**
+   * RR-966 — {@code className} arrives verbatim from model JSON ({@code TestTask.taskName}). Left
+   * unvalidated, a prompt-influenced name such as {@code ../../main/java/Foo} escapes the test
+   * scaffold and overwrites another writable Java file, which is then compiled and executed. Only a
+   * bounded single-segment Java class-name grammar is accepted, and the resolved target must still
+   * prove containment beneath the scaffold directory with no symlink components.
+   */
+  static String requireJavaClassName(String className) {
+    if (className == null || className.isBlank() || className.length() > 128) {
+      throw new SecurityException("test class name is empty or over-long");
+    }
+    if (!className.matches("[A-Za-z_$][A-Za-z0-9_$]*")) {
+      throw new SecurityException("test class name is not a bare Java identifier");
+    }
+    return className;
+  }
+
   private void writeTestFile(String runId, String className, String code) throws IOException {
+    String safeClassName = requireJavaClassName(className);
     Path testDir = scaffold.getTestSourceDir(runId);
     Files.createDirectories(testDir);
-    Files.writeString(testDir.resolve(className + ".java"), code);
+    Path target = SafeWorkspacePath.resolveWithin(testDir, safeClassName + ".java");
+    Files.writeString(target, code);
   }
 
   private String stripMarkdownFences(String code) {

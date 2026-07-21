@@ -23,19 +23,43 @@ import lombok.extern.slf4j.Slf4j;
 final class ValidationVerificationLedgerBuilder {
 
   /**
-   * RR-1646 — provenance label for the persisted concrete-test counts.
+   * RR-1646 / RR-1660 — provenance label for the persisted concrete-test counts.
    *
    * <p>{@code DETERMINISTIC} is the one label this ledger uses to claim independence from an LLM.
-   * The counts on {@code validation_report.tests_passed/tests_total} originate from test-runner
-   * report files read off disk with no exit-code check and no per-run directory reset (RR-1582), so
-   * they can describe a run that did not happen. Until an execution-freshness/provenance token is
-   * persisted with those counts, they are labelled as an unverified count at MEDIUM confidence
-   * rather than asserted as independent proof. Status is unchanged, so run-level goal proof keeps
-   * its existing (conservative) semantics.
+   * RR-1646 downgraded these counts to {@code UNVERIFIED_COUNT}/MEDIUM because report files read
+   * off disk carried no proof they described THIS run: no exit-code check, no per-run directory
+   * reset (RR-1582). That was honest but pessimistic — it also understated genuinely proven runs.
+   *
+   * <p>RR-1660 restores the strong label where, and only where, the producer positively proved
+   * provenance: V317 persists {@code validation_report.test_execution_verified}, set TRUE only when
+   * the report directory was reset before launch, the runner's exit status was checked, and every
+   * parsed report postdates the launch.
+   *
+   * <p><b>Three-valued, and null is unproven.</b> {@code null} (no signal recorded — every pre-V317
+   * row, and any producer that establishes no freshness) and {@code FALSE} both keep {@code
+   * UNVERIFIED_COUNT}/MEDIUM. Only TRUE promotes. Treating null as proven-false would be equally
+   * wrong; both non-TRUE states mean the same thing here — not proven.
    */
-  private static final String TEST_COUNT_SOURCE = "UNVERIFIED_COUNT";
+  private static final String UNPROVEN_TEST_COUNT_SOURCE = "UNVERIFIED_COUNT";
 
-  private static final String TEST_COUNT_CONFIDENCE = "MEDIUM";
+  private static final String PROVEN_TEST_COUNT_SOURCE = "DETERMINISTIC";
+
+  private static final String UNPROVEN_TEST_COUNT_CONFIDENCE = "MEDIUM";
+
+  private static final String PROVEN_TEST_COUNT_CONFIDENCE = "HIGH";
+
+  /** True only when V317 recorded a positive execution-provenance proof for these counts. */
+  private static boolean testCountsProven(ValidationReport entity) {
+    return Boolean.TRUE.equals(entity.getTestExecutionVerified());
+  }
+
+  private static String testCountSource(ValidationReport entity) {
+    return testCountsProven(entity) ? PROVEN_TEST_COUNT_SOURCE : UNPROVEN_TEST_COUNT_SOURCE;
+  }
+
+  private static String testCountConfidence(ValidationReport entity) {
+    return testCountsProven(entity) ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE;
+  }
 
   private final ObjectMapper objectMapper;
 
@@ -117,9 +141,9 @@ final class ValidationVerificationLedgerBuilder {
                 case "FAILED" -> "FAIL";
                 default -> "UNKNOWN";
               },
-              restsOnTestCounts ? TEST_COUNT_SOURCE : "DETERMINISTIC",
-              restsOnTestCounts ? TEST_COUNT_CONFIDENCE : "HIGH",
-              restsOnTestCounts
+              restsOnTestCounts ? testCountSource(entity) : "DETERMINISTIC",
+              restsOnTestCounts ? testCountConfidence(entity) : "HIGH",
+              restsOnTestCounts && !testCountsProven(entity)
                   ? "The admitted product diff has reloadable build evidence and a test-runner"
                       + " result whose execution freshness is not independently proven."
                   : "The admitted product diff has reloadable build and concrete-test evidence.",
@@ -143,11 +167,15 @@ final class ValidationVerificationLedgerBuilder {
             "Tests",
             "TESTS",
             total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
-            TEST_COUNT_SOURCE,
-            total <= 0 ? "MEDIUM" : TEST_COUNT_CONFIDENCE,
-            "Generated or workspace tests passed. Counts are read from persisted test-runner"
-                + " output; the report carries no execution-freshness token, so a stale or absent"
-                + " run cannot be ruled out.",
+            total <= 0 ? UNPROVEN_TEST_COUNT_SOURCE : testCountSource(entity),
+            total <= 0 ? UNPROVEN_TEST_COUNT_CONFIDENCE : testCountConfidence(entity),
+            total > 0 && testCountsProven(entity)
+                ? "Generated or workspace tests passed. The counts are bound to this run's own"
+                    + " execution: report files were reset before launch, the runner's exit status"
+                    + " was checked, and every parsed report postdates the launch."
+                : "Generated or workspace tests passed. Counts are read from persisted test-runner"
+                    + " output; the report carries no execution-freshness token, so a stale or"
+                    + " absent run cannot be ruled out.",
             total <= 0
                 ? "No concrete test execution was captured."
                 : passed + "/" + total + " tests passed.",

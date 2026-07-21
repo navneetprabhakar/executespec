@@ -3,9 +3,12 @@ package com.navneet.executespec.reviewer;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
 
@@ -92,27 +95,29 @@ public class PostEditFormatter {
       }
     }
 
-    if ((hasFiles(workspace, ".js")
-            || hasFiles(workspace, ".jsx")
-            || hasFiles(workspace, ".ts")
-            || hasFiles(workspace, ".tsx"))
-        && (isOnPath("prettier") || isOnPath("npx"))) {
-      String bin = isOnPath("prettier") ? "prettier" : "npx";
+    if (hasFiles(workspace, ".js")
+        || hasFiles(workspace, ".jsx")
+        || hasFiles(workspace, ".ts")
+        || hasFiles(workspace, ".tsx")) {
       java.util.List<Path> jsRoots = jsRoots(workspace);
       for (Path root : jsRoots) {
+        // RR-278 — resolve an ALREADY-INSTALLED prettier for this specific root. The previous
+        // `npx prettier` fallback would fetch and execute an unpinned package from the registry
+        // during an automatic reviewer phase, using repository-controlled package configuration:
+        // arbitrary remote code execution inside the workspace, outside the worker's guarded
+        // installation path. Formatting is cosmetic; it is never worth installing anything for.
+        String bin = resolvePrettier(root, workspace);
+        if (bin == null) continue;
         try {
-          List<String> args =
-              "prettier".equals(bin)
-                  ? List.of(
+          int n =
+              invokeFormatter(
+                  runId,
+                  bin,
+                  root,
+                  List.of(
                       "--write",
                       "--log-level=warn",
-                      root.toString() + "/**/*.{js,jsx,ts,tsx,json,css,md}")
-                  : List.of(
-                      "prettier",
-                      "--write",
-                      "--log-level=warn",
-                      root.toString() + "/**/*.{js,jsx,ts,tsx,json,css,md}");
-          int n = invokeFormatter(runId, bin, root, args);
+                      root.toString() + "/**/*.{js,jsx,ts,tsx,json,css,md}"));
           totalReformatted += n;
           if (n > 0) formatters.add("prettier on " + root);
         } catch (Exception e) {
@@ -198,6 +203,22 @@ public class PostEditFormatter {
   }
 
   /**
+   * Resolve an already-installed prettier executable for {@code root} (RR-278).
+   *
+   * <p>Order: the project's own {@code node_modules/.bin/prettier} (installed from the repository's
+   * lockfile, the closest thing to a pinned binary available here), then the workspace-level one,
+   * then a {@code prettier} already on PATH. Returns null when none exists — this method never
+   * installs, downloads, or invokes a package runner that would.
+   */
+  private static String resolvePrettier(Path root, Path workspace) {
+    for (Path base : List.of(root, workspace)) {
+      Path local = base.resolve("node_modules").resolve(".bin").resolve("prettier");
+      if (Files.isExecutable(local)) return local.toString();
+    }
+    return isOnPath("prettier") ? "prettier" : null;
+  }
+
+  /**
    * Returns true if {@code binary} can be found via {@code command -v}. Cheap PATH lookup; no env
    * variables leaked.
    */
@@ -226,17 +247,7 @@ public class PostEditFormatter {
       throws IOException, InterruptedException {
     java.util.List<String> cmd = new java.util.ArrayList<>();
     cmd.add(bin);
-    cmd.addAll(args.subList(0, Math.min(args.size(), 1))); // already includes bin if npx
-    if ("npx".equals(bin)) {
-      // For npx, args already starts with "prettier <flags>"; replace the entry list.
-      cmd.clear();
-      cmd.add(bin);
-      cmd.addAll(args);
-    } else {
-      cmd.clear();
-      cmd.add(bin);
-      cmd.addAll(args);
-    }
+    cmd.addAll(args);
     ProcessBuilder pb = new ProcessBuilder(cmd);
     pb.directory(workdir.toFile());
     // Strip env — same hardening as TestCompilationGate (audit 2026-05-12 J #59).
@@ -249,19 +260,27 @@ public class PostEditFormatter {
     if (home != null) env.put("HOME", home);
     if (user != null) env.put("USER", user);
     pb.redirectErrorStream(true);
-    Process p = pb.start();
-    String output;
-    try (var stream = p.getInputStream()) {
-      output = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    // RR-277 — the previous shape drained stdout to EOF on this thread and only then called
+    // waitFor(timeout). stdout closes when the child exits, so waitFor was only ever reached on an
+    // already-dead process and the documented 60s cap could not fire: a hung formatter pinned the
+    // reviewer thread forever, blocking terminal status, billing settlement and publication.
+    // BoundedProcess drains on its own thread so the deadline is reached while the child is alive,
+    // and destroys the whole process tree on expiry.
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, Duration.ofSeconds(FORMATTER_TIMEOUT_SECONDS));
+    } catch (IOException | InterruptedException known) {
+      throw known;
+    } catch (Exception e) {
+      throw new IOException("formatter " + bin + " could not be run: " + shortMsg(e), e);
     }
-    boolean finished = p.waitFor(FORMATTER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    if (!finished) {
-      p.destroyForcibly();
+    if (!outcome.finished()) {
       log.warn(
           "[PostEditFormatter] run {} — {} TIMEOUT (>{}s)", runId, bin, FORMATTER_TIMEOUT_SECONDS);
       return 0;
     }
-    int exit = p.exitValue();
+    String output = outcome.output();
+    int exit = outcome.exitCode();
     if (exit != 0) {
       log.warn(
           "[PostEditFormatter] run {} — {} exit={} (continuing). Output head: {}",

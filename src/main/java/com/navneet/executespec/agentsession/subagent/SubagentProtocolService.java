@@ -668,6 +668,34 @@ public class SubagentProtocolService {
         : read(events.getLast().getPayloadJson(), ChildMetadata.class).depth();
   }
 
+  /**
+   * RR-557 (2026-07-20) — resolves the ROOT of the subagent tree containing {@code sessionId}.
+   *
+   * <p>The tree turn/cost ceilings are advertised as whole-tree limits, but the spawn check used to
+   * start its accounting at the immediate parent. A depth-1 child's own descendant budget therefore
+   * started at zero, so a root could reserve its documented maximum breadth and every one of those
+   * children could independently reserve the same again — the depth-2 tree could reserve five times
+   * the authorized root budget. Walking to the root makes the ceiling mean what it says.
+   *
+   * <p>The walk is bounded by {@code MAX_DEPTH + 1} hops and a visited set, so a corrupt or cyclic
+   * parent chain terminates instead of looping.
+   */
+  private String rootOf(String sessionId) {
+    String current = sessionId;
+    java.util.Set<String> seen = new java.util.HashSet<>();
+    for (int hop = 0; hop <= MAX_DEPTH + 1; hop++) {
+      if (current == null || !seen.add(current)) break;
+      List<AgentActionEvent> events =
+          eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(current, EVENT_CHILD_CREATED);
+      if (events.isEmpty()) return current;
+      ChildMetadata metadata = read(events.getLast().getPayloadJson(), ChildMetadata.class);
+      String parent = metadata == null ? null : blankToNull(metadata.parentSessionId());
+      if (parent == null || parent.equals(current)) return current;
+      current = parent;
+    }
+    return current == null ? sessionId : current;
+  }
+
   private long countChildren(String sessionId) {
     return eventRepository.countBySessionIdAndType(sessionId, EVENT_CHILD_SPAWNED);
   }
@@ -681,9 +709,15 @@ public class SubagentProtocolService {
    * Calculates the requested budget of every descendant, not the spend so far. Requested budgets
    * are the safe reservation: enforcing them at spawn time prevents a nested tree from becoming
    * unbounded before any model turn has been recorded.
+   *
+   * <p>RR-557 (2026-07-20): accounting starts at the ROOT of {@code parentSessionId}'s tree, not at
+   * that session. Starting at the immediate parent gave every nested child a fresh zero budget, so
+   * the documented whole-tree turn/cost ceiling could be exceeded several times over by nesting.
+   * Both the advisory delegation preview and the enforcing spawn path now read the same root
+   * figure, so the number a caller is shown is the number that will be enforced.
    */
   private TreeBudget treeBudget(String parentSessionId) {
-    return treeBudget(parentSessionId, new java.util.HashSet<>());
+    return treeBudget(rootOf(parentSessionId), new java.util.HashSet<>());
   }
 
   private TreeBudget treeBudget(String sessionId, java.util.Set<String> visited) {

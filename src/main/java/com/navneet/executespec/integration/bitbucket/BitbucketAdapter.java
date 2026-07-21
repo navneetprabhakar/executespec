@@ -41,7 +41,15 @@ public class BitbucketAdapter implements InboundAdapter, OutboundAdapter {
 
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
-    if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) return;
+    // RR-637 — fail CLOSED. "No secret configured" must mean "reject every request", never "skip
+    // verification": an unsigned POST would otherwise submit attacker-controlled PR text as a
+    // pipeline run under the configured runner identity, spending platform LLM budget. Matches the
+    // PagerDuty adapter's posture.
+    if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) {
+      throw new WebhookSignatureException(
+          "Bitbucket webhook: configure agent.integrations.bitbucket.webhook-secret to enable"
+              + " inbound webhooks");
+    }
 
     String signatureHeader = headers.get("x-hub-signature");
     if (signatureHeader == null || signatureHeader.isBlank()) {

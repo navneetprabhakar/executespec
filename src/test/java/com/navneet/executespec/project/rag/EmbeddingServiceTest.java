@@ -67,7 +67,15 @@ class EmbeddingServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new EmbeddingService(policy, contexts, guard, transport, usage, managedUsage);
+    service =
+        new EmbeddingService(
+            policy,
+            contexts,
+            guard,
+            transport,
+            usage,
+            managedUsage,
+            new com.navneet.executespec.agent.ProviderDispatchAuthorization(true, false, ""));
     when(policy.resolve("project-1")).thenReturn(semantic());
     when(contexts.forProjectEmbedding(
             eq("project-1"),

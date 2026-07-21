@@ -42,6 +42,20 @@ public class IntegrationRun {
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
+  /**
+   * Owning org (V320). Explicit, non-default ownership — {@code tenant_id} below is populated
+   * opportunistically by {@link TenantInterceptor} from a request-scoped thread local and defaults
+   * to the literal {@code "default"} on unauthenticated webhook threads, so it is not an
+   * authorization fact. Reads scope on this column; NULL means "legacy / unknown owner" and is
+   * visible only to SUPER_ADMIN (RR-339).
+   */
+  @Column(name = "org_id")
+  private String orgId;
+
+  /** The actor whose identity the run was submitted under (V320, RR-340). */
+  @Column(name = "created_by_user_id")
+  private String createdByUserId;
+
   @Column(name = "tenant_id", nullable = false)
   @Builder.Default
   private String tenantId = "default";
