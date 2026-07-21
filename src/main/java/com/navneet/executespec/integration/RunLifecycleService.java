@@ -883,6 +883,21 @@ public class RunLifecycleService {
         afterExec = costTracker.snapshot(runId);
       }
 
+      if (localRun) {
+        // Nothing server-side reviewed or validated this run: the edits happened on the client and
+        // the server workspace is not the delivered artefact. Terminalize with the same honest
+        // LOCAL_EXECUTION contract the original submission used instead of running a reviewer over
+        // a workspace that does not hold the customer's changes.
+        var localTerminal = RunOrchestrator.localExecutionTerminalStatus();
+        controlPort.terminate(
+            runId,
+            localTerminal.status(),
+            localTerminal.reason(),
+            "resume final status: " + localTerminal.reason(),
+            startedAt);
+        return;
+      }
+
       persistenceWriter.updateStatus(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
       try {
@@ -931,6 +946,17 @@ public class RunLifecycleService {
         }
       }
     }
+  }
+
+  /**
+   * True only when the local-hands transport can actually be rebound. A missing collaborator (the
+   * compatibility constructor) or a disabled flag is treated as unavailable, so a local-hands run
+   * is refused rather than quietly re-executed server-side.
+   */
+  private boolean localHandsTransportAvailable() {
+    return featureFlagService != null
+        && remoteToolDispatcher != null
+        && featureFlagService.isEnabled("worker.local-hands.enabled");
   }
 
   /**
@@ -1013,6 +1039,19 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Task retry requires PARTIAL / FAILED / COMPLETE run (current: " + status + ")");
     }
+    // Execution locality is run authority, not a per-dispatch default. A run the customer submitted
+    // as local-hands must never be retried through the server-side worker/tool path: that would
+    // execute commands and mutate files on ExecuteSpec's machine after the customer approved only
+    // local execution. Either the local transport is restored (and the retry waits for the client,
+    // failing visibly if it never reconnects) or the retry is refused.
+    final boolean localRun = run.isLocalExecutionRequested();
+    if (localRun && !localHandsTransportAvailable()) {
+      throw new IllegalStateException(
+          "This run executed on your machine (local hands), and local execution is currently"
+              + " unavailable — retrying it here would run the task on ExecuteSpec's servers"
+              + " instead. Submit a fresh run once local execution is available.");
+    }
+
     var task = findTask(runId, taskId);
 
     java.nio.file.Path workspace =
@@ -1081,6 +1120,12 @@ public class RunLifecycleService {
                   keyContextStore.resolveAndPut(runId, row.getCreatedByUserId());
                 }
                 ContinuationUsage approvedUsage = continuationUsageFor(row, override);
+                if (localRun) {
+                  remoteToolDispatcher.registerAfterWorkerRestart(runId);
+                  log.info(
+                      "retry run={} restoring LOCAL-HANDS transport; awaiting client reconnect",
+                      runId);
+                }
 
                 ExecutionContext rootCtx =
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
@@ -1096,7 +1141,8 @@ public class RunLifecycleService {
                             .model(model)
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
-                            .enableSmokeTests(true)
+                            .enableSmokeTests(!localRun)
+                            .localHandsMode(localRun)
                             .routePinned(row != null && row.isRoutePinned())
                             .userConfirmedExpensiveContinuation(override != null)
                             .userConfirmedContinuationAction(
@@ -1129,11 +1175,11 @@ public class RunLifecycleService {
                     model);
 
                 ReviewerResult reviewResult =
-                    override != null && override.postReview()
+                    !localRun && override != null && override.postReview()
                         ? runReviewerAfterApprovedPostReviewContinuation(
                             runId, plan, rootCtx, provider, model, result, afterRetry)
                         : null;
-                if (override != null && override.postReview()) {
+                if (!localRun && override != null && override.postReview()) {
                   try {
                     validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
                   } catch (Exception e) {
@@ -1144,7 +1190,12 @@ public class RunLifecycleService {
                   }
                 }
 
-                var terminal = RunOrchestrator.resolveTerminalStatus(result, reviewResult);
+                // A local-hands retry never produced server-verified evidence: no server smoke, no
+                // reviewer, no validation. It terminalizes exactly like the original local run.
+                var terminal =
+                    localRun
+                        ? RunOrchestrator.localExecutionTerminalStatus()
+                        : RunOrchestrator.resolveTerminalStatus(result, reviewResult);
                 controlPort.terminate(
                     runId,
                     terminal.status(),
@@ -1161,6 +1212,13 @@ public class RunLifecycleService {
               } finally {
                 RunModelOverrides.clear();
                 keyContextStore.evict(runId);
+                if (localRun) {
+                  try {
+                    remoteToolDispatcher.unregister(runId);
+                  } catch (Exception ignored) {
+                    log.debug("retry run={} local-hands unregister failed", runId);
+                  }
+                }
                 controlPort.removeActiveRun(runId);
               }
             });
