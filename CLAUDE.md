@@ -384,7 +384,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                                                                                                                                                        |
 | POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                                                                                                                                                     |
 | GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                                                                                                                                                    |
-| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning/call fields and `schemaVersion=1`.                                                                                                                                                                                    |
+| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning/call fields and `schemaVersion=1`. Per-attempt `stepCalls[]` detail is ORG_ADMIN/SUPER_ADMIN-only: lower-privileged callers get `stepCallsIncluded=false` + `stepCallsRestrictedReason` + `stepCallsTotal` so the UI can say "withheld", not "none" (RR-1552). |
 | POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                                                                                                                                                     |
 | POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                                                                                                                                               |
 | POST   | `/api/repos/{repoId}/webhook`         | Install pull_request webhook with caller's PAT.                                                                                                                                                                                                                                             |
@@ -580,7 +580,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V305; 306 source files; applied V-files immutable)                                                                                                                                                                                     |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V309; 310 source files; applied V-files immutable)                                                                                                                                                                                     |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -695,13 +695,21 @@ managed-AI FREE-tier locks is systematic (every FREE managed call is forced to
 `deepseek-v4-flash-native`), so the requested/served divergence there is by design and high-volume,
 not a rare tail.
 
-**Current correction (2026-07-19):** source migration head is V305; the next allocatable number is V306. V300 adds durable idempotent
+**Current correction (2026-07-21):** source migration head is **V309** (310 source files). V300 adds durable idempotent
 failed-run quota compensation; V301 snapshots the human project/org/global role on immutable LLM attempt
 intents so later membership edits cannot rewrite historical usage exports. V302 adds the preview-render
 bundle tables for the flag-gated `previewrender/` prototype and is treated as permanently occupied even
 if that prototype is later discarded. V303 adds durable run-submission idempotency; V304 adds
-benchmark per-attempt route attribution. The older V299, V301 and V302 statements above describe
-prior source tuples.
+benchmark per-attempt route attribution; V305 adds `agent_task` effective-route columns; V306 adds
+preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
+`contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
+valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped
+composite `(run_id, file_path)` identity (RR-1544 — the prior key let one run's lock collide with
+another's). The older V299, V301 and V302 statements above describe prior source tuples.
+
+**V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
+tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from
+that range; the next free number outside it is V318.
 SWE-bench and ProgramBench terminal capture now dispatch through the dedicated virtual-thread
 benchmark-capture executor instead of self-invoking ineffective `@Async` methods; capture restart
 ownership remains open.

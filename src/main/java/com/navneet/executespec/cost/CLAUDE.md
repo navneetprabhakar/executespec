@@ -47,6 +47,13 @@
   `parentAttemptId` and `logicalCallId` alongside provider/model, so a consumer of
   `/api/runs/{id}/cost` can distinguish a same-provider retry from a cross-provider failover instead
   of inferring it.
+- **Per-attempt `stepCalls[]` is a privileged surface (RR-1552).** It exposes which physical provider
+  served each call, so it is emitted only to ORG_ADMIN/SUPER_ADMIN. For every other caller the array
+  is withheld and the response carries `stepCallsIncluded=false`,
+  `stepCallsRestrictedReason=ORG_ADMIN_OR_SUPER_ADMIN_REQUIRED` and `stepCallsTotal`. Those three
+  fields exist specifically so a client can render "withheld" rather than "no calls" — omitting them
+  and returning an empty array is the defect this replaced. Any new consumer MUST branch on
+  `stepCallsIncluded` before interpreting an empty `stepCalls[]`.
 - `provider_usage_raw_json` is a historical column name, not permission to store provider payloads.
   `RunStepUsageRecorder` may store only allow-listed numeric usage/cost metadata. Never store
   prompts, completions, tool arguments/results, request bodies, headers, credentials, or arbitrary

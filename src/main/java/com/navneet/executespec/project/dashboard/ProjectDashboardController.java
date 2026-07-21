@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Pilot R1 — aggregates project-level metrics for the dashboard header. Single endpoint; all five
@@ -27,6 +28,7 @@ import lombok.RequiredArgsConstructor;
  */
 @RestController
 @RequiredArgsConstructor
+@Slf4j
 public class ProjectDashboardController {
 
   private static final Set<String> ACTIVE_STATUSES =
@@ -220,9 +222,27 @@ public class ProjectDashboardController {
     } else {
       try {
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-        archStatus = stalenessService.report(projectId, pat).stale() ? "STALE" : "GENERATED";
+        var staleness = stalenessService.report(projectId, pat);
+        // RR-1657: "GENERATED" is an affirmative claim that the architecture matches the current
+        // repository state, so it must only be made when the probe actually verified that. A
+        // project whose repos could not be read (SCM outage, expired PAT) or that has only
+        // LOCAL/non-GitHub sources is UNVERIFIED, not current. Collapsing those into GENERATED was
+        // the user-visible half of the fail-open that RR-1585 closed inside StalenessService.
+        if (staleness.stale()) {
+          archStatus = "STALE";
+        } else if (staleness.verified()) {
+          archStatus = "GENERATED";
+        } else {
+          archStatus = "UNVERIFIED";
+        }
       } catch (Exception e) {
-        archStatus = "GENERATED";
+        // RR-1657: a failed staleness probe proves nothing about freshness. It previously reported
+        // GENERATED, which is the strongest possible claim on the weakest possible evidence.
+        log.warn(
+            "[Dashboard] Staleness probe failed for project {}; reporting UNVERIFIED: {}",
+            projectId,
+            e.toString());
+        archStatus = "UNVERIFIED";
       }
     }
     Integer archVersion = arch.map(a -> a.getVersion()).orElse(null);
