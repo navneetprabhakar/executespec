@@ -940,10 +940,16 @@ production boundary: `LlmRouter` and `project/rag/EmbeddingService` both call it
 router re-implementing the kill switch inline and the embedding transport having none.
 `executioncontext/LlmExecutionBudgetGate` (V316 `llm_execution_context.reserved_provider_calls`)
 evaluates every budget dimension under a pessimistic row lock and commits a provider-call
-reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency; token and
-cost ceilings are serialized but still reconciled after the fact, not reserved. The dispatch guard
-also fences a stale worker whose lease has expired or whose declared attempt generation has been
-superseded. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
+reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency. Output
+tokens are also reserved (worst-case `max-output-tokens` of the largest model the policy admits,
+charged per in-flight call), so `maxOutputTokens` is a hard concurrent ceiling too; input tokens and
+`maxCostUsd` remain serialized-and-reconciled because a call's input count and dollar cost are not
+knowable until it returns. The dispatch guard contains an expired-lease / superseded-attempt fence,
+but it is **built, not wired**: `LlmExecutionContextService.claim` has no production caller and no
+caller sets `LlmRequest.llmExecutionAttempt`, so every real context stays QUEUED with a null lease
+and the fence never fires (RR-322/RR-1666). Wiring it live (claim on ownership, heartbeat, propagate
+the attempt onto each request, release on terminal, then restrict dispatch to RUNNING) is tracked
+open; `executioncontext/CLAUDE.md` records the exact remaining steps. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
 than the immediate parent's, so nesting can no longer multiply the advertised 48-turn/$8 ceiling.
 `UsageTrackingService.reserveWithinLimits` adds an atomic admit-and-increment primitive; the legacy
 `assertWithinLimits` read remains but has no production caller (RUNS admission is managed-AI
