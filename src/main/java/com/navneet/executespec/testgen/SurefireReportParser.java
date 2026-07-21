@@ -32,12 +32,85 @@ public class SurefireReportParser {
 
   private final TestTaskRepository testTaskRepository;
 
+  /**
+   * Admit a reports directory as evidence for one execution attempt (RR-1582).
+   *
+   * <p>Surefire XML on disk carries no attempt identity, so a report left behind by an earlier
+   * attempt is indistinguishable from one this attempt produced. Every report file must therefore
+   * postdate the launch instant. A single stale file means the pre-execution reset did not take
+   * effect and the whole directory is refused rather than partially trusted.
+   *
+   * @param surefireReportsDir directory to admit
+   * @param freshnessFloor no report file may be older than this instant
+   */
+  public ReportAdmission admit(Path surefireReportsDir, java.time.Instant freshnessFloor) {
+    if (!Files.isDirectory(surefireReportsDir)) {
+      return ReportAdmission.refused("surefire report directory is absent");
+    }
+    List<Path> reportFiles;
+    try (Stream<Path> files = Files.list(surefireReportsDir)) {
+      reportFiles = files.filter(SurefireReportParser::isReportFile).sorted().toList();
+    } catch (Exception e) {
+      return ReportAdmission.refused("surefire report directory is unreadable");
+    }
+    if (reportFiles.isEmpty()) {
+      return ReportAdmission.refused("no surefire report was produced");
+    }
+    for (Path reportFile : reportFiles) {
+      java.time.Instant modified;
+      try {
+        modified = Files.getLastModifiedTime(reportFile).toInstant();
+      } catch (Exception e) {
+        return ReportAdmission.refused("surefire report timestamp is unreadable");
+      }
+      if (freshnessFloor != null && modified.isBefore(freshnessFloor)) {
+        log.warn(
+            "[SurefireParser] Stale report {} (modified {}, floor {}) — refusing directory",
+            reportFile.getFileName(),
+            modified,
+            freshnessFloor);
+        return ReportAdmission.refused("surefire report predates this execution attempt");
+      }
+    }
+    return new ReportAdmission(true, null, reportFiles);
+  }
+
+  private static boolean isReportFile(Path p) {
+    return p.getFileName().toString().startsWith("TEST-") && p.toString().endsWith(".xml");
+  }
+
+  /**
+   * Outcome of {@link #admit(Path, java.time.Instant)}.
+   *
+   * @param admitted true only when every report file provably belongs to this attempt
+   */
+  public record ReportAdmission(boolean admitted, String reason, List<Path> reportFiles) {
+    static ReportAdmission refused(String reason) {
+      return new ReportAdmission(false, reason, List.of());
+    }
+  }
+
   /** Parse all TEST-*.xml files in the surefire-reports directory. */
   public List<TestResult> parse(Path surefireReportsDir, Long testPlanId) {
-    List<TestResult> results = new ArrayList<>();
-
     if (!Files.isDirectory(surefireReportsDir)) {
       log.warn("[SurefireParser] Reports directory not found: {}", surefireReportsDir);
+      return new ArrayList<>();
+    }
+    try (Stream<Path> files = Files.list(surefireReportsDir)) {
+      return parse(files.filter(SurefireReportParser::isReportFile).sorted().toList(), testPlanId);
+    } catch (Exception e) {
+      log.error(
+          "[SurefireParser] Failed to list report files in {}: {}",
+          surefireReportsDir,
+          e.getMessage());
+      return new ArrayList<>();
+    }
+  }
+
+  /** Parse an explicit, already-admitted set of Surefire report files. */
+  public List<TestResult> parse(List<Path> reportFiles, Long testPlanId) {
+    List<TestResult> results = new ArrayList<>();
+    if (reportFiles == null || reportFiles.isEmpty()) {
       return results;
     }
 
@@ -46,15 +119,7 @@ public class SurefireReportParser {
         testTaskRepository.findByTestPlanId(testPlanId).stream()
             .collect(Collectors.toMap(TestTask::getTaskName, TestTask::getId, (a, b) -> a));
 
-    try (Stream<Path> files = Files.list(surefireReportsDir)) {
-      List<Path> reportFiles =
-          files
-              .filter(
-                  p ->
-                      p.getFileName().toString().startsWith("TEST-")
-                          && p.toString().endsWith(".xml"))
-              .toList();
-
+    try {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       // Disable external entities for security
       factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -135,13 +200,13 @@ public class SurefireReportParser {
         }
       }
     } catch (Exception e) {
-      log.error(
-          "[SurefireParser] Failed to list report files in {}: {}",
-          surefireReportsDir,
-          e.getMessage());
+      log.error("[SurefireParser] Failed to parse report files: {}", e.getMessage());
     }
 
-    log.info("[SurefireParser] Parsed {} test results from {}", results.size(), surefireReportsDir);
+    log.info(
+        "[SurefireParser] Parsed {} test results from {} report file(s)",
+        results.size(),
+        reportFiles.size());
     return results;
   }
 
