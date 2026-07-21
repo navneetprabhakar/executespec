@@ -133,3 +133,20 @@ When a selected continuation rerun is authorized, the executor reopens the prima
 row to `PENDING` before publishing the rerun's `WORKING` and terminal result. This keeps stale-worker
 fencing from discarding the handoff's durable outcome; recovery-attempt fencing still protects
 cross-JVM stale writers.
+
+## Vendored-path removal targets the exact subtree (RR-649, 2026-07-21)
+
+`VendoredPathGuard.purgeStagedVendored` derived its `git rm --cached -r` target with
+`rootSegmentOf`, so a normal nested path like `frontend/node_modules/pkg/index.js` resolved to
+`frontend` — the pre-commit guard meant to discard dependencies could unstage the entire
+application subtree from the index, and the following commit would remove all tracked frontend
+source from the customer branch. Both call sites now use `firstVendoredSegmentOf`, which returns the
+exact prefix ending at the first vendored segment.
+
+Two further corrections in the same class: `firstVendoredSegmentOf` was case-SENSITIVE while
+`isVendored` is `(?i)`, so `Frontend/Node_Modules/x` passed the vendored test and then fell through
+to the same `rootSegmentOf` widening — reachable from the committed-history scrub path too. And it
+no longer falls back at all: an unidentifiable path yields `null`, the caller logs and SKIPS it, and
+`isSafeVendoredRemovalTarget` re-checks every target (relative, traversal-free, non-option-looking,
+final segment itself vendored) before Git is invoked. Pathspecs are passed after `--`.
+**Refusing an ambiguous removal is the contract; never widen to a parent directory.**

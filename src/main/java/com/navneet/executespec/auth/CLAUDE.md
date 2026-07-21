@@ -207,3 +207,22 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - `V253__ai_credit_pricing_ladder.sql` refreshes Free/Pro/Pro+/BYOK/Team seed rows and restores Team's 2-seat minimum.
 - `V292__project_chat_scoped_confirmations.sql` adds hashed, actor/tenant/project/route/target-scoped
   one-shot Project Chat authority and makes the existing `activity_audit` table database-append-only.
+
+## Data-export field allowlist (RR-204, 2026-07-21)
+
+`UserDataExportService` must NEVER serialize a persistence entity. It previously wrote the full
+`Org` row and up to 200 full `PipelineRun` rows into `payload.json`: `Org` has Jackson-visible
+getters for the DECRYPTED Anthropic / OpenAI / Gemini / OpenRouter / DeepSeek / Fireworks keys plus
+the JIRA and Confluence API tokens, and `PipelineRun` exposes the decrypted GitHub PAT and Bitbucket
+app password. `@ToString.Exclude` is not JSON redaction, and the bundle README explicitly claimed
+these were excluded — so any authenticated org member could download all shared org credentials.
+
+Every section (`orgs`, `projects`, `runs`, `notifications`, `billing.*`) is now built by an
+explicit, deny-by-default `export*` projection. Adding a field to an entity does NOT add it to the
+export. `UserDataExportServiceTest.payloadJson_neverContainsOrgOrRunCredentials` is the secret
+canary: it populates every credential field on the org and run rows and asserts no value survives.
+The pre-existing redaction test only ever populated `AppUser` secrets, which is why this survived.
+
+**Operational follow-up owned outside this change:** every org provider key, Atlassian token and
+run-scoped SCM credential that could have been exported should be rotated, and access to
+`GET /api/auth/me/data-export` audited.
