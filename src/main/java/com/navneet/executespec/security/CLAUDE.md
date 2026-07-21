@@ -30,10 +30,20 @@ LLM context. `ReadFileTool` and `WorkspaceFileService` reject those paths, `Sear
 secret-shaped previews, and host `ShellSandboxPolicy` rejects explicit credential-file references;
 shell output is redacted as a second boundary. `WorkspaceFileService` also rejects symbolic-link
 reads and proves real-path containment, so run chat/file APIs cannot follow a repository link to a
-host secret. Safe configuration templates remain inspectable.
+host secret. Safe configuration templates remain inspectable. `WorkspaceFileService.readFileDiff`
+applies the same policy plus `SafeWorkspacePath.requireSafeRelativePosixPath` before any head,
+GitHub-fallback or `git show <baseSha>:<path>` read, so a credential file deleted from the head can
+no longer be served back out of history as `FileDiff.base` (RR-859).
 
 `ArtifactPublicationGuard` is the final, fail-closed egress boundary. It streams the complete Git
-candidate set (tracked plus non-ignored untracked files) immediately before GitHub/Bitbucket push,
+candidate set (tracked plus non-ignored untracked files) immediately before GitHub/Bitbucket push.
+**RR-080:** a tracked entry is scanned from its INDEXED blob by object id through one long-lived
+`git cat-file --batch` child, not from the worktree file, so a secret that was staged and then
+overwritten or deleted on disk is still blocked; the worktree copy is scanned as well, because a
+caller that stages after this gate publishes those bytes instead. **RR-081:** `ls-files -z` records
+are parsed as raw bytes — the object id decides what is scanned and the path is only a bounded label,
+so a non-UTF-8 tracked name cannot skip inspection, and an untracked entry whose name is undecodable
+is refused (`UNDECODABLE_GIT_PATH`) rather than treated as absent. It also
 scans every local or restored-GCS workspace ZIP member, and validates both newly generated and
 historical project-export tarballs before download/publication. ZIP/TAR readers enforce entry-count,
 per-entry and total-inflated limits, reject traversal and unsupported TAR entry types, and scan
