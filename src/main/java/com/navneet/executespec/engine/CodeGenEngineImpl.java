@@ -2,8 +2,8 @@ package com.navneet.executespec.engine;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import jakarta.annotation.PostConstruct;
 
@@ -16,6 +16,7 @@ import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.testgen.BoundedProcess;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
@@ -226,18 +227,20 @@ public class CodeGenEngineImpl implements CodeGenEngine {
               ":(exclude)*.egg-info",
               ":(exclude,glob)appendonlydir/**");
       pb.redirectErrorStream(true);
-      Process p = pb.start();
-      String out = new String(p.getInputStream().readAllBytes());
-      if (!p.waitFor(120, TimeUnit.SECONDS)) {
-        p.destroyForcibly();
-        return "";
-      }
-      return p.exitValue() == 0 ? out : "";
-    } catch (IOException e) {
-      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
-      return "";
+      // RR-1565: BoundedProcess makes the 120s deadline reachable and caps the captured output.
+      // Reading stdout to EOF on this thread first (the old shape) let a stalled `git diff` — an
+      // index lock, a hung filter/textconv driver, or a credential-helper prompt — pin the pipeline
+      // thread forever, and the unbounded read materialised a large working tree whole into heap.
+      // (EngineResult.diff() has no production reader today; this keeps the value bounded and
+      // honest
+      // rather than deleting the capture.)
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(120));
+      return outcome.finished() && outcome.exitCode() == 0 ? outcome.output() : "";
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      return "";
+    } catch (Exception e) {
+      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
       return "";
     }
   }

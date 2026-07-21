@@ -304,7 +304,7 @@ public class DeploymentService {
 
       if (!cloudRun.healthCheck(deployResult.serviceUrl())) {
         throw new IOException(
-            "Post-deploy health check failed — service returned 5xx at "
+            "Post-deploy health check failed — service did not return 2xx at "
                 + deployResult.serviceUrl());
       }
 
