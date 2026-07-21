@@ -1,8 +1,16 @@
 package com.navneet.executespec.tool;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -76,5 +84,71 @@ class McpAllowlistTest {
       assertThat(McpClientFallbackTool.argvFor(entry)).as(entry).isEqualTo(List.of());
     }
     assertThat(McpClientFallbackTool.argvFor("node \"unterminated")).isEqualTo(List.of());
+  }
+
+  /**
+   * RR-551. The allowlisted MCP child previously inherited the FULL backend environment (every
+   * provider key, PAT, cloud credential) and the backend's working directory. It now receives only
+   * the {@link McpClientFallbackTool#ENV_ALLOWLIST} vars plus a {@code HOME}/{@code TMPDIR} pinned
+   * to a private scratch directory, and runs with that directory as its CWD.
+   */
+  @Test
+  void hardenedChildEnvironmentIsSecretFreeAndPinnedToWorkDir() throws Exception {
+    // POSIX-only smoke: printenv reflects the child's exact environment with no shell additions.
+    assumeTrue(java.io.File.separatorChar == '/', "POSIX-only environment assertion");
+    Path work = Files.createTempDirectory("es-mcp-test-");
+    Process process;
+    try {
+      process = McpClientFallbackTool.startHardenedProcess(List.of("printenv"), work);
+    } catch (IOException noPrintenv) {
+      Files.deleteIfExists(work);
+      assumeTrue(false, "printenv not available: " + noPrintenv.getMessage());
+      return;
+    }
+    try {
+      String out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      process.waitFor(10, TimeUnit.SECONDS);
+      Map<String, String> childEnv = parseEnv(out);
+
+      // Every key is either an allowlist locale/path var or the two pinned scratch vars.
+      assertThat(childEnv.keySet())
+          .allSatisfy(
+              key ->
+                  assertThat(
+                          McpClientFallbackTool.ENV_ALLOWLIST.contains(key)
+                              || key.equals("HOME")
+                              || key.equals("TMPDIR"))
+                      .as("unexpected inherited env var: %s", key)
+                      .isTrue());
+
+      // HOME/TMPDIR are pinned to the private scratch dir, not the backend service account's home.
+      assertThat(childEnv.get("HOME")).isEqualTo(work.toString());
+      assertThat(childEnv.get("TMPDIR")).isEqualTo(work.toString());
+
+      // No credential-shaped variable survives the strip.
+      assertThat(childEnv.keySet())
+          .noneMatch(
+              key ->
+                  key.contains("KEY")
+                      || key.contains("TOKEN")
+                      || key.contains("SECRET")
+                      || key.contains("PASSWORD")
+                      || key.contains("CREDENTIAL")
+                      || key.equals("AWS_ACCESS_KEY_ID"));
+    } finally {
+      process.destroyForcibly();
+      Files.deleteIfExists(work);
+    }
+  }
+
+  private static Map<String, String> parseEnv(String printenvOutput) {
+    Map<String, String> env = new LinkedHashMap<>();
+    for (String line : printenvOutput.split("\n")) {
+      int eq = line.indexOf('=');
+      if (eq > 0) {
+        env.put(line.substring(0, eq), line.substring(eq + 1));
+      }
+    }
+    return env;
   }
 }
