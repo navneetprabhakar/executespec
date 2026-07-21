@@ -17,8 +17,28 @@ public record DeploymentProperties(
     WorkspaceConfig workspace) {
   public record ArtifactRegistryConfig(String repository, String host) {}
 
+  /**
+   * @param serviceAccount runtime service account for generated Cloud Run services (RR-998).
+   *     Omitting {@code --service-account} makes Cloud Run fall back to the project's default
+   *     compute identity, so generated customer code inherits whatever that identity can do —
+   *     obtainable as a metadata token from inside the container. This must name a dedicated,
+   *     minimal-permission SA.
+   * @param requireServiceAccount fail closed when {@code serviceAccount} is unset rather than
+   *     silently deploying under the default identity. Default true.
+   */
   public record CloudRunConfig(
-      String cpu, String memory, int maxInstances, boolean allowUnauthenticated) {}
+      String cpu,
+      String memory,
+      int maxInstances,
+      boolean allowUnauthenticated,
+      String serviceAccount,
+      Boolean requireServiceAccount) {
+
+    /** Defaults to fail-closed when the property is absent. */
+    public boolean serviceAccountRequired() {
+      return requireServiceAccount == null || requireServiceAccount;
+    }
+  }
 
   public record DockerConfig(int buildTimeoutSeconds) {}
 
