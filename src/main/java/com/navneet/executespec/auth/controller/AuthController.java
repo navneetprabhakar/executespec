@@ -817,7 +817,13 @@ public class AuthController {
       @AuthenticationPrincipal com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     if (userDetails == null)
       throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED);
-    int deleted = dataRetentionService.eraseUserData(userDetails.getUser().getId());
-    return ResponseEntity.ok(Map.of("runsScheduledForDeletion", deleted));
+    var result = dataRetentionService.eraseUserData(userDetails.getUser().getId());
+    // RR-090: live runs are REFUSED, not tombstoned. Report that honestly so the caller knows the
+    // erasure is incomplete and which runs still need to terminalise or be cancelled.
+    return ResponseEntity.ok(
+        Map.of(
+            "runsScheduledForDeletion", result.runsSoftDeleted(),
+            "liveRunsSkipped", result.liveRunsSkipped(),
+            "complete", result.liveRunsSkipped() == 0));
   }
 }
