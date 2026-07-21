@@ -240,6 +240,22 @@ Final validation-ledger proof treats reviewer `WARN` / `FAIL` rows as reviewer l
 After the validation report is generated, `RunOrchestrator` also treats a low final report (`pipelineResult=FAILED/NEEDS_ATTENTION` or `verifiedScore < execution.continuation.post-review.required-quality-threshold`) as post-validation low-quality evidence. It emits a `POST_VALIDATION_REPORT` continuation decision and can run the same selected `STEP_UP_MODEL` / `CHANGE_PROVIDER` rerun + reviewer + regenerated validation report before final terminal status. If no automatic/approved upgrade runs, the terminal reason is stamped as `VALIDATION_REPORT_LOW_QUALITY` instead of letting a low-score run stay `COMPLETE`.
 Reviewer exceptions are materialized as `ReviewerResult.Overall.REVIEW_FAILED`, so terminal status and validation evidence preserve `REVIEWER_FAILED` instead of falling through to vague no-review or final-build-failed reasons.
 
+**Reviewer pass termination (2026-07-21, RR-272).** A timed-out reviewer pass used to return a
+synthetic `ERROR` the instant `Future.cancel(true)` was called. `WorkerAgent` only observes
+interruption at an iteration boundary, so an in-flight provider response or tool batch kept
+running: the reviewer's own later stages (final build, fix-build pass, fix-tests pass) and then
+validate / push / preview / cleanup could all measure or publish a workspace another thread was
+still editing. `ReviewerAgent.runPassWithTimeout` now returns a `PassRun` carrying explicit
+termination proof — after cancelling it re-interrupts and waits up to
+`TERMINATION_RESERVE_SECONDS` (330s, one full in-flight provider read plus unwind) on a latch the
+pass counts down in its own `finally`. If that latch trips the review proceeds as before. If it
+does not, the review is ABANDONED at that stage: `REVIEW_FAILED` with
+`ReviewerResult.workspaceQuiescent=false` and **no** build, formatter or test evidence attached,
+because none of it can be attributed to a stable workspace generation. **Not closed:** write
+authority is not yet lease/generation-scoped, so an abandoned thread that outlives the reserve can
+still mutate the workspace — the reviewer refuses to vouch for it, it does not stop it.
+`tool/ReviewerMutationScope` is the seam for revocation and is owned by the tool lane.
+
 Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
 
 When a terminal waste/failed goal decision still says another model/provider might help, `CONTINUATION_DECISION` now explains when no useful escalation remains within configured limits instead of hiding that stop behind the generic goal reason.

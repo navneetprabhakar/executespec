@@ -2,11 +2,13 @@ package com.navneet.executespec.reviewer;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -96,6 +98,30 @@ public class ReviewerAgent {
 
   /** Wall-clock cap on the wiring pass — narrower scope than general. */
   public static final long WIRING_PASS_TIMEOUT_SECONDS = 600; // was 60 — bumped 2026-04-19
+
+  /**
+   * RR-272 — how long a cancelled review pass gets to actually stop before the review is abandoned.
+   * {@code Future.cancel(true)} only sets the interrupt flag; {@link WorkerAgent} checks it at an
+   * iteration boundary, so a provider call already in flight (native DeepSeek reads up to 300s) or
+   * a running build/tool command has to unwind first. 330s covers one full in-flight provider read
+   * plus unwind without letting the pipeline block indefinitely on a wedged thread.
+   */
+  public static final long TERMINATION_RESERVE_SECONDS = 330;
+
+  /**
+   * Poll interval while waiting for a cancelled pass to terminate; also the re-interrupt period.
+   */
+  static final long TERMINATION_POLL_MILLIS = 500;
+
+  /**
+   * Effective abandonment reserve. Instance-scoped only so a test can shorten it; production always
+   * uses {@link #TERMINATION_RESERVE_SECONDS}.
+   */
+  private volatile long terminationReserveSeconds = TERMINATION_RESERVE_SECONDS;
+
+  void setTerminationReserveSecondsForTest(long seconds) {
+    this.terminationReserveSeconds = seconds;
+  }
 
   // Real mobile reviews take 2–4 minutes on sonnet because each pass reads many
   // files (App.tsx + screens + reducer + tests). 60s was a holdover from when
@@ -208,7 +234,7 @@ public class ReviewerAgent {
     // state. Only a hard ERROR outcome (LLM failure, tool dispatch crash)
     // warrants REVIEW_FAILED. ITERATION_LIMIT_EXCEEDED and STOPPED_WITHOUT_COMPLETE
     // fall through to the final build, whose exit code dictates the verdict.
-    WorkerResult general =
+    PassRun generalRun =
         runPassWithTimeout(
             req,
             maxIter,
@@ -216,6 +242,10 @@ public class ReviewerAgent {
             loadPrompt("prompts/reviewer-general.md"),
             GENERAL_PASS_TIMEOUT_SECONDS,
             preReviewBuildError);
+    WorkerResult general = generalRun.result();
+    if (!generalRun.workspaceQuiescent()) {
+      return abandonedReview(general, null, "general", start);
+    }
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
       log.warn("ReviewerAgent general pass errored: {}", general.outcome());
       return ReviewerResult.builder()
@@ -240,7 +270,7 @@ public class ReviewerAgent {
           (preReviewBuildError == null)
               ? null // build was clean coming in; assume general pass didn't break it
               : capturePreReviewBuildError(req);
-      wiring =
+      PassRun wiringRun =
           runPassWithTimeout(
               req,
               maxIter,
@@ -248,6 +278,10 @@ public class ReviewerAgent {
               loadPrompt("prompts/reviewer-wiring.md"),
               WIRING_PASS_TIMEOUT_SECONDS,
               preWiringBuildError);
+      wiring = wiringRun.result();
+      if (!wiringRun.workspaceQuiescent()) {
+        return abandonedReview(general, wiring, "wiring", start);
+      }
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
         log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
         return ReviewerResult.builder()
@@ -334,7 +368,7 @@ public class ReviewerAgent {
       log.info(
           "ReviewerAgent run={} third pass START — build red after general+wiring, retrying",
           req.context().runId());
-      fixBuild =
+      PassRun fixBuildRun =
           runPassWithTimeout(
               req,
               FIX_BUILD_PASS_MAX_ITER,
@@ -342,6 +376,12 @@ public class ReviewerAgent {
               loadPrompt("prompts/reviewer-general.md"),
               FIX_BUILD_PASS_TIMEOUT_SECONDS,
               buildOutput);
+      fixBuild = fixBuildRun.result();
+      if (!fixBuildRun.workspaceQuiescent()) {
+        // RR-272 — rebuilding here would report the exit code of a workspace the abandoned
+        // fix-build thread is still editing.
+        return abandonedReview(general, wiring, "fix-build", start);
+      }
       // Re-run final build to capture the post-third-pass state.
       ObjectNode rebuildArgs = objectMapper.createObjectNode();
       if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
@@ -411,7 +451,7 @@ public class ReviewerAgent {
                   + d.command()
                   + ").\n\nTest output (tail):\n"
                   + d.outputTail();
-          fixTests =
+          PassRun fixTestsRun =
               runPassWithTimeout(
                   req,
                   FIX_BUILD_PASS_MAX_ITER,
@@ -419,6 +459,12 @@ public class ReviewerAgent {
                   loadPrompt("prompts/reviewer-general.md"),
                   FIX_BUILD_PASS_TIMEOUT_SECONDS,
                   testSpec);
+          fixTests = fixTestsRun.result();
+          if (!fixTestsRun.workspaceQuiescent()) {
+            // RR-272 — the post-repair build + suite rerun below would measure a workspace the
+            // abandoned fix-tests thread is still writing.
+            return abandonedReview(general, wiring, "fix-tests", start);
+          }
           // The fix-tests worker just mutated source. Re-establish BOTH gates against the workspace
           // as it now stands: a repair that fixes a test but breaks compilation is not a repair.
           ObjectNode postFixArgs = objectMapper.createObjectNode();
@@ -643,53 +689,158 @@ exit=0 — the harness will reject premature completions.
   }
 
   /**
+   * A finished review pass plus the proof that its worker thread is no longer running.
+   *
+   * <p>RR-272 — {@code workspaceQuiescent=false} means a timed-out pass could not be proven
+   * terminated within {@link #TERMINATION_RESERVE_SECONDS}. That thread still holds the shared
+   * workspace and its (brownfield) write authority, so no later stage of the review may read the
+   * workspace or publish evidence about it.
+   */
+  record PassRun(WorkerResult result, boolean workspaceQuiescent) {}
+
+  /**
    * Runs a review pass on the worker pool with a wall-clock timeout. On timeout the underlying
-   * future is cancelled (interrupting the worker thread); we return a synthetic {@link
-   * WorkerResult} with outcome {@code ERROR} so {@link #determineOverall} treats it as
-   * REVIEW_FAILED and {@link
+   * future is cancelled (interrupting the worker thread) and we then WAIT, re-interrupting, for
+   * confirmed termination of that thread before returning. {@link WorkerAgent} observes
+   * interruption at an iteration boundary, so one in-flight provider response or tool batch may
+   * still be running when {@code cancel} returns; returning immediately let the reviewer's own
+   * later stages — final build, fix-build pass, fix-tests pass — and the orchestrator's validate /
+   * push / cleanup run against a workspace that a live thread was still editing.
+   *
+   * <p>The returned {@link WorkerResult} keeps outcome {@code ERROR} so {@link #determineOverall}
+   * treats it as REVIEW_FAILED and {@link
    * com.navneet.executespec.integration.RunOrchestrator#resolveTerminalStatus} falls through to the
    * build + execution signals.
    */
-  private WorkerResult runPassWithTimeout(
+  PassRun runPassWithTimeout(
       ReviewerRequest req,
       int maxIter,
       String taskIdSuffix,
       String systemPrompt,
       long timeoutSeconds,
       String preBuildError) {
+    AtomicReference<Thread> passThread = new AtomicReference<>();
+    CountDownLatch terminated = new CountDownLatch(1);
     Future<WorkerResult> future =
         passExecutor.submit(
-            () -> runPass(req, maxIter, taskIdSuffix, systemPrompt, timeoutSeconds, preBuildError));
+            () -> {
+              passThread.set(Thread.currentThread());
+              try {
+                return runPass(
+                    req, maxIter, taskIdSuffix, systemPrompt, timeoutSeconds, preBuildError);
+              } finally {
+                terminated.countDown();
+              }
+            });
     try {
-      return future.get(timeoutSeconds, TimeUnit.SECONDS);
+      return new PassRun(future.get(timeoutSeconds, TimeUnit.SECONDS), true);
     } catch (TimeoutException te) {
-      future.cancel(true);
-      log.warn(
-          "ReviewerAgent pass {} TIMED OUT after {}s — treating as ERROR; "
-              + "final build verdict will determine run status",
-          taskIdSuffix,
-          timeoutSeconds);
-      return WorkerResult.builder()
-          .outcome(WorkerResult.Outcome.ERROR)
-          .completionSummary("review pass timeout after " + timeoutSeconds + "s")
-          .iterations(maxIter)
-          .build();
+      boolean quiescent = awaitPassTermination(future, passThread, terminated, taskIdSuffix);
+      String summary =
+          quiescent
+              ? "review pass timeout after " + timeoutSeconds + "s"
+              : "review pass timeout after "
+                  + timeoutSeconds
+                  + "s; worker did not terminate within "
+                  + terminationReserveSeconds
+                  + "s — workspace evidence abandoned";
+      return new PassRun(
+          WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.ERROR)
+              .completionSummary(summary)
+              .iterations(maxIter)
+              .build(),
+          quiescent);
     } catch (InterruptedException ie) {
-      future.cancel(true);
+      boolean quiescent = awaitPassTermination(future, passThread, terminated, taskIdSuffix);
       Thread.currentThread().interrupt();
-      return WorkerResult.builder()
-          .outcome(WorkerResult.Outcome.ERROR)
-          .completionSummary("review pass interrupted")
-          .iterations(0)
-          .build();
+      return new PassRun(
+          WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.ERROR)
+              .completionSummary("review pass interrupted")
+              .iterations(0)
+              .build(),
+          quiescent);
     } catch (Exception e) {
+      // ExecutionException — the callable itself threw, so its thread has already returned and the
+      // workspace is quiescent by construction.
       log.error("ReviewerAgent pass {} unexpected failure", taskIdSuffix, e);
-      return WorkerResult.builder()
-          .outcome(WorkerResult.Outcome.ERROR)
-          .completionSummary("review pass crashed: " + e.getClass().getSimpleName())
-          .iterations(0)
-          .build();
+      return new PassRun(
+          WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.ERROR)
+              .completionSummary("review pass crashed: " + e.getClass().getSimpleName())
+              .iterations(0)
+              .build(),
+          true);
     }
+  }
+
+  /**
+   * Cancel a pass and prove it stopped. Interrupts repeatedly (the worker only observes the flag at
+   * an iteration boundary, and an interruptible wait inside a tool can clear it) and waits on the
+   * latch the pass counts down in its own {@code finally}. Returns true only when that latch trips,
+   * which is the single fact that proves no further tool call can originate from that thread.
+   */
+  private boolean awaitPassTermination(
+      Future<WorkerResult> future,
+      AtomicReference<Thread> passThread,
+      CountDownLatch terminated,
+      String taskIdSuffix) {
+    future.cancel(true);
+    long reserve = terminationReserveSeconds;
+    long deadline = System.currentTimeMillis() + reserve * 1000L;
+    boolean wasInterrupted = false;
+    try {
+      while (System.currentTimeMillis() < deadline) {
+        Thread t = passThread.get();
+        if (t != null) t.interrupt();
+        try {
+          if (terminated.await(TERMINATION_POLL_MILLIS, TimeUnit.MILLISECONDS)) {
+            log.warn(
+                "ReviewerAgent pass {} TIMED OUT — worker terminated after cancellation;"
+                    + " treating as ERROR",
+                taskIdSuffix);
+            return true;
+          }
+        } catch (InterruptedException ie) {
+          // Our own thread was interrupted while waiting. Keep proving termination of the pass —
+          // abandoning the wait here is exactly the race this method exists to close — and restore
+          // the flag on the way out.
+          wasInterrupted = true;
+        }
+      }
+    } finally {
+      if (wasInterrupted) Thread.currentThread().interrupt();
+    }
+    log.error(
+        "ReviewerAgent pass {} TIMED OUT and did NOT terminate within {}s of cancellation."
+            + " The workspace may still be mutating; abandoning all further review evidence for"
+            + " this run rather than reporting a build/test result for a workspace generation"
+            + " another thread is still writing.",
+        taskIdSuffix,
+        reserve);
+    return false;
+  }
+
+  /**
+   * Terminal result for a review whose pass thread could not be proven stopped. No build, formatter
+   * or test evidence is attached, because none of it can be attributed to a stable workspace.
+   */
+  private ReviewerResult abandonedReview(
+      WorkerResult general, WorkerResult wiring, String stage, long start) {
+    log.error(
+        "ReviewerAgent ABANDONED review at stage={} — returning REVIEW_FAILED with no workspace"
+            + " evidence",
+        stage);
+    return ReviewerResult.builder()
+        .overall(ReviewerResult.Overall.REVIEW_FAILED)
+        .generalPassOutcome(general)
+        .generalPassSummary(general == null ? null : general.completionSummary())
+        .wiringPassOutcome(wiring)
+        .wiringPassSummary(wiring == null ? null : wiring.completionSummary())
+        .workspaceQuiescent(false)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
   }
 
   /** Verdict the reviewer prompt asks the agent to emit on the first line of `completeTask`. */
