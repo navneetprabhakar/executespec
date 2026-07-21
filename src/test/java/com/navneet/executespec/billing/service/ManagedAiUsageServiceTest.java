@@ -68,7 +68,11 @@ class ManagedAiUsageServiceTest {
       ManagedAiProperties properties, PipelineRunRepository pipelineRunRepository) {
     ManagedAiUsagePeriodService periodService =
         new ManagedAiUsagePeriodService(
-            periodRepo, tierResolver, pipelineRunRepository, notificationService);
+            periodRepo,
+            tierResolver,
+            pipelineRunRepository,
+            notificationService,
+            new ManagedAiUsagePeriodInitializer(periodRepo));
     ManagedAiRoutingPolicy policy = new ManagedAiRoutingPolicy();
     return new ManagedAiUsageService(
         properties,

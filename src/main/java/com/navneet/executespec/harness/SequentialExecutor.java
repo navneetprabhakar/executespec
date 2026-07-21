@@ -1237,14 +1237,17 @@ to boot — skip it for those.""";
         reason,
         outcome.smokeTestOutput());
 
-    // A failed/partial primary attempt is terminal for ordinary stale-worker fencing, but it is
-    // deliberately not terminal for this executor's selected continuation rerun. Clear the
-    // terminal marker under the row lock before executeOne() publishes WORKING; otherwise the
-    // retry runs in memory while persistTaskStatus() rejects both its WORKING and COMPLETE writes
-    // as a "terminal overwrite". That left the database stuck at FAILED/PARTIAL even when the
-    // handoff produced a passing result. This reset is reached only after reserveContinuationAction
-    // succeeds, so an exhausted/blocked action cannot reopen a task.
-    prepareTaskForContinuation(runId, task.id());
+    // Clear the primary attempt's terminal marker before executeOne() publishes WORKING; otherwise
+    // persistTaskStatus() rejects the rerun's WORKING/COMPLETE writes as a "terminal overwrite".
+    // RR-266: a false return means a concurrent cancellation or a rolling-restart takeover owns the
+    // terminal state, so this (possibly stale) executor keeps the primary outcome — no rerun.
+    if (!prepareTaskForContinuation(runId, task.id())) {
+      log.warn(
+          "SequentialExecutor continuation run={} task={} — reopen fenced; keeping primary outcome",
+          runId,
+          task.id());
+      return outcome;
+    }
 
     // Preserve the worker's latest investigation when handing the same task to a different
     // provider/model. The workspace is shared, but starting with a fresh conversation makes the
@@ -1263,26 +1266,23 @@ to boot — skip it for those.""";
     return mergeContinuationAttempt(outcome, rerun, decision, candidate);
   }
 
-  private void prepareTaskForContinuation(String runId, String taskIdShort) {
+  /**
+   * RR-266: reopen a terminal task for a selected continuation rerun via the atomic, row-locked
+   * compare-and-set in {@link TaskStatusPersistenceService#reopenForContinuation} (inline-
+   * constructed when the injected bean is absent, mirroring {@link #persistTaskStatus}). Returns
+   * {@code true} only when this executor won the reopen; otherwise it has no authority to rerun.
+   */
+  private boolean prepareTaskForContinuation(String runId, String taskIdShort) {
     if (taskRepo == null || runId == null || runId.length() < 8 || taskIdShort == null) {
-      return;
+      return false;
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
-    // This method is called from the long-running executor thread, outside the short persistence
-    // transaction used by persistTaskStatus. The subsequent saveAndFlush is the atomic terminal
-    // reset for this selected action; recovery-attempt fencing still protects a stale JVM.
-    var existing = taskRepo.findById(key);
-    if (existing.isEmpty()) {
-      log.warn("prepareTaskForContinuation: row not found id={}", key);
-      return;
-    }
-    var task = existing.get();
-    task.setStatus("PENDING");
-    task.setCompletedAt(null);
-    task.setDurationMs(null);
-    task.setLastActivityAt(java.time.Instant.now());
-    taskRepo.saveAndFlush(task);
-    log.info("prepareTaskForContinuation: reopened id={} for selected handoff rerun", key);
+    TaskStatusPersistenceService persistence =
+        taskStatusPersistenceService != null
+            ? taskStatusPersistenceService
+            : new TaskStatusPersistenceService(taskRepo, costTracker);
+    return persistence.reopenForContinuation(
+        runId, taskIdShort, taskRecoveryAttemptByTask.get(key));
   }
 
   /**

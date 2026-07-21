@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Optional;
+
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
@@ -18,6 +20,7 @@ import com.navneet.executespec.auth.service.PersonalAccessTokenService;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.UserDataExportService;
+import com.navneet.executespec.auth.service.UserSettingsUpdateService;
 import com.navneet.executespec.compliance.DataRetentionService;
 import com.navneet.executespec.repo.BitbucketRepoService;
 
@@ -86,7 +89,10 @@ class AuthControllerAiKeysTest {
             mock(PersonalAccessTokenService.class),
             mock(AiProviderPreferenceService.class),
             tiers,
-            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class));
+            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class),
+            // RR-008: the endpoints now delegate to the real transactional update service, which
+            // refetches the user under the row lock — so the test stubs findByIdForUpdate below.
+            new UserSettingsUpdateService(users, audits));
     user =
         AppUser.builder()
             .id("user-1")
@@ -97,6 +103,7 @@ class AuthControllerAiKeysTest {
             .openAiApiKey("sk-openai-old")
             .geminiApiKey("sk-gem-old")
             .build();
+    when(users.findByIdForUpdate("user-1")).thenReturn(Optional.of(user));
     principal = new AppUserDetails(user, null);
   }
 

@@ -36,7 +36,8 @@ class AuthControllerDataExportTest {
             mock(PersonalAccessTokenService.class),
             mock(AiProviderPreferenceService.class),
             mock(TierEnforcementService.class),
-            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class));
+            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class),
+            mock(com.navneet.executespec.auth.service.UserSettingsUpdateService.class));
 
     ResponseEntity<Map<String, String>> response = controller.exportMyDataJsonHint();
 
