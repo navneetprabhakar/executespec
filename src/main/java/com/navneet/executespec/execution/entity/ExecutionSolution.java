@@ -116,6 +116,20 @@ public class ExecutionSolution {
   @Column(name = "completed_at")
   private Instant completedAt;
 
+  /**
+   * RR-530 (V327) — the last human execution decision that won this solution's conditional state
+   * transition, plus who made it and when. Written only inside the atomic claim, so a replayed or
+   * concurrent call that lost the transition never appears here as if it had authority.
+   */
+  @Column(name = "last_decision_action", length = 30)
+  private String lastDecisionAction;
+
+  @Column(name = "last_decision_by_user_id", length = 36)
+  private String lastDecisionByUserId;
+
+  @Column(name = "last_decision_at")
+  private Instant lastDecisionAt;
+
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
