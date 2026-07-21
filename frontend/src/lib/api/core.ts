@@ -507,10 +507,36 @@ export interface RunCostEvidence {
   reasoningTokens: number | null;
   calls: number | null;
   phases: {classifier: number; outline: number; expansion: number; coherence: number};
+  /**
+   * The per-attempt physical LLM ledger. RR-1552: the backend now restricts this to own-org
+   * ORG_ADMIN and SUPER_ADMIN, because each row carries key-source (BYOK vs platform),
+   * exact provider/model routing, per-attempt spend and redacted provider errors. Every
+   * other principal with run read access receives `[]` — which is NOT the same as "this run
+   * made no provider calls". Read `stepCallsIncluded` / `stepCallsTotal` to tell those apart.
+   */
   stepCalls: RunStepCostCall[];
+  /** False when the ledger was withheld for authorization rather than being empty. */
+  stepCallsIncluded?: boolean;
+  /** Machine-readable reason the ledger was withheld, present only when withheld. */
+  stepCallsRestrictedReason?: string | null;
+  /** Total attempts on the run, independent of what this page returned. */
+  stepCallsTotal?: number;
+  /** RR-1558 paging — page 0 is the MOST RECENT attempts. */
+  stepCallsPage?: number;
+  stepCallsSize?: number;
+  stepCallsHasMore?: boolean;
+  /**
+   * Sum of attempts whose cost is PROVEN. Failed attempts and unpriced routes are persisted
+   * as a hard zero, so this is a lower bound whenever `unknownCostAttempts > 0`.
+   * `knownCostUsdLowerBound` carries the same number under the honest name.
+   */
   attributedCostUsd: number;
+  knownCostUsdLowerBound?: number;
+  unknownCostAttempts?: number;
+  costStatus?: 'KNOWN' | 'UNKNOWN_PROVIDER_NOT_REPORTED_PRESENT' | string;
   unattributedCostUsd: number;
   reconciled: boolean;
+  reconciliationToleranceUsd?: number;
 }
 
 /**
@@ -1361,11 +1387,21 @@ export interface ContractCoverageResponse {
 }
 
 // E2.8 — contract drift detection
+/**
+ * RR-1631 / RR-1658 — `hasDrift` is deliberately false for BOTH `NO_DRIFT` and `UNAVAILABLE`
+ * (the backend kept it that way for wire compatibility), so it alone cannot distinguish
+ * "verified identical" from "we could not read the source". Always branch on `status` when
+ * reporting a result to a user; `hasDrift` is only safe for counting confirmed drift.
+ * Optional so a response from a server predating the tri-state still parses.
+ */
+export type DriftStatus = 'NO_DRIFT' | 'DRIFT' | 'UNAVAILABLE';
+
 export interface DriftCheckResult {
   contractId: string;
   hasDrift: boolean;
   summary: string;
   eventId?: string | null;
+  status?: DriftStatus;
 }
 
 // E3.16 — standards compliance report

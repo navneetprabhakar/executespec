@@ -5,12 +5,14 @@ import {
   canManageProjectSharing,
   contractDetectorSummary,
   docStamp,
+  driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
   isExternalProjectMember,
   looksLikeArtifact,
   memberDisplayName,
   parseArchDoc,
+  summarizeDriftResults,
   techDebtCategories,
 } from './projectMoreUtils';
 import type * as api from '@/lib/api';
@@ -145,5 +147,52 @@ describe('projectMoreUtils', () => {
         {heading: 'Storage', body: '| table |'},
       ],
     });
+  });
+});
+
+// RR-1658 — `hasDrift` is false for BOTH NO_DRIFT and UNAVAILABLE (retained that way for
+// wire compatibility), so counting it alone reported an unperformable check as clean.
+describe('contract drift rollup', () => {
+  it('separates an unavailable check from a clean one', () => {
+    const summary = summarizeDriftResults([
+      {contractId: 'a', hasDrift: false, summary: 'no drift', status: 'NO_DRIFT'},
+      {contractId: 'b', hasDrift: true, summary: 'diff', status: 'DRIFT'},
+      {contractId: 'c', hasDrift: false, summary: 'source unreadable', status: 'UNAVAILABLE'},
+    ]);
+    expect(summary).toEqual({drifted: 1, clean: 1, unavailable: 1, total: 3});
+  });
+
+  it('never reports an unavailable-only batch as clean', () => {
+    const summary = summarizeDriftResults([
+      {contractId: 'c', hasDrift: false, summary: 'source unreadable', status: 'UNAVAILABLE'},
+    ]);
+    expect(summary.clean).toBe(0);
+    expect(driftSummaryMessage(summary)).toBe('1 contract could not be checked.');
+  });
+
+  it('falls back to hasDrift for rows from a server predating the tri-state', () => {
+    expect(
+      summarizeDriftResults([
+        {contractId: 'a', hasDrift: false, summary: 'no drift'},
+        {contractId: 'b', hasDrift: true, summary: 'diff'},
+      ]),
+    ).toEqual({drifted: 1, clean: 1, unavailable: 0, total: 2});
+  });
+
+  it('reports drift and unavailable together rather than only the drift count', () => {
+    expect(
+      driftSummaryMessage({
+        drifted: 2,
+        unavailable: 3,
+        total: 6,
+      }),
+    ).toBe('2 drift results detected; 3 contracts could not be checked.');
+  });
+
+  it('still says no drift when every check succeeded and matched', () => {
+    expect(driftSummaryMessage({drifted: 0, unavailable: 0, total: 4})).toBe('No drift detected.');
+    expect(driftSummaryMessage({drifted: 0, unavailable: 0, total: 0})).toBe(
+      'No contracts to check.',
+    );
   });
 });

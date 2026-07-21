@@ -9,11 +9,21 @@ import AppErrorBoundary from '@/signal/components/AppErrorBoundary';
 import '@/signal/signal.css';
 // Syntax highlighting theme for the IDE file viewer (Code tab)
 import 'highlight.js/styles/github-dark-dimmed.css';
-// OpenTelemetry browser telemetry (traces + fetch instrumentation)
-import {initTelemetry} from '@/lib/telemetry';
-
-// Initialize OTel before rendering — instruments all subsequent fetch() calls
-initTelemetry();
+// RR-1534 — browser OpenTelemetry was removed. `lib/telemetry.ts` built a WebTracerProvider and
+// called `provider.register(...)` but never called `registerInstrumentations`, never imported
+// `@opentelemetry/auto-instrumentations-web`, and created no manual spans, so it produced no
+// traces even in principle. Its only gate, `VITE_OTEL_ENDPOINT`, was set by no `.env`, no Vite
+// define, and no CI or deploy script, so `initTelemetry()` early-returned in every environment.
+// Meanwhile the static import here plus the `node_modules → vendor` chunking in vite.config.ts
+// shipped six @opentelemetry packages in the first-paint chunk for code that could not execute,
+// and the comments above it documented active fetch instrumentation that never existed.
+//
+// Deletion over wiring: making it real needs an instrumentation registration, a
+// `propagateTraceHeaderCorsUrls` allowlist scoped to the API origin, a dynamic import behind the
+// endpoint check, and an OTLP endpoint configured per deploy environment — none of which can be
+// verified from this repo alone, so shipping that would have replaced silently-inert telemetry
+// with unverified telemetry. Backend tracing (Micrometer + OTel → Tempo / Cloud Trace) is
+// unaffected. Re-introducing browser tracing should start from the real deploy-env endpoint.
 
 // R-171 — register the v3 service worker so iOS / Android can install
 // the app from the home screen. Production-only so Vite HMR isn't
