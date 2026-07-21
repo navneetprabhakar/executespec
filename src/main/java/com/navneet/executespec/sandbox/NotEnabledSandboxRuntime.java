@@ -32,6 +32,15 @@ public class NotEnabledSandboxRuntime implements RunSandboxRuntime {
   }
 
   @Override
+  public SandboxExecResult exec(RunSandbox sandbox, SandboxExecRequest request) {
+    // Deliberately a typed UNAVAILABLE and not an exception. The caller's alternative is host
+    // execution, and an exception invites a catch-and-fall-back. A status the caller must read
+    // alongside success makes failing closed the obvious handling.
+    return SandboxExecResult.unavailable(
+        "no sandbox runtime is enabled; nothing was executed for sandbox " + sandbox.id());
+  }
+
+  @Override
   public void destroy(RunSandbox sandbox) {
     // Nothing was started, so nothing needs destroying. Deliberately a success: reconciliation
     // and cancellation must be able to settle rows created before the runtime was disabled.

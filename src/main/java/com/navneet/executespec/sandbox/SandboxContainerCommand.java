@@ -94,6 +94,39 @@ public final class SandboxContainerCommand {
     return List.copyOf(argv);
   }
 
+  /**
+   * The argv that runs one command inside an already-running strict sandbox.
+   *
+   * <p>The isolation of the exec'd process is inherited from the container, not re-declared here:
+   * network namespace, read-only root, dropped capabilities and the CPU/memory/PID ceilings all
+   * belong to the container and apply to anything running in it. The two properties this builder is
+   * responsible for are the two that {@code docker exec} would otherwise let a caller weaken —
+   * identity and privilege escalation — so {@code --user} is pinned to the same unprivileged
+   * identity as {@link #create} and {@code --privileged} is never emitted.
+   *
+   * <p>No {@code --env} is passed. The exec'd process sees the container's own environment and
+   * nothing of the host's, which is what keeps ambient host credentials out of customer code.
+   *
+   * <p>Non-interactive by construction: no {@code --tty}, no {@code --interactive}, no {@code
+   * --detach}. The caller waits for the command and owns the wall-clock bound, because no exec flag
+   * expresses one.
+   */
+  public static List<String> exec(String containerName, SandboxExecRequest request) {
+    if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
+      throw new IllegalArgumentException("unsafe container name: " + containerName);
+    }
+    List<String> argv = new ArrayList<>(List.of("docker", "exec"));
+    argv.addAll(List.of("--user", NON_ROOT_USER));
+    if (request.workdir() != null) {
+      requireAbsolute(request.workdir(), "exec workdir");
+      argv.addAll(List.of("--workdir", request.workdir()));
+    }
+    // Container name last among the options: everything after it is the command, never a flag.
+    argv.add(containerName);
+    argv.addAll(request.argv());
+    return List.copyOf(argv);
+  }
+
   /** Idempotent teardown. Succeeds for a container that is already gone. */
   public static List<String> destroy(String containerName) {
     return List.of("docker", "rm", "--force", "--volumes", containerName);
