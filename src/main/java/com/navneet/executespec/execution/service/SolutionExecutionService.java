@@ -54,6 +54,28 @@ public class SolutionExecutionService {
   private static final long POLL_TIMEOUT_MS = 2L * 60L * 60L * 1000L; // 2h
 
   /**
+   * RR-531 — how long we wait for a cancelled child V2 run to reach a terminal status before we
+   * report that we could not prove it stopped. {@code RunLifecycleService.cancel} writes CANCELLED
+   * synchronously, so this bound is for the case where the row is being written concurrently.
+   */
+  private static final long FENCE_ACK_TIMEOUT_MS = 30_000L;
+
+  private static final long FENCE_ACK_POLL_MS = 1_000L;
+
+  /**
+   * RR-530 — the single legal prior state for a human execution decision. {@link #handleFailure}
+   * writes FAILED and pauses the launch; that pause is what the decision endpoints answer.
+   */
+  private static final String AWAITING_DECISION = "FAILED";
+
+  /**
+   * RR-530 — the state a FIX decision moves the solution into. Manual-ready is legal only from
+   * here, which is what makes it impossible to replay against a solution nobody chose to fix by
+   * hand.
+   */
+  static final String AWAITING_MANUAL_FIX = "AWAITING_MANUAL_FIX";
+
+  /**
    * 2026-05-13 audit — statusReason prefixes that indicate "the worker did its job; what failed was
    * post-worker validation". When BOTH this AND the worker-task-outcome is COMPLETE, an auto-retry
    * just re-runs a deterministic task and produces identical code. Each such retry costs
@@ -81,6 +103,9 @@ public class SolutionExecutionService {
   private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
   private final ExecutionRunCasUpdater runCas;
   private final ExecutionCostAggregator costAggregator;
+
+  /** RR-531 — used to actually cancel an abandoned child run, not merely record it as failed. */
+  private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
 
   public void executeSolution(ExecutionSolution solution, ExecutionRun run) {
     // Entry-point marker: either first attempt or retry.
@@ -120,8 +145,40 @@ public class SolutionExecutionService {
     // short-circuit on abort (otherwise it sleeps for up to 2h).
     String terminal = pollUntilTerminal(pipelineRunId, run.getId());
     if (terminal == null) {
-      recordAttemptTerminal(attempt, "TIMEOUT", null);
-      handleFailure(run, solution, "RUNNING", "V2 run timed out after 2h");
+      // RR-531 — the child was previously abandoned here: the solution recorded TIMEOUT and the
+      // launch paused, but the V2 run kept executing with skipApproval=true and could still spend,
+      // mutate the workspace and open/push a customer PR long after Execution View called it
+      // failed. A concurrent retry could then publish a second, conflicting result. Fence it: ask
+      // for idempotent cancellation and wait a bounded time for a terminal acknowledgement before
+      // the solution is allowed to fail (and therefore become retryable/skippable).
+      String fenced = fenceChildRun(pipelineRunId, "solution poll timeout after 2h");
+      if (fenced != null && !"CANCELLED".equals(fenced)) {
+        // Reconcile a late completion rather than reporting a run that actually finished as a
+        // timeout — the poll loop simply did not observe the terminal write in time.
+        log.warn(
+            "[exec={} sol={}] poll timed out but child run {} was already terminal={} —"
+                + " reconciling",
+            run.getId(),
+            solution.getId(),
+            pipelineRunId,
+            fenced);
+        recordAttemptTerminal(attempt, fenced, pipelineRunId);
+        switch (fenced) {
+          case "COMPLETE" -> onV2Complete(run, solution);
+          case "PARTIAL" -> onV2Partial(run, solution);
+          default -> onV2Failed(run, solution, fenced);
+        }
+        return;
+      }
+      recordAttemptTerminal(attempt, "TIMEOUT", pipelineRunId);
+      handleFailure(
+          run,
+          solution,
+          "RUNNING",
+          fenced == null
+              ? "V2 run timed out after 2h and could not be confirmed cancelled — treat the child"
+                  + " run as possibly still active"
+              : "V2 run timed out after 2h; child run cancelled");
       return;
     }
     recordAttemptTerminal(attempt, terminal, pipelineRunId);
@@ -242,6 +299,48 @@ public class SolutionExecutionService {
         return status.toUpperCase();
       }
     }
+    return null;
+  }
+
+  /**
+   * RR-531 — request idempotent cancellation of a child V2 run and wait, bounded, for a terminal
+   * acknowledgement.
+   *
+   * <p>Returns the child's observed terminal status: {@code "CANCELLED"} when this call fenced it,
+   * the run's own terminal status when it had already finished (a late completion the poll loop
+   * missed), or {@code null} when no terminal state could be confirmed within the bound. A {@code
+   * null} return is the honest "we could not prove this child stopped" answer and callers must not
+   * present it as a clean stop.
+   */
+  private String fenceChildRun(String pipelineRunId, String why) {
+    if (pipelineRunId == null) return null;
+    try {
+      boolean cancelled = runLifecycleService.cancel(pipelineRunId);
+      log.info(
+          "RR-531 fencing child run {} ({}): cancel accepted={}", pipelineRunId, why, cancelled);
+    } catch (Exception e) {
+      log.warn("RR-531 fencing child run {} failed: {}", pipelineRunId, shortMsg(e));
+    }
+    long deadline = System.currentTimeMillis() + FENCE_ACK_TIMEOUT_MS;
+    while (System.currentTimeMillis() < deadline) {
+      PipelineRun child = pipelineRunRepo.findById(pipelineRunId).orElse(null);
+      if (child == null) return null;
+      String status = child.getStatus();
+      if (status != null && V2_TERMINAL.contains(status.toUpperCase())) {
+        return status.toUpperCase();
+      }
+      try {
+        Thread.sleep(FENCE_ACK_POLL_MS);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return null;
+      }
+    }
+    log.error(
+        "RR-531 child run {} did not reach a terminal state within {}ms after cancellation — it may"
+            + " still be spending or publishing",
+        pipelineRunId,
+        FENCE_ACK_TIMEOUT_MS);
     return null;
   }
 
@@ -475,61 +574,175 @@ public class SolutionExecutionService {
     emit(run.getId(), ExecutionEventTypes.EXEC_PAUSED_FOR_DECISION, solution.getId());
   }
 
+  /**
+   * Outcome of a human execution decision. RR-530 — the caller needs to distinguish "applied" from
+   * "you were not allowed to do that here", because the previous void signature meant an illegal or
+   * replayed decision was reported to the operator as accepted.
+   */
+  public enum DecisionOutcome {
+    /** This caller won the conditional transition. */
+    APPLIED,
+    /**
+     * The solution is not in the one legal prior state for this action (replay, race, stale UI).
+     */
+    ILLEGAL_STATE,
+    /** The action token is not a member of {@link ExecutionDecision}. */
+    UNKNOWN_ACTION,
+    /** The solution does not exist under this execution run. */
+    NOT_FOUND
+  }
+
+  /**
+   * RR-530 — apply a human decision to a paused solution.
+   *
+   * <p>Every action is a conditional transition out of exactly one prior state. The awaiting-
+   * decision state is {@code FAILED} (what {@link #handleFailure} writes before pausing the
+   * launch), so SKIP / RETRY / FIX / ATTEMPT_ANYWAY are legal only from there, and manual-ready is
+   * legal only from the {@code AWAITING_MANUAL_FIX} state a prior FIX decision creates. The
+   * transition is a single atomic UPDATE that also stamps the deciding actor, so:
+   *
+   * <ul>
+   *   <li>a stale or replayed call cannot skip QUEUED/RUNNING work or mark it DONE,
+   *   <li>a second RETRY cannot bump the retry counter and launch an overlapping paid child run,
+   *   <li>manual-ready cannot complete a solution the operator never chose to fix by hand,
+   *   <li>an unknown action is refused rather than silently logged and treated as success.
+   * </ul>
+   *
+   * <p>Only the caller that won the transition performs the side effects (JIRA sync, SSE, resume).
+   */
   @org.springframework.transaction.annotation.Transactional
-  public void processDecision(ExecutionSolution solution, String action) {
-    if (action == null) return;
+  public DecisionOutcome processDecision(
+      ExecutionSolution solution, String action, String actorUserId) {
+    if (solution == null) return DecisionOutcome.NOT_FOUND;
+    if (action == null || action.isBlank()) return DecisionOutcome.UNKNOWN_ACTION;
+
     // Re-attach within the new transaction so lazy associations (executionRun)
     // resolve cleanly instead of throwing LazyInitializationException.
-    solution = solutionRepo.findById(solution.getId()).orElse(solution);
-    ExecutionRun run = solution.getExecutionRun();
-    if (run != null) run.getId(); // force-init proxy
-    switch (action.toUpperCase()) {
+    ExecutionSolution attached = solutionRepo.findById(solution.getId()).orElse(null);
+    if (attached == null) return DecisionOutcome.NOT_FOUND;
+    ExecutionRun run = attached.getExecutionRun();
+    if (run == null) return DecisionOutcome.NOT_FOUND;
+    String executionRunId = run.getId(); // force-init proxy
+
+    String normalized = action.toUpperCase(java.util.Locale.ROOT);
+    String nextStatus;
+    int retryDelta;
+    switch (normalized) {
+      case ExecutionDecision.SKIP, ExecutionDecision.ATTEMPT_ANYWAY -> {
+        nextStatus = "SKIPPED";
+        retryDelta = 0;
+      }
+      case ExecutionDecision.RETRY -> {
+        nextStatus = "QUEUED";
+        retryDelta = 1;
+      }
+      case ExecutionDecision.FIX -> {
+        nextStatus = AWAITING_MANUAL_FIX;
+        retryDelta = 0;
+      }
+      default -> {
+        log.warn(
+            "Rejected unknown decision action {} for exec {} sol {}",
+            action,
+            executionRunId,
+            attached.getId());
+        return DecisionOutcome.UNKNOWN_ACTION;
+      }
+    }
+
+    // RR-531 — a RETRY submits a fresh child run and overwrites pipelineRunId. Fence any child
+    // that is somehow still active first, so the abandoned attempt cannot publish alongside the
+    // new one. Normal flow has already terminalised it; a crashed JVM or a lost poll has not.
+    if (ExecutionDecision.RETRY.equals(normalized) && attached.getPipelineRunId() != null) {
+      fenceChildRun(attached.getPipelineRunId(), "retry decision supersedes previous attempt");
+    }
+
+    int claimed =
+        solutionRepo.claimDecision(
+            attached.getId(),
+            executionRunId,
+            AWAITING_DECISION,
+            nextStatus,
+            normalized,
+            actorUserId,
+            retryDelta,
+            Instant.now());
+    if (claimed == 0) {
+      log.warn(
+          "Rejected decision {} for exec {} sol {} — solution is {} not {} (replay, race or stale"
+              + " client)",
+          normalized,
+          executionRunId,
+          attached.getId(),
+          attached.getStatus(),
+          AWAITING_DECISION);
+      return DecisionOutcome.ILLEGAL_STATE;
+    }
+
+    ExecutionSolution fresh = solutionRepo.findById(attached.getId()).orElse(attached);
+    switch (normalized) {
       case ExecutionDecision.SKIP -> {
-        solution.setStatus("SKIPPED");
-        solutionRepo.save(solution);
-        jiraSync.updateTicket(run, solution, "User skipped the solution.", "Done");
-        emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_SKIPPED, solution.getId());
+        jiraSync.updateTicket(run, fresh, "User skipped the solution.", "Done");
+        emit(executionRunId, ExecutionEventTypes.EXEC_SOLUTION_SKIPPED, fresh.getId());
+        resume(run);
+      }
+      case ExecutionDecision.ATTEMPT_ANYWAY -> {
+        jiraSync.updateTicket(run, fresh, "User chose to proceed without this solution.", "Done");
+        emit(executionRunId, ExecutionEventTypes.EXEC_SOLUTION_SKIPPED, fresh.getId());
         resume(run);
       }
       case ExecutionDecision.RETRY -> {
-        solution.setRetryCount(solution.getRetryCount() + 1);
-        solution.setStatus("QUEUED");
-        solution.setFailurePhase(null);
-        solution.setFailureReason(null);
-        solutionRepo.save(solution);
-        jiraSync.updateTicket(run, solution, "User triggered a retry.", null);
-        emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_QUEUED, solution.getId());
+        jiraSync.updateTicket(run, fresh, "User triggered a retry.", null);
+        emit(executionRunId, ExecutionEventTypes.EXEC_SOLUTION_QUEUED, fresh.getId());
         resume(run);
       }
-      case ExecutionDecision.FIX -> {
-        // Wait for manual-ready signal; no resume yet.
-        jiraSync.updateTicket(run, solution, "User chose to fix manually — awaiting signal.", null);
+      case ExecutionDecision.FIX ->
+          // Wait for the manual-ready signal; no resume yet. The solution now sits in
+          // AWAITING_MANUAL_FIX, which is what makes signalManualFixDone legal.
+          jiraSync.updateTicket(run, fresh, "User chose to fix manually — awaiting signal.", null);
+      default -> {
+        /* unreachable — validated above */
       }
-      case ExecutionDecision.ATTEMPT_ANYWAY -> {
-        solution.setStatus("SKIPPED");
-        solutionRepo.save(solution);
-        jiraSync.updateTicket(
-            run, solution, "User chose to proceed without this solution.", "Done");
-        resume(run);
-      }
-      default -> log.warn("Unknown decision action {}", action);
     }
+    return DecisionOutcome.APPLIED;
   }
 
-  public boolean signalManualFixDone(String executionRunId, String solutionId) {
+  /**
+   * RR-530 — complete a manual fix. Legal only when a prior FIX decision put the solution into
+   * {@code AWAITING_MANUAL_FIX}; previously this marked ANY matching solution DONE and resumed the
+   * launch, so a QUEUED, RUNNING or already-FAILED solution could be declared complete without the
+   * human decision state the gate represents.
+   *
+   * @return {@link DecisionOutcome#APPLIED} when this caller won the transition
+   */
+  @org.springframework.transaction.annotation.Transactional
+  public DecisionOutcome signalManualFixDone(
+      String executionRunId, String solutionId, String actorUserId) {
     ExecutionSolution s =
         solutionRepo.findByIdAndExecutionRun_Id(solutionId, executionRunId).orElse(null);
-    if (s == null) return false;
-    s.setStatus("DONE");
-    s.setCompletedAt(Instant.now());
-    solutionRepo.save(s);
-    ExecutionRun run = s.getExecutionRun();
+    if (s == null) return DecisionOutcome.NOT_FOUND;
+
+    int claimed =
+        solutionRepo.claimManualFixDone(solutionId, executionRunId, actorUserId, Instant.now());
+    if (claimed == 0) {
+      log.warn(
+          "Rejected manual-ready for exec {} sol {} — solution is {} not {} (no prior FIX decision,"
+              + " replay or race)",
+          executionRunId,
+          solutionId,
+          s.getStatus(),
+          AWAITING_MANUAL_FIX);
+      return DecisionOutcome.ILLEGAL_STATE;
+    }
+
+    ExecutionSolution fresh = solutionRepo.findById(solutionId).orElse(s);
+    ExecutionRun run = fresh.getExecutionRun();
     if (run != null) {
-      jiraSync.updateTicket(run, s, "Manual fix signalled as complete.", "Done");
-      emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_DONE, s.getId());
+      jiraSync.updateTicket(run, fresh, "Manual fix signalled as complete.", "Done");
+      emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_DONE, fresh.getId());
       resume(run);
     }
-    return true;
+    return DecisionOutcome.APPLIED;
   }
 
   private void resume(ExecutionRun run) {
