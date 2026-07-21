@@ -234,6 +234,11 @@ class RunSandboxRuntimeDispatcherTest {
     }
 
     @Override
+    public SandboxExecResult exec(RunSandbox sandbox, SandboxExecRequest request) {
+      return SandboxExecResult.completed(0, "", "", false, Duration.ZERO);
+    }
+
+    @Override
     public void destroy(RunSandbox sandbox) {
       destroyed.add(sandbox.id());
       if (destroyFailure != null) {
