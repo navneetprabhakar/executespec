@@ -212,6 +212,112 @@ class PreviewHardeningTest {
   }
 
   @Nested
+  @DisplayName("RR-159 — preview response cannot set a cookie on the parent domain")
+  class ResponseCookieDomain {
+
+    @Test
+    @DisplayName("a Domain=.executespec.ai attribute is stripped, making the cookie host-only")
+    void stripsParentDomain() {
+      String rewritten =
+          PreviewProxyFilter.stripCookieDomain("sid=abc; Domain=.executespec.ai; Path=/; HttpOnly");
+      assertThat(rewritten).doesNotContainIgnoringCase("domain=");
+      assertThat(rewritten).contains("sid=abc").contains("Path=/").contains("HttpOnly");
+    }
+
+    @Test
+    @DisplayName("Domain matching is case-insensitive (DOMAIN / domain / Domain)")
+    void stripsRegardlessOfCase() {
+      assertThat(PreviewProxyFilter.stripCookieDomain("a=b; DOMAIN=executespec.ai"))
+          .doesNotContainIgnoringCase("domain");
+      assertThat(PreviewProxyFilter.stripCookieDomain("a=b; domain=evil.example"))
+          .doesNotContainIgnoringCase("domain");
+    }
+
+    @Test
+    @DisplayName("a cookie without a Domain attribute is preserved verbatim")
+    void preservesHostOnlyCookie() {
+      String v = "theme=dark; Path=/; SameSite=Lax; Secure";
+      assertThat(PreviewProxyFilter.stripCookieDomain(v)).isEqualTo(v);
+    }
+
+    @Test
+    @DisplayName("null / empty input is returned unchanged")
+    void handlesNullAndEmpty() {
+      assertThat(PreviewProxyFilter.stripCookieDomain(null)).isNull();
+      assertThat(PreviewProxyFilter.stripCookieDomain("")).isEmpty();
+    }
+  }
+
+  @Nested
+  @DisplayName("RR-384 — a customer's .dockerignore is merged, not clobbered")
+  class DockerIgnoreMerge {
+
+    @Test
+    @DisplayName("an absent customer file yields the generated block unchanged")
+    void noCustomerFile() {
+      assertThat(PreviewArtifactWriter.mergeDockerIgnore(null, "node_modules\n.env\n"))
+          .isEqualTo("node_modules\n.env\n");
+      assertThat(PreviewArtifactWriter.mergeDockerIgnore("   \n", "node_modules\n"))
+          .isEqualTo("node_modules\n");
+    }
+
+    @Test
+    @DisplayName("customer rules are preserved and the security block is appended after them")
+    void preservesCustomerAndAppendsSecurity() {
+      String customer = "coverage\n*.tmp\n";
+      String generated = "node_modules\n.env\n";
+
+      String merged = PreviewArtifactWriter.mergeDockerIgnore(customer, generated);
+
+      // Customer rules survive.
+      assertThat(merged).contains("coverage").contains("*.tmp");
+      // Security exclusions are present.
+      assertThat(merged).contains(".env");
+      // The ExecuteSpec block comes AFTER the customer content, so a customer re-include
+      // (evaluated earlier) cannot pull a security exclusion back in.
+      assertThat(merged.indexOf("coverage"))
+          .isLessThan(merged.indexOf(PreviewArtifactWriter.MERGE_MARKER));
+      assertThat(merged.indexOf(PreviewArtifactWriter.MERGE_MARKER))
+          .isLessThan(merged.indexOf(".env"));
+    }
+
+    @Test
+    @DisplayName("a pattern present in both files is not duplicated in the merged output")
+    void dedupesSharedPatterns() {
+      String merged =
+          PreviewArtifactWriter.mergeDockerIgnore(
+              "node_modules\ncoverage\n", "node_modules\n.env\n");
+
+      int first = merged.indexOf("node_modules");
+      int last = merged.lastIndexOf("node_modules");
+      assertThat(first).isEqualTo(last); // appears exactly once
+      assertThat(merged).contains(".env"); // non-duplicate generated pattern still added
+    }
+
+    @Test
+    @DisplayName("writing on disk keeps the customer rule and backs the original up to .user")
+    void writeMergesAndBacksUp(@TempDir Path ws) throws Exception {
+      Files.writeString(ws.resolve(".dockerignore"), "my-secret-dir\ncoverage\n");
+
+      PreviewArtifactWriter.writeDockerIgnore(ws, "node_modules\n.env\n");
+
+      String onDisk = Files.readString(ws.resolve(".dockerignore"));
+      assertThat(onDisk).contains("my-secret-dir").contains(".env"); // not clobbered
+      assertThat(Files.readString(ws.resolve(".dockerignore.user")))
+          .isEqualTo("my-secret-dir\ncoverage\n");
+    }
+
+    @Test
+    @DisplayName("no customer file → generated content written, no backup created")
+    void writeWithoutCustomerFile(@TempDir Path ws) throws Exception {
+      PreviewArtifactWriter.writeDockerIgnore(ws, "node_modules\n.env\n");
+
+      assertThat(Files.readString(ws.resolve(".dockerignore"))).isEqualTo("node_modules\n.env\n");
+      assertThat(Files.exists(ws.resolve(".dockerignore.user"))).isFalse();
+    }
+  }
+
+  @Nested
   @DisplayName("RR-476 — framework writes do not follow repository symlinks")
   class ArtifactWrites {
 
