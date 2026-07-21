@@ -25,6 +25,24 @@ destructive run-end cleanup), `context/ContextAgent`, `context/ContextAgentScann
 `tool/PathSafety` and `deployment/WorkspaceFileService`; folding those two onto this helper is a
 tracked follow-up owned by their respective lanes.
 
+`dependency/DependencySecurityPolicy` is the guardrail-tiered gate on `npm` / `bun` / `pnpm` / `yarn`
+install commands reaching `ShellSandboxPolicy`. Two of its claims were untrue and are corrected
+(2026-07-21). **RR-247:** Yarn's `--immutable` was accepted as equivalent to `--ignore-scripts`;
+it pins the lockfile and has no effect on lifecycle scripts, so MEDIUM/HIGH runs reported
+"lifecycle-script RCE prevention" active while every `postinstall` executed. Suppression now requires
+a control that actually suppresses — `--ignore-scripts`, `--mode=skip-build`,
+`YARN_ENABLE_SCRIPTS=false`, or a truthy `NPM_CONFIG_IGNORE_SCRIPTS` — and `--immutable` counts only
+as the lockfile flag it is. **RR-248:** registry allowlisting compared URLs with `startsWith`, so
+`https://registry.npmjs.org.evil.example` passed; both the allowlist and the off-registry check now
+parse the URI and compare scheme, host and effective port exactly, take path prefixes on a segment
+boundary, and reject userinfo and unparseable URLs. Two gaps wider than those reports are also
+closed: a leading `NAME=value` environment prefix used to make the whole install unparseable and
+therefore unpoliced, and the off-registry pattern required `file://` so npm's single-colon `file:`
+plus the `github:` / `gitlab:` / `bitbucket:` / `gist:` Git shorthands were never detected. This is
+command-shape enforcement only — it is not a networkless unprivileged install sandbox, and the
+preview build path (RR-385) executes dependency scripts through a different route this policy does
+not see.
+
 `SensitiveWorkspacePathPolicy` blocks credential-like workspace paths before tool output enters an
 LLM context. `ReadFileTool` and `WorkspaceFileService` reject those paths, `SearchFilesTool` omits their hits and redacts
 secret-shaped previews, and host `ShellSandboxPolicy` rejects explicit credential-file references;
