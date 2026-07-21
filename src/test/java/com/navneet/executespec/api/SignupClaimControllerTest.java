@@ -68,9 +68,24 @@ class SignupClaimControllerTest {
         controller.claimAnonymousSession(new SignupClaimController.ClaimRequest("tok-1"), alice);
 
     assertTrue(resp.getBody().claimed());
-    assertEquals("tok-1", resp.getBody().sessionToken());
     assertEquals("anon-tok-1", resp.getBody().runId());
     assertNull(resp.getBody().reason());
+  }
+
+  /**
+   * RR-665 — the anonymous-session bearer must not be echoed back to the authenticated caller. The
+   * field is gone from the response record entirely; this pins that no accessor reintroduces it.
+   */
+  @Test
+  void claim_response_never_carries_the_bearer_token() {
+    boolean exposesToken =
+        java.util.Arrays.stream(SignupClaimController.ClaimResponse.class.getRecordComponents())
+            .anyMatch(
+                c -> {
+                  String n = c.getName().toLowerCase();
+                  return n.contains("token") || n.contains("secret") || n.contains("bearer");
+                });
+    assertFalse(exposesToken, "ClaimResponse must not expose the anonymous-session bearer");
   }
 
   @Test
