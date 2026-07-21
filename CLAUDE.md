@@ -714,6 +714,30 @@ SWE-bench and ProgramBench terminal capture now dispatch through the dedicated v
 benchmark-capture executor instead of self-invoking ineffective `@Async` methods; capture restart
 ownership remains open.
 
+**Scoring-verification honesty pass (2026-07-21, V317).** Six places where the product claimed
+something was verified when it was not are corrected. (1) The BUILD-mode `WorkspaceTestRunner` now
+treats the runner's process exit code as outranking the parsed summary: a suite printing "all
+passed" while exiting non-zero (coverage threshold, plugin/compilation error, package failure,
+teardown error) is discarded as unproven instead of published as green (RR-283). (2) Surefire/Gradle
+report directories are reset before launch and only reports postdating the launch are admitted, so a
+command that dies before writing any report cannot have the previous attempt's green XML scored as
+its own (RR-284). (3) `V317 validation_report.test_execution_verified` persists that
+freshness/provenance token three-valued, and the evidence ledger restores `DETERMINISTIC`/HIGH for
+the `tests` and count-derived `executable-verification` rows only on TRUE — `null` remains unproven,
+never proven-false (RR-1660, completing RR-1646). (4) `ReviewerAgent` now models build and test
+evidence for ONE final workspace generation: the fix-tests pass is followed by a rebuild and a test
+rerun whose results are persisted on `ReviewerResult`, and red-or-unprovable concrete tests
+tighten the verdict to `UNRESOLVED_ISSUES` (RR-273). (5) `RunChangeEvidenceService` no longer uses a
+repository's root commit as a run baseline unless the history is a single commit (RR-287). (6) An
+absent final validation report is `UNAVAILABLE`, not a pass: `PostReviewQualityPolicy` stops
+returning "not failed" for a null report (RR-826). `SequentialExecutor` also stops promoting a
+twice-failed build smoke with zero worker writes to SUCCESS/COMPLETE — it terminalises `PARTIAL`,
+because "delivered nothing and verification is red" was being read as "environmental" (RR-262), and
+`WorkerAgent`'s terminal verified-pass now requires a structured exit-zero verdict rather than
+`{"ok":true}` transport success, which `ShellTool` returns for failing commands by design (RR-258).
+**Expect verified scores to move DOWN, never up, apart from proven-test runs whose ledger label
+recovers.**
+
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 
 **Benchmark trajectory checkpoint (2026-07-18):** eligible benchmark SSE is captured outside the

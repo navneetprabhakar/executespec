@@ -91,6 +91,42 @@ class RunChangeEvidenceServiceTest {
         .isZero();
   }
 
+  /**
+   * RR-287 — without an admitted run-start snapshot, an EXISTING repository's root commit is not
+   * this run's baseline. Diffing against the first-ever commit counted every change since the
+   * repository was created as this run's delivery, so a no-op run cleared the {@code filesGenerated
+   * > 0} hard floor and earned a nonzero verified score plus a HIGH-confidence "Code delivered"
+   * ledger row.
+   */
+  @Test
+  void failsClosedWhenAnExistingRepositoryHasNoAdmittedRunStartSnapshot() throws Exception {
+    String runId = "run-2";
+    Path workspace = temp.resolve(runId);
+    Files.createDirectories(workspace);
+    git(workspace, "init", "-b", "main");
+    git(workspace, "config", "user.email", "test@example.com");
+    git(workspace, "config", "user.name", "Test");
+    // Pre-existing repository history that predates this run entirely.
+    Files.writeString(workspace.resolve("existing.java"), "class Existing {}\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "first ever commit");
+    Files.writeString(workspace.resolve("existing.java"), "class Existing { int a = 1; }\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "later work, months before this run");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId(runId)).thenReturn(List.of());
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(temp.toString());
+    RunChangeEvidenceService service = new RunChangeEvidenceService(properties, snapshots);
+
+    // This run wrote nothing. Evidence must be INVALID, not "everything since the root commit".
+    var evidence = service.inspect(runId, List.of());
+    assertThat(evidence.valid()).isFalse();
+    assertThat(evidence.invalidReason()).contains("run-start snapshot");
+    assertThat(service.meaningfulProductDiffCount(runId)).isZero();
+  }
+
   private static void git(Path dir, String... args) throws Exception {
     java.util.List<String> command = new java.util.ArrayList<>();
     command.add("git");

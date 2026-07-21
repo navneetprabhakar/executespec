@@ -2740,6 +2740,23 @@ public class WorkerAgent {
     return com.navneet.executespec.smoketest.BuildVerificationResult.parse(envelope).passed();
   }
 
+  /**
+   * RR-258 — does this Ok envelope carry the runner's own exit-zero verdict?
+   *
+   * <p>Deliberately three-state collapsed to false: a missing exit marker is NOT proof of success.
+   * {@code shell} and {@code runTests} embed {@code exit=N} / {@code "exit_code": N} in their
+   * content; {@code buildProject} is delegated to the stricter build parser, which also rejects the
+   * resolver's explicit no-op marker. An envelope with no readable verdict proves nothing and
+   * therefore cannot mark a terminal verified pass.
+   */
+  static boolean envelopeProvesExitZero(String toolName, String envelope) {
+    if (envelope == null || !envelope.startsWith("{\"ok\":true")) return false;
+    if (isBuildTool(toolName)) return isSuccessfulBuildEnvelope(envelope);
+    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
+    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
+    return m.find() && "0".equals(m.group(1));
+  }
+
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
       java.util.regex.Pattern.compile("\\bexit(?:_code)?[\"=:\\s\\\\]+(-?\\d+)");
 
@@ -3242,6 +3259,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
       List<String> requiredDeliverables,
       ExecutionContext ctx) {
     if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
+    // RR-258 — `{"ok":true}` only means the TRANSPORT succeeded. ShellTool deliberately wraps
+    // non-zero process exits in an Ok envelope so the model can read stderr, so a verifier command
+    // that FAILED looked identical to one that passed. The resulting verified-pass flag then blocks
+    // further edits and can force a text-only worker to COMPLETED — protecting a failing candidate
+    // from repair. Require the runner's own structured exit-zero verdict, not transport success.
+    if (!envelopeProvesExitZero(toolName, envelope)) return false;
     String command = commandFromArgs(argsJson);
     if (!terminalVerifierCommand(toolName, command)) return false;
     if (visibleTestsExist(ctx) && !terminalVisibleTestCommand(toolName, command)) return false;

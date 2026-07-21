@@ -39,13 +39,25 @@ invalid reports are excluded and counted separately.
 - Ledger entries label provenance (`DETERMINISTIC`, `UNVERIFIED_COUNT`, `LLM_REVIEWER`,
   `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or `INTERNAL_FORMULA`). A score is a summary,
   not independent proof.
-- `DETERMINISTIC` is the only label that claims independence from an LLM, so it may not be attached
-  to the persisted concrete-test counts: those come from test-runner report files read off disk
-  with no exit-code check and no per-run directory reset, and can therefore describe a run that did
-  not happen. The `tests` row — and the `executable-verification` row whenever
-  `executable_tests_run` is true — are labelled `UNVERIFIED_COUNT` at MEDIUM confidence. Restoring
-  `DETERMINISTIC`/HIGH requires an execution-freshness/provenance token persisted alongside the
-  counts. Row *status* is unchanged, so run-level goal proof keeps its existing semantics.
+- `DETERMINISTIC` is the only label that claims independence from an LLM. RR-1646 removed it from
+  the persisted concrete-test counts because report files read off disk carried no proof they
+  described THIS run. **V317 (RR-1660) supplies that proof and restores the label where — and only
+  where — it was earned.** `validation_report.test_execution_verified` is a THREE-VALUED token set
+  TRUE only when the producing runner reset the report directory before launch, checked the exit
+  status, and admitted only reports postdating the launch. The `tests` row, and the
+  `executable-verification` row whenever `executable_tests_run` is true, read
+  `DETERMINISTIC`/HIGH on TRUE and `UNVERIFIED_COUNT`/MEDIUM otherwise.
+  **`null` is unproven, never proven-false** — every pre-V317 row and every producer that
+  establishes no freshness lands there and keeps the conservative label. `merged` populations are
+  only as proven as their weakest contributor. Row *status* is unchanged, and
+  `ValidationReportGoalProofEvaluator` keys on status rather than source/confidence, so restoring
+  the strong label does not by itself change run-level goal proof.
+- `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
+  row exists, a Git workspace is accepted only if its history is a single commit — the case where
+  the workspace was initialised for this run and `gitCommit` is filtered out of worker authority.
+  Any deeper history fails closed (RR-287): diffing against the repository's first-ever commit
+  counted every change since repository creation as this run's delivery, letting a no-op or failed
+  run clear the `filesGenerated > 0` hard floor.
 - Public/shared report DTOs expose score metadata and the same sanitized ledger, but not run-goal
   persistence or credentials.
 - New report shares are `ProjectShareLink.Surface.VALIDATION_REPORT` links with digest-only storage,

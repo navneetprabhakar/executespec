@@ -78,9 +78,24 @@ public class RunChangeEvidenceService {
           baselines.add(snapshot.getRepoFullName() + "@" + snapshot.getCommitSha());
         }
       } else if (Files.isDirectory(workspace.resolve(".git"))) {
+        // RR-287 — without an admitted run-start snapshot the only honest baseline is one this run
+        // provably created. Diffing against the repository's FIRST-EVER commit counted every
+        // change since the repository was created as this run's delivery, so a no-op or failed run
+        // against an existing checkout cleared the `filesGenerated > 0` hard floor and earned a
+        // nonzero verified score plus a HIGH-confidence "Code delivered" ledger row.
+        //
+        // A single-commit history is the one case where root IS the run baseline: the workspace
+        // was initialised for this run and `gitCommit` is filtered out of worker authority, so
+        // nothing can advance HEAD mid-run. Any deeper history is unprovable — fail closed.
         String baseline = git(workspace, "rev-list", "--max-parents=0", "HEAD").trim();
         if (baseline.isBlank())
           return ChangeEvidence.invalid("workspace Git baseline is unavailable");
+        String commitCount = git(workspace, "rev-list", "--count", "HEAD").trim();
+        if (!"1".equals(commitCount)) {
+          return ChangeEvidence.invalid(
+              "no admitted run-start snapshot for this workspace; the repository root commit is"
+                  + " not a valid run baseline");
+        }
         collectDiff(
             workspace, baseline.lines().findFirst().orElse(baseline), "", workerPaths, files);
         baselines.add("workspace@" + baseline.lines().findFirst().orElse(baseline));
