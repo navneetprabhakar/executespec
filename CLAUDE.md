@@ -186,10 +186,31 @@ fallback. The dispatcher gates on `sandbox.runtime.dispatch.enabled`, then on
 `SandboxLeaseFencedException`, a non-READY sandbox gets `REFUSED`), then delegates. `SandboxProcess`
 drains stdout and stderr separately on virtual threads so the timeout is actually reachable, caps
 each stream at 256k chars, and destroys the whole process tree on expiry.
+**Container fencing and mount containment (2026-07-21, RR-327 / RR-328).** The container name is
+derived from the sandbox id so a restarted JVM reattaches instead of leaking a second container —
+which means the name is not an ownership proof. `SandboxContainerCommand.create` now stamps
+`com.executespec.sandbox.id` and `com.executespec.sandbox.epoch` labels, and reattach, `alive` and
+`destroy` all read them back and act only on an exact match; an unlabelled, foreign or
+different-generation container, or an unreadable engine, is a refusal (surfaced as
+`TEARDOWN_FAILED`), never a guess. The ownership half moved to the dispatcher: the
+`SandboxLeaseFencedException` branch of `provision` no longer destroys anything, because a failed
+fenced transition is proof that another JVM owns the sandbox and the takeover reattaches to that
+same container; the ordinary-failure branch cleans up only while `holdsLiveLease` is true. Writable
+bind-mount admission was lexical and said so in its own javadoc, so a symlink planted inside the
+sandbox root bind-mounted its target read-write; it now proves containment on disk through
+`security/SafeWorkspacePath` (no symbolic link in any existing component, canonical-root
+containment) and additionally requires the mount to already exist as a real directory. All three
+sandbox flags remain seeded false.
 **Explicitly not closed:** a timeout destroys the host-side `docker exec` client tree; the process
 inside the container is a child of container init and is bounded only by the container's own
 CPU/memory/PID/wall-clock ceilings until release — a container-side kill would depend on a binary
-present in an untrusted image. The lease check is a check, not a hold. **No `tool/**` caller was
+present in an untrusted image. The lease check is a check, not a hold. Neither the label fence nor
+the mount check eliminates its check/use window: Docker offers no compare-and-delete, so a
+generation could in principle change between the inspect and the `rm`, and a mount path validated
+here could be replaced by a symlink before the daemon opens it. Closing those needs
+descriptor-relative mounts or engine-managed volumes. `exec` does not re-read the labels per
+command; a stale owner is caught at `authorizeExec` in the database, but a name-colliding container
+is not. **No `tool/**` caller was
 migrated onto this seam**: the whole `sandbox/` package still has zero callers outside itself and
 all three flags remain seeded false, so no existing execution path changed.
 
