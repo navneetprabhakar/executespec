@@ -244,7 +244,20 @@ public class TierPermissionService {
     OrgMember membership =
         orgMemberRepo.findByOrgIdAndUserId(org.getId(), user.getId()).orElse(null);
 
-    String orgRole = (membership != null) ? membership.getOrgRole() : "DEVELOPER";
+    // RR-210: fail closed on an orphaned identity. `app_user.org_id` is a denormalized pointer;
+    // `org_member` is the authoritative membership record. Defaulting a missing row to DEVELOPER
+    // handed org-derived product capabilities to a user whose membership had been removed or never
+    // committed. Fall back to the tier-driven solo permission set instead of inventing an org role.
+    if (membership == null) {
+      log.warn(
+          "Orphaned org pointer: user={} references org={} with no org_member row — denying"
+              + " org-derived permissions",
+          user.getId(),
+          org.getId());
+      return freeUserPermissions(user);
+    }
+
+    String orgRole = membership.getOrgRole();
     boolean isOrgAdmin = "ORG_ADMIN".equals(orgRole);
 
     int limit = tierEnforcementService.effectiveOrgLimit(org);
