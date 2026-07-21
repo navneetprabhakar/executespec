@@ -7,6 +7,7 @@ import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {LoadError} from '@/ide/LoadError';
 import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import {isActiveRunStatus} from '@/lib/runStatus';
 import {explicitLinkedRepoSelection, repoSupports} from '@/ide/projectRepoUi';
 import {
   PRODUCT_PROVIDER_OPTIONS,
@@ -186,16 +187,11 @@ export default function IdeProject() {
     return <Navigate to={`/projects/${projectId}/pulse`} replace />;
   }
 
-  const activeRuns = runs.filter((r) =>
-    [
-      'CLASSIFYING',
-      'PLANNING',
-      'EXECUTING',
-      'RUNNING',
-      'IN_PROGRESS',
-      'AWAITING_APPROVAL',
-    ].includes((r.status || '').toUpperCase()),
-  );
+  // RR-1521 — this used to hardcode six statuses and omitted APPROVAL_RESUMING, WORKING,
+  // REVIEWING and the halted states, i.e. most of a run's wall-clock. A project with a run
+  // mid-execution therefore reported "Active 0". Active now means "not terminal", derived
+  // from the one shared vocabulary.
+  const activeRuns = runs.filter((r) => isActiveRunStatus(r.status));
   const lastRun = runs[0];
   const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
   const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);

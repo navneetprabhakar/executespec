@@ -1,5 +1,6 @@
 import type {TierPermissions} from '@/hooks/useTierPermissions';
 import type * as api from '@/lib/api';
+import {isLiveRunStatus} from '@/lib/runStatus';
 
 export const PAGE_SIZE = 30;
 
@@ -25,19 +26,11 @@ export interface LinkRow {
   sub: string;
 }
 
-export const LIVE_STATUSES = new Set([
-  'CLASSIFYING',
-  'PLANNING',
-  'EXECUTING',
-  'AWAITING_APPROVAL',
-  'RUNNING',
-  'PROVIDER_SWITCHING',
-  'REVIEWING',
-  'PAUSED',
-]);
-
+// RR-1536 — this list used to be maintained independently of the plan page's and the
+// agent panel's, and like them it omitted APPROVAL_RESUMING and WORKING. It now delegates
+// to the one shared vocabulary in lib/runStatus.
 export function isLiveStatus(status?: string | null): boolean {
-  return LIVE_STATUSES.has((status || '').toUpperCase());
+  return isLiveRunStatus(status);
 }
 
 export function scoreOf(r: api.RunSummary): number | null | undefined {

@@ -107,17 +107,52 @@ export function parseSpecHandoff(raw: string | null): SpecHandoff | null {
     // a JSON snippet) is still a legacy raw spec.
     return buildSpecHandoff({spec: raw, source: 'legacy'});
   }
-  const envelope = parsed as Partial<SpecHandoff> & {spec: string};
+  // RR-1537 — the previous implementation cast to `Partial<SpecHandoff>` and passed
+  // `handoffId`, `projectId`, `repoId`, `source` and `createdAt` straight through, so a
+  // malformed envelope (a version-skewed bundle mid-deploy, or any same-origin script)
+  // produced a value whose runtime shape contradicted its declared type — and a non-string
+  // `projectId` reached run submission, where it selects run scope. Every field is now
+  // narrowed individually and the cast is gone, so the compiler enforces coverage: adding a
+  // field to `SpecHandoff` without validating it here is a type error.
+  const envelope = parsed as Record<string, unknown>;
+  const projectId = optionalString(envelope.projectId);
   return {
     schemaVersion: SPEC_HANDOFF_SCHEMA_VERSION,
-    handoffId: envelope.handoffId || mintId(),
-    spec: envelope.spec,
-    projectId: envelope.projectId ?? null,
-    repoId: envelope.repoId ?? null,
-    scope: envelope.scope === 'PROJECT' ? 'PROJECT' : 'GLOBAL',
-    source: envelope.source ?? 'legacy',
-    createdAt: envelope.createdAt || new Date().toISOString(),
+    handoffId: optionalString(envelope.handoffId) ?? mintId(),
+    spec: envelope.spec as string,
+    projectId,
+    repoId: optionalString(envelope.repoId),
+    // A stored scope of PROJECT with no usable projectId is not honourable; fall back to
+    // GLOBAL rather than composing a project-scoped run against nothing.
+    scope: envelope.scope === 'PROJECT' && projectId ? 'PROJECT' : 'GLOBAL',
+    source: isSpecHandoffSource(envelope.source) ? envelope.source : 'legacy',
+    createdAt: validIsoDate(envelope.createdAt) ?? new Date().toISOString(),
   };
+}
+
+/** A usable identifier, or null. Rejects non-strings, blanks, and whitespace-only values. */
+function optionalString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+const SPEC_HANDOFF_SOURCES: readonly SpecHandoffSource[] = [
+  'onboarding-sample',
+  'signup-picker',
+  'project-chat-compile',
+  'legacy',
+];
+
+function isSpecHandoffSource(value: unknown): value is SpecHandoffSource {
+  return typeof value === 'string' && (SPEC_HANDOFF_SOURCES as readonly string[]).includes(value);
+}
+
+/** Keeps only a timestamp that actually parses, so `createdAt` staleness checks stay sound. */
+function validIsoDate(value: unknown): string | null {
+  const candidate = optionalString(value);
+  if (!candidate) return null;
+  return Number.isNaN(Date.parse(candidate)) ? null : candidate;
 }
 
 export function readSpecHandoff(): SpecHandoff | null {

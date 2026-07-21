@@ -29,9 +29,11 @@ import {
 import {
   contractDetectorSummary,
   docStamp,
+  driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
   looksLikeArtifact,
+  summarizeDriftResults,
   techDebtCategories,
   uiBound,
 } from '@/ide/projectMoreUtils';
@@ -1460,8 +1462,8 @@ export function IdeProjectArchitecture() {
     setMsg('');
     try {
       const r = await api.checkRepoDrift(projectId, repoId);
-      const n = r.filter((d) => d.hasDrift).length;
-      setMsg(n > 0 ? `${n} drift result${n === 1 ? '' : 's'} detected.` : 'No drift detected.');
+      // RR-1658 — counting `hasDrift` alone reported an UNAVAILABLE check as clean.
+      setMsg(driftSummaryMessage(summarizeDriftResults(r)));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Drift check failed.');
     } finally {
@@ -1502,8 +1504,10 @@ export function IdeProjectArchitecture() {
     setErr('');
     setMsg('');
     try {
-      await api.checkProjectDrift(projectId);
-      setMsg('Project-wide drift check started.');
+      // RR-1658 — this endpoint returns the per-contract results synchronously, so report
+      // them rather than an unconditional "started" that hides drifted and unavailable rows.
+      const r = await api.checkProjectDrift(projectId);
+      setMsg(`Project-wide drift check complete. ${driftSummaryMessage(summarizeDriftResults(r))}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Drift check failed.');
     } finally {

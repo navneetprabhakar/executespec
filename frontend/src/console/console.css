@@ -426,6 +426,29 @@
   font-size: 12px;
   color: var(--ide-fg-muted);
 }
+/* RR-1655 — the disclosures now render a retry control in place of a false "you have none"
+   message when the underlying read failed. As a button it needs the shell's hit target and
+   focus treatment rather than inheriting the plain-text empty-state styling. */
+button.con-side-empty {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ide-fg-muted);
+}
+button.con-side-empty:hover {
+  color: var(--ide-fg);
+}
+button.con-side-empty:focus-visible {
+  outline: 2px solid var(--ide-focus, var(--signal-blue, #5b8def));
+  outline-offset: -2px;
+}
 .con-runitem {
   display: flex;
   align-items: center;
