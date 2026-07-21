@@ -51,8 +51,8 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
         continue;
       }
       String provider = normalize(row.getProvider());
-      String model = row.getModel() == null ? null : row.getModel().trim();
-      if (provider == null || model == null || model.isEmpty()) {
+      String model = normalizeModel(row.getModel());
+      if (provider == null || model == null) {
         continue;
       }
       if (distinct.add(provider + "\u001f" + model) && distinct.size() == 1) {
@@ -114,11 +114,33 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
     return a == null ? b == null : a.equals(b);
   }
 
+  /**
+   * The recorder writes the literal {@code "unknown"} when neither the caller nor the provider
+   * response named a provider/model ({@code RunStepUsageRecorder}'s {@code firstNonBlank(…,
+   * "unknown")}). That is an ABSENCE marker, not a route. Admitting it produced ledger-grade
+   * "proof" of a provider called {@code unknown} and made {@link #divergesFrom} fire against every
+   * real requested provider (RR-1560); treating it as absent degrades the projection to {@link
+   * Attribution#UNATTRIBUTED}, which is what the enum already exists to say.
+   */
+  private static final Set<String> ABSENT_SENTINELS = Set.of("unknown", "null", "none", "n/a", "-");
+
   private static String normalize(String provider) {
     if (provider == null || provider.isBlank()) {
       return null;
     }
     String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    if (ABSENT_SENTINELS.contains(normalized)) {
+      return null;
+    }
     return "google".equals(normalized) ? "gemini" : normalized;
+  }
+
+  /** Same sentinel rule for the model half of the route; casing is otherwise preserved. */
+  private static String normalizeModel(String model) {
+    if (model == null || model.isBlank()) {
+      return null;
+    }
+    String trimmed = model.trim();
+    return ABSENT_SENTINELS.contains(trimmed.toLowerCase(Locale.ROOT)) ? null : trimmed;
   }
 }

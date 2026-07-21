@@ -178,7 +178,8 @@ public class RunController {
         runIdempotencyService.claim(
             userId,
             idempotencyKey,
-            com.navneet.executespec.run.RunRequestFingerprint.of(fingerprintOf(req)));
+            com.navneet.executespec.run.RunRequestFingerprint.of(
+                new java.util.ArrayList<>(fingerprintOf(req).values())));
     var alreadySubmitted = resolveIdempotentSubmit(idempotencyClaim, userId);
     if (alreadySubmitted != null) return alreadySubmitted;
 
@@ -312,26 +313,60 @@ public class RunController {
   /**
    * The values that decide what a run builds and what it costs. A reused Idempotency-Key carrying
    * any different value here is a conflict, never a silent replay of the earlier run.
+   *
+   * <p>RR-1553 — this list must cover EVERY {@link RunRequest} component. It previously omitted
+   * {@code requireConfirmationBeforeExpensiveContinuation} and {@code
+   * requireBenchmarkPriorForAutomaticContinuation} (both real continuation spend guards), {@code
+   * skipAutoPush} (publication policy), {@code prReviewComments} and {@code
+   * localRepositoryInventory} (planner input) and {@code localInstallationId} (the LOCAL source
+   * binding). A user who submitted, noticed a spend guard was off, and retried with the same key
+   * and the guard on was silently handed back the earlier UNGUARDED run with HTTP 202. Keyed by
+   * component name so {@code RunControllerSubmitFingerprintTest} can assert reflectively that a new
+   * DTO field cannot be forgotten here.
    */
-  private static java.util.List<String> fingerprintOf(RunRequest req) {
-    return java.util.Arrays.asList(
-        req.userRequest(),
-        req.source(),
-        req.repoUrl(),
-        req.repoMode(),
-        req.projectId(),
-        req.modelName(),
-        req.aiProvider(),
-        req.executionMode(),
-        req.branch(),
-        req.figmaUrl(),
-        String.valueOf(req.skipApproval()),
-        String.valueOf(req.autoMerge()),
-        String.valueOf(req.tddMode()),
-        String.valueOf(req.localExecution()),
-        String.valueOf(req.userCostCap()),
-        String.valueOf(req.selectedRepoIds()),
-        String.valueOf(req.lowComplexityWorkerStartTier()));
+  static java.util.LinkedHashMap<String, String> fingerprintOf(RunRequest req) {
+    java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+    values.put("userRequest", req.userRequest());
+    values.put("source", req.source());
+    values.put("repoUrl", req.repoUrl());
+    values.put("repoMode", req.repoMode());
+    values.put("projectId", req.projectId());
+    values.put("modelName", req.modelName());
+    values.put("aiProvider", req.aiProvider());
+    values.put("executionMode", req.executionMode());
+    values.put("branch", req.branch());
+    values.put("figmaUrl", req.figmaUrl());
+    values.put("prReviewComments", req.prReviewComments());
+    values.put("skipApproval", String.valueOf(req.skipApproval()));
+    values.put("autoMerge", String.valueOf(req.autoMerge()));
+    values.put("skipAutoPush", String.valueOf(req.skipAutoPush()));
+    values.put("tddMode", String.valueOf(req.tddMode()));
+    values.put("localExecution", String.valueOf(req.localExecution()));
+    values.put("localInstallationId", String.valueOf(req.localInstallationId()));
+    values.put("localRepositoryInventory", req.localRepositoryInventory());
+    values.put("userCostCap", String.valueOf(req.userCostCap()));
+    values.put("selectedRepoIds", canonicalRepoIds(req.selectedRepoIds()));
+    values.put("lowComplexityWorkerStartTier", String.valueOf(req.lowComplexityWorkerStartTier()));
+    values.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        String.valueOf(req.requireConfirmationBeforeExpensiveContinuation()));
+    values.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        String.valueOf(req.requireBenchmarkPriorForAutomaticContinuation()));
+    return values;
+  }
+
+  /**
+   * Repo selection is a set, not a sequence — {@code List.toString} made a reordered but
+   * semantically identical selection hash differently and produced a spurious CONFLICT. Sorting
+   * canonicalizes it; a genuinely different membership still changes the hash.
+   */
+  private static String canonicalRepoIds(java.util.List<java.util.UUID> ids) {
+    if (ids == null) return "null";
+    return ids.stream()
+        .map(id -> id == null ? "" : id.toString())
+        .sorted()
+        .collect(java.util.stream.Collectors.joining(","));
   }
 
   /**
@@ -451,8 +486,23 @@ public class RunController {
   /** Compute the live cost for a run. Cached: terminal runs forever, in-progress runs for 15s. */
   @GetMapping("/{runId}/cost")
   public ResponseEntity<java.util.Map<String, Object>> getLiveCost(
-      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+      @PathVariable String runId,
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestParam(value = "stepCallsPage", defaultValue = "0") int stepCallsPage,
+      @RequestParam(
+              value = "stepCallsSize",
+              defaultValue =
+                  ""
+                      + com.navneet.executespec.cost.RunCostEvidenceService
+                          .DEFAULT_STEP_CALLS_PAGE_SIZE)
+          int stepCallsSize) {
     var run = guard.requireRunAccess(runId, userDetails);
+    // RR-1552 — the per-attempt ledger carries key-source, exact routing and per-attempt spend.
+    // cost/CLAUDE.md restricts that detail to own-org ORG_ADMIN / SUPER_ADMIN; the run read guard
+    // is broader (BILLING_ADMIN, org developers, cross-org project viewers).
+    boolean attemptDetail =
+        com.navneet.executespec.cost.RunCostEvidenceService.canViewPhysicalAttemptDetail(
+            userDetails, run);
 
     // Terminal run with stored cost → return immediately with DB totals.
     // The stored total_input_tokens / total_output_tokens are authoritative
@@ -467,7 +517,7 @@ public class RunController {
       body.put("reasoningTokens", null);
       body.put("calls", null);
       body.put("source", "stored_total");
-      runCostEvidenceService.enrich(body, run);
+      runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
       return ResponseEntity.ok(body);
     }
 
@@ -490,7 +540,7 @@ public class RunController {
       body.put("reasoningTokens", snap.reasoningTokens());
       body.put("calls", snap.calls());
       body.put("source", "live_tracker");
-      runCostEvidenceService.enrich(body, run);
+      runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
       return ResponseEntity.ok(body);
     }
 
@@ -515,7 +565,7 @@ public class RunController {
     body.put("reasoningTokens", null);
     body.put("calls", null);
     body.put("source", "legacy_estimator");
-    runCostEvidenceService.enrich(body, run);
+    runCostEvidenceService.enrich(body, run, attemptDetail, stepCallsPage, stepCallsSize);
     return ResponseEntity.ok(body);
   }
 
@@ -923,7 +973,17 @@ public class RunController {
           HttpStatus.CONFLICT,
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
-    var outcome = runSyncService.sync(runId, branch);
+    // RR-1555 — `branch` reaches `git fetch` / `git reset --hard` as an argv token. Git parses
+    // options anywhere before `--`, so a value beginning with `-` would be consumed as a git
+    // option rather than a refspec. Reject the shape here; the service validates again.
+    if (branch != null
+        && !branch.isBlank()
+        && !com.navneet.executespec.run.sync.RunSyncService.isValidBranch(branch)) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "branch must be a plain branch name (letters, digits, '.', '_', '-', '/')");
+    }
+    var outcome = runSyncService.sync(runId, branch, syncCredentialFor(run, userDetails));
     // SDET 2026-05-16 (BUG-019) — distinguish "everything synced" from "nothing synced (all
     // failed)" / "partial sync". The previous response said `status: "synced"` whether or not any
     // repo actually moved; with `reposSynced=0 + details=[FAILED ...]` the UI happily displayed
@@ -956,7 +1016,7 @@ public class RunController {
           HttpStatus.CONFLICT,
           "Run sync requires a terminal status (current: " + run.getStatus() + ")");
     }
-    var outcome = runSyncService.syncToOriginalCommit(runId);
+    var outcome = runSyncService.syncToOriginalCommit(runId, syncCredentialFor(run, userDetails));
     // SDET 2026-05-16 (BUG-019) — same outcome aggregation as /sync above so the UI doesn't
     // surface a misleading success when every repo failed to reset.
     boolean anyFailed = outcome.details().stream().anyMatch(d -> d.contains("FAILED"));
@@ -969,6 +1029,34 @@ public class RunController {
             "status", syncStatus,
             "reposSynced", outcome.reposSynced(),
             "details", outcome.details()));
+  }
+
+  /**
+   * RR-1554 — resolve the git credential the sync children must authenticate with. Mirrors the
+   * run-then-user precedence {@code push-scm} already uses, so a sync uses exactly the credential
+   * that cloned the workspace. Returns {@link
+   * com.navneet.executespec.run.sync.RunSyncService.GitCredential#NONE} for public repositories,
+   * which still work unauthenticated.
+   */
+  private com.navneet.executespec.run.sync.RunSyncService.GitCredential syncCredentialFor(
+      PipelineRun run, AppUserDetails userDetails) {
+    var user = userDetails == null ? null : userDetails.getUser();
+    String githubPat = firstNonBlank(run.getGithubPat(), user == null ? null : user.getGithubPat());
+    if (githubPat != null) {
+      return com.navneet.executespec.run.sync.RunSyncService.GitCredential.github(githubPat);
+    }
+    String bitbucket =
+        firstNonBlank(
+            run.getBitbucketAppPassword(), user == null ? null : user.getBitbucketAppPassword());
+    if (bitbucket != null) {
+      return com.navneet.executespec.run.sync.RunSyncService.GitCredential.bitbucket(bitbucket);
+    }
+    return com.navneet.executespec.run.sync.RunSyncService.GitCredential.NONE;
+  }
+
+  private static String firstNonBlank(String a, String b) {
+    if (a != null && !a.isBlank()) return a;
+    return b != null && !b.isBlank() ? b : null;
   }
 
   @PostMapping("/{runId}/push-scm")
