@@ -158,7 +158,12 @@ class RunOrchestratorEnterpriseEnforcementTest {
             List.of(unavailable)));
   }
 
-  // Breaking-change report rows → report-only run issues
+  // Breaking-change report rows → report-only run issues.
+  //
+  // RR-819 — MINOR is correct HERE and only here: this mapping runs after the worker has already
+  // written the change, so it can describe but not refuse. It is the second, tighten-only gate. The
+  // control that can actually refuse is PlanContractGateService at the plan-approval gate; these
+  // assertions must NOT be read as "report-only is the whole governance story".
 
   @Test
   void breaking_change_with_consumers_renders_requires_ack_issue() {
@@ -175,11 +180,12 @@ class RunOrchestratorEnterpriseEnforcementTest {
                     "DETERMINISTIC")),
             true);
 
-    var issues = RunOrchestrator.toBreakingChangeIssues(report);
+    var issues = RunBreakingChangeDetector.toBreakingChangeIssues(report);
 
     assertEquals(1, issues.size());
     var issue = issues.get(0);
-    // report-only: MINOR so it surfaces without triggering auto-fix or cratering the score.
+    // report-only: MINOR so it surfaces without triggering auto-fix or cratering the score. The
+    // approval-time refusal lives in PlanContractGateService, not here.
     assertEquals(IssueSeverity.MINOR, issue.getSeverity());
     assertFalse(issue.isAutoFixed());
     assertTrue(issue.getDescription().contains("orders-api"));
@@ -205,7 +211,7 @@ class RunOrchestratorEnterpriseEnforcementTest {
                     "LLM_DERIVED")),
             false);
 
-    var issues = RunOrchestrator.toBreakingChangeIssues(report);
+    var issues = RunBreakingChangeDetector.toBreakingChangeIssues(report);
 
     assertEquals(1, issues.size());
     assertFalse(issues.get(0).getDescription().contains("[REQUIRES ACK]"));
@@ -215,9 +221,9 @@ class RunOrchestratorEnterpriseEnforcementTest {
   @Test
   void empty_or_null_breaking_report_yields_no_issues() {
     assertTrue(
-        RunOrchestrator.toBreakingChangeIssues(
+        RunBreakingChangeDetector.toBreakingChangeIssues(
                 new PlanBreakingChangeReport.Report(List.of(), false))
             .isEmpty());
-    assertTrue(RunOrchestrator.toBreakingChangeIssues(null).isEmpty());
+    assertTrue(RunBreakingChangeDetector.toBreakingChangeIssues(null).isEmpty());
   }
 }

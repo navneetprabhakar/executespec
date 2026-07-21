@@ -25,6 +25,31 @@ final class PostReviewQualityPolicy {
         || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
   }
 
+  /** RR-826 — the three states final verification can actually be in. */
+  enum FinalVerification {
+    /** A report exists and clears the quality bar. */
+    PASSED,
+    /** A report exists and is below the bar (or reports FAILED / NEEDS_ATTENTION). */
+    LOW_QUALITY,
+    /**
+     * No report exists at all — generation threw, the run row vanished, or persistence failed. This
+     * is NOT low quality: nothing was measured. Escalating to a stronger model on this state would
+     * turn a persistent report-generation bug into a recurring provider charge on every run, which
+     * is why {@code RunOrchestrator} stamps it and stops rather than re-running the work.
+     */
+    UNAVAILABLE
+  }
+
+  static FinalVerification finalVerification(
+      ValidationReport report, double requiredQualityThreshold) {
+    if (report == null) {
+      return FinalVerification.UNAVAILABLE;
+    }
+    return validationReportQualityFailed(report, requiredQualityThreshold)
+        ? FinalVerification.LOW_QUALITY
+        : FinalVerification.PASSED;
+  }
+
   /**
    * RR-826 — final verification is {@code PASSED | FAILED | UNAVAILABLE}, and only PASSED may leave
    * a run success-shaped.
