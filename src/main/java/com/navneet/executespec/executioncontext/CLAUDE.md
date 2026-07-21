@@ -39,14 +39,32 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Credentials are not stored in V282 or `ExecutionContext`; only the context reference propagates
   through planner/worker/reviewer/compactor children and survives a JVM restart.
 - Lifecycle mutations take a tenant scope and use a pessimistic row lock plus JPA `@Version`.
-- An active lease cannot be stolen. After expiry, a new owner may claim and increment `attempt`.
-- RR-322: dispatch is fenced against a superseded claim. A context whose lease owner is set but whose
-  lease has EXPIRED is not dispatchable, and a caller that declares `LlmRequest.llmExecutionAttempt`
-  must match the context's current attempt. Dispatch is NOT restricted to `RUNNING` only, because no
-  production caller invokes `claim` yet — every real context is `QUEUED`, so that restriction would
-  fail-close all customer dispatch rather than fence a stale worker. Making the lease mandatory is
-  open lifecycle work for the context-creation callers.
-- Stale owners cannot heartbeat, complete, or fail after lease loss.
+- The `LlmExecutionContext` entity enforces lease transitions correctly (an active lease cannot be
+  stolen; after expiry a new owner may claim and increment `attempt`; stale owners cannot heartbeat,
+  complete, or fail after lease loss). **These are unit-tested entity rules, not runtime guarantees
+  — see the RR-1666 note below.**
+- **RR-322 / RR-1666 — the lease/attempt fence is BUILT BUT NOT WIRED.** `LlmExecutionDispatchGuard`
+  contains two fences: (1) a context whose lease owner is set and whose lease has EXPIRED is not
+  dispatchable, and (2) a caller that declares `LlmRequest.llmExecutionAttempt` must match the
+  context's current `attempt`. Both are correct and unit-tested, but **neither can fire in
+  production**, because nothing on any real dispatch path populates the state they read:
+  `LlmExecutionContextService.claim` (the only thing that sets a lease owner or advances `attempt`)
+  has ZERO production callers, and no production caller sets `LlmRequest.llmExecutionAttempt` (it is
+  always `null`). Every real context therefore stays `QUEUED` with a null lease and `attempt=0`, so
+  a stolen/zombie worker is **not** fenced today — the durable-attempt contract does not hold at
+  runtime. This is not closed by the RR-321 budget reservation: a duplicate worker is bounded only
+  by shared budget, not fenced off.
+
+  **Exact remaining wiring** (all in context-creation/execution callers, not the guard): (a) `claim`
+  the context — RUNNING + lease owner + `attempt` — when a worker takes ownership; (b) heartbeat the
+  lease during long work; (c) propagate the claimed `attempt` onto every
+  `LlmRequest.llmExecutionAttempt`; (d) release (`complete`/`fail`) on terminal. Only then can
+  dispatch be restricted to `RUNNING` and the lease made mandatory. The blocker is that ONE run
+  context is inherited by planner/worker/reviewer/compaction/report/chat, so a single per-context
+  lease owner conflicts with concurrent multi-agent use — wiring needs per-owner sub-leases or an
+  ownership redesign, plus context hydration + re-claim on the three `RunLifecycleService`
+  resume/retry/re-review roots (still open per the residual inventory below). Restricting dispatch
+  to `RUNNING` today would fail-close all customer dispatch rather than fence a stale worker.
 - Cancellation is immediate for queued/expired work and cooperative for active work.
 - Reusing an idempotency key with a different immutable request fails closed.
 
@@ -61,12 +79,26 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   `LlmRequest`.
 - `LlmExecutionPolicyFactory` — idempotent run/agent/project/chat/platform context construction.
 - `LlmExecutionDispatchGuard` — last-mile route, credential-source and durable-budget enforcement.
-- `LlmExecutionBudgetGate` — RR-321 (V316). Budget evaluation plus the atomic provider-call
-  reservation, under a pessimistic row lock in its own transaction. `maxProviderCalls` is a hard
-  ceiling: `reserved_provider_calls` is incremented before transport, so concurrent authorizers
-  cannot each observe the same remaining allowance. Token/cost ceilings are evaluated under the same
-  lock but remain reconciled-after-the-fact rather than reserved — a per-call worst-case estimate
-  was deliberately not invented.
+- `LlmExecutionBudgetGate` — RR-321 (V316). Budget evaluation plus reservation, under a pessimistic
+  row lock in its own transaction. What is RESERVED vs reconciled-after-the-fact:
+  - **Provider-call count (reserved, hard ceiling).** `reserved_provider_calls` is incremented
+    before transport, so concurrent authorizers cannot each observe the same remaining allowance and
+    `maxProviderCalls` cannot be exceeded. Worst-case equals actual for a call, so
+    `max(reserved, recorded)` self-heals with no release path.
+  - **Output tokens (reserved).** A provider call cannot emit more than the dispatched model's
+    registered `max-output-tokens` (the API-enforced `max_tokens`, a real bound, not an estimate).
+    The gate charges every in-flight (authorized-but-not-recorded) call the worst-case output of the
+    largest model the context policy admits, so N concurrent dispatches cannot collectively cross
+    `maxOutputTokens`, and tightens the `maxTotalTokens` check by that output half. The in-flight
+    count is `reserved_provider_calls` minus recorded terminal rows, so it self-heals as calls
+    terminalize — no release path, no extra column, no migration.
+  - **Input tokens and dollar cost (reconciled-after-the-fact, NOT reserved).** A call's input-token
+    count and its dollar cost are only known once the provider responds; the sole a-priori input
+    bound is the full context window, which would deny admission far below the real ceiling and so
+    is not a usable reservation. `maxInputTokens`, the input half of `maxTotalTokens`, and
+    `maxCostUsd` are evaluated against recorded usage — but now under the same lock as one consistent
+    read with in-flight calls visible, so a context that has crossed one of those ceilings stops
+    immediately instead of racing. A worst-case dollar reservation is deliberately not invented.
 
 ## Adopted customer surfaces
 
