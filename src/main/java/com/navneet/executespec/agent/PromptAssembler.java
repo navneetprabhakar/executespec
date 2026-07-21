@@ -15,7 +15,10 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Assembles LLM prompt files by resolving {@code {{include:fragment-name}}} markers and
@@ -32,6 +35,7 @@ import lombok.RequiredArgsConstructor;
  * </ul>
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class PromptAssembler {
 
@@ -43,8 +47,19 @@ public class PromptAssembler {
   private final ResourceLoader resourceLoader;
   private final PromptHashAuditRepository promptAuditRepository;
 
-  /** Returned by {@link #assembleAndTrack}. */
-  public record AssembledPrompt(String text, String hash) {}
+  /** Nullable in unit tests that construct the assembler without a metrics backend. */
+  private final MeterRegistry meterRegistry;
+
+  /**
+   * Returned by {@link #assembleAndTrack}.
+   *
+   * @param text the assembled prompt
+   * @param hash 12-char SHA-256 prefix of {@link #text}
+   * @param tracked {@code true} when the prompt-audit row was durably persisted; {@code false} when
+   *     the audit write failed, so downstream must NOT treat this prompt's provenance as reliably
+   *     recorded (RR-521 — the audit linkage is the only proof a run's prompt was tracked).
+   */
+  public record AssembledPrompt(String text, String hash, boolean tracked) {}
 
   @Value("${prompts.base-path:classpath:prompts}")
   private String basePath;
@@ -102,10 +117,31 @@ public class PromptAssembler {
               .promptHash(hash)
               .charCount(text.length())
               .build());
+      return new AssembledPrompt(text, hash, true);
     } catch (Exception e) {
-      // Non-fatal — audit failure must never block execution
+      // RR-521 — the audit write is the ONLY durable prompt-version linkage. Swallowing this
+      // failure
+      // silently made a run appear auditable when its prompt provenance had actually vanished.
+      // Execution still proceeds (the audit is non-blocking), but the failure is now surfaced as a
+      // structured log + metric and the prompt is returned DEGRADED (tracked=false) so downstream
+      // does not treat unrecorded provenance as clean.
+      log.warn(
+          "Prompt-audit persistence failed — prompt provenance NOT recorded (runId={},"
+              + " agentType={}, promptHash={}, error={}: {})",
+          runId,
+          agentType,
+          hash,
+          e.getClass().getSimpleName(),
+          e.getMessage());
+      if (meterRegistry != null) {
+        Counter.builder("executespec.prompt.audit.failures")
+            .description("Prompt-audit rows that failed to persist (RR-521 degraded provenance)")
+            .tag("agent_type", agentType == null ? "unknown" : agentType)
+            .register(meterRegistry)
+            .increment();
+      }
+      return new AssembledPrompt(text, hash, false);
     }
-    return new AssembledPrompt(text, hash);
   }
 
   private static String sha256Prefix(String input, int prefixLen) {

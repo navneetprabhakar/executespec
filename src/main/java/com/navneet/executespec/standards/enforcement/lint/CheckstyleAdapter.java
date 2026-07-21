@@ -72,27 +72,44 @@ public class CheckstyleAdapter implements LintAdapter {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());
     }
-    // Checkstyle exits non-zero when violations found — same parse-anyway
-    // pattern as eslint.
-    if (res.exitCode() != 0
-        && (res.stdout() == null || res.stdout().isBlank())
-        && res.stderr() != null
-        && !res.stderr().isBlank()) {
+    // RR-1610 — SUCCESS requires a structurally complete report, not merely the absence of stderr.
+    // The old three-way conjunction let a silently-killed process (exit=137, stdout="", stderr="")
+    // and a non-checkstyle binary on PATH (exit=0, stdout="") fall through to a clean SUCCESS.
+    int exit = res.exitCode();
+    String stdout = res.stdout();
+    // A real `checkstyle -f xml` run always writes a complete <checkstyle>...</checkstyle>
+    // document,
+    // even with zero violations. Blank stdout is never a valid clean result — it means the tool did
+    // not audit (exit=0 wrong binary) or was killed mid-run (exit=137).
+    if (stdout == null || stdout.isBlank()) {
       return new LintResult(
           tool(),
           LintResult.Status.FAILED,
           List.of(),
-          "checkstyle stderr: " + truncate(res.stderr()));
+          "checkstyle exited " + exit + " with no XML report" + describeStderr(res.stderr()));
+    }
+    // Require BOTH the opening and closing root tags so a truncated stream (process killed
+    // mid-write) cannot be scored as a complete, passing audit.
+    if (!stdout.contains("<checkstyle") || !stdout.contains("</checkstyle>")) {
+      return new LintResult(
+          tool(),
+          LintResult.Status.FAILED,
+          List.of(),
+          "checkstyle output was not a complete XML report (exit " + exit + ")");
     }
     try {
-      return new LintResult(tool(), LintResult.Status.SUCCESS, parseXmlOutput(res.stdout()), null);
+      return new LintResult(tool(), LintResult.Status.SUCCESS, parseXmlOutput(stdout), null);
     } catch (Exception ex) {
       return new LintResult(
           tool(),
           LintResult.Status.FAILED,
           List.of(),
-          "could not parse checkstyle xml: " + ex.getMessage());
+          "could not parse checkstyle xml (exit " + exit + "): " + ex.getMessage());
     }
+  }
+
+  private static String describeStderr(String stderr) {
+    return stderr == null || stderr.isBlank() ? "" : ": " + truncate(stderr);
   }
 
   List<LintViolation> parseXmlOutput(String stdout) {

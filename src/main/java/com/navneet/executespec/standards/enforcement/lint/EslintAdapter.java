@@ -74,30 +74,64 @@ public class EslintAdapter implements LintAdapter {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());
     }
-    // eslint exits non-zero when violations found — still parse the
-    // stdout. Only treat empty-stdout-with-stderr as adapter failure.
-    if (res.exitCode() != 0
-        && (res.stdout() == null || res.stdout().isBlank())
-        && res.stderr() != null
-        && !res.stderr().isBlank()) {
+    // RR-1610 — SUCCESS must be inferred from the PRESENCE of a well-formed report, not the ABSENCE
+    // of an error signal. The old three-way conjunction (exit != 0 AND stdout blank AND stderr set)
+    // let a silently-killed linter (exit=137, stdout="", stderr="") and a non-eslint binary on PATH
+    // (exit=0, stdout="") both fall through to a clean SUCCESS with zero violations.
+    int exit = res.exitCode();
+    String stdout = res.stdout();
+    // ESLint documents exactly two normal exit codes: 0 (no problems) and 1 (lint problems found).
+    // Any other code — 2 (config/internal error), -1 (timeout), 137 (SIGKILL/OOM) — means it did
+    // not
+    // run to a verdict, so it is NOT a passing lint regardless of stream contents.
+    if (exit != 0 && exit != 1) {
       return new LintResult(
-          tool(), LintResult.Status.FAILED, List.of(), "eslint stderr: " + truncate(res.stderr()));
+          tool(),
+          LintResult.Status.FAILED,
+          List.of(),
+          "eslint exited " + exit + describeStderr(res.stderr()));
     }
+    // A real `eslint --format json` run always emits a JSON array (at minimum `[]`). Blank stdout
+    // is
+    // never a valid clean result — the linter produced nothing to verify.
+    if (stdout == null || stdout.isBlank()) {
+      return new LintResult(
+          tool(),
+          LintResult.Status.FAILED,
+          List.of(),
+          "eslint exited " + exit + " with no JSON report" + describeStderr(res.stderr()));
+    }
+    JsonNode root;
     try {
-      return new LintResult(tool(), LintResult.Status.SUCCESS, parseJsonOutput(res.stdout()), null);
+      root = json.readTree(stdout);
     } catch (Exception ex) {
       return new LintResult(
           tool(),
           LintResult.Status.FAILED,
           List.of(),
-          "could not parse eslint json: " + ex.getMessage());
+          "could not parse eslint json (exit " + exit + "): " + ex.getMessage());
     }
+    if (!root.isArray()) {
+      return new LintResult(
+          tool(),
+          LintResult.Status.FAILED,
+          List.of(),
+          "eslint output was not a JSON report array (exit " + exit + ")");
+    }
+    return new LintResult(tool(), LintResult.Status.SUCCESS, extractViolations(root), null);
+  }
+
+  private static String describeStderr(String stderr) {
+    return stderr == null || stderr.isBlank() ? "" : ": " + truncate(stderr);
   }
 
   List<LintViolation> parseJsonOutput(String stdout) throws Exception {
     if (stdout == null || stdout.isBlank()) return List.of();
-    JsonNode arr = json.readTree(stdout);
-    if (!arr.isArray()) return List.of();
+    return extractViolations(json.readTree(stdout));
+  }
+
+  private List<LintViolation> extractViolations(JsonNode arr) {
+    if (arr == null || !arr.isArray()) return List.of();
     List<LintViolation> out = new ArrayList<>();
     for (JsonNode fileNode : arr) {
       String filePath = fileNode.path("filePath").asText("");

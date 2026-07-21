@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.contracts.detection.DetectorUtils;
+import com.navneet.executespec.standards.enforcement.EvaluationStatus;
 import com.navneet.executespec.standards.model.Standard;
 
 import org.springframework.stereotype.Component;
@@ -28,6 +29,33 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class FilePatternEnforcer {
+
+  /**
+   * RR-1611 — availability-aware evaluation. Reports whether the file-pattern check could actually
+   * run (a standard configured with no usable forbidden/required pattern, or a null inventory, is a
+   * degradation, not a clean pass) alongside its violations.
+   */
+  public FilePatternOutcome evaluate(
+      Standard.FilePatternEnforcement enforcement, List<String> repoFilePaths) {
+    if (enforcement == null) {
+      return new FilePatternOutcome(EvaluationStatus.INVALID_RULE, List.of());
+    }
+    if (repoFilePaths == null) {
+      return new FilePatternOutcome(EvaluationStatus.UNAVAILABLE, List.of());
+    }
+    boolean hasForbidden = hasUsablePattern(enforcement.forbiddenPatterns());
+    boolean hasRequired = hasUsablePattern(enforcement.requiredPatterns());
+    if (!hasForbidden && !hasRequired) {
+      // A file-pattern standard with no forbidden and no required pattern configured cannot enforce
+      // anything — treat it as a misconfigured rule, not a satisfied one.
+      return new FilePatternOutcome(EvaluationStatus.INVALID_RULE, List.of());
+    }
+    return new FilePatternOutcome(EvaluationStatus.EVALUATED, enforce(enforcement, repoFilePaths));
+  }
+
+  private static boolean hasUsablePattern(List<String> patterns) {
+    return patterns != null && patterns.stream().anyMatch(p -> p != null && !p.isBlank());
+  }
 
   public List<Violation> enforce(
       Standard.FilePatternEnforcement enforcement, List<String> repoFilePaths) {
@@ -86,4 +114,10 @@ public class FilePatternEnforcer {
       REQUIRED_FILE_MISSING
     }
   }
+
+  /**
+   * RR-1611 — the availability-aware result of one file-pattern evaluation: the violations plus
+   * whether the check could actually run against a configured rule and a real inventory.
+   */
+  public record FilePatternOutcome(EvaluationStatus status, List<Violation> violations) {}
 }
