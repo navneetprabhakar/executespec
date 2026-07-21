@@ -112,7 +112,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     int limit = policy.getLimit(group, tier);
 
     long minuteBucket = Instant.now().getEpochSecond() / 60;
-    String redisKey = buildRateLimitKey(identifier, group, minuteBucket);
+    String redisKey = buildRateLimitKey(identifier, group, tier, minuteBucket);
 
     try {
       Long count = redisTemplate.opsForValue().increment(redisKey);
@@ -158,7 +158,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
       log.warn("[RateLimit] Redis error, using local fallback: {}", e.getMessage());
       redisFailopenCounter.increment();
       int fallbackLimit = Math.max(1, limit / 2); // 50% of normal limit
-      String localKey = identifier + ":" + group + ":" + minuteBucket;
+      String localKey =
+          identifier
+              + ":"
+              + ("AUTH".equals(group) ? group + ":" + tier : group)
+              + ":"
+              + minuteBucket;
       cleanupLocalCounters(minuteBucket);
       int localCount =
           localCounters.computeIfAbsent(localKey, k -> new AtomicInteger(0)).incrementAndGet();
@@ -258,9 +263,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
     return remoteAddr;
   }
 
-  /** Builds the Redis key for rate limiting: {prefix}{identifier}:{group}:{minuteBucket}. */
-  private String buildRateLimitKey(String identifier, String group, long minuteBucket) {
-    return RATE_LIMIT_KEY_PREFIX + identifier + ":" + group + ":" + minuteBucket;
+  /**
+   * Builds the Redis key for rate limiting:
+   * {prefix}{identifier}:{group}[:{subType}]:{minuteBucket}.
+   *
+   * <p>For the AUTH group the sub-type is part of the key, so each auth endpoint gets its own
+   * counter. Without this the sub-type only selected the <em>limit</em> while every AUTH path
+   * shared one counter per identifier — so a burst on one endpoint consumed the budget of all the
+   * others. That was latent while AUTH held only login/register/forgot, but became a live
+   * availability problem once reset-password/refresh/verify-email joined the group (RR-1642):
+   * {@code /refresh} is called by every active session on access-token expiry, and its traffic
+   * would otherwise lock users out of {@code /login}.
+   *
+   * <p>Other groups keep the historical key shape. Their "tier" is a stable property of the
+   * identifier (FREE/PRO/…), not a per-request dimension, so splitting them would change nothing.
+   */
+  private String buildRateLimitKey(
+      String identifier, String group, String tier, long minuteBucket) {
+    String scope = "AUTH".equals(group) ? group + ":" + tier : group;
+    return RATE_LIMIT_KEY_PREFIX + identifier + ":" + scope + ":" + minuteBucket;
   }
 
   /**
