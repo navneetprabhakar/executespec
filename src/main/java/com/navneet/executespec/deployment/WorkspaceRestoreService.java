@@ -1,9 +1,10 @@
 package com.navneet.executespec.deployment;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
@@ -12,6 +13,7 @@ import java.util.zip.ZipInputStream;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -41,6 +43,16 @@ public class WorkspaceRestoreService {
 
   /** Per-runId lock to prevent concurrent downloads of the same workspace. */
   private final ConcurrentHashMap<String, Object> restoreLocks = new ConcurrentHashMap<>();
+
+  /**
+   * RR-161 zip-bomb ceilings. A restored workspace is a real repository, so these are generous, but
+   * a crafted archive must not be able to exhaust host disk/inodes or the heap during extraction.
+   */
+  private static final long MAX_TOTAL_UNCOMPRESSED_BYTES = 8L * 1024 * 1024 * 1024; // 8 GiB
+
+  private static final long MAX_ENTRY_BYTES = 2L * 1024 * 1024 * 1024; // 2 GiB
+
+  private static final int MAX_ENTRIES = 200_000;
 
   /**
    * Returns the local workspace path for the given run, restoring from GCS if necessary.
@@ -110,9 +122,20 @@ public class WorkspaceRestoreService {
   }
 
   private void extractZip(Path zipPath, Path targetDir) throws IOException {
+    // RR-161: the previous extraction had a zip-slip guard but no size, count, or per-entry caps,
+    // so a crafted archive (few compressed bytes, terabytes expanded, or millions of entries) could
+    // exhaust host disk/inodes. Bound entry count, per-entry bytes and total uncompressed bytes,
+    // and copy through a bounded loop rather than the unbounded Files.copy(zis, ...).
+    long totalBytes = 0;
+    int entryCount = 0;
+    byte[] buffer = new byte[8192];
     try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipPath))) {
       ZipEntry entry;
       while ((entry = zis.getNextEntry()) != null) {
+        if (++entryCount > MAX_ENTRIES) {
+          throw new IOException(
+              "Archive rejected: exceeds " + MAX_ENTRIES + " entries (possible zip bomb)");
+        }
         Path entryPath = targetDir.resolve(entry.getName()).normalize();
         // Security: prevent zip-slip attack
         if (!entryPath.startsWith(targetDir)) {
@@ -120,9 +143,26 @@ public class WorkspaceRestoreService {
         }
         if (entry.isDirectory()) {
           Files.createDirectories(entryPath);
-        } else {
-          Files.createDirectories(entryPath.getParent());
-          Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+          zis.closeEntry();
+          continue;
+        }
+        Files.createDirectories(entryPath.getParent());
+        long entryBytes = 0;
+        try (OutputStream out = Files.newOutputStream(entryPath)) {
+          int n;
+          while ((n = zis.read(buffer)) != -1) {
+            entryBytes += n;
+            totalBytes += n;
+            if (entryBytes > MAX_ENTRY_BYTES) {
+              throw new IOException(
+                  "Archive rejected: entry " + entry.getName() + " exceeds per-file cap");
+            }
+            if (totalBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+              throw new IOException(
+                  "Archive rejected: uncompressed size exceeds cap (possible zip bomb)");
+            }
+            out.write(buffer, 0, n);
+          }
         }
         zis.closeEntry();
       }
@@ -146,13 +186,25 @@ public class WorkspaceRestoreService {
     }
   }
 
-  private void runGit(Path dir, String... cmd) throws IOException, InterruptedException {
+  private void runGit(Path dir, String... cmd) throws IOException {
     ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
-    Process p = pb.start();
-    p.getInputStream().readAllBytes(); // drain stdout/stderr
-    int exit = p.waitFor();
-    if (exit != 0) {
-      throw new IOException("Command failed (exit " + exit + "): " + String.join(" ", cmd));
+    // Same read-before-waitFor pattern as the RR-651/RR-999 family: the old drain read stdout to
+    // EOF and then called waitFor() with NO timeout, so a hung git could block restore forever.
+    // BoundedProcess drains on a separate thread with a reachable deadline and a bounded buffer.
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, Duration.ofSeconds(60));
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException("Command failed: " + String.join(" ", cmd), e);
+    }
+    if (!outcome.finished()) {
+      throw new IOException("Command timed out: " + String.join(" ", cmd));
+    }
+    if (outcome.exitCode() != 0) {
+      throw new IOException(
+          "Command failed (exit " + outcome.exitCode() + "): " + String.join(" ", cmd));
     }
   }
 

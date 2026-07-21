@@ -371,8 +371,12 @@ public class OutlinePlannerAgent {
     // 4 = per-call ceiling" rule of thumb already used in
     // RunOrchestrator.runLargePipeline.
     ChatResponse resp;
+    // RR-505: declared outside the try so the TimeoutException path can cancel it. Leaving the
+    // future scoped inside the try meant a stalled provider call kept running on the common pool
+    // and kept spending after the run had already taken its failure/fallback path.
+    CompletableFuture<ChatResponse> fut = null;
     try {
-      CompletableFuture<ChatResponse> fut =
+      fut =
           CompletableFuture.supplyAsync(
               () ->
                   router.call(
@@ -400,6 +404,12 @@ public class OutlinePlannerAgent {
                           .build()));
       resp = fut.get(PLANNER_LLM_WALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     } catch (TimeoutException te) {
+      // RR-505: free the waiter and interrupt the common-pool worker running router.call. The
+      // per-call HTTP read-timeout (readTimeoutSeconds above) is what actually bounds the transport
+      // — it is wired for Gemini; Anthropic/OpenAI clients ignore it today — so cancel(true) stops
+      // the JVM-side wait but a socket already mid-response may run to completion. That is the
+      // honest limit here: this frees the thread, it does not guarantee the provider stops billing.
+      fut.cancel(true);
       log.error(
           "OutlinePlanner [{}] WALL_TIMEOUT after {}s — provider {} may be stalled",
           mode,
