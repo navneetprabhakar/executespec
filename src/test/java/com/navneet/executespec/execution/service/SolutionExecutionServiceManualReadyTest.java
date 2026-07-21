@@ -1,11 +1,14 @@
 package com.navneet.executespec.execution.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.repository.AppUserRepository;
@@ -14,6 +17,8 @@ import com.navneet.executespec.execution.entity.ExecutionSolution;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository;
+import com.navneet.executespec.execution.service.SolutionExecutionService.DecisionOutcome;
+import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
@@ -27,6 +32,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+/**
+ * RR-530 — manual-ready must prove a prior FIX decision and win a one-shot conditional transition,
+ * not simply overwrite whatever state the solution happened to be in.
+ */
 @ExtendWith(MockitoExtension.class)
 class SolutionExecutionServiceManualReadyTest {
 
@@ -45,39 +54,82 @@ class SolutionExecutionServiceManualReadyTest {
   @Mock GitHubRepoService gitHubRepoService;
   @Mock ExecutionRunCasUpdater runCas;
   @Mock ExecutionCostAggregator costAggregator;
+  @Mock RunLifecycleService runLifecycleService;
 
   @InjectMocks SolutionExecutionService service;
+
+  private static ExecutionSolution solution(ExecutionRun run, String status) {
+    return ExecutionSolution.builder()
+        .id("solution-1")
+        .executionRun(run)
+        .status(status)
+        .createdAt(Instant.now())
+        .updatedAt(Instant.now())
+        .build();
+  }
 
   @Test
   void foreignRunSolutionIsDeniedBeforeAnySideEffect() {
     when(solutionRepo.findByIdAndExecutionRun_Id("solution-2", "run-1"))
         .thenReturn(Optional.empty());
 
-    assertThat(service.signalManualFixDone("run-1", "solution-2")).isFalse();
+    assertThat(service.signalManualFixDone("run-1", "solution-2", "user-1"))
+        .isEqualTo(DecisionOutcome.NOT_FOUND);
 
-    verify(solutionRepo, never()).save(org.mockito.ArgumentMatchers.any());
+    verify(solutionRepo, never()).claimManualFixDone(any(), any(), any(), any());
     verifyNoInteractions(jiraSync, broadcaster, runCas);
   }
 
   @Test
-  void sameRunSolutionCompletesAndResumesItsBoundRun() {
+  void awaitingManualFixSolutionCompletesAndResumesItsBoundRun() {
     ExecutionRun run = ExecutionRun.builder().id("run-1").build();
-    ExecutionSolution solution =
-        ExecutionSolution.builder()
-            .id("solution-1")
-            .executionRun(run)
-            .status("AWAITING_FIX")
-            .build();
+    ExecutionSolution sol = solution(run, SolutionExecutionService.AWAITING_MANUAL_FIX);
     when(solutionRepo.findByIdAndExecutionRun_Id("solution-1", "run-1"))
-        .thenReturn(Optional.of(solution));
+        .thenReturn(Optional.of(sol));
+    when(solutionRepo.claimManualFixDone(eq("solution-1"), eq("run-1"), eq("user-1"), any()))
+        .thenReturn(1);
+    when(solutionRepo.findById("solution-1")).thenReturn(Optional.of(sol));
 
-    assertThat(service.signalManualFixDone("run-1", "solution-1")).isTrue();
+    assertThat(service.signalManualFixDone("run-1", "solution-1", "user-1"))
+        .isEqualTo(DecisionOutcome.APPLIED);
 
-    assertThat(solution.getStatus()).isEqualTo("DONE");
-    assertThat(solution.getCompletedAt()).isNotNull();
-    verify(solutionRepo).save(solution);
-    verify(jiraSync).updateTicket(run, solution, "Manual fix signalled as complete.", "Done");
-    verify(runCas)
-        .casUpdate(org.mockito.ArgumentMatchers.eq("run-1"), org.mockito.ArgumentMatchers.any());
+    verify(jiraSync).updateTicket(run, sol, "Manual fix signalled as complete.", "Done");
+    verify(runCas).casUpdate(eq("run-1"), any());
+  }
+
+  /**
+   * The core RR-530 regression: a solution that is still RUNNING (or QUEUED, or already DONE) was
+   * previously marked DONE by this call and the parent launch resumed. The conditional transition
+   * loses, so nothing happens.
+   */
+  @Test
+  void runningSolutionCannotBeMarkedDoneByManualReady() {
+    ExecutionRun run = ExecutionRun.builder().id("run-1").build();
+    ExecutionSolution sol = solution(run, "RUNNING");
+    when(solutionRepo.findByIdAndExecutionRun_Id("solution-1", "run-1"))
+        .thenReturn(Optional.of(sol));
+    when(solutionRepo.claimManualFixDone(eq("solution-1"), eq("run-1"), eq("user-1"), any()))
+        .thenReturn(0);
+
+    assertThat(service.signalManualFixDone("run-1", "solution-1", "user-1"))
+        .isEqualTo(DecisionOutcome.ILLEGAL_STATE);
+
+    verifyNoInteractions(jiraSync, broadcaster, runCas);
+  }
+
+  /** A replayed manual-ready loses the transition the second time and does not resume again. */
+  @Test
+  void replayedManualReadyIsRefused() {
+    ExecutionRun run = ExecutionRun.builder().id("run-1").build();
+    ExecutionSolution sol = solution(run, "DONE");
+    when(solutionRepo.findByIdAndExecutionRun_Id("solution-1", "run-1"))
+        .thenReturn(Optional.of(sol));
+    when(solutionRepo.claimManualFixDone(eq("solution-1"), eq("run-1"), eq("user-1"), any()))
+        .thenReturn(0);
+
+    assertThat(service.signalManualFixDone("run-1", "solution-1", "user-1"))
+        .isEqualTo(DecisionOutcome.ILLEGAL_STATE);
+
+    verifyNoInteractions(runCas);
   }
 }

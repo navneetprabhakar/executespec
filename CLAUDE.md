@@ -739,6 +739,28 @@ selections fail closed on both sides — an unparseable or non-UUID value is an 
 non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
 LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
 
+**Solution decision authority + child fencing (2026-07-21, V327).** The Execution-View per-solution
+gate had no state machine. `SolutionExecutionService.processDecision` applied SKIP / RETRY / FIX /
+ATTEMPT_ANYWAY to a solution in ANY state and merely logged an unknown action, and
+`signalManualFixDone` marked any matching solution DONE without proving a prior FIX — so a stale,
+repeated or crafted call could skip QUEUED/RUNNING work, mark it complete, retry an already-finished
+solution, and resume the parent launch without the human decision the gate represents; two concurrent
+RETRYs could each launch a paid child run (RR-530). Each action is now an atomic conditional UPDATE
+(`ExecutionSolutionRepository.claimDecision` / `claimManualFixDone`) out of exactly one legal prior
+state — `FAILED` for the four decisions, and the new `AWAITING_MANUAL_FIX` state a FIX decision
+creates for manual-ready — stamping actor/action/time (V327) inside the same statement, so only the
+caller that won performs the JIRA/SSE/resume side effects. `processDecision` returns a
+`DecisionOutcome`; `POST /api/executions/{id}/solutions/{solutionId}/decide` and `/manual-ready` now
+answer **409** on an illegal or replayed decision and **400** on an unknown action instead of 202.
+Separately, a solution whose child V2 run exceeded the 2h poll was recorded FAILED but never
+cancelled, so the child — submitted with `skipApproval=true` — kept spending, mutating the workspace
+and could open/push a customer PR after the parent was paused, retried or skipped (RR-531). Timeout
+now requests idempotent cancellation through `RunLifecycleService.cancel` and waits up to 30s for a
+terminal acknowledgement; a child that had actually finished is reconciled to its real terminal
+status rather than reported as a timeout, an unconfirmed stop is stated as unconfirmed, and a RETRY
+decision fences the superseded child before claiming. **Not closed:** push authority is still not
+bound to the current solution attempt generation — that lives in the publication path, not here.
+
 **Route truth (Adaptive C1 Steps 4-7, 2026-07-19):** the per-task poisoned-feedback finding is now
 corrected at the task layer. V305 adds `agent_task.effective_provider` / `effective_model` /
 `effective_route_attribution`, populated by `RunTokenAttributor.attributeWorker` from the
@@ -800,7 +822,8 @@ failed-run quota compensation; V301 snapshots the human project/org/global role 
 intents so later membership edits cannot rewrite historical usage exports. V302 adds the preview-render
 bundle tables for the flag-gated `previewrender/` prototype and is treated as permanently occupied even
 if that prototype is later discarded. V303 adds durable run-submission idempotency; V304 adds
-benchmark per-attempt route attribution; V305 adds `agent_task` effective-route columns; V306 adds
+benchmark per-attempt route attribution; **V327** adds Execution-View solution decision actor/action
+evidence (RR-530); V305 adds `agent_task` effective-route columns; V306 adds
 preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
 `contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
 valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped

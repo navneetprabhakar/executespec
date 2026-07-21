@@ -223,8 +223,21 @@ public class ExecutionController {
     if (!sol.getExecutionRun().getId().equals(run.getId())) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "solution does not belong to run");
     }
-    solutionExecService.processDecision(sol, req.action());
-    return ResponseEntity.accepted().build();
+    // RR-530 — the decision is a conditional transition out of one exact state. Report what
+    // actually happened instead of accepting a replayed / illegal / unknown action as applied.
+    var outcome = solutionExecService.processDecision(sol, req.action(), user.getId());
+    return switch (outcome) {
+      case APPLIED -> ResponseEntity.accepted().build();
+      case UNKNOWN_ACTION ->
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST, "unsupported decision action: " + req.action());
+      case NOT_FOUND -> throw new ResponseStatusException(HttpStatus.NOT_FOUND, "solution");
+      case ILLEGAL_STATE ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "solution is not awaiting a decision (it may have already been decided, retried or"
+                  + " completed) — reload the launch and try again");
+    };
   }
 
   @PostMapping("/api/executions/{id}/solutions/{solutionId}/manual-ready")
@@ -234,10 +247,17 @@ public class ExecutionController {
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
     requireRunWriteAccess(id, principal);
-    if (!solutionExecService.signalManualFixDone(id, solutionId)) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "solution");
-    }
-    return ResponseEntity.accepted().build();
+    // RR-530 — manual-ready is legal only after a FIX decision put this solution into
+    // AWAITING_MANUAL_FIX. Anything else is a replay or a stale client, not a completion.
+    var outcome = solutionExecService.signalManualFixDone(id, solutionId, user.getId());
+    return switch (outcome) {
+      case APPLIED -> ResponseEntity.accepted().build();
+      case NOT_FOUND -> throw new ResponseStatusException(HttpStatus.NOT_FOUND, "solution");
+      case ILLEGAL_STATE, UNKNOWN_ACTION ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "solution is not awaiting a manual fix — choose FIX on the paused solution first");
+    };
   }
 
   /**
