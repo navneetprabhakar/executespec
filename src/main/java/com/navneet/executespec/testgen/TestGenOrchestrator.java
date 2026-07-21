@@ -197,6 +197,7 @@ public class TestGenOrchestrator {
           testCompilationGate.compileTests(runId);
 
       if (compilationResult.success()) {
+        testCompilationGate.markCompiled(testPlan.getId());
         testPlan.setStatus(TestPlanStatus.COMPILED);
         emitTestEvent(runId, "TEST_COMPILATION_PASSED", "All tests compiled successfully");
       } else {
@@ -252,11 +253,17 @@ public class TestGenOrchestrator {
   }
 
   /**
-   * Handle compilation failure: retry failed tasks, re-compile, and determine if any tests
-   * survived.
+   * Handle compilation failure: retry failed tasks, re-compile, and determine whether the test
+   * project now compiles.
    *
-   * @return true if at least some tests compiled successfully, false if all failed (pipeline should
-   *     abort)
+   * <p><strong>RR-1584.</strong> The gate is {@code retryResult.success()} — the compiler's own
+   * exit status — not a survivor count derived from regex attribution. The previous version counted
+   * every task the {@code [ERROR] …Test.java} regex failed to name as a survivor, so a
+   * whole-project failure (dependency resolution, broken POM, compile timeout, absent {@code mvn})
+   * yielded zero named classes, a full survivor count, a "N tests compiled" event, a COMPILED plan
+   * and a {@code TestsReadyEvent} — for a project that does not compile.
+   *
+   * @return true only if the test project compiles; false aborts the pipeline
    */
   private boolean handleCompilationFailure(
       String runId,
@@ -277,31 +284,27 @@ public class TestGenOrchestrator {
     // Re-compile after retries
     TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
     if (retryResult.success()) {
+      testCompilationGate.markCompiled(testPlan.getId());
       testPlan.setStatus(TestPlanStatus.COMPILED);
       emitTestEvent(runId, "TEST_COMPILATION_PASSED", "Tests compiled after retry");
       return true;
     }
 
-    // Mark remaining failures
+    // Still red after the retry pass. Record the failure and stop — the raw compiler output is
+    // retained on the tasks. No COMPILED plan and no TestsReadyEvent for a project that does not
+    // compile, whether or not the failure could be attributed to specific classes.
     testCompilationGate.markFailedTasks(
         testPlan.getId(), retryResult.failedClasses(), retryResult.output());
 
-    // Check if any tests survived
-    long compiledCount =
-        testTaskRepository.findByTestPlanId(testPlan.getId()).stream()
-            .filter(t -> t.getStatus() != TestTaskStatus.FAILED)
-            .count();
-    if (compiledCount > 0) {
-      testPlan.setStatus(TestPlanStatus.COMPILED);
-      emitTestEvent(
-          runId,
-          "TEST_COMPILATION_PASSED",
-          compiledCount + " tests compiled (" + retryResult.failedClasses().size() + " failed)");
-      return true;
-    }
-
     testPlan.setStatus(TestPlanStatus.FAILED);
-    emitTestEvent(runId, "TEST_COMPILATION_FAILED", "All tests failed compilation");
+    emitTestEvent(
+        runId,
+        "TEST_COMPILATION_FAILED",
+        retryResult.failedClasses().isEmpty()
+            ? "Test project failed to compile (failure could not be attributed to a test class)"
+            : "Test project failed to compile ("
+                + retryResult.failedClasses().size()
+                + " class(es) with errors)");
     testPlanRepository.save(testPlan);
     // Notify that test pipeline ended (no results)
     eventPublisher.publishEvent(

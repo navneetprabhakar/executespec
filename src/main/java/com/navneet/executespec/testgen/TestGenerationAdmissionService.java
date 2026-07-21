@@ -52,6 +52,26 @@ public class TestGenerationAdmissionService {
         true, null, workspace, paths, changes.baselineFingerprint(), workspaceFingerprint);
   }
 
+  /**
+   * Recompute the relevant product-diff fingerprint for a run as it stands right now (RR-1583).
+   *
+   * <p>V277 persisted this fingerprint on the test plan but nothing ever read it back, so a
+   * workspace that legitimately changed after planning — reviewer fix-build pass, post-review
+   * step-up rerun, approved continuation — was still scored as evidence for the original diff. Test
+   * execution calls this immediately before and after running, and refuses to publish pass counts
+   * when it does not match what the plan was bound to.
+   *
+   * @return the current fingerprint, or null when it cannot be computed (treat as a mismatch)
+   */
+  public String currentWorkspaceFingerprint(String runId) {
+    Path workspace = workspaceInitService.runWorkspacePath(runId);
+    if (workspace == null || !Files.isDirectory(workspace)) return null;
+    RunChangeEvidenceService.ChangeEvidence changes =
+        changeEvidenceService.inspect(runId, List.of());
+    if (changes == null || !changes.valid()) return null;
+    return workspaceFingerprint(workspace, changes);
+  }
+
   public boolean targetExists(Admission admission, TestTask task) {
     if (admission == null || !admission.admitted() || task == null) return false;
     String target = task.getTargetEntity();
