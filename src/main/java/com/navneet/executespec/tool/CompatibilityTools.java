@@ -1247,6 +1247,27 @@ final class McpClientFallbackTool implements Tool {
   /** Hard cap on stdout/stderr bytes read back from an MCP server (RR-551). */
   private static final int MAX_MCP_STREAM_BYTES = 256 * 1024;
 
+  /**
+   * RR-551. The ONLY inherited environment variables an allowlisted MCP child receives. Everything
+   * else — every provider API key, GitHub/Bitbucket PAT, cloud credential, and the backend's own
+   * configuration — is dropped, so a subverted or hostile MCP server cannot read the application's
+   * secrets out of its own process environment. This mirrors {@code repo/GitProcessAuth}'s
+   * hardened-environment approach: keep only what a benign non-interactive process legitimately
+   * needs to find its executable and format output (executable search path + locale).
+   *
+   * <p>{@code HOME} and {@code TMPDIR} are deliberately absent here: they are pinned to a private,
+   * per-call temporary directory in {@link #startHardenedProcess} instead of inherited, so that
+   * {@code $HOME}-relative credential files ({@code ~/.aws/credentials}, {@code ~/.config/...},
+   * {@code ~/.netrc}) resolve to an empty scratch directory rather than the backend service
+   * account's real home.
+   *
+   * <p>This is a secret-free environment and an explicit safe working directory, not a full
+   * cleanroom: the child still shares the host kernel, filesystem (outside {@code $HOME}) and
+   * network namespace. Container/network isolation remains out of scope for this change.
+   */
+  static final java.util.Set<String> ENV_ALLOWLIST =
+      java.util.Set.of("PATH", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES");
+
   private static String callStdio(String command, String method, JsonNode params)
       throws IOException, InterruptedException {
     java.util.List<String> argv = argvFor(command);
@@ -1255,7 +1276,20 @@ final class McpClientFallbackTool implements Tool {
     }
     // No shell: argv is executed directly, so nothing in the command string can be reinterpreted
     // as an operator, substitution or second command (RR-551).
-    Process process = new ProcessBuilder(argv).start();
+    Path workDir = Files.createTempDirectory("es-mcp-");
+    try {
+      return callStdioIn(argv, method, params, workDir);
+    } finally {
+      deleteRecursivelyQuiet(workDir);
+    }
+  }
+
+  private static String callStdioIn(
+      java.util.List<String> argv, String method, JsonNode params, Path workDir)
+      throws IOException, InterruptedException {
+    // RR-551: the child runs with a secret-free environment and an explicit, private working
+    // directory instead of inheriting the backend's environment and CWD.
+    Process process = startHardenedProcess(argv, workDir);
     String initialize =
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"executespec-backend\",\"version\":\"1\"}}}";
     String initialized =
@@ -1302,6 +1336,62 @@ final class McpClientFallbackTool implements Tool {
   private static void killTree(Process process) {
     process.descendants().forEach(ProcessHandle::destroyForcibly);
     process.destroyForcibly();
+  }
+
+  /**
+   * RR-551. Starts the allowlisted MCP child with a stripped, secret-free environment and an
+   * explicit private working directory. {@link ProcessBuilder} defaults to inheriting the FULL
+   * parent environment (every provider key/PAT/cloud credential) and the backend's own working
+   * directory; this replaces that inheritance with only {@link #ENV_ALLOWLIST} plus a {@code HOME}
+   * / {@code TMPDIR} pinned to {@code workDir}. Package-private for direct test assertion.
+   */
+  static Process startHardenedProcess(java.util.List<String> argv, Path workDir)
+      throws IOException {
+    ProcessBuilder pb = new ProcessBuilder(argv);
+    java.util.Map<String, String> env = pb.environment();
+    java.util.Map<String, String> preserved = new java.util.LinkedHashMap<>();
+    for (String key : ENV_ALLOWLIST) {
+      String value = System.getenv(key);
+      if (value != null && !value.isBlank()) {
+        preserved.put(key, value);
+      }
+    }
+    env.clear();
+    env.putAll(preserved);
+    // Private, writable HOME/TMPDIR that is NOT the backend service account's, so $HOME-relative
+    // credential files are unreachable and scratch writes land in the disposable work dir.
+    String work = workDir.toString();
+    env.put("HOME", work);
+    env.put("TMPDIR", work);
+    pb.directory(workDir.toFile());
+    return pb.start();
+  }
+
+  /** Best-effort recursive delete of the per-call MCP scratch directory; never throws. */
+  private static void deleteRecursivelyQuiet(Path root) {
+    if (root == null) return;
+    try {
+      Files.walkFileTree(
+          root,
+          new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                throws IOException {
+              Files.deleteIfExists(file);
+              return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc)
+                throws IOException {
+              Files.deleteIfExists(dir);
+              return FileVisitResult.CONTINUE;
+            }
+          });
+    } catch (IOException ignored) {
+      // A hostile server holding a descriptor open cannot fail the tool call; the OS reclaims the
+      // temp tree on restart.
+    }
   }
 
   /**
