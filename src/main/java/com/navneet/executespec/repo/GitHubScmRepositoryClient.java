@@ -78,7 +78,14 @@ public class GitHubScmRepositoryClient implements ScmRepositoryClient {
   public String readFile(
       ScmRemoteRepository repository, String branch, String path, ScmCredential credential) {
     requireCredential(credential);
-    return github.readRepoFile(repository.cloneUrl(), path, branch, credential.secret());
+    GitHubRepoService.RepoFileResult result =
+        github.readRepoFile(repository.cloneUrl(), path, branch, credential.secret());
+    // RR-1631 — the provider-neutral contract signals failure by throwing (Bitbucket already does).
+    // Returning GitHub's old "// …" sentinel here would hand callers an error message as content.
+    if (!result.successful()) {
+      throw new ScmProviderException(result.errorCode(), result.upstreamStatus(), false);
+    }
+    return result.content();
   }
 
   private ScmRemoteRepository map(GitHubRepoService.RemoteRepo repo) {

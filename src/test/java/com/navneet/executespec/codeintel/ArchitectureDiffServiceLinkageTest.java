@@ -86,7 +86,9 @@ class ArchitectureDiffServiceLinkageTest {
         "{\"acme/api\":\"bbb\",\"acme/gone\":\"ddd\"}");
     linked("acme/api"); // acme/gone was unlinked after v2 was generated
     when(gitHub.compareCommits(anyString(), anyString(), anyString(), any()))
-        .thenReturn(List.of(new ChangedFile("src/A.java", "modified", 3, 1)));
+        .thenReturn(
+            GitHubRepoService.CompareResult.success(
+                List.of(new ChangedFile("src/A.java", "modified", 3, 1))));
 
     DiffReport report = service.diff("p1", 1, 2, null);
 
@@ -98,20 +100,39 @@ class ArchitectureDiffServiceLinkageTest {
     assertThat(report.skipped().get(0).status()).isEqualTo("NOT_LINKED");
   }
 
+  /**
+   * RR-1656 — this test previously asserted that an EMPTY compare is unverified, because the old
+   * List-returning API could not tell a failed compare from a genuine no-change one. Now it can, so
+   * the assertion is split: a FAILED compare is the unverified case.
+   */
   @Test
-  void emptyCompareIsReportedAsUnverifiedNotAsZeroChanges() {
+  void failedCompareIsReportedAsUnverifiedNotAsZeroChanges() {
     docs("{\"acme/api\":\"aaa\"}", "{\"acme/api\":\"bbb\"}");
     linked("acme/api");
-    // compareCommits returns an empty list on non-200, network error, or missing access —
-    // indistinguishable from a genuine no-file compare at this layer.
-    when(gitHub.compareCommits(anyString(), anyString(), anyString(), any())).thenReturn(List.of());
+    when(gitHub.compareCommits(anyString(), anyString(), anyString(), any()))
+        .thenReturn(GitHubRepoService.CompareResult.failed("GITHUB_COMPARE_HTTP_ERROR", 403));
 
     DiffReport report = service.diff("p1", 1, 2, null);
 
     assertThat(report.totalFiles()).isZero();
     assertThat(report.perRepo()).isEmpty();
     assertThat(report.unverified()).hasSize(1);
-    assertThat(report.unverified().get(0).status()).isEqualTo("COMPARE_EMPTY");
+    assertThat(report.unverified().get(0).status()).isEqualTo("COMPARE_FAILED");
+  }
+
+  /** RR-1656 — a compare that ran and legitimately found nothing is NOT unverified. */
+  @Test
+  void successfulEmptyCompareIsAVerifiedNoChangeNotUnverified() {
+    docs("{\"acme/api\":\"aaa\"}", "{\"acme/api\":\"bbb\"}");
+    linked("acme/api");
+    when(gitHub.compareCommits(anyString(), anyString(), anyString(), any()))
+        .thenReturn(GitHubRepoService.CompareResult.success(List.of()));
+
+    DiffReport report = service.diff("p1", 1, 2, null);
+
+    assertThat(report.totalFiles()).isZero();
+    assertThat(report.perRepo()).isEmpty();
+    assertThat(report.unverified()).isEmpty();
   }
 
   @Test
