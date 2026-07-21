@@ -22,6 +22,21 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 final class ValidationVerificationLedgerBuilder {
 
+  /**
+   * RR-1646 — provenance label for the persisted concrete-test counts.
+   *
+   * <p>{@code DETERMINISTIC} is the one label this ledger uses to claim independence from an LLM.
+   * The counts on {@code validation_report.tests_passed/tests_total} originate from test-runner
+   * report files read off disk with no exit-code check and no per-run directory reset (RR-1582), so
+   * they can describe a run that did not happen. Until an execution-freshness/provenance token is
+   * persisted with those counts, they are labelled as an unverified count at MEDIUM confidence
+   * rather than asserted as independent proof. Status is unchanged, so run-level goal proof keeps
+   * its existing (conservative) semantics.
+   */
+  private static final String TEST_COUNT_SOURCE = "UNVERIFIED_COUNT";
+
+  private static final String TEST_COUNT_CONFIDENCE = "MEDIUM";
+
   private final ObjectMapper objectMapper;
 
   ValidationVerificationLedgerBuilder(ObjectMapper objectMapper) {
@@ -88,6 +103,9 @@ final class ValidationVerificationLedgerBuilder {
 
     if (entity.getExecutableVerificationStatus() != null) {
       String executableStatus = entity.getExecutableVerificationStatus();
+      // RR-1646 — this row is deterministic only while it rests on the build signal. Once the
+      // status was decided by the concrete-test counts, it inherits their unproven provenance.
+      boolean restsOnTestCounts = Boolean.TRUE.equals(entity.getExecutableTestsRun());
       out.add(
           evidence(
               "executable-verification",
@@ -99,9 +117,12 @@ final class ValidationVerificationLedgerBuilder {
                 case "FAILED" -> "FAIL";
                 default -> "UNKNOWN";
               },
-              "DETERMINISTIC",
-              "HIGH",
-              "The admitted product diff has reloadable build and concrete-test evidence.",
+              restsOnTestCounts ? TEST_COUNT_SOURCE : "DETERMINISTIC",
+              restsOnTestCounts ? TEST_COUNT_CONFIDENCE : "HIGH",
+              restsOnTestCounts
+                  ? "The admitted product diff has reloadable build evidence and a test-runner"
+                      + " result whose execution freshness is not independently proven."
+                  : "The admitted product diff has reloadable build and concrete-test evidence.",
               "Executable verification: "
                   + executableStatus
                   + (entity.getExecutionFailureStage() == null
@@ -122,9 +143,11 @@ final class ValidationVerificationLedgerBuilder {
             "Tests",
             "TESTS",
             total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
-            "DETERMINISTIC",
-            total <= 0 ? "MEDIUM" : "HIGH",
-            "Generated or workspace tests passed.",
+            TEST_COUNT_SOURCE,
+            total <= 0 ? "MEDIUM" : TEST_COUNT_CONFIDENCE,
+            "Generated or workspace tests passed. Counts are read from persisted test-runner"
+                + " output; the report carries no execution-freshness token, so a stale or absent"
+                + " run cannot be ruled out.",
             total <= 0
                 ? "No concrete test execution was captured."
                 : passed + "/" + total + " tests passed.",

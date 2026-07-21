@@ -155,6 +155,11 @@ class ValidationReportServiceVerifiedScoreTest {
   @Test
   void unfixed_critical_lightly_damps_floored_at_half() {
     // 1 critical → damper 0.95; 5 → 0.75; 10 → 0.5 (floor); 20 → still 0.5.
+    //
+    // RR-1650: the RL-2026-06-026 trust caps now apply to this legacy rollback path too, so the
+    // raw damped value is additionally bounded by "how credible can this headline be". 1
+    // unresolved critical caps at 85 (raw 95 → 85); 3+ cap at 70 (raw 75 → 70). The 10/20-critical
+    // cases already sat at the 0.5 damper floor of 50, below the cap, so they are unchanged.
     int s0 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0);
     int s1 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 1);
     int s5 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 5);
@@ -162,12 +167,31 @@ class ValidationReportServiceVerifiedScoreTest {
     int s20 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 20);
 
     assertEquals(100, s0);
-    assertEquals(95, s1);
-    assertEquals(75, s5);
+    assertEquals(85, s1);
+    assertEquals(70, s5);
     assertEquals(50, s10);
     // Floor at 50 — beyond 10 unfixed criticals, the verdict / build factors should be
     // dragging the score anyway; this damper isn't meant to bottom out the number.
     assertEquals(50, s20);
+  }
+
+  /**
+   * RR-1650 — this multiplicative formula is the documented rollback path for {@code
+   * scoring.additive-v2}. It used to return without any trust cap, so flipping the flag off also
+   * removed every "this headline is not credible above N" constraint the additive path applies.
+   */
+  @Test
+  void legacy_multiplicative_path_applies_the_same_trust_caps() {
+    // Raw multiplicative would be 100 × 1 × 1 × 0.85 (FIXED_ISSUES) × 1 × 0.95 = 81, but two
+    // unresolved criticals cap a credible headline at 85 — not binding here.
+    assertEquals(81, svc.computeVerifiedScore(true, 50, 50, "FIXED_ISSUES", 1));
+
+    // A run whose concrete tests all failed cannot headline above 70 regardless of the product.
+    // Raw: 100 × 1 × 0 × 1 × 1 × 1 = 0 — the multiplicative shape already floors it.
+    assertEquals(0, svc.computeVerifiedScore(true, 0, 10, "CLEAN", 0));
+
+    // Reviewer failed: raw 20, cap 70 — the cap is a ceiling, never a floor.
+    assertEquals(20, svc.computeVerifiedScore(true, 50, 50, "REVIEW_FAILED", 0));
   }
 
   @Test

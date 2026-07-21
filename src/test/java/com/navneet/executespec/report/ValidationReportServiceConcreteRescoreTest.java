@@ -158,4 +158,55 @@ class ValidationReportServiceConcreteRescoreTest {
     verify(repository, never()).save(any());
     verify(events, never()).publishEvent(any());
   }
+
+  /**
+   * RR-1647 — the generated HTTP/preview suite is a DIFFERENT population from the worker's own
+   * workspace suite captured at report generation. Replacing one with the other discarded a passing
+   * 10/10 worker suite the moment a 2/3 generated smoke landed. Both suites must stay counted.
+   */
+  @Test
+  void downstreamSuiteIsCombinedWithTheWorkerSuiteInsteadOfReplacingIt() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(any())).thenReturn(true);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-merge")
+            .runId("run-merge")
+            .filesGenerated(6)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(10)
+            .testsTotal(10)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+    when(repository.findByRunId("run-merge")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    ValidationReportService service =
+        new ValidationReportService(
+            repository, null, new ObjectMapper(), new SimpleMeterRegistry(), null, null, flags);
+
+    ValidationReport merged =
+        service
+            .rescoreAfterConcreteTests(
+                "run-merge",
+                TestExecutionSummary.builder().totalTests(3).passed(2).failed(1).build())
+            .orElseThrow();
+
+    assertEquals(13, merged.getTestsTotal(), "the worker suite must not be discarded");
+    assertEquals(12, merged.getTestsPassed());
+
+    // Re-delivering the same execution event must reproduce the same result, not stack again.
+    ValidationReport again =
+        service
+            .rescoreAfterConcreteTests(
+                "run-merge",
+                TestExecutionSummary.builder().totalTests(3).passed(2).failed(1).build())
+            .orElseThrow();
+    assertEquals(13, again.getTestsTotal(), "the merge must be anchored on a stable baseline");
+    assertEquals(12, again.getTestsPassed());
+  }
 }

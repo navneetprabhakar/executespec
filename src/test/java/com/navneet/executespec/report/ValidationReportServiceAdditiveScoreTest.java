@@ -79,6 +79,39 @@ class ValidationReportServiceAdditiveScoreTest {
         100, guarded, "a clean run with full endpoint coverage must be unaffected by guards");
   }
 
+  /**
+   * RR-1648 — the endpoint tie-in used to fire only when endpoint evidence existed, so a run with
+   * no endpoint block collected the full 30-point CODE_DELIVERED slot at 100 just for writing
+   * files. Absent evidence is not evidence of delivery: the slot now takes the midpoint (75) of the
+   * guarded range.
+   */
+  @Test
+  void guards_do_not_award_full_code_delivered_when_endpoint_evidence_is_absent() {
+    int guarded = svcGuardsOn().computeVerifiedScore(true, 10, 10, "CLEAN", 0, null, "GOOD", 4);
+    int unguarded = svcAdditiveOn().computeVerifiedScore(true, 10, 10, "CLEAN", 0, null, "GOOD", 4);
+    assertEquals(100, unguarded, "without guards an unmeasured run still reads 100");
+    // CODE 75 + BUILD 100 + TESTS 100 + REVIEWER 100 + CRIT 100 weighted over 100
+    //   = (30*75 + 25*100 + 20*100 + 20*100 + 5*100) / 100 = 92.5 → 93
+    assertEquals(
+        93,
+        guarded,
+        "unmeasured endpoint evidence must not buy a full CODE_DELIVERED slot. Got: " + guarded);
+  }
+
+  /**
+   * RR-1648 — an unrecognised / missing coverage judgment used to fall through to an uncapped 100,
+   * so a trivially-passing suite scored full marks whenever the LLM emitted nothing usable.
+   */
+  @Test
+  void guards_cap_the_tests_slot_when_the_coverage_judgment_is_unknown() {
+    int unknown = svcGuardsOn().computeVerifiedScore(true, 5, 5, "CLEAN", 0, 100, "UNKNOWN", 4);
+    int good = svcGuardsOn().computeVerifiedScore(true, 5, 5, "CLEAN", 0, 100, "GOOD", 4);
+    assertEquals(100, good, "an explicit GOOD judgment still lifts the cap");
+    // TESTS capped at 85: (30*100 + 25*100 + 20*85 + 20*100 + 5*100) / 100 = 97
+    assertEquals(97, unknown, "an unknown coverage judgment must not get the uncapped default");
+    assertTrue(unknown < good, "unknown coverage must score below an explicit GOOD judgment");
+  }
+
   @Test
   void no_files_generated_floors_score_to_zero() {
     int score = svcAdditiveOn().computeVerifiedScore(true, 50, 50, "CLEAN", 0, null, null, 0);
