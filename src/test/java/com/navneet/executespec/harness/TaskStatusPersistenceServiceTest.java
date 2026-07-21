@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -110,6 +111,87 @@ class TaskStatusPersistenceServiceTest {
     assertEquals("{\"state\":\"STOP_FAILED\"}", task.getGoalDonenessJson());
     assertEquals("{\"decision\":\"STOP\"}", task.getContinuationDecisionJson());
     verify(repository).saveAndFlush(task);
+  }
+
+  @Test
+  void reopenForContinuationResetsFailedTaskUnderLock() {
+    // RR-266 — a FAILED primary attempt whose recovery generation still matches is reopened to
+    // PENDING with completion timing cleared, so a selected model/provider handoff rerun can run.
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("PARTIAL")
+            .recoveryAttempt(2)
+            .completedAt(Instant.now())
+            .durationMs(1234L)
+            .build();
+    AtomicBoolean transactionActiveAtLock = new AtomicBoolean();
+    when(repository.findByIdForUpdate("12345678_T1"))
+        .thenAnswer(
+            invocation -> {
+              transactionActiveAtLock.set(
+                  TransactionSynchronizationManager.isActualTransactionActive());
+              return Optional.of(task);
+            });
+
+    boolean reopened =
+        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 2);
+
+    assertTrue(reopened, "matching FAILED/PARTIAL row must be reopened");
+    assertTrue(transactionActiveAtLock.get(), "reopen must acquire the lock in a transaction");
+    assertEquals("PENDING", task.getStatus());
+    org.junit.jupiter.api.Assertions.assertNull(task.getCompletedAt());
+    org.junit.jupiter.api.Assertions.assertNull(task.getDurationMs());
+    verify(repository).saveAndFlush(task);
+  }
+
+  @Test
+  void reopenForContinuationRefusesCancelledTask() {
+    // RR-266 — a task a concurrent cancellation moved to CANCELLED must NOT be reopened into a paid
+    // rerun: the caller has no authority and the cancellation must stand. (A soft COMPLETE, by
+    // contrast, is an escalatable primary outcome and IS reopenable — see reopenForContinuation.)
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("CANCELLED")
+            .recoveryAttempt(2)
+            .build();
+    when(repository.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
+
+    boolean reopened =
+        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 2);
+
+    assertFalse(reopened, "a CANCELLED task must not be reopened");
+    assertEquals("CANCELLED", task.getStatus());
+    verify(repository, org.mockito.Mockito.never())
+        .saveAndFlush(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void reopenForContinuationFencesStaleRecoveryGeneration() {
+    // RR-266 — a rolling-restart takeover bumped recovery_attempt; the stale executor's reopen must
+    // be fenced so it cannot revive a task another JVM now owns.
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("FAILED")
+            .recoveryAttempt(5)
+            .build();
+    when(repository.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
+
+    boolean reopened =
+        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 3);
+
+    assertFalse(reopened, "stale recovery generation must be fenced");
+    assertEquals("FAILED", task.getStatus());
+    verify(repository, org.mockito.Mockito.never())
+        .saveAndFlush(org.mockito.ArgumentMatchers.any());
   }
 
   @Test
