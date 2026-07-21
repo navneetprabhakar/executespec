@@ -61,7 +61,7 @@ frontend/
     │   └── signal.css               # .signal-* component styles (reused by ide/ via the ide.css token bridge)
     ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + uiMode pinned to 'console' via initUiMode), useRunStore, useSseStore
     ├── hooks/                       # useSse, useTierPermissions, useIsMobile, useDocumentTitle
-    ├── lib/                         # api/ split client + billing/execution clients + telemetry/ui helpers
+    ├── lib/                         # api/ split client + billing/execution clients + runStatus/ui helpers
     ├── types/                       # project.ts, execution.ts
     └── design-system/              # contrast.{ts,test.ts} (WCAG ratio helpers + dormant vitest test) + primitives.css
 ```
@@ -238,6 +238,47 @@ The reusable surface lives in `signal/components/` and is enumerated in the **"S
 - `FILE_WRITTEN` — fired by `WriteFileTool` / `EditFileTool`; bumps a file-written tick the file-tree subscribes to (debounced re-fetch of the listing only, no run-metadata refetch).
 
 (The live log + cost telemetry rendering itself lives on `IdeLive` in `ide/IdeSurfaces.tsx`, which also polls `/cost`; the global amber plan-gate chip is `ide/PlanGateIndicator.tsx`.)
+
+## Run-status vocabulary (single source)
+
+`src/lib/runStatus.ts` is the **only** run-status classifier. It is seeded from the backend's own
+literal sets — `integration/RunLifecycleService.NON_TERMINAL_STATUSES` for in-flight work and
+`integration/RunPipelineSupport.isTerminal` for settled work — and is consumed by `ide/planUtils.ts`
+(`isPlanExecutingStatus` / `isPlanTerminalStatus`), `ide/moreUtils.ts` (`isLiveStatus`),
+`ide/agentState.ts` (`isTerminalRunStatus`), and `ide/IdeProject.tsx` (the project "Active" count).
+Do not add another hardcoded status array: four independent lists all omitted the live
+`APPROVAL_RESUMING` state, so an approved run neither routed to Live (RR-1463) nor counted as active
+work on its project (RR-1521). `LEGACY_*` arrays hold spellings the current backend no longer writes
+but persisted rows still carry; keep new statuses out of them. `runStatus.test.ts` is table-driven
+over the backend literal sets and asserts every consumer agrees.
+
+`lib/utils.ts` is down to `errMsg` + `fmtCost`; the other six exports had no importers (RR-1535).
+`fmtCost` accepts `number | null | undefined` and returns `—` for unknown input — it must never
+render an unknown cost as `$0.0000` (RR-1538).
+
+Browser OpenTelemetry (`lib/telemetry.ts` and the six `@opentelemetry/*` dependencies) was **deleted**
+(RR-1534): it registered no instrumentations, created no spans, and its `VITE_OTEL_ENDPOINT` gate was
+set in no environment, while still shipping in the first-paint vendor chunk. Backend tracing is
+unaffected. Re-introducing browser tracing must start from a real per-environment OTLP endpoint plus
+an actual instrumentation registration, not a provider that only calls `register()`.
+
+## Truth-surface contracts
+
+Surfaces that report absence must distinguish "none" from "we could not tell you":
+
+- **Per-call LLM ledger** — `/api/runs/{id}/cost` restricts `stepCalls` to own-org ORG_ADMIN /
+  SUPER_ADMIN and returns `[]` plus `stepCallsIncluded: false` to everyone else, and pages it
+  newest-first via `stepCallsTotal` / `stepCallsHasMore`. Read it through
+  `ide/runCostLedger.ts:stepCallsView`, which separates `restricted` / `empty` / `rows` /
+  `unavailable`; rendering a withheld ledger as "no per-call attribution is available for this run"
+  is a false claim about the run (RR-1552/RR-1558).
+- **Contract drift** — `DriftCheckResult.hasDrift` is deliberately false for BOTH `NO_DRIFT` and
+  `UNAVAILABLE`, so branch on `status` and use `projectMoreUtils.ts:summarizeDriftResults` /
+  `driftSummaryMessage`. Counting `hasDrift` alone presents an unperformable check as clean
+  (RR-1631/RR-1658).
+- **Console shell rails** — `ConsoleShell` tracks `runsFailed` / `projectsFailed` / `unreadFailed`
+  separately. A failed read renders a retry affordance, never "No work yet" or the empty-projects
+  "New project" CTA (RR-1655).
 
 ## Accessibility
 

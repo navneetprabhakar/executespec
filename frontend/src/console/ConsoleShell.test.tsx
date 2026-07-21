@@ -119,6 +119,41 @@ describe('ConsoleShell focus affordances', () => {
   });
 });
 
+// RR-1655 — the three loaders shared one `apiError` boolean and left their state at
+// `[]`/`0` on failure, so a failed read rendered as an affirmative "you have none".
+describe('ConsoleShell per-source load state', () => {
+  it('does not claim the account has no projects when the projects read fails', async () => {
+    vi.mocked(api.getProjects).mockRejectedValue(new Error('offline'));
+    await renderShell('/home');
+
+    const sidebar = host.textContent ?? '';
+    expect(sidebar).toContain("Couldn't load projects");
+    expect(sidebar).not.toContain('New project');
+  });
+
+  it('keeps a successful runs rail intact when only the projects read fails', async () => {
+    vi.mocked(api.getProjects).mockRejectedValue(new Error('offline'));
+    vi.mocked(api.getRuns).mockResolvedValue({
+      content: [{runId: 'run-1', status: 'COMPLETE', userRequest: 'Add a login page'}],
+    } as Awaited<ReturnType<typeof api.getRuns>>);
+    await renderShell('/home');
+
+    const sidebar = host.textContent ?? '';
+    expect(sidebar).not.toContain('No work yet');
+    expect(sidebar).not.toContain("Couldn't load recent work");
+    expect(sidebar).toContain('Add a login page');
+  });
+
+  it('does not claim there is no work when only the runs read fails', async () => {
+    vi.mocked(api.getRuns).mockRejectedValue(new Error('offline'));
+    await renderShell('/home');
+
+    const sidebar = host.textContent ?? '';
+    expect(sidebar).toContain("Couldn't load recent work");
+    expect(sidebar).not.toContain('No work yet');
+  });
+});
+
 async function renderShell(path: string) {
   await act(async () => {
     root.render(
