@@ -60,6 +60,40 @@ class ProjectDocumentControllerReadinessTest {
         .isEqualTo("SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL");
   }
 
+  /**
+   * RR-1532: a lexical row must not be annotated with the route reason asserting that semantic
+   * embedding IS available — that hides a real degradation behind a success string.
+   */
+  @Test
+  void lexicalRowOnAHealthyRouteReportsTheDegradationNotTheAvailabilityReason() {
+    ProjectDocument document =
+        ProjectDocument.builder()
+            .id("d2")
+            .projectId("p1")
+            .filename("runbook.md")
+            .status(ProjectDocument.Status.LEXICAL_READY)
+            .retrievalMode("LEXICAL")
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    when(service.list("p1")).thenReturn(List.of(document));
+    when(service.embeddingAvailability("p1"))
+        .thenReturn(
+            new EmbeddingPolicyResolver.Availability(
+                EmbeddingPolicyResolver.Mode.SEMANTIC,
+                true,
+                true,
+                "openai",
+                EmbeddingService.DEFAULT_MODEL,
+                "GOVERNED_OPENAI_EMBEDDING_AVAILABLE"));
+
+    var view = controller.list(principal(), "p1").getBody().get(0);
+
+    assertThat(view.semanticSearchAvailable()).isFalse();
+    assertThat(view.readinessReason())
+        .isEqualTo("DOCUMENT_INDEXED_LEXICALLY_SEMANTIC_REINDEX_PENDING");
+  }
+
   private static AppUserDetails principal() {
     return new AppUserDetails(
         AppUser.builder()

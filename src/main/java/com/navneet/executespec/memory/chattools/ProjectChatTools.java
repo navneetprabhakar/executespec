@@ -745,7 +745,8 @@ public class ProjectChatTools {
                     query,
                     "ProjectCodeRetrieval",
                     "PROJECT_REPOSITORY_QUERY",
-                    repoId);
+                    repoId,
+                    ctx.userId());
           } catch (Exception e) {
             log.warn(
                 "Project chat query embedding failed: {}", contextSanitizer.sanitizeException(e));
@@ -758,7 +759,10 @@ public class ProjectChatTools {
             ObjectNode row = arr.addObject();
             row.put("file", h.filePath());
             row.put("chunk", h.chunkIndex());
-            row.put("relevance", Math.round((1.0 - h.distance()) * 1000.0) / 1000.0);
+            // Cosine distance can exceed 1.0, so the raw complement can go negative; a fabricated
+            // negative "relevance" is worse than no score at all.
+            double relevance = Math.max(0.0, Math.min(1.0, 1.0 - h.distance()));
+            row.put("relevance", Math.round(relevance * 1000.0) / 1000.0);
             String snippet =
                 h.content().length() > 1200
                     ? h.content().substring(0, 1200) + "\n…[truncated]"

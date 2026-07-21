@@ -156,6 +156,67 @@ class EmbeddingServiceTest {
             eq(RunKeyContext.Source.ORG));
   }
 
+  /**
+   * RR-1525: a managed-key (FREE/PRO) project resolves PLATFORM as its exact key source. The guard
+   * must hand back a usable key — a PLATFORM dispatch with a withheld key made semantic indexing
+   * dead for every such project while readiness still reported it as available.
+   */
+  @Test
+  void platformKeyDispatchReachesTheTransportAndIsAttributedAsPlatform() {
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "platform-openai-key", RunKeyContext.Source.PLATFORM, null));
+    when(transport.embed(
+            eq("platform-openai-key"), eq(EmbeddingService.DEFAULT_MODEL), eq(List.of("hello"))))
+        .thenReturn(new OpenAiEmbeddingTransport.Result(List.of(new float[] {0.4f}), 5));
+
+    assertThat(
+            service.embedForProject(
+                "project-1",
+                List.of("hello"),
+                "ProjectDocumentEmbedding",
+                "PROJECT_DOCUMENT",
+                "doc-1"))
+        .hasSize(1);
+
+    verify(transport)
+        .embed(eq("platform-openai-key"), eq(EmbeddingService.DEFAULT_MODEL), eq(List.of("hello")));
+    verify(usage)
+        .prepareProviderCapabilityAttempt(
+            eq(reference),
+            eq("embedding:doc-1"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
+            eq("embedding.batch"),
+            eq("openai"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq("PLATFORM"),
+            eq(1));
+  }
+
+  /** RR-1525: a withheld key must fail loudly, never degrade silently to an empty vector set. */
+  @Test
+  void aPlatformDispatchWithoutAUsableKeyFailsLoudly() {
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                null, RunKeyContext.Source.PLATFORM, null));
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1",
+                    List.of("hello"),
+                    "ProjectDocumentEmbedding",
+                    "PROJECT_DOCUMENT",
+                    "doc-1"))
+        .isInstanceOf(EmbeddingUnavailableException.class)
+        .extracting(error -> ((EmbeddingUnavailableException) error).reason())
+        .isEqualTo("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
+    verify(transport, never()).embed(nullable(String.class), anyString(), any());
+  }
+
   @Test
   void lexicalPolicyFailsBeforeContextCreationOrTransport() {
     when(policy.resolve("project-1"))

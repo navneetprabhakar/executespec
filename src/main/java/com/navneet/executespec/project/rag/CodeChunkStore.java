@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,9 @@ public class CodeChunkStore {
       double distance) {}
 
   private final JdbcTemplate jdbc;
+
+  @Value("${project.rag.embedding.max-cosine-distance:0.55}")
+  private double maxCosineDistance = 0.55;
 
   /** Raised when a stale/expired index worker attempts to publish after losing its DB fence. */
   public static final class LeaseLostException extends RuntimeException {
@@ -99,8 +103,27 @@ public class CodeChunkStore {
     }
   }
 
-  /** Nearest code chunks across the project, optionally narrowed to one repo. */
+  /**
+   * Nearest code chunks across the project, optionally narrowed to one repo.
+   *
+   * <p>The configured cosine-distance ceiling is applied here, exactly as it is for the document
+   * corpus: without it an off-topic query still returns k confident-looking snippets, and the
+   * caller has no signal that the lexical {@code search_repo_files} path is the honest fallback.
+   */
   public List<RetrievedCodeChunk> nearest(String projectId, String repoId, float[] query, int k) {
+    return nearest(projectId, repoId, query, k, maxCosineDistance);
+  }
+
+  public List<RetrievedCodeChunk> nearest(
+      String projectId, String repoId, float[] query, int k, double maxDistance) {
+    double ceiling = Math.max(0.0, Math.min(2.0, maxDistance));
+    return rawNearest(projectId, repoId, query, k).stream()
+        .filter(hit -> Double.isFinite(hit.distance()) && hit.distance() <= ceiling)
+        .toList();
+  }
+
+  private List<RetrievedCodeChunk> rawNearest(
+      String projectId, String repoId, float[] query, int k) {
     StringBuilder sql =
         new StringBuilder(
             "SELECT repo_id, repo_full_name, file_path, chunk_index, content, token_count,"
