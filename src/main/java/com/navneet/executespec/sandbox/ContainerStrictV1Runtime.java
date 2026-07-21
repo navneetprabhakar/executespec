@@ -67,7 +67,11 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
 
     ExecResult started =
         exec(
-            SandboxContainerCommand.create(name, spec, Path.of(properties.getWorkspaceRoot())),
+            // RR-821 — mount admission is scoped to THIS sandbox's own directory, derived from
+            // the sandbox id. Passing only the global workspace root admitted the root itself
+            // and every sibling tenant's workspace.
+            SandboxContainerCommand.create(
+                name, spec, Path.of(properties.getWorkspaceRoot()), String.valueOf(sandbox.id())),
             properties.getCommandTimeoutSeconds());
     if (started.exitCode() != 0) {
       throw new IllegalStateException(

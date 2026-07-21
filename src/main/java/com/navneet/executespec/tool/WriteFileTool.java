@@ -102,6 +102,13 @@ public class WriteFileTool implements Tool {
     if (content == null) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "content is required");
     }
+    // RR-1018 — unconditional reserved-namespace deny, at every guardrail level including the
+    // production LOW default. See ReservedWorkspacePaths for what this does and does not cover.
+    String reservedError = ReservedWorkspacePaths.rejectionFor(path);
+    if (reservedError != null) {
+      log.warn("writeFile blocked reserved control-plane path={}", path);
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reservedError);
+    }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
       boolean overwrite = args.path("overwrite").asBoolean(false);
