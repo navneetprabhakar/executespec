@@ -132,4 +132,36 @@ class CodeReviewServiceSamplingBoundsTest {
     assertThat(result.samples().get(0).content()).doesNotContain(key);
     assertThat(result.samples().get(0).content()).contains("ANTHROPIC_KEY");
   }
+
+  @Test
+  void sendsOnlyBoundedLineWindowsAroundAFindingAnchorForAHotSpotFile() throws Exception {
+    // RR-435 — a large flagged file must disclose only the neighbourhood of the finding, not its
+    // whole head. Line 1 carries a unique marker far from the anchor; line 500 carries the anchor
+    // marker. With a finding at line 500 the sample must contain the anchor line and drop line 1.
+    StringBuilder big = new StringBuilder();
+    for (int i = 1; i <= 1000; i++) {
+      if (i == 1) big.append("AAA_TOP_MARKER_FAR_FROM_ANCHOR\n");
+      else if (i == 500) big.append("ZZZ_ANCHOR_MARKER\n");
+      else big.append("int filler_").append(i).append(" = ").append(i).append(";\n");
+    }
+    Files.writeString(workspace.resolve("Big.java"), big.toString());
+
+    CodeReviewService.SampleResult result =
+        service.sampleFiles(
+            workspace,
+            List.of(
+                new SemgrepRunner.Finding(
+                    "rule", "MAJOR", "security", "Big.java", 500, 500, "msg", "snippet")),
+            "scan-test");
+
+    CodeReviewAgent.FileSample sample =
+        result.samples().stream()
+            .filter(s -> s.path().equals("Big.java"))
+            .findFirst()
+            .orElseThrow();
+    assertThat(sample.content()).contains("ZZZ_ANCHOR_MARKER");
+    assertThat(sample.content()).doesNotContain("AAA_TOP_MARKER_FAR_FROM_ANCHOR");
+    // The whole-file line count is still reported honestly even though only a window was sent.
+    assertThat(result.totalLoc()).isEqualTo(1000);
+  }
 }
