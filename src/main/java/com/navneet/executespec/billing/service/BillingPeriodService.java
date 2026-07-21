@@ -31,9 +31,10 @@ public class BillingPeriodService {
    * runtime logic — this class, {@code RazorpayGateway}'s renewal count, and {@code
    * PlanSeederService}'s gateway period — recognised only {@code 'ANNUAL'} and silently fell
    * through to monthly. An annual customer therefore paid annual pricing while their local
-   * entitlement expired after 30 days and Razorpay provisioned a monthly plan. V310 forward-migrates
-   * the stored rows to {@code ANNUAL}; this alias keeps any row that predates or bypasses that
-   * migration (a restored dump, a hand-inserted row) from silently reverting to monthly semantics.
+   * entitlement expired after 30 days and Razorpay provisioned a monthly plan. V310
+   * forward-migrates the stored rows to {@code ANNUAL}; this alias keeps any row that predates or
+   * bypasses that migration (a restored dump, a hand-inserted row) from silently reverting to
+   * monthly semantics.
    */
   public static boolean isAnnual(String period) {
     String normalized = period == null ? "" : period.trim().toUpperCase();
@@ -41,9 +42,7 @@ public class BillingPeriodService {
   }
 
   public Instant periodEnd(String period) {
-    return isAnnual(period)
-        ? now().plus(365, ChronoUnit.DAYS)
-        : now().plus(30, ChronoUnit.DAYS);
+    return isAnnual(period) ? now().plus(365, ChronoUnit.DAYS) : now().plus(30, ChronoUnit.DAYS);
   }
 
   /**

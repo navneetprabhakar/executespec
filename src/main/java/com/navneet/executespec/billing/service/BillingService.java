@@ -81,6 +81,7 @@ public class BillingService {
 
   /** V310 — durable liabilities for irreversible gateway actions (RR-048, RR-049). */
   private final BillingGatewayObligationService obligationService;
+
   private final BillingSubscriptionWriter subscriptionWriter;
   private final BillingWebhookEventRecorder webhookEventRecorder;
   private final RunTopupService runTopupService;
@@ -996,9 +997,9 @@ public class BillingService {
    * it as retired — the customer is charged for both plans and nothing in the system says so.
    *
    * <p>The intent is now committed as a durable obligation <i>before</i> the gateway call, so a
-   * failure (or a rollback of the enclosing upgrade transaction) leaves a visible, retryable
-   * work item. The upgrade still proceeds: the customer has paid for the new tier and must get it.
-   * What changed is that the unfinished cancellation is no longer invisible.
+   * failure (or a rollback of the enclosing upgrade transaction) leaves a visible, retryable work
+   * item. The upgrade still proceeds: the customer has paid for the new tier and must get it. What
+   * changed is that the unfinished cancellation is no longer invisible.
    */
   private void cancelSupersededSubscription(BillingSubscription existing) {
     String gatewaySubscriptionId = existing.getGatewaySubscriptionId();
@@ -1265,7 +1266,8 @@ public class BillingService {
   private String attemptGatewayRefund(
       String gateway, String paymentId, long amountPaise, String reason) {
     if ("RAZORPAY".equalsIgnoreCase(gateway)
-        && razorpayGateway instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
+        && razorpayGateway
+            instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
       String refundId = rpGw.refundPartial(paymentId, amountPaise, reason);
       if (refundId == null || refundId.isBlank()) {
         throw new BillingException(

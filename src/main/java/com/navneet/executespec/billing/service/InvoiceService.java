@@ -314,8 +314,7 @@ public class InvoiceService {
     SellerConfig seller = sellerRepo.getDefault();
     BillingProfile buyer = resolveBuyerProfile(original.getUserId(), original.getOrgId());
 
-    Invoice cn =
-        buildProportionalCreditNote(original, buyer, seller, refundAmountPaise, reason);
+    Invoice cn = buildProportionalCreditNote(original, buyer, seller, refundAmountPaise, reason);
     cn.setOriginalInvoiceId(originalInvoiceId);
     cn.setCreditNoteReason(reason);
     cn.setStatus("ISSUED");
