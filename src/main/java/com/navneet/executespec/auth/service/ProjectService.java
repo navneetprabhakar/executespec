@@ -9,14 +9,17 @@ import com.navneet.executespec.analytics.EventName;
 import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
+import com.navneet.executespec.auth.dto.ProjectMemberCapabilitiesDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
 import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
@@ -44,6 +47,7 @@ public class ProjectService {
   private final EventTrackingService eventTracking;
   private final TierEnforcementService tierEnforcement;
   private final ProviderReadinessService providerReadinessService;
+  private final OrgRepository orgRepo;
 
   @Transactional
   public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
@@ -362,25 +366,87 @@ public class ProjectService {
         .contains(effectiveRole)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project role");
     }
-    if (!projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
-      projectMemberRepo.save(
-          ProjectMember.builder()
-              .id(UUID.randomUUID().toString())
-              .projectId(projectId)
-              .userId(userId)
-              .projectRole(effectiveRole)
-              .build());
-
-      auditService.record(
-          ActivityAudit.builder()
-              .eventType("PROJECT_MEMBER_ADDED")
-              .entityType("PROJECT")
-              .entityId(projectId)
-              .orgId(project != null ? project.getOrgId() : null)
-              .actorId(actorId)
-              .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + effectiveRole + "\"}")
-              .build());
+    // RR-1513 — this used to silently no-op on an existing membership while still returning 201,
+    // so any caller reusing addMember for a role change reported success and changed nothing.
+    // Changing an existing member's role goes through updateMemberRole.
+    if (projectMemberRepo.existsByProjectIdAndUserId(projectId, userId)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "User is already a member of this project — change their role instead of re-adding"
+              + " them.");
     }
+    projectMemberRepo.save(
+        ProjectMember.builder()
+            .id(UUID.randomUUID().toString())
+            .projectId(projectId)
+            .userId(userId)
+            .projectRole(effectiveRole)
+            .build());
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_MEMBER_ADDED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project != null ? project.getOrgId() : null)
+            .actorId(actorId)
+            .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + effectiveRole + "\"}")
+            .build());
+  }
+
+  /**
+   * RR-1513 — change an existing member's project role. Before this, promoting a PROJECT_VIEWER or
+   * demoting a PROJECT_ADMIN was impossible in the product: there was no route, and the
+   * remove-then-re-add workaround is blocked for external collaborators because cross-org direct
+   * adds are rejected. Guarded exactly like add/remove, with the same last-admin guard applied on
+   * demotion that {@link #removeMember} applies on removal.
+   */
+  @Transactional
+  public void updateMemberRole(String projectId, String userId, String role, String actorId) {
+    requireProjectAdmin(projectId, actorId);
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    String newRole = role == null ? "" : role.trim();
+    if (!java.util.Set.of("PROJECT_ADMIN", "PROJECT_DEVELOPER", "PROJECT_VIEWER")
+        .contains(newRole)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project role");
+    }
+    ProjectMember member =
+        projectMemberRepo
+            .findByProjectIdAndUserId(projectId, userId)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Member not found in project"));
+    String previousRole = member.getProjectRole();
+    if (newRole.equals(previousRole)) {
+      return;
+    }
+    // Last-admin guard on demotion — mirrors removeMember so the project cannot be locked out.
+    if ("PROJECT_ADMIN".equals(previousRole)) {
+      int adminCount = projectMemberRepo.countByProjectIdAndProjectRole(projectId, "PROJECT_ADMIN");
+      if (adminCount <= 1) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "Cannot demote the only project admin — promote another admin first.");
+      }
+    }
+    member.setProjectRole(newRole);
+    projectMemberRepo.save(member);
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_MEMBER_ROLE_CHANGED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project.getOrgId())
+            .actorId(actorId)
+            .oldValue("{\"userId\":\"" + userId + "\",\"role\":\"" + previousRole + "\"}")
+            .newValue("{\"userId\":\"" + userId + "\",\"role\":\"" + newRole + "\"}")
+            .build());
   }
 
   @Transactional
@@ -624,15 +690,91 @@ public class ProjectService {
     }
   }
 
+  /**
+   * RR-1510 — the projection now carries the persisted {@code external} marker and the
+   * collaborator's home-org name, so a cross-org collaborator is distinguishable from an employee.
+   */
   public List<ProjectMemberDto> listMembers(String projectId) {
+    java.util.Map<String, String> orgNames = new java.util.HashMap<>();
     return projectMemberRepo.findByProjectId(projectId).stream()
         .map(
             m -> {
               AppUser user = userRepo.findById(m.getUserId()).orElse(null);
               if (user == null) return null;
-              return ProjectMemberDto.from(user, m);
+              String homeOrgName =
+                  user.getOrgId() == null
+                      ? null
+                      : orgNames.computeIfAbsent(
+                          user.getOrgId(),
+                          orgId -> orgRepo.findById(orgId).map(Org::getName).orElse(null));
+              return ProjectMemberDto.from(user, m, homeOrgName);
             })
         .filter(m -> m != null)
         .collect(Collectors.toList());
+  }
+
+  /**
+   * RR-1507 / RR-1509 — the effective per-action authority for this caller on this project, so
+   * clients stop re-deriving membership authority from a single role guess. Membership
+   * administration and share-link administration are genuinely different server guards, and the
+   * invite gate has three independent causes; each is reported separately with its own cause code.
+   */
+  public ProjectMemberCapabilitiesDto memberCapabilities(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    AppUser actor = userRepo.findById(actorId).orElse(null);
+    boolean isSuperAdmin = actor != null && "SUPER_ADMIN".equals(actor.getGlobalRole());
+    boolean isHostOrgAdmin =
+        actor != null
+            && actor.getOrgId() != null
+            && actor.getOrgId().equals(project.getOrgId())
+            && orgMemberRepo
+                .findByOrgIdAndUserId(project.getOrgId(), actorId)
+                .map(m -> "ORG_ADMIN".equals(m.getOrgRole()))
+                .orElse(false);
+    ProjectMember membership =
+        projectMemberRepo.findByProjectIdAndUserId(projectId, actorId).orElse(null);
+    String projectRole = membership == null ? null : membership.getProjectRole();
+
+    boolean canManageMembership =
+        isSuperAdmin || isHostOrgAdmin || "PROJECT_ADMIN".equals(projectRole);
+    boolean canManageShareLinks = canManageMembership || "PROJECT_DEVELOPER".equals(projectRole);
+
+    // Invite authority mirrors ProjectInviteService.assertCanInvite, cause by cause.
+    String inviteBlockedReason = null;
+    if (!isSuperAdmin) {
+      String tier = tierEnforcement.resolveUserTier(actorId);
+      boolean orgAdminOfOwnOrg =
+          actor != null
+              && actor.getOrgId() != null
+              && orgMemberRepo
+                  .findByOrgIdAndUserId(actor.getOrgId(), actorId)
+                  .map(m -> "ORG_ADMIN".equals(m.getOrgRole()))
+                  .orElse(false);
+      boolean orgFlagEnabled =
+          actor != null
+              && actor.getOrgId() != null
+              && orgRepo
+                  .findById(actor.getOrgId())
+                  .map(Org::isExternalSharingEnabled)
+                  .orElse(false);
+      if (!TierEnforcementService.isPaidTier(tier)) {
+        inviteBlockedReason = "TIER";
+      } else if (!orgAdminOfOwnOrg) {
+        inviteBlockedReason = "ROLE";
+      } else if (!orgFlagEnabled) {
+        inviteBlockedReason = "ORG_EXTERNAL_SHARING_DISABLED";
+      }
+    }
+
+    return new ProjectMemberCapabilitiesDto(
+        projectRole,
+        canManageMembership,
+        canManageShareLinks,
+        inviteBlockedReason == null,
+        inviteBlockedReason);
   }
 }

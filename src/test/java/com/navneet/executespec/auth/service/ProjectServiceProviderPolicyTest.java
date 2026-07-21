@@ -44,7 +44,8 @@ class ProjectServiceProviderPolicyTest {
             mock(ActivityAuditService.class),
             mock(EventTrackingService.class),
             mock(TierEnforcementService.class),
-            readiness);
+            readiness,
+            mock(com.navneet.executespec.auth.repository.OrgRepository.class));
     when(projectRepo.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
   }
 

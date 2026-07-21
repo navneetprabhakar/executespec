@@ -70,7 +70,8 @@ class OrgControllerModelMatrixPolicyTest {
             mock(OrgMemberRepository.class),
             overrides,
             registry,
-            readiness);
+            readiness,
+            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class));
     AppUser admin =
         AppUser.builder().id("admin-1").orgId("org-1").globalRole("USER").status("ACTIVE").build();
 

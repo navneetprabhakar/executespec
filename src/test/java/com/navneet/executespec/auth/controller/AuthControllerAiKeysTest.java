@@ -85,7 +85,8 @@ class AuthControllerAiKeysTest {
             mock(UserDataExportService.class),
             mock(PersonalAccessTokenService.class),
             mock(AiProviderPreferenceService.class),
-            tiers);
+            tiers,
+            mock(com.navneet.executespec.auth.service.ExternalConnectionValidator.class));
     user =
         AppUser.builder()
             .id("user-1")
