@@ -564,6 +564,10 @@ final class MovePathTool implements Tool {
     try {
       String srcRel = args.path("src").asText(null);
       String dstRel = args.path("dst").asText(null);
+      String reviewerPolicyError = ReviewerMutationScope.validateMove(srcRel, dstRel);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       Path src = PathSafety.safeResolve(ctx.workspaceRoot(), srcRel);
       Path dst = PathSafety.safeResolve(ctx.workspaceRoot(), dstRel);
       if (!Files.exists(src))
@@ -613,6 +617,10 @@ final class DeletePathTool implements Tool {
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     try {
       String rel = args.path("path").asText(null);
+      String reviewerPolicyError = ReviewerMutationScope.validateDelete(rel);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       Path target = PathSafety.safeResolve(ctx.workspaceRoot(), rel);
       if (!Files.exists(target))
         return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "not found: " + rel);

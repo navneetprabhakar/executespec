@@ -33,6 +33,17 @@ final class CommandAliasTool implements Tool {
     return delegate.inputSchema();
   }
 
+  /**
+   * An alias has EXACTLY the delegate's authority — never a weaker one. Deriving it from the
+   * delegate keeps a new alias correctly classified even before it is added to the {@link
+   * ToolCapabilities} table (RR-1599).
+   */
+  @Override
+  public ToolCapability capability() {
+    ToolCapability own = ToolCapabilities.of(name).orElse(null);
+    return own != null ? own : delegate.capability();
+  }
+
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     return delegate.execute(args, ctx);

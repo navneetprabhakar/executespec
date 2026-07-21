@@ -66,14 +66,19 @@ public class FileLockTool {
     return SHARED_BY_DEFAULT.contains(basename);
   }
 
-  // Claim a file for a task. Returns false if already owned by another task.
-  // Shared files (pom.xml, package.json, etc.) always succeed — no exclusive lock.
+  // Claim a file for a task within ONE run. Returns false if already owned by another task of the
+  // SAME run. Shared files (pom.xml, package.json, etc.) always succeed — no exclusive lock.
+  //
+  // RR-1544: the lookup was `findById(filePath)`, which is a GLOBAL key. A concurrent run —
+  // possibly
+  // another tenant — holding `src/index.ts` blocked this task, and the subsequent save silently
+  // reattributed that run's row. Every lookup is now (runId, filePath).
   @Transactional
   public boolean claim(String filePath, String runId, String taskId) {
     if (isSharedFile(filePath)) return true; // shared files are never locked
-    Optional<FileLock> existing = lockRepo.findById(filePath);
+    Optional<FileLock> existing = lockRepo.findByRunIdAndFilePath(runId, filePath);
     if (existing.isPresent() && !existing.get().getTaskId().equals(taskId)) {
-      return false; // owned by someone else
+      return false; // owned by another task in this run
     }
     lockRepo.save(
         FileLock.builder()
@@ -87,20 +92,21 @@ public class FileLockTool {
   }
 
   @Transactional
-  public void release(String filePath, String taskId) {
+  public void release(String runId, String filePath, String taskId) {
     lockRepo
-        .findById(filePath)
+        .findByRunIdAndFilePath(runId, filePath)
         .ifPresent(
             lock -> {
               if (lock.getTaskId().equals(taskId)) {
-                lockRepo.deleteById(filePath);
+                lockRepo.deleteByRunIdAndFilePath(runId, filePath);
               }
             });
   }
 
-  public Optional<String> getOwner(String filePath) {
+  /** Owning taskId within {@code runId}; never observes another run's lock (RR-1544). */
+  public Optional<String> getOwner(String runId, String filePath) {
     if (isSharedFile(filePath)) return Optional.empty(); // shared files have no exclusive owner
-    return lockRepo.findById(filePath).map(FileLock::getTaskId);
+    return lockRepo.findByRunIdAndFilePath(runId, filePath).map(FileLock::getTaskId);
   }
 
   @Transactional
@@ -110,6 +116,18 @@ public class FileLockTool {
 
   // Tier 5: Bulk lock release
 
+  @Transactional
+  public int releaseAllLocksForTask(String runId, String taskId) {
+    List<FileLock> locks = lockRepo.findByRunIdAndTaskId(runId, taskId);
+    lockRepo.deleteAll(locks);
+    log.info("Released {} locks for task {} in run {}", locks.size(), taskId, runId);
+    return locks.size();
+  }
+
+  /**
+   * Run-agnostic task sweep retained for legacy callers. Prefer {@link #releaseAllLocksForTask(
+   * String, String)} — task ids are only unique within a run.
+   */
   @Transactional
   public int releaseAllLocksForTask(String taskId) {
     List<FileLock> locks = lockRepo.findByTaskId(taskId);

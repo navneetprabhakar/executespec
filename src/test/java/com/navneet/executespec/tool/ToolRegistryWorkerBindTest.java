@@ -574,4 +574,82 @@ class ToolRegistryWorkerBindTest {
                 .toList())
         .containsExactly("readFile");
   }
+
+  @Test
+  void serverWorkerNeverSeesRedundantAliasSpellings() {
+    // RR-1599 — an alias executes the same privileged capability but is invisible to every
+    // name-keyed worker guard, so a server worker is only ever shown the canonical spelling.
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("shell"),
+                fakeTool("executeCommand"),
+                fakeTool("runCommand"),
+                fakeTool("terminalCommand"),
+                fakeTool("buildProject"),
+                fakeTool("build"),
+                fakeTool("runBuild"),
+                fakeTool("move"),
+                fakeTool("rename"),
+                fakeTool("delete"),
+                fakeTool("deletePath"),
+                fakeTool("backgroundProcess")),
+            new ObjectMapper(),
+            null,
+            null,
+            null);
+
+    List<String> bound =
+        toolRegistry.bindForWorker(ctx()).stream().map(t -> t.getToolDefinition().name()).toList();
+
+    org.assertj.core.api.Assertions.assertThat(bound)
+        .containsExactlyInAnyOrder("shell", "buildProject", "move", "delete")
+        .doesNotContain(
+            "executeCommand",
+            "runCommand",
+            "terminalCommand",
+            "build",
+            "runBuild",
+            "rename",
+            "deletePath",
+            "backgroundProcess");
+
+    // Dispatch compatibility for a persisted/replayed call is preserved.
+    org.assertj.core.api.Assertions.assertThat(toolRegistry.find("executeCommand")).isNotNull();
+  }
+
+  @Test
+  void implementerBindAuthorizesEveryWriteCapableName() {
+    // RR-1607 — the old predicate matched the literal names writeFile/editFile only, so adding any
+    // other write-capable name to the allowlist silently bypassed the single-writer reservation.
+    java.util.List<String> authorized = new java.util.ArrayList<>();
+    ToolRegistry toolRegistry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("writeFile"),
+                fakeTool("multiEdit"),
+                fakeTool("delete"),
+                fakeTool("brandNewWriter")),
+            new ObjectMapper(),
+            null,
+            null,
+            null);
+
+    var callbacks =
+        toolRegistry.bindForImplementer(
+            ctx(),
+            java.util.Set.of("readFile", "writeFile", "multiEdit", "delete", "brandNewWriter"),
+            (name, args) -> {
+              authorized.add(name);
+              return new ToolResult.Ok("authorized");
+            });
+    for (ToolCallback cb : callbacks) {
+      cb.call("{}");
+    }
+
+    org.assertj.core.api.Assertions.assertThat(authorized)
+        .containsExactlyInAnyOrder("writeFile", "multiEdit", "delete", "brandNewWriter");
+    org.assertj.core.api.Assertions.assertThat(authorized).doesNotContain("readFile");
+  }
 }
