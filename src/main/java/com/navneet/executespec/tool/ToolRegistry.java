@@ -99,6 +99,15 @@ public class ToolRegistry {
           "lsp",
           "mcp_client",
           "mcpClient",
+          // RR-548 — network egress. A server-side coding worker runs against a cloned workspace
+          // (and, for SWE-bench / ProgramBench, a `--network none` cleanroom); it has no legitimate
+          // need to fetch a URL, while a spec or an injected repository instruction absolutely can
+          // steer it at an internal service. The guarded fetch seam still applies wherever these
+          // tools remain bound (local-hands, generic bind), but the server worker is simply never
+          // shown them. This exclusion is unconditional and does not depend on
+          // `worker.lean-toolset.enabled`, whose default-OFF state is what exposed them before.
+          "web_fetch",
+          "web_search",
           // RR-1599 — redundant alias spellings of a capability the worker already has under its
           // canonical name. `executeCommand`/`runCommand`/`terminalCommand` ARE `shell`,
           // `build`/`runBuild` ARE `buildProject`, `rename` IS `move`, `deletePath` IS `delete`,
