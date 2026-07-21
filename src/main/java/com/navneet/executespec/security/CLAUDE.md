@@ -11,6 +11,20 @@ tokens, generic secrets/passwords, and private-key blocks from outputs. `sanitiz
 returns a bounded, secret-free description; chat/tool/SSE paths must never expose a raw exception
 message.
 
+`SafeWorkspacePath` is the shared path-containment boundary for framework-owned filesystem access
+into customer-controlled trees (cloned repositories, run workspaces, generated test scaffolds). It
+enforces relative-only paths, rejects dot/empty segments, proves canonical-root containment, and
+rejects a symbolic link in any existing component; a not-yet-existing leaf is permitted only under an
+already-validated existing parent. `requireSafeRelativePosixPath` is the SCM-side variant for
+repository-relative paths written through a provider API where there is no local root to
+canonicalize against. Every failure is a refusal — the write, read or delete does not happen and is
+not redirected. Callers: `integration/RunContextComposer`, `context/ContextStore` (including the
+destructive run-end cleanup), `context/ContextAgent`, `context/ContextAgentScanner`,
+`context/ContextEvidenceBundleWriter`, `context/RunJournalStore`, `codereview/CodeReviewService`,
+`testgen/TestWorkerAgent`, and `folder/ExecutespecFolderWriter`. It duplicates the rules already in
+`tool/PathSafety` and `deployment/WorkspaceFileService`; folding those two onto this helper is a
+tracked follow-up owned by their respective lanes.
+
 `SensitiveWorkspacePathPolicy` blocks credential-like workspace paths before tool output enters an
 LLM context. `ReadFileTool` and `WorkspaceFileService` reject those paths, `SearchFilesTool` omits their hits and redacts
 secret-shaped previews, and host `ShellSandboxPolicy` rejects explicit credential-file references;

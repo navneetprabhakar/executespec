@@ -173,6 +173,18 @@ public class TestPlannerAgent {
 
     // Persist test tasks
     for (TestTaskPlan tp : taskPlans) {
+      // RR-966 — taskName becomes a filename in the test scaffold. Reject anything that is not a
+      // bare Java identifier here, at the point the model output first becomes durable state,
+      // rather than letting a traversal name reach the writer.
+      try {
+        TestWorkerAgent.requireJavaClassName(tp.getTaskName());
+      } catch (SecurityException e) {
+        log.warn(
+            "[TestPlanner] Dropping test task with unsafe class name for run {}: {}",
+            runId,
+            e.getMessage());
+        continue;
+      }
       TestCategory category;
       try {
         category = TestCategory.valueOf(tp.getCategory());
