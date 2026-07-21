@@ -106,7 +106,9 @@ public class WorkspaceArchiveJob {
     if (run == null) return;
 
     if (run.getGcsWorkspaceKey() != null) {
-      // Already uploaded to GCS by WorkspaceGcsUploadListener — just clean up local
+      // Already uploaded to GCS by WorkspaceGcsUploadListener — clean up local ONLY once the remote
+      // object is proven to still be there.
+      requireRemoteArchive(runId, run.getGcsWorkspaceKey());
       stateStore.markGcsArchived(runId, run.getGcsWorkspaceKey());
       deleteLocalWorkspace(runId);
       log.info(
@@ -120,6 +122,10 @@ public class WorkspaceArchiveJob {
     Path zipPath = exportService.exportWorkspace(runId);
     try {
       String gcsKey = gcsStore.uploadZip(runId, zipPath);
+      // RR-163 — uploadZip returns null when the Storage client was disabled at startup (ADC or
+      // bucket probing failed). That is a SKIPPED upload, not a successful one; persisting a null
+      // key and deleting the only copy of customer code destroys it permanently.
+      requireRemoteArchive(runId, gcsKey);
       stateStore.markGcsArchived(runId, gcsKey);
       deleteLocalWorkspace(runId);
 
@@ -136,6 +142,34 @@ public class WorkspaceArchiveJob {
         log.warn(
             "[WorkspaceArchiveJob] Could not delete temp zip {}: {}", zipPath, ex.getMessage());
       }
+    }
+  }
+
+  /**
+   * Fail-closed proof that a durable remote archive exists before any local deletion (RR-163).
+   *
+   * <p>A blank key means the upload was skipped or never produced an object. A key that does not
+   * resolve to a live GCS object means the archive is not there — {@link
+   * GcsWorkspaceStore#exists(String)} itself fails closed on an unavailable client or a storage
+   * error, so an unreachable bucket is treated as "no archive", never as "assume it worked".
+   *
+   * @throws IOException so the caller counts the run as failed and retries on the next pass,
+   *     leaving the local workspace intact
+   */
+  private void requireRemoteArchive(String runId, String gcsKey) throws IOException {
+    if (gcsKey == null || gcsKey.isBlank()) {
+      throw new IOException(
+          "Refusing to delete local workspace for run "
+              + runId
+              + ": GCS upload produced no object key (storage unavailable or skipped)");
+    }
+    if (!gcsStore.exists(gcsKey)) {
+      throw new IOException(
+          "Refusing to delete local workspace for run "
+              + runId
+              + ": archive object is not present in GCS ("
+              + gcsKey
+              + ")");
     }
   }
 

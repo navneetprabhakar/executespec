@@ -46,10 +46,18 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+- `WorkspaceArchiveJob.java` — Hourly archive + local cleanup. RR-163: `requireRemoteArchive`
+  proves a nonblank object key AND a live `GcsWorkspaceStore.exists` hit before any local deletion,
+  so a skipped upload (`uploadZip` returns `null` when the Storage client was disabled at startup)
+  or a vanished archive leaves the workspace on disk and fails the run for the next pass instead of
+  destroying the only copy of customer code.
 - `WorkspaceFileService.java` — Read-only run-file and run-chat source boundary. Lists omit
   credential-like paths and symlinks; direct reads reject absolute/traversal/sensitive/symlinked
   paths and prove the resolved file remains under the real workspace root. GitHub fallback applies
   the same sensitive-path policy before remote content is requested or returned to a model.
+  `readFileDiff` applies the identical sensitive-path policy plus
+  `SafeWorkspacePath.requireSafeRelativePosixPath` (exact segments, not a `contains("..")`
+  substring) before the head read, the GitHub fallback and `git show <baseSha>:<path>` (RR-859).
 - `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). It applies the
   same final `ArtifactPublicationGuard` before creating a remote repository or pushing to an
   existing one. Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end)
