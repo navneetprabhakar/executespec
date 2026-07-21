@@ -73,11 +73,46 @@ useful 20 in the LLM's prompt without paying for a full-repo upload:
 - `-10` files under 200 chars
 
 Files referenced by static findings get a `+50` bump so the LLM sees the actual hot
-spots semgrep flagged.
+spots semgrep flagged. The bump is applied at admission, not after the walk, so the
+bounded retention below still produces the old ranking.
 
 Total walk capped at 5,000 files; per-file content capped at 12,000 chars. Skipped
 entirely: `.git/`, `node_modules/`, `target/`, `build/`, `dist/`, `.gradle/`,
 `.mvn/`, `.idea/`, `.vscode/`, `.lock` files, minified JS/CSS, binary assets.
+
+### Bounded retention (RR-433)
+
+The sampler used to decode every eligible file into a String and hold all of them
+until after the walk — 5,000 files x 1 MB was a multi-gigabyte live-heap ceiling
+before any provider call, and concurrent reviews could take the JVM down with
+unrelated runs on it. Now:
+
+- each candidate is streamed once, retaining at most `MAX_BYTES_PER_FILE` characters
+  while counting every line, so LOC no longer requires materializing whole files;
+- retention is a bounded top-K heap of `MAX_FILES_IN_PROMPT` already-truncated,
+  already-redacted excerpts (~240 KB), independent of repository size;
+- a cumulative 256 MB read budget is checked against `BasicFileAttributes.size()`
+  BEFORE each file is opened, plus a 120s walk deadline. Hitting either stops the
+  walk and logs a warning; `totalFiles` / `totalLoc` are then a lower bound.
+
+### Credential boundary (RR-435)
+
+Raw config and source used to reach the review model verbatim, and the score
+heuristic explicitly boosted `.env`. Prompt-injection wrapping is not
+confidentiality. Now, reusing the platform primitives rather than a new redactor:
+
+- `SensitiveWorkspacePathPolicy` excludes `.env`, credential stores, private keys and
+  keystores from `shouldSkip` outright (`.env.example` and declared templates stay
+  inspectable), and drops static findings anchored on those paths;
+- `GeneratedSecretScanner.redactRecognizedSecrets` runs over every retained excerpt
+  before it is held in the candidate set, and over every semgrep snippet and message
+  before it is mapped into `CodeReviewAgent.StaticFinding`;
+- the `.env` term is gone from `scoreFile`; `docker` / `config` remain.
+
+**Bound on the claim:** this covers high-confidence provider/PAT/cloud/PEM formats and
+the declared sensitive-path set. Customer-specific credential formats, PII and
+business identifiers in ordinary source are NOT redacted, and reviewing a repository
+still discloses its source to the configured provider.
 
 ## Schema
 

@@ -42,7 +42,9 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.security.SafeWorkspacePath;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -89,6 +91,20 @@ public class CodeReviewService {
   /** Total workspace traversal cap — files above this don't even count toward sampling. */
   private static final int MAX_FILES_SCANNED = 5_000;
 
+  /** Largest single file the sampler will open at all. */
+  private static final long MAX_FILE_SIZE_BYTES = 1_000_000;
+
+  /**
+   * RR-433 — cumulative byte budget for the sampling walk, checked against {@code
+   * BasicFileAttributes.size()} BEFORE each read. 5,000 files × 1 MB was a 5 GB read budget with no
+   * ceiling, and every decoded file was retained in a list until after the walk. Reads are now both
+   * budgeted and streamed, and retention is bounded by the top-K heap rather than by the walk.
+   */
+  private static final long MAX_TOTAL_READ_BYTES = 256L * 1024 * 1024;
+
+  /** RR-433 — wall-clock budget for the sampling walk on a pathologically large repository. */
+  private static final long MAX_SAMPLE_DURATION_MILLIS = 120_000;
+
   private final CodeReviewScanRepository scanRepo;
   private final CodeReviewIssueRepository issueRepo;
   private final SemgrepRunner semgrep;
@@ -106,6 +122,13 @@ public class CodeReviewService {
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
   private final ObjectMapper objectMapper;
+
+  /**
+   * RR-435 — deterministic credential redactor applied to every byte the sampler retains and to
+   * every static-analysis snippet, before either can reach the review model. Reused rather than
+   * reimplemented so this boundary cannot drift from the platform's credential pattern set.
+   */
+  private final GeneratedSecretScanner secretScanner;
 
   @Autowired
   public CodeReviewService(
@@ -125,7 +148,8 @@ public class CodeReviewService {
       ModelResolver modelResolver,
       ProjectRepository projectRepository,
       AppUserRepository appUserRepository,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      GeneratedSecretScanner secretScanner) {
     this.scanRepo = scanRepo;
     this.issueRepo = issueRepo;
     this.semgrep = semgrep;
@@ -143,6 +167,7 @@ public class CodeReviewService {
     this.projectRepository = projectRepository;
     this.appUserRepository = appUserRepository;
     this.objectMapper = objectMapper;
+    this.secretScanner = secretScanner == null ? new GeneratedSecretScanner() : secretScanner;
   }
 
   /**
@@ -178,7 +203,8 @@ public class CodeReviewService {
         null,
         null,
         null,
-        new ObjectMapper());
+        new ObjectMapper(),
+        new GeneratedSecretScanner());
   }
 
   /** No service-owned queue remains; retained as a no-op for source compatibility. */
@@ -476,8 +502,14 @@ public class CodeReviewService {
     int totalLoc = samples.totalLoc();
     int totalFiles = samples.totalFiles();
 
+    // RR-435 — a semgrep hit on a hardcoded-credential rule carries the matched line verbatim in
+    // its snippet (and sometimes in its message). Redact both on the same rules the sampler uses,
+    // and drop findings whose file the sample policy refuses to disclose.
     List<CodeReviewAgent.StaticFinding> staticForAgent =
         staticResult.findings().stream()
+            .filter(
+                f ->
+                    f.filePath() == null || !SensitiveWorkspacePathPolicy.isSensitive(f.filePath()))
             .map(
                 f ->
                     new CodeReviewAgent.StaticFinding(
@@ -487,8 +519,8 @@ public class CodeReviewService {
                         f.filePath(),
                         f.lineStart(),
                         f.lineEnd(),
-                        f.message(),
-                        f.snippet()))
+                        secretScanner.redactRecognizedSecrets(f.message()),
+                        secretScanner.redactRecognizedSecrets(f.snippet())))
             .toList();
 
     CodeReviewAgent.AgentRequest agentReq =
@@ -727,15 +759,40 @@ public class CodeReviewService {
    */
   SampleResult sampleFiles(Path root, List<SemgrepRunner.Finding> staticFindings) {
     Set<String> languages = new HashSet<>();
-    int totalLoc = 0;
+    long totalLoc = 0;
     int totalFiles = 0;
-    List<FileMeta> all = new ArrayList<>();
+    long totalReadBytes = 0;
+    long deadline = System.currentTimeMillis() + MAX_SAMPLE_DURATION_MILLIS;
+    // Boost score for files referenced by static findings — those are likely the hot spots. The
+    // bump is applied at admission rather than after the walk (RR-433) so the retained set can be
+    // bounded to MAX_FILES_IN_PROMPT while producing the same final ranking.
+    Set<String> hotPaths =
+        staticFindings == null
+            ? Set.of()
+            : staticFindings.stream()
+                .map(SemgrepRunner.Finding::filePath)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+    // Min-heap of the best MAX_FILES_IN_PROMPT candidates seen so far: worst (lowest score, then
+    // latest walk position) sits at the head and is the one evicted.
+    java.util.PriorityQueue<FileMeta> best =
+        new java.util.PriorityQueue<>(
+            Comparator.comparingInt(FileMeta::score)
+                .thenComparing(Comparator.comparingLong(FileMeta::sequence).reversed()));
+    long sequence = 0;
     if (!Files.isDirectory(root)) {
-      return new SampleResult(List.of(), languages, totalLoc, totalFiles);
+      return new SampleResult(List.of(), languages, 0, 0);
     }
     try (Stream<Path> stream = Files.walk(root)) {
       var iter = stream.iterator();
       while (iter.hasNext() && totalFiles < MAX_FILES_SCANNED) {
+        if (System.currentTimeMillis() > deadline) {
+          log.warn(
+              "CodeReview sampling stopped at the {}ms time budget after {} files",
+              MAX_SAMPLE_DURATION_MILLIS,
+              totalFiles);
+          break;
+        }
         Path p = iter.next();
         // RR-434 — the reviewed tree is a customer-controlled clone. Every following-link
         // operation below (isDirectory / size / readAllBytes) would happily resolve a repository
@@ -758,51 +815,97 @@ public class CodeReviewService {
         } catch (IOException e) {
           continue;
         }
-        if (size > 1_000_000) continue; // skip huge files (>1MB)
+        if (size > MAX_FILE_SIZE_BYTES) continue; // skip huge files (>1MB)
         totalFiles++;
-        // Quick LOC estimate from byte-count if extension is text-like.
-        int loc = 0;
-        if (!lang.isBlank()) {
-          try {
-            byte[] bytes;
-            try (var in = Files.newInputStream(p, LinkOption.NOFOLLOW_LINKS)) {
-              bytes = in.readAllBytes();
-            }
-            String content = new String(bytes, StandardCharsets.UTF_8);
-            loc = (int) content.lines().count();
-            totalLoc += loc;
-            all.add(new FileMeta(relStr, lang, content, scoreFile(relStr, content)));
-          } catch (IOException e) {
-            // skip unreadable
-          }
+        if (lang.isBlank()) continue;
+        // RR-433 — the size is known BEFORE the file is opened, so the cumulative read budget is
+        // enforced ahead of the allocation rather than after it.
+        if (totalReadBytes + size > MAX_TOTAL_READ_BYTES) {
+          log.warn(
+              "CodeReview sampling stopped at the {}-byte read budget after {} files",
+              MAX_TOTAL_READ_BYTES,
+              totalFiles);
+          break;
         }
+        FileHead head;
+        try {
+          head = readBoundedHead(p);
+        } catch (IOException e) {
+          continue; // skip unreadable
+        }
+        totalReadBytes += size;
+        totalLoc += head.lineCount();
+        FileMeta candidate =
+            new FileMeta(
+                relStr,
+                lang,
+                head.head(),
+                scoreFile(relStr, head.head()) + (hotPaths.contains(relStr) ? 50 : 0),
+                sequence++);
+        best.add(candidate);
+        if (best.size() > MAX_FILES_IN_PROMPT) best.poll();
       }
     } catch (IOException e) {
       log.warn("CodeReview file walk failed: {}", e.getMessage());
     }
 
-    // Boost score for files referenced by static findings — those are likely the hot spots.
-    Set<String> hotPaths =
-        staticFindings.stream().map(SemgrepRunner.Finding::filePath).collect(Collectors.toSet());
-    for (FileMeta m : all) {
-      if (hotPaths.contains(m.path())) m.bumpScore(50);
+    List<FileMeta> picked = new ArrayList<>(best);
+    picked.sort(
+        Comparator.comparingInt(FileMeta::score)
+            .reversed()
+            .thenComparing(Comparator.comparingLong(FileMeta::sequence)));
+    List<CodeReviewAgent.FileSample> samples = new ArrayList<>(picked.size());
+    for (FileMeta m : picked) {
+      samples.add(new CodeReviewAgent.FileSample(m.path(), m.lang(), m.content()));
     }
+    return new SampleResult(
+        samples, languages, (int) Math.min(totalLoc, Integer.MAX_VALUE), totalFiles);
+  }
 
-    all.sort(Comparator.comparingInt(FileMeta::score).reversed());
-    List<CodeReviewAgent.FileSample> picked = new ArrayList<>();
-    for (FileMeta m : all) {
-      if (picked.size() >= MAX_FILES_IN_PROMPT) break;
-      String content = m.content();
-      if (content.length() > MAX_BYTES_PER_FILE) {
-        content = content.substring(0, MAX_BYTES_PER_FILE) + "\n\n…(truncated)\n";
+  /** Bounded head of a file plus the line count of the WHOLE file. */
+  record FileHead(String head, int lineCount) {}
+
+  /**
+   * Stream one candidate file, retaining at most {@link #MAX_BYTES_PER_FILE} characters while
+   * counting every line (RR-433 — the previous implementation decoded the complete file into a
+   * String and kept it alive until after the walk, purely to count lines and take a 12,000-char
+   * prefix). The retained head is redacted before it is returned, so no un-redacted credential
+   * material is ever held in the candidate set (RR-435).
+   */
+  private FileHead readBoundedHead(Path p) throws IOException {
+    StringBuilder head = new StringBuilder();
+    int lines = 0;
+    boolean truncated = false;
+    try (var reader =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(
+                Files.newInputStream(p, LinkOption.NOFOLLOW_LINKS), StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        lines++;
+        if (head.length() >= MAX_BYTES_PER_FILE) {
+          truncated = true;
+          continue;
+        }
+        if (lines > 1) head.append('\n');
+        head.append(line);
       }
-      picked.add(new CodeReviewAgent.FileSample(m.path(), m.lang(), content));
     }
-    return new SampleResult(picked, languages, totalLoc, totalFiles);
+    if (head.length() > MAX_BYTES_PER_FILE) {
+      head.setLength(MAX_BYTES_PER_FILE);
+      truncated = true;
+    }
+    if (truncated) head.append("\n\n…(truncated)\n");
+    return new FileHead(secretScanner.redactRecognizedSecrets(head.toString()), lines);
   }
 
   /** Skip rule for files we don't want walking into the prompt OR the LOC count. */
   static boolean shouldSkip(String relPath) {
+    // RR-435 — credential stores, private keys and keystores are excluded from the review sample
+    // outright. Reviewing an `.env` is not worth disclosing its contents to a third-party model,
+    // and the same policy already governs what the worker's own tools may read. `.env.example`
+    // and other declared templates stay inspectable.
+    if (SensitiveWorkspacePathPolicy.isSensitive(relPath)) return true;
     if (relPath.startsWith(".git/") || relPath.equals(".git")) return true;
     if (relPath.startsWith("node_modules/")) return true;
     if (relPath.startsWith("target/")
@@ -836,7 +939,10 @@ public class CodeReviewService {
     if (lower.contains("/repository/") || lower.contains("repositories/")) s += 15;
     if (lower.contains("/api/")) s += 10;
     if (lower.endsWith(".sql")) s += 25;
-    if (lower.contains("docker") || lower.contains(".env") || lower.contains("config")) s += 15;
+    // RR-435 — the `.env` term is gone: those paths are now excluded by
+    // SensitiveWorkspacePathPolicy in shouldSkip, so boosting them was ranking material that can
+    // never be sampled. Docker/config files remain review-worthy and are redacted before dispatch.
+    if (lower.contains("docker") || lower.contains("config")) s += 15;
     if (lower.contains("/test/") || lower.endsWith("test.java") || lower.endsWith(".test.ts"))
       s -= 30;
     if (lower.endsWith("readme.md") || lower.endsWith(".md")) s -= 20;
@@ -954,40 +1060,12 @@ public class CodeReviewService {
     }
   }
 
-  /** Mutable score holder used during file sampling. */
-  static final class FileMeta {
-    private final String path;
-    private final String lang;
-    private final String content;
-    private int score;
-
-    FileMeta(String path, String lang, String content, int score) {
-      this.path = path;
-      this.lang = lang;
-      this.content = content;
-      this.score = score;
-    }
-
-    String path() {
-      return path;
-    }
-
-    String lang() {
-      return lang;
-    }
-
-    String content() {
-      return content;
-    }
-
-    int score() {
-      return score;
-    }
-
-    void bumpScore(int by) {
-      this.score += by;
-    }
-  }
+  /**
+   * One retained sampling candidate: an already-truncated and already-redacted excerpt plus its
+   * final score. {@code sequence} is the walk position, used as the tie-break so a bounded top-K
+   * selection reproduces the ordering the old full-list stable sort produced.
+   */
+  record FileMeta(String path, String lang, String content, int score, long sequence) {}
 
   record SampleResult(
       List<CodeReviewAgent.FileSample> samples,
