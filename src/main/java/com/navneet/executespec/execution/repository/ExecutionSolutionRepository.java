@@ -25,6 +25,12 @@ public interface ExecutionSolutionRepository extends JpaRepository<ExecutionSolu
   List<ExecutionSolution> findByExecutionRun_IdOrderBySequenceNumberAsc(String executionRunId);
 
   /**
+   * RR-1689 — the solution that currently names this child run, i.e. the still-current attempt. A
+   * RETRY overwrites {@code pipelineRunId}, so an empty result means the run has been superseded.
+   */
+  Optional<ExecutionSolution> findFirstByPipelineRunId(String pipelineRunId);
+
+  /**
    * Eager-fetches the {@code dependencies} set so callers outside a transaction (e.g. {@link
    * com.navneet.executespec.execution.service.SolutionDependencyResolver}) can iterate without a
    * {@code LazyInitializationException}.

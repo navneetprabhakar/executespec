@@ -217,21 +217,20 @@ public class RunOrchestrator implements RunControlPort {
   /**
    * RL-2026-05-037 — enterprise enforcement made real (was "decorative"). {@code StandardsRunner}
    * runs deterministic coding standards against the final workspace and persists violations so the
-   * {@code /standards/report} endpoint is no longer always-empty; {@code PlanBreakingChangeReport}
-   * classifies touched contracts (previous content from {@link
-   * com.navneet.executespec.contracts.ContractVersion}, new content from workspace disk) and
-   * surfaces breaking changes as report-only run issues. Both project-gated + flag-gated ({@code
-   * standards.enforcement.enabled} / {@code contracts.breaking-change.enabled}, default OFF) +
-   * non-fatal; greenfield / no-project runs are a no-op.
+   * {@code /standards/report} endpoint is no longer always-empty; {@link RunBreakingChangeDetector}
+   * classifies touched contracts and surfaces breaking changes as report-only run issues. Both
+   * project-gated + flag-gated ({@code standards.enforcement.enabled} / {@code
+   * contracts.breaking-change.enabled}, default OFF) + non-fatal.
+   *
+   * <p>RR-819 — that post-run detector is the SECOND, tighten-only gate. {@link
+   * com.navneet.executespec.contracts.gate.PlanContractGateService} is the one that can actually
+   * refuse: it fires at the plan gate, before worker spend or publication.
    */
-  private final com.navneet.executespec.contracts.gate.PlanBreakingChangeReport
-      planBreakingChangeReport;
+  private final RunBreakingChangeDetector runBreakingChangeDetector;
 
-  private final com.navneet.executespec.contracts.ContractRegistryRepository
-      contractRegistryRepository;
+  private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
-  private final com.navneet.executespec.contracts.ContractVersionRepository
-      contractVersionRepository;
+  private final RunPublicationFence publicationFence;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
@@ -1872,6 +1871,15 @@ public class RunOrchestrator implements RunControlPort {
         boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
         if (needsApproval) {
           perky.stop(runId);
+          // RR-819 — compose the contract gate BEFORE the run parks at the gate, so the approver is
+          // shown (and the server durably records) which registered contracts this plan intends to
+          // modify and which repositories declare themselves consumers. The post-run classifier
+          // below cannot do this job: it runs after the files are already written.
+          try {
+            planContractGate.composeAndPersist(runId, projectId, plan, selectedRepoIds);
+          } catch (Exception gateEx) {
+            log.warn("run={} plan contract gate not composed: {}", runId, gateEx.toString());
+          }
           persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
           PlanGateContinuation continuation =
               new PlanGateContinuation(
@@ -2202,7 +2210,7 @@ public class RunOrchestrator implements RunControlPort {
         if (featureFlagService.isEnabled("contracts.breaking-change.enabled")) {
           try {
             contractBreakingIssues.addAll(
-                detectBreakingChangeIssues(
+                runBreakingChangeDetector.detect(
                     runId, projectId, rootCtx.workspaceRoot(), selectedRepoIds));
           } catch (Exception e) {
             log.warn(
@@ -2302,18 +2310,14 @@ public class RunOrchestrator implements RunControlPort {
         if (validationReportProvenanceFailed(effectiveValidationReport)) {
           sr = new StatusAndReason("FAILED", "VALIDATION_EVIDENCE_FAILED");
           stampRunStatusReason(runId, sr);
-        } else if (validationReportQualityFailed(
-            effectiveValidationReport, postReviewRequiredQualityThreshold)) {
-          sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
-          stampRunStatusReason(runId, sr);
+        } else {
+          sr = applyFinalVerificationStatus(runId, effectiveValidationReport, sr);
         }
       } else if (validationReportProvenanceFailed(validationReport.orElse(null))) {
         sr = new StatusAndReason("FAILED", "VALIDATION_EVIDENCE_FAILED");
         stampRunStatusReason(runId, sr);
-      } else if (validationReportQualityFailed(
-          validationReport.orElse(null), postReviewRequiredQualityThreshold)) {
-        sr = new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
-        stampRunStatusReason(runId, sr);
+      } else {
+        sr = applyFinalVerificationStatus(runId, validationReport.orElse(null), sr);
       }
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
       // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
@@ -2447,7 +2451,8 @@ public class RunOrchestrator implements RunControlPort {
         if (shouldPush) {
           try {
             PipelineRun fresh = runRepo.findById(runId).orElse(null);
-            if (fresh != null) {
+            // RR-1689 — publication authority is bound to the still-current solution attempt.
+            if (fresh != null && publicationFence.mayPublish(fresh)) {
               scmPushService.push(fresh);
               log.info("V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
             }
@@ -2736,7 +2741,8 @@ public class RunOrchestrator implements RunControlPort {
       }
       try {
         PipelineRun fresh = runRepo.findById(runId).orElse(null);
-        if (fresh != null) {
+        // RR-1689 — same fence on the PATCH path.
+        if (fresh != null && publicationFence.mayPublish(fresh)) {
           scmPushService.push(fresh);
           log.info(
               "PATCH run={} auto-pushed to SCM (finding-triggered={})", runId, run.getSourceType());
@@ -3298,6 +3304,30 @@ public class RunOrchestrator implements RunControlPort {
     return Optional.of(new PostReviewContinuation(task, decision));
   }
 
+  /**
+   * RR-826 remainder — an absent final validation report and a low-scoring one are different facts
+   * and must not share a status reason. {@code VALIDATION_REPORT_LOW_QUALITY} says "we measured the
+   * output and it was poor"; stamping it when no report exists at all tells the customer something
+   * the system never established. {@code VALIDATION_REPORT_UNAVAILABLE} says what is true: the
+   * deterministic verification artifact was not produced, so the run is not verified either way.
+   * Both are non-success; neither is silently swallowed.
+   */
+  private StatusAndReason applyFinalVerificationStatus(
+      String runId, ValidationReport report, StatusAndReason current) {
+    var verification =
+        PostReviewQualityPolicy.finalVerification(report, postReviewRequiredQualityThreshold);
+    StatusAndReason next =
+        switch (verification) {
+          case PASSED -> current;
+          case LOW_QUALITY -> new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
+          case UNAVAILABLE -> new StatusAndReason("PARTIAL", "VALIDATION_REPORT_UNAVAILABLE");
+        };
+    if (next != current) {
+      stampRunStatusReason(runId, next);
+    }
+    return next;
+  }
+
   private Optional<PostReviewContinuation> maybeEmitPostValidationContinuationDecision(
       String runId,
       ExecutionResult execResult,
@@ -3305,8 +3335,14 @@ public class RunOrchestrator implements RunControlPort {
       boolean confirmationRequired,
       boolean benchmarkPriorRequired,
       boolean routePinned) {
+    // RR-826 remainder — escalate only on MEASURED low quality. A null report is UNAVAILABLE, not
+    // failed output: re-running the task on a stronger model cannot fix a report generator that
+    // threw, and doing so on every such run converts one persistent bug into recurring provider
+    // spend on every run in the fleet. Stamp the honest reason instead (see
+    // applyFinalVerificationStatus) and stop.
     if (!postReviewContinuationEnabled
-        || !validationReportQualityFailed(report, postReviewRequiredQualityThreshold)) {
+        || PostReviewQualityPolicy.finalVerification(report, postReviewRequiredQualityThreshold)
+            != PostReviewQualityPolicy.FinalVerification.LOW_QUALITY) {
       return Optional.empty();
     }
     Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
@@ -3404,6 +3440,21 @@ public class RunOrchestrator implements RunControlPort {
       boolean skipWiring,
       Integer reviewerMaxIter) {
     if (continuation == null || continuation.isEmpty()) {
+      return Optional.empty();
+    }
+    // RR-1693 (sibling of RR-479) — execution locality is run authority, not a per-dispatch
+    // default. Post-review and post-validation continuation build a plain server-side
+    // ExecutionRequest: no localHandsMode, no remote dispatcher. On a run the customer submitted as
+    // local-hands that would execute commands and mutate files on ExecuteSpec's machine, and unlike
+    // retry it needs no user action to fire. The main pipeline currently terminalises a local run
+    // before the reviewer, so this is a latent path rather than a live one — which is exactly why
+    // it must be fenced here rather than left to depend on an upstream early return. Refuse
+    // visibly; never fall back to server execution.
+    if (runRepo.findById(runId).map(PipelineRun::isLocalExecutionRequested).orElse(false)) {
+      log.warn(
+          "RunOrchestrator run={} continuation refused: this run executes on the customer's"
+              + " machine (local hands) and continuation has no local transport",
+          runId);
       return Optional.empty();
     }
     PostReviewContinuation action = continuation.get();
@@ -4198,99 +4249,6 @@ public class RunOrchestrator implements RunControlPort {
             .filter(java.util.Objects::nonNull)
             .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-VIOLATION"));
     return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
-  }
-
-  /**
-   * Classify breaking changes to contracts the run touched. Previous content comes from the latest
-   * {@link com.navneet.executespec.contracts.ContractVersion#getInlineContent()}; new content is
-   * read from the workspace disk at the contract's detected path (per-repo subdir for multi-repo
-   * runs). Returns report-only (MINOR) run issues so a breaking change is visible in the Issues
-   * panel without triggering auto-fix or penalising the score. Non-fatal; empty on any miss.
-   */
-  private java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue>
-      detectBreakingChangeIssues(
-          String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
-    if (selectedRepoIds == null || selectedRepoIds.isEmpty()) return java.util.List.of();
-    var repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
-    if (repos == null || repos.isEmpty()) return java.util.List.of();
-    boolean multiRepo = repos.size() > 1;
-    java.util.List<com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.IntendedChange>
-        intended = new java.util.ArrayList<>();
-    for (var repo : repos) {
-      Path repoRoot =
-          multiRepo
-              ? workspaceRoot
-                  .resolve("repos")
-                  .resolve(lastPathSegment(repo.getGithubRepoFullName()))
-              : workspaceRoot;
-      for (var contract : contractRegistryRepository.findByRepoId(repo.getId())) {
-        if (contract.getDetectedPath() == null || contract.getDetectedPath().isBlank()) continue;
-        String prev =
-            contractVersionRepository
-                .findFirstByContractIdOrderByRegistryVersionDesc(contract.getId())
-                .map(com.navneet.executespec.contracts.ContractVersion::getInlineContent)
-                .orElse(null);
-        if (prev == null) continue; // first-version or GCS-pointer contract: skip (best-effort)
-        Path f = repoRoot.resolve(contract.getDetectedPath());
-        if (!java.nio.file.Files.isRegularFile(f)) continue;
-        String now;
-        try {
-          now = java.nio.file.Files.readString(f);
-        } catch (Exception e) {
-          continue;
-        }
-        if (now.equals(prev)) continue; // unchanged → not a candidate
-        intended.add(
-            new com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.IntendedChange(
-                contract.getId(), prev, now));
-      }
-    }
-    if (intended.isEmpty()) return java.util.List.of();
-    var report = planBreakingChangeReport.compose(projectId, intended);
-    var issues = toBreakingChangeIssues(report);
-    if (!issues.isEmpty()) {
-      log.info(
-          "RunOrchestrator run={} breaking-change: {} contract(s) flagged (typedAck={})",
-          runId,
-          issues.size(),
-          report.requiresTypedAck());
-    }
-    return issues;
-  }
-
-  /** Pure mapping: breaking-change report rows → report-only (MINOR) run issues. */
-  static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> toBreakingChangeIssues(
-      com.navneet.executespec.contracts.gate.PlanBreakingChangeReport.Report report) {
-    java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> out =
-        new java.util.ArrayList<>();
-    if (report == null || report.breakingChanges() == null) return out;
-    int n = 0;
-    for (var row : report.breakingChanges()) {
-      n++;
-      String consumers =
-          row.affectedConsumers() == null || row.affectedConsumers().isEmpty()
-              ? "no declared consumers"
-              : "consumers: " + String.join(", ", row.affectedConsumers());
-      out.add(
-          com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-              .id("SYNTH-CONTRACT-" + n)
-              .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-              .category(com.navneet.executespec.reviewer.model.IssueCategory.CROSS_TASK_MISMATCH)
-              .description(
-                  "Breaking change to contract '"
-                      + row.contractName()
-                      + "' ("
-                      + row.type()
-                      + "): "
-                      + truncate(row.summary(), 160)
-                      + " — "
-                      + consumers
-                      + (row.requiresFriction() ? " [REQUIRES ACK]" : ""))
-              .autoFixed(false)
-              .fixSucceeded(false)
-              .build());
-    }
-    return out;
   }
 
   /**

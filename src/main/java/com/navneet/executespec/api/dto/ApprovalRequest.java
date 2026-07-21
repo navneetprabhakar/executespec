@@ -14,10 +14,21 @@ package com.navneet.executespec.api.dto;
  *     lands on run B. When supplied, this must match the plan currently persisted on the run or the
  *     approval is rejected with 409. Optional only so existing clients keep working; any client
  *     that renders a plan should echo the fingerprint it rendered.
+ * @param breakingChangeAck RR-819 — the literal text {@code BREAKING}, typed by the approver, when
+ *     this plan intends to modify a registered contract that other repositories declare themselves
+ *     consumers of. Required only when the server composed a gate report with {@code
+ *     requiresTypedAck}; supplying it when no gate is pending is ignored. Server-verified: exact
+ *     text, bound to {@code breakingChangeReportDigest}, recorded with the acting user.
+ * @param breakingChangeReportDigest RR-819 — the {@code digest} of the gate report the approver was
+ *     actually shown ({@code GET /api/runs/{id}/plan-contract-gate}). Binds the acknowledgement to
+ *     that exact evidence so consent collected against one set of contracts cannot be replayed
+ *     against a different one. Mismatch is 409.
  */
 public record ApprovalRequest(
     boolean approved,
     String comment,
     Integer creditsConfirmed,
     String executionMode,
-    String planFingerprint) {}
+    String planFingerprint,
+    String breakingChangeAck,
+    String breakingChangeReportDigest) {}
