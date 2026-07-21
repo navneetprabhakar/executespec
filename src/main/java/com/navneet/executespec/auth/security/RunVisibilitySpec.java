@@ -39,13 +39,11 @@ public class RunVisibilitySpec {
         return cb.equal(root.get("orgId"), user.getOrgId());
       }
 
-      // Safety fallback: user has orgId but orgMember record is missing/orphaned.
-      // Still grant org-scoped visibility so they can see runs in their org.
-      if (user.getOrgId() != null) {
-        return cb.equal(root.get("orgId"), user.getOrgId());
-      }
-
-      // FREE user (no org) — see own runs only
+      // RR-210: NO org-wide fallback. `app_user.org_id` is a denormalized pointer; `org_member` is
+      // the authoritative membership record. Granting tenant-wide run visibility from the pointer
+      // alone meant a removed/expired membership kept working for as long as the stale pointer
+      // survived, and it overrode the very table that revocation writes to. Absent or unrecognized
+      // membership now falls through to own-runs-only.
       return cb.equal(root.get("createdByUserId"), user.getId());
     };
   }

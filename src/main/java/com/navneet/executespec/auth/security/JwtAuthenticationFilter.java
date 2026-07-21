@@ -90,7 +90,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       userInvalidatedAt = appUser.getUser().getTokenInvalidatedAt();
     }
 
-    if (jwtUtil.isTokenValid(token, userInvalidatedAt)) {
+    // RR-128: only a token minted for API access may authenticate here. A refresh cookie value or a
+    // scoped SSE query token replayed as a bearer must not yield a full-authority session.
+    if (jwtUtil.isAccessTokenValid(token, userInvalidatedAt)) {
       if (isActive(userDetails)) {
         setAuthentication(userDetails, request, AUTH_SOURCE_JWT);
       }
