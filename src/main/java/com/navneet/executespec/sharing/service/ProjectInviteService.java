@@ -21,6 +21,7 @@ import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.service.MailService;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.sharing.entity.ProjectInvite;
 import com.navneet.executespec.sharing.repository.ProjectInviteRepository;
 
@@ -60,7 +61,6 @@ public class ProjectInviteService {
   private static final SecureRandom RNG = new SecureRandom();
   private static final Set<String> VALID_ROLES =
       Set.of("PROJECT_ADMIN", "PROJECT_DEVELOPER", "PROJECT_VIEWER");
-  private static final Set<String> PAID_TIERS = Set.of("PRO", "TEAM", "MAX", "ENTERPRISE");
   private static final long DEFAULT_EXPIRY_DAYS = 14;
 
   private final ProjectInviteRepository inviteRepo;
@@ -71,6 +71,7 @@ public class ProjectInviteService {
   private final OrgRepository orgRepo;
   private final OrgMemberRepository orgMemberRepo;
   private final MailService mailService;
+  private final TierEnforcementService tierEnforcementService;
 
   /**
    * RL-2026-05-041 (audit #11) — project-only external collaborator changes belong in the project
@@ -114,11 +115,15 @@ public class ProjectInviteService {
     // Tier check still applies even for SUPER_ADMIN's own org — but SUPER_ADMIN
     // acting on behalf of any org is rare and intentional, so we keep the gate
     // strict and rely on operator judgement.
-    String tier = inviter.getTier();
-    if (tier == null || !PAID_TIERS.contains(tier.toUpperCase())) {
+    // RR-1508 — resolve the canonical EFFECTIVE tier (own tier, org tier, and any inherited
+    // external host-org entitlement) and ask the single tier authority whether it is paid. The old
+    // hardcoded Set.of("PRO","TEAM","MAX","ENTERPRISE") omitted V253's first-class PRO_PLUS and
+    // BYOK, so a paying Pro+/BYOK customer was told to upgrade, and still honoured retired MAX.
+    String tier = tierEnforcementService.resolveUserTier(inviter.getId());
+    if (!TierEnforcementService.isPaidTier(tier)) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "Inviting external collaborators is a paid feature — upgrade to PRO or above.");
+          "Inviting external collaborators is a paid feature — upgrade to a paid plan.");
     }
     Optional<TierConfig> cfg = tierConfigRepo.findById(tier);
     if (cfg.isEmpty()) {

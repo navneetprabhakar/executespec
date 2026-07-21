@@ -43,6 +43,42 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - AI-key validation sends Gemini keys only in `x-goog-api-key` and returns bounded status messages;
   raw provider/transport exception text and credential-bearing URLs are forbidden.
 
+## External credential validation
+
+- Every server-side credential-validation probe (personal and org GitHub / Jira / Confluence /
+  AI-provider checks) goes through `auth/service/ExternalConnectionValidator`. Controllers must not
+  open their own `HttpClient` against a caller-supplied base URL.
+- Policy: HTTPS only, no URL-embedded credentials, no CR/LF in headers, every resolved address must
+  be public unicast (loopback / any-local / link-local / site-local / multicast / CGNAT / IPv6
+  unique-local / IPv4-mapped equivalents refused).
+- The TCP connection is pinned to the exact validated `InetAddress` while TLS SNI + hostname
+  verification still run against the original hostname, so a second DNS answer cannot be substituted
+  between check and connect.
+- Only the HTTP status line is read (1 KB cap); the body is never buffered and redirects are never
+  followed. Callers receive a coarse category (`OK` / `TARGET_NOT_ALLOWED` / `HTTP_ERROR` /
+  `UNREACHABLE`) — never an exception message, resolved address, or other transport detail.
+
+## Personal Access Token lifetime
+
+- A PAT always has a bounded lifetime. Omitting `expiresInDays` applies
+  `PersonalAccessTokenService.DEFAULT_EXPIRY_DAYS` (90); the maximum accepted is `MAX_EXPIRY_DAYS`
+  (365). There is no "never expires" PAT.
+
+## Project membership
+
+- `GET /api/projects/{id}/member-capabilities` publishes the effective per-action authority
+  (`canManageMembership`, `canManageShareLinks`, `canInviteExternal` + `inviteBlockedReason` of
+  `TIER` / `ROLE` / `ORG_EXTERNAL_SHARING_DISABLED`). Clients must read it rather than re-deriving
+  membership authority from a single role, because membership admin and share-link admin are two
+  different server guards.
+- `PUT /api/projects/{id}/members/{userId}` changes an existing member's role, with the same
+  last-admin guard on demotion that `removeMember` applies on removal. `POST .../members` now
+  returns 409 on an existing membership instead of silently no-op'ing with 201.
+- `ProjectMemberDto` carries `external` and `homeOrgName` so cross-org collaborators are
+  distinguishable from employees on the members screen.
+- External-invite entitlement resolves through `TierEnforcementService.resolveUserTier` +
+  `TierEnforcementService.isPaidTier`; never hardcode a tier-name allow-list.
+
 ## Data Export
 
 - `GET /api/auth/me/data-export` is a ZIP-only personal-data export. Browser/download clients should send `Accept: application/zip`; JSON-default clients receive a clear `406` body with `error=data_export_requires_zip_accept` instead of a misleading route miss.

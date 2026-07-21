@@ -1,10 +1,6 @@
 package com.navneet.executespec.auth.controller;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -24,6 +20,7 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.auth.service.ExternalConnectionValidator;
 import com.navneet.executespec.auth.service.InvitationService;
 import com.navneet.executespec.auth.service.OrgService;
 import com.navneet.executespec.router.AgentTier;
@@ -55,6 +52,7 @@ public class OrgController {
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final ProviderReadinessService providerReadinessService;
+  private final ExternalConnectionValidator externalConnectionValidator;
 
   @PostMapping
   public ResponseEntity<OrgDto> createOrg(
@@ -442,30 +440,9 @@ public class OrgController {
       return ResponseEntity.ok(
           new ValidationResult(false, "Base URL, email, and API token are all required"));
     }
-    try {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-      String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(
-              HttpRequest.newBuilder()
-                  .uri(URI.create(url))
-                  .header("Authorization", "Basic " + auth)
-                  .header("Accept", "application/json")
-                  .timeout(Duration.ofSeconds(10))
-                  .GET()
-                  .build(),
-              HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, "JIRA credentials are valid"));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(
-              false, "JIRA returned " + resp.statusCode() + " — check your credentials"));
-    } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-    }
+    String url = req.baseUrl().strip().replaceAll("/+$", "") + "/rest/api/3/myself";
+    return validateAtlassian(
+        url, req.email(), req.apiToken(), "JIRA credentials are valid", "JIRA");
   }
 
   // Org-level Confluence settings (ORG_ADMIN only)
@@ -492,34 +469,42 @@ public class OrgController {
       return ResponseEntity.ok(
           new ValidationResult(false, "Base URL, email, and API token are all required"));
     }
-    try {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((req.email().strip() + ":" + req.apiToken().strip()).getBytes());
-      String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
-      HttpResponse<String> resp =
-          HTTP_CLIENT.send(
-              HttpRequest.newBuilder()
-                  .uri(URI.create(url))
-                  .header("Authorization", "Basic " + auth)
-                  .header("Accept", "application/json")
-                  .timeout(Duration.ofSeconds(10))
-                  .GET()
-                  .build(),
-              HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() == 200) {
-        return ResponseEntity.ok(new ValidationResult(true, "Confluence credentials are valid"));
-      }
-      return ResponseEntity.ok(
-          new ValidationResult(
-              false, "Confluence returned " + resp.statusCode() + " — check your credentials"));
-    } catch (Exception e) {
-      return ResponseEntity.ok(new ValidationResult(false, "Connection failed: " + e.getMessage()));
-    }
+    String url = req.baseUrl().strip().replaceAll("/+$", "") + "/wiki/rest/api/space?limit=1";
+    return validateAtlassian(
+        url, req.email(), req.apiToken(), "Confluence credentials are valid", "Confluence");
   }
 
-  private static final HttpClient HTTP_CLIENT =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+  /**
+   * RR-001 / RR-002 / RR-003 — org credential validation now runs through the same SSRF-guarded,
+   * bounded-response seam as the personal validators in {@code AuthController}. It previously
+   * fetched an arbitrary caller-supplied base URL with no target policy, buffered the whole
+   * response body, and echoed the raw exception message back to the caller.
+   */
+  private ResponseEntity<ValidationResult> validateAtlassian(
+      String url, String email, String apiToken, String successMessage, String productLabel) {
+    String auth =
+        Base64.getEncoder()
+            .encodeToString(
+                (email.strip() + ":" + apiToken.strip()).getBytes(StandardCharsets.UTF_8));
+    ExternalConnectionValidator.ProbeResult probe =
+        externalConnectionValidator.probe(
+            url, Map.of("Authorization", "Basic " + auth, "Accept", "application/json"));
+    return switch (probe.status()) {
+      case OK -> ResponseEntity.ok(new ValidationResult(true, successMessage));
+      case TARGET_NOT_ALLOWED ->
+          ResponseEntity.ok(
+              new ValidationResult(false, "Connection target is not an allowed external address"));
+      case HTTP_ERROR ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false,
+                  productLabel + " returned " + probe.statusCode() + " — check your credentials"));
+      case UNREACHABLE ->
+          ResponseEntity.ok(
+              new ValidationResult(
+                  false, "Connection failed; verify the base URL and credentials"));
+    };
+  }
 
   // Seat management (v2.6.0 TEAM tier)
 

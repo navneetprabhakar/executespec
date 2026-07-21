@@ -36,6 +36,15 @@ class PatScopePolicyTest {
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/me/settings/github")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/org/me/settings/ai-keys")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/org/me/settings/key-source")).isFalse();
+    // RR-004 — the ACTUAL personal credential mappings live under /api/auth/settings/**.
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/ai-keys")).isFalse();
+    assertThat(PatScopePolicy.allows(scopes, "DELETE", "/api/auth/settings/ai-keys/deepseek"))
+        .isFalse();
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/github")).isFalse();
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/bitbucket")).isFalse();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/settings/jira/validate")).isFalse();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/settings/confluence/validate"))
+        .isFalse();
     assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/me/tokens")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "POST", "/api/billing/subscribe")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "POST", "/api/admin/swebench/run")).isFalse();
@@ -48,6 +57,15 @@ class PatScopePolicyTest {
     String scopes = PatScopePolicy.normalizeRequested(List.of("credentials:manage"));
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/me/settings/ai-keys")).isTrue();
     assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/me/settings/jira/validate"))
+        .isTrue();
+    // RR-004 — a scoped credentials:manage PAT must reach the real controller mappings.
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/ai-keys")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "DELETE", "/api/auth/settings/ai-keys/deepseek"))
+        .isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/github")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/settings/bitbucket")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/settings/jira/validate")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/auth/settings/confluence/validate"))
         .isTrue();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/me/provider-preference")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/admin/tiers/free")).isFalse();
