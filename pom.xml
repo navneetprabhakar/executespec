@@ -664,6 +664,15 @@
           <execution>
             <id>prepare-agent</id>
             <goals><goal>prepare-agent</goal></goals>
+            <configuration>
+              <!-- The JaCoCo agent appends to jacoco.exec by default. If a test JVM is ever killed
+                   mid-write (Ctrl-C, OOM, timeout) the exec file is left truncated, and because
+                   every later run appends to it the `report` goal then fails permanently with
+                   "Unknown block type 0" on any workspace that isn't cleaned — breaking the build
+                   for reasons unrelated to the code. Starting each run from a fresh exec file makes
+                   the coverage step self-healing. -->
+              <append>false</append>
+            </configuration>
           </execution>
           <execution>
             <id>report</id>

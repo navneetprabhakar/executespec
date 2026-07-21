@@ -120,7 +120,8 @@ public class ShellTool implements Tool {
     // reporting a spurious TIMEOUT (RR-1550).
     int timeout =
         args.hasNonNull("timeoutSeconds")
-            ? Math.max(1, Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC))
+            ? Math.max(
+                1, Math.min(args.get("timeoutSeconds").asInt(DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC))
             : DEFAULT_TIMEOUT_SEC;
 
     // Resolve the cleanroom container FIRST (was done after the sandbox check — see below for why

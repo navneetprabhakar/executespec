@@ -186,9 +186,9 @@ public class AstCheckEnforcer {
       case JAVA -> Pattern.compile("(?m)^\\s*import\\s+(?:static\\s+)?([\\w.]+)\\s*;");
       case TYPESCRIPT ->
           Pattern.compile("(?m)^\\s*import\\s+(?:[\\s\\S]*?\\bfrom\\s+)?['\"]([^'\"]+)['\"]");
-      // Require whitespace after the import/from keyword, otherwise Python `import os` /
-      // `from os import path` and Go `import "fmt"` never match (\s is not in the capture class),
-      // silently passing forbidden-import and dependency-direction rules (RR-1639).
+        // Require whitespace after the import/from keyword, otherwise Python `import os` /
+        // `from os import path` and Go `import "fmt"` never match (\s is not in the capture class),
+        // silently passing forbidden-import and dependency-direction rules (RR-1639).
       case OTHER ->
           Pattern.compile("(?m)^\\s*(?:import\\s+|from\\s+|require\\()['\"]?([\\w./@-]+)['\"]?");
     };
