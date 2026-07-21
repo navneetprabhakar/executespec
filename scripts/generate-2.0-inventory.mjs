@@ -9,9 +9,16 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const backend = path.resolve(scriptDir, "..");
-const cli = path.resolve(backend, "../executespec-cli-1.0");
-const docs = path.resolve(backend, "../executespec-docs-2.0");
-const output = path.join(backend, "docs", "plans", "evidence", "executespec-2.0-inventory.json");
+const cli = path.resolve(backend, "../executespec-cli");
+const docs = path.resolve(backend, "../executespec-docs");
+const output = path.join(
+  docs,
+  "backend",
+  "plans",
+  "source-repository",
+  "evidence",
+  "executespec-2.0-inventory.json",
+);
 const check = process.argv.includes("--check");
 
 function git(repo, ...args) {
@@ -26,7 +33,12 @@ function sourceFiles(repo) {
   return git(repo, "ls-files", "--cached", "--others", "--exclude-standard")
     .split("\n")
     .filter(Boolean)
-    .filter((file) => !file.endsWith("docs/plans/evidence/executespec-2.0-inventory.json"))
+    .filter(
+      (file) =>
+        !file.endsWith(
+          "backend/plans/source-repository/evidence/executespec-2.0-inventory.json",
+        ),
+    )
     // Release-evidence manifests and copied captures are independently hash-sealed. Including
     // them here creates a cross-repository fingerprint churn every time provenance is rebound.
     .filter((file) => !file.startsWith("release-evidence/"))

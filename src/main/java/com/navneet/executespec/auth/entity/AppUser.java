@@ -31,6 +31,7 @@ public class AppUser {
   private String lastName;
 
   @Column(name = "password_hash")
+  @lombok.ToString.Exclude
   private String passwordHash;
 
   /** SUPER_ADMIN | USER */
@@ -110,6 +111,7 @@ public class AppUser {
    */
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "github_pat")
+  @lombok.ToString.Exclude
   private String githubPat;
 
   /** GitHub username or org name to create repos under (e.g. "navneet" or "mycompany"). */
@@ -123,6 +125,7 @@ public class AppUser {
   /** Bitbucket app password — encrypted at rest via AES-256-GCM. */
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "bitbucket_app_password")
+  @lombok.ToString.Exclude
   private String bitbucketAppPassword;
 
   /** Bitbucket workspace slug (e.g. "myteam"). */
@@ -135,22 +138,27 @@ public class AppUser {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "openai_api_key")
+  @lombok.ToString.Exclude
   private String openAiApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "anthropic_api_key")
+  @lombok.ToString.Exclude
   private String anthropicApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "gemini_api_key")
+  @lombok.ToString.Exclude
   private String geminiApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "deepseek_api_key")
+  @lombok.ToString.Exclude
   private String deepSeekApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "fireworks_api_key")
+  @lombok.ToString.Exclude
   private String fireworksApiKey;
 
   @Column(name = "jira_base_url")
@@ -161,6 +169,7 @@ public class AppUser {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "jira_api_token")
+  @lombok.ToString.Exclude
   private String jiraApiToken;
 
   @Column(name = "stripe_customer_id")
@@ -179,6 +188,7 @@ public class AppUser {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "confluence_api_token")
+  @lombok.ToString.Exclude
   private String confluenceApiToken;
 
   /**

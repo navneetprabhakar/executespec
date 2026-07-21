@@ -91,27 +91,31 @@
   --signal-lavender-text: #a89cff;
 }
 
-/* Page bounce / rubber-band fix — kill BOTH the elastic overscroll AND the
- * "whole screen drags up/down" trackpad glitch. The chain:
- *   1. html/body — `overflow: hidden`, fixed 100% height. The OUTER page
- *      itself never scrolls, so trackpad rubber-band has nothing to drag.
- *   2. `.signal-shell` — height: 100dvh; overflow: hidden; the whole app
- *      is one fixed-height shell.
- *   3. `.signal-main` — flex column, same height bound, overflow: hidden.
- *   4. `.signal-content` — flex: 1 with min-height: 0 so it constrains its
- *      flex children (without min-height:0, flex items refuse to shrink
- *      below their content size and the parent overflows).
- *   5. `.signal-feed` — flex: 1, min-height: 0, overflow-y: auto — THIS
- *      element owns the actual scroll. Chrome (sidebar, topbar, tabbar)
- *      stays put; only the Feed body scrolls.
+/* Overscroll / rubber-band handling.
  *
- * All five layers also carry `overscroll-behavior: contain/none` so iOS +
- * macOS trackpad scroll chaining stops cleanly at the Feed boundary.
+ * This block USED TO also set `html, body { height: 100%; overflow: hidden }`
+ * as layer 1 of a five-layer fixed-shell scroll chain whose layer 2 was
+ * `.signal-shell`. That shell was deleted in the 2026-05-23 cleanup and no
+ * element carries the class any more — but the global lock survived, and this
+ * stylesheet is imported globally from `main.tsx`. The result (RR-797): the
+ * document could not scroll, and the public pages that render only a TopBar
+ * plus fragments — Pricing, Trust, Terms, Privacy, DPA, shared reports — had
+ * no inner scroller either, so any content taller than the viewport was simply
+ * unreachable. Procurement and legal pages were the worst affected, and mobile
+ * or zoomed layouts hit it soonest.
+ *
+ * The lock is gone. Nothing needs it: the IDE shell is `.ide-root`, which is
+ * `position: fixed; inset: 0; height: 100dvh; overflow: hidden` and therefore
+ * self-contained — it never produces page scroll to suppress.
+ *
+ * `overscroll-behavior: none` is kept: it stops scroll chaining without
+ * preventing the document from scrolling in the first place.
+ *
+ * Do not reintroduce an unscoped html/body lock from a feature stylesheet. If a
+ * future shell needs one, scope it to that shell's own element.
  */
 html,
 body {
-  height: 100%;
-  overflow: hidden;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: auto;
 }

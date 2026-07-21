@@ -13,6 +13,7 @@ export type ProjectDocumentDisplay = {
   label: string;
   status: string;
   sizeLabel: string;
+  readiness: string | null;
 };
 
 export function canEditProjectSettings(
@@ -36,14 +37,24 @@ export function isProjectDocumentIndexing(
   docs: api.ProjectDocumentRow[] | null | undefined,
 ): boolean {
   return (docs ?? []).some((doc) =>
-    ['UPLOADED', 'EXTRACTING', 'EMBEDDING'].includes((doc.status || '').toUpperCase()),
+    ['UPLOADED', 'EXTRACTING', 'EMBEDDING', 'INDEXING', 'RETRY_PENDING'].includes(
+      (doc.status || '').toUpperCase(),
+    ),
   );
 }
 
 export function projectDocumentDisplay(row: api.ProjectDocumentRow): ProjectDocumentDisplay {
+  const rawStatus = (row.status || 'READY').toUpperCase();
+  const status =
+    rawStatus === 'READY'
+      ? 'SEMANTIC READY'
+      : rawStatus === 'LEXICAL_READY'
+        ? 'LEXICAL READY'
+        : rawStatus.replace(/_/g, ' ');
   return {
     label: row.filename || row.pathRelative || `Document ${row.id.slice(0, 6)}`,
-    status: (row.status || 'READY').toUpperCase(),
+    status,
     sizeLabel: row.sizeBytes ? `${(row.sizeBytes / 1024).toFixed(1)} KB` : '—',
+    readiness: row.readinessReason || null,
   };
 }

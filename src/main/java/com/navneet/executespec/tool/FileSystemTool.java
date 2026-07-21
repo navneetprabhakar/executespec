@@ -127,10 +127,11 @@ public class FileSystemTool {
    * Checks if the current task is allowed to write to the given path. Returns an error message if
    * blocked by another task's file lock, null if OK.
    */
-  private String checkFileLock(String path) {
+  private String checkFileLock(String runId, String path) {
     String currentTask = WorkspaceContext.getTaskId();
-    if (currentTask != null && lockTool != null) {
-      Optional<String> owner = lockTool.getOwner(path);
+    if (currentTask != null && lockTool != null && runId != null) {
+      // RR-1544: locks are (runId, filePath); a bare path would read another run's owner.
+      Optional<String> owner = lockTool.getOwner(runId, path);
       if (owner.isPresent() && !owner.get().equals(currentTask)) {
         return "WRITE BLOCKED: File '"
             + path
@@ -211,7 +212,7 @@ public class FileSystemTool {
       @ToolParam(description = "Path of the file to write", required = true) String path,
       @ToolParam(description = "Complete content of the file", required = true) String content) {
     try {
-      String lockBlock = checkFileLock(path);
+      String lockBlock = checkFileLock(runId, path);
       if (lockBlock != null) return lockBlock;
       Path target = safeResolve(runId, path);
       String fileName =
@@ -255,7 +256,7 @@ public class FileSystemTool {
       @ToolParam(description = "Exact string to replace", required = true) String oldStr,
       @ToolParam(description = "New string to insert", required = true) String newStr) {
     try {
-      String lockBlock = checkFileLock(path);
+      String lockBlock = checkFileLock(runId, path);
       if (lockBlock != null) return lockBlock;
       Path target = safeResolve(runId, path);
       String current = Files.readString(target);

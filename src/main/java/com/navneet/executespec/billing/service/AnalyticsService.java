@@ -92,12 +92,12 @@ public class AnalyticsService {
     var countRows = jdbc.queryForList(countSql, countParams);
     if (!countRows.isEmpty()) {
       var row = countRows.get(0);
-      totalRuns = ((Number) row.getOrDefault("total", 0)).intValue();
-      successfulRuns = ((Number) row.getOrDefault("success", 0)).intValue();
-      failedRuns = ((Number) row.getOrDefault("failed", 0)).intValue();
-      partialRuns = ((Number) row.getOrDefault("partial", 0)).intValue();
-      avgTime = ((Number) row.getOrDefault("avg_time", 0)).doubleValue();
-      totalCost = ((Number) row.getOrDefault("total_cost", 0)).doubleValue();
+      totalRuns = intOf(row, "total");
+      successfulRuns = intOf(row, "success");
+      failedRuns = intOf(row, "failed");
+      partialRuns = intOf(row, "partial");
+      avgTime = doubleOf(row, "avg_time");
+      totalCost = doubleOf(row, "total_cost");
     }
 
     // --- Runs per day ---
@@ -200,10 +200,7 @@ GROUP BY m.model_name ORDER BY calls DESC
 
       jdbc.queryForList(costSql, costParams)
           .forEach(
-              row ->
-                  costByModel.put(
-                      (String) row.get("model"),
-                      ((Number) row.getOrDefault("total_cost_usd", 0)).doubleValue()));
+              row -> costByModel.put((String) row.get("model"), doubleOf(row, "total_cost_usd")));
     } catch (Exception e) {
       log.warn("Failed to query cost by model: {}", e.getMessage());
     }
@@ -242,8 +239,8 @@ GROUP BY m.model_name ORDER BY calls DESC
     return jdbc.queryForList(sql, orgId, Timestamp.from(since), orgId).stream()
         .map(
             row -> {
-              int runs = ((Number) row.getOrDefault("runs", 0)).intValue();
-              int success = ((Number) row.getOrDefault("success", 0)).intValue();
+              int runs = intOf(row, "runs");
+              int success = intOf(row, "success");
               double rate = runs > 0 ? (success * 100.0 / runs) : 0;
               Timestamp lastRun = (Timestamp) row.get("last_run");
               return new MemberUsage(
@@ -452,8 +449,189 @@ GROUP BY m.model_name ORDER BY calls DESC
         "periodDays", periodDays);
   }
 
+  /**
+   * Enterprise token audit over the canonical physical-attempt ledger. Unlike run totals or
+   * agent-session rollups, this includes failed retries/failovers and groups the same rows by user,
+   * project, provider, model, agent role, feature, key source, and outcome.
+   */
+  public Map<String, Object> getLlmUsageAudit(String orgId, int periodDays) {
+    int boundedPeriod = Math.max(1, Math.min(periodDays, 366));
+    Instant since = Instant.now().minus(boundedPeriod, ChronoUnit.DAYS);
+    Timestamp sinceTimestamp = Timestamp.from(since);
+
+    String aggregateSql =
+        """
+        SELECT COUNT(*) AS attempts,
+               COUNT(*) FILTER (WHERE attempt_status = 'SUCCESS') AS successful_attempts,
+               COUNT(*) FILTER (WHERE attempt_status = 'FAILED') AS failed_attempts,
+               COALESCE(SUM(input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+               COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd
+        FROM run_step_usage
+        WHERE org_id = ? AND created_at >= ?
+        """;
+    Map<String, Object> totals =
+        jdbc.queryForList(aggregateSql, orgId, sinceTimestamp).stream()
+            .findFirst()
+            .map(AnalyticsService::normalizedUsageRow)
+            .orElseGet(LinkedHashMap::new);
+
+    List<Map<String, Object>> byUser =
+        groupedUsage(
+            """
+            SELECT u.user_id AS id,
+                   COALESCE(a.email, 'Unknown') AS label,
+                   COUNT(*) AS attempts,
+                   COUNT(*) FILTER (WHERE u.attempt_status = 'FAILED') AS failed_attempts,
+                   COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
+                   COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
+                   COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
+                   COALESCE(SUM(u.cache_write_tokens), 0) AS cache_write_tokens,
+                   COALESCE(SUM(u.reasoning_tokens), 0) AS reasoning_tokens,
+                   COALESCE(SUM(u.cost_usd), 0) AS cost_usd
+            FROM run_step_usage u
+            LEFT JOIN app_user a ON a.id = u.user_id
+            WHERE u.org_id = ? AND u.created_at >= ?
+            GROUP BY u.user_id, a.email
+            ORDER BY cost_usd DESC, attempts DESC
+            """,
+            orgId,
+            sinceTimestamp);
+    List<Map<String, Object>> byProject =
+        groupedUsage(
+            """
+            SELECT u.project_id AS id,
+                   COALESCE(p.name, 'No project') AS label,
+                   COUNT(*) AS attempts,
+                   COUNT(*) FILTER (WHERE u.attempt_status = 'FAILED') AS failed_attempts,
+                   COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
+                   COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
+                   COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
+                   COALESCE(SUM(u.cache_write_tokens), 0) AS cache_write_tokens,
+                   COALESCE(SUM(u.reasoning_tokens), 0) AS reasoning_tokens,
+                   COALESCE(SUM(u.cost_usd), 0) AS cost_usd
+            FROM run_step_usage u
+            LEFT JOIN project p ON p.id = u.project_id AND p.org_id = u.org_id
+            WHERE u.org_id = ? AND u.created_at >= ?
+            GROUP BY u.project_id, p.name
+            ORDER BY cost_usd DESC, attempts DESC
+            """,
+            orgId,
+            sinceTimestamp);
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("schemaVersion", 1);
+    result.put("source", "run_step_usage_attempt_ledger");
+    result.put("orgId", orgId);
+    result.put("periodDays", boundedPeriod);
+    result.put("since", since);
+    result.put("totals", totals);
+    result.put("byUser", byUser);
+    result.put("byUserModelRole", userModelRoleUsage(orgId, sinceTimestamp));
+    result.put("byProject", byProject);
+    result.put("byProvider", groupedDimension("provider", orgId, sinceTimestamp));
+    result.put("byModel", groupedDimension("model", orgId, sinceTimestamp));
+    result.put("byRole", groupedDimension("agent_role", orgId, sinceTimestamp));
+    result.put("byFeature", groupedDimension("feature", orgId, sinceTimestamp));
+    result.put("byKeySource", groupedDimension("key_source", orgId, sinceTimestamp));
+    result.put("byStatus", groupedDimension("attempt_status", orgId, sinceTimestamp));
+    return result;
+  }
+
+  private List<Map<String, Object>> userModelRoleUsage(String orgId, Timestamp since) {
+    return groupedUsage(
+        """
+        SELECT u.user_id,
+               COALESCE(a.email, 'Unknown') AS user_label,
+               COALESCE(u.provider, 'Unknown') AS provider,
+               COALESCE(u.model, 'Unknown') AS model,
+               COALESCE(u.agent_role, 'Unknown') AS agent_role,
+               COALESCE(u.feature, 'Unknown') AS feature,
+               COALESCE(u.key_source, 'UNKNOWN') AS key_source,
+               COUNT(*) AS attempts,
+               COUNT(*) FILTER (WHERE u.attempt_status = 'FAILED') AS failed_attempts,
+               COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(u.cache_read_tokens), 0) AS cache_read_tokens,
+               COALESCE(SUM(u.cache_write_tokens), 0) AS cache_write_tokens,
+               COALESCE(SUM(u.reasoning_tokens), 0) AS reasoning_tokens,
+               COALESCE(SUM(u.cost_usd), 0) AS cost_usd
+        FROM run_step_usage u
+        LEFT JOIN app_user a ON a.id = u.user_id
+        WHERE u.org_id = ? AND u.created_at >= ?
+        GROUP BY u.user_id, a.email, u.provider, u.model, u.agent_role, u.feature, u.key_source
+        ORDER BY cost_usd DESC, attempts DESC
+        """,
+        orgId,
+        since);
+  }
+
+  private List<Map<String, Object>> groupedDimension(String column, String orgId, Timestamp since) {
+    Set<String> allowed =
+        Set.of("provider", "model", "agent_role", "feature", "key_source", "attempt_status");
+    if (!allowed.contains(column))
+      throw new IllegalArgumentException("unsupported usage dimension");
+    String sql =
+        "SELECT COALESCE("
+            + column
+            + ", 'Unknown') AS label, COUNT(*) AS attempts, "
+            + "COUNT(*) FILTER (WHERE attempt_status = 'FAILED') AS failed_attempts, "
+            + "COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+            + "COALESCE(SUM(output_tokens), 0) AS output_tokens, "
+            + "COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, "
+            + "COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens, "
+            + "COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens, "
+            + "COALESCE(SUM(cost_usd), 0) AS cost_usd "
+            + "FROM run_step_usage WHERE org_id = ? AND created_at >= ? "
+            + "GROUP BY "
+            + column
+            + " ORDER BY cost_usd DESC, attempts DESC";
+    return groupedUsage(sql, orgId, since);
+  }
+
+  private List<Map<String, Object>> groupedUsage(String sql, String orgId, Timestamp since) {
+    return jdbc.queryForList(sql, orgId, since).stream()
+        .map(AnalyticsService::normalizedUsageRow)
+        .toList();
+  }
+
+  private static Map<String, Object> normalizedUsageRow(Map<String, Object> source) {
+    Map<String, Object> row = new LinkedHashMap<>();
+    source.forEach(
+        (key, value) ->
+            row.put(
+                key.toLowerCase(Locale.ROOT),
+                value instanceof java.math.BigDecimal decimal ? decimal.doubleValue() : value));
+    return row;
+  }
+
   private static String normalizeEntityType(String entityType) {
     if (entityType == null) return "USER";
     return entityType.trim().toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * Null-safe numeric read from a JDBC row.
+   *
+   * <p>{@code getOrDefault} only substitutes the default when the key is ABSENT. A SQL aggregate
+   * such as {@code AVG(...)} or {@code SUM(...)} over zero rows returns the column PRESENT and
+   * NULL, so {@code getOrDefault(key, 0)} handed back null and the cast NPE'd. That made the
+   * analytics endpoint 500 for any account with no runs yet — i.e. every newly registered user
+   * loading the insights surface.
+   */
+  private static int intOf(java.util.Map<String, Object> row, String key) {
+    Object v = row.get(key);
+    return v instanceof Number n ? n.intValue() : 0;
+  }
+
+  /**
+   * @see #intOf
+   */
+  private static double doubleOf(java.util.Map<String, Object> row, String key) {
+    Object v = row.get(key);
+    return v instanceof Number n ? n.doubleValue() : 0d;
   }
 }

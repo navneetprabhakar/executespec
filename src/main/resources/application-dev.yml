@@ -75,13 +75,13 @@ spring:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:1061994342941-5rrf50jalmdkg0l5rck95ucc0fenh0vr.apps.googleusercontent.com}
-            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET: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}
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
             scope: openid, email, profile
             redirect-uri: https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}
           github:
-            client-id: ${GITHUB_OAUTH_CLIENT_ID:Ov23lijrPPx9fhPemczg}
-            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:46033466197599eb1fc74d321b141a816fdcb1f5}
+            client-id: ${GITHUB_OAUTH_CLIENT_ID:}
+            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
             scope: user:email, read:user
             redirect-uri: https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}
         provider:
@@ -159,9 +159,9 @@ app:
   mail:
     base-url: https://dev.executespec.ai
     smtp:
-      password: ${SMTP_PASSWORD:smdpsanatyrtlcxa}
+      password: ${SMTP_PASSWORD:}
   jwt:
-    secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
+    secret: ${JWT_SECRET:}
   cors:
     # Plan 1 (this-week #5): include staging clones of the future surface
     # subdomains so a Phase-2 dev rollout doesn't need a config push.
@@ -192,12 +192,12 @@ auth:
 # Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
 # Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
 # configured in the base profile. Safe fallback: if the key can't be loaded the
-# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
-# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
-# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+# Shared dev is a remote enterprise-test surface: missing key/IAM is a boot failure, never a
+# plaintext fallback. Local/test profiles retain developer-friendly passthrough semantics.
 executespec:
   crypto:
     enabled: true
+    require-encryption: true
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:

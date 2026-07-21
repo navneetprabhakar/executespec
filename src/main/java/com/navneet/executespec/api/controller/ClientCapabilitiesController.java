@@ -62,7 +62,12 @@ public class ClientCapabilitiesController {
             List.of("OK", "ERROR", "INTERNAL", "TIMEOUT", "DENIED")),
         new WebFetch(true, true, true, true, true, "untrusted", "explicit read-only web tool"),
         new ProviderCatalog(
-            true, "/api/health/providers", List.of(), true, "Provider health is read-only."),
+            true,
+            "/api/v3/provider-readiness",
+            List.of(),
+            true,
+            "Authenticated account-effective readiness; deployment health is not dispatch"
+                + " authority."),
         new Governance(true, "/api/v3/governance-policy"),
         new ManagedAi(true, "/api/billing/managed-ai/balance", "/api/billing/managed-ai/policy"));
   }

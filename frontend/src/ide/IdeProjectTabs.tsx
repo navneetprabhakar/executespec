@@ -1,14 +1,23 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import type {ProjectCodeIndexStatus, ProjectRepo, ProjectRepoLink} from '@/types/project';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {PrReviewPanel} from '@/signal/components/PrReviewPanel';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {
+  normalizeScmRepoQuery,
+  repoSupports,
+  sourceReadinessBadge,
+  syncBadge,
+} from '@/ide/projectRepoUi';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -26,6 +35,14 @@ const stackLanguage = (r: Dash): string | undefined => {
 // Repo size: KB → human (e.g. 1.2 MB / 840 KB).
 const fmtKb = (kb: number): string =>
   kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
+
+const codeIndexByRepo = (rows: ProjectCodeIndexStatus[]) => {
+  const byRepo: Record<string, ProjectCodeIndexStatus> = {};
+  rows.forEach((row) => {
+    if (row.readiness.repoId) byRepo[row.readiness.repoId] = row;
+  });
+  return byRepo;
+};
 function relTime(input?: string | null): string {
   if (!input) return '—';
   const t = new Date(input).getTime();
@@ -39,6 +56,21 @@ function relTime(input?: string | null): string {
   const d = Math.round(h / 24);
   return `${d}d ago`;
 }
+
+/**
+ * Colour for the per-repo architecture badge (RR-1657).
+ *
+ * Only `GENERATED` is an affirmative "verified current" claim and earns green. `STALE` is a known
+ * negative (yellow). `UNVERIFIED` — the server could not probe the repositories, or the project has
+ * only LOCAL/non-GitHub sources — is neither, and must not be rendered as a pass. The previous
+ * `includes('STALE') ? yellow : green` painted every unknown state green.
+ */
+const archStatusColor = (status: string): string => {
+  const s = status.toUpperCase();
+  if (s.includes('STALE')) return 'var(--ide-yellow)';
+  if (s === 'GENERATED') return 'var(--ide-green)';
+  return 'var(--ide-fg-muted)';
+};
 
 const LIVE = new Set(['CLASSIFYING', 'PLANNING', 'EXECUTING', 'AWAITING_APPROVAL', 'RUNNING']);
 const isLive = (s?: string) => LIVE.has((s || '').toUpperCase());
@@ -245,6 +277,8 @@ export function IdeProjectPulse() {
   const [dash, setDash] = useState<Dash | null>(null);
   const [health, setHealth] = useState<Array<Record<string, unknown>>>([]);
   const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
+  const [recentFailure, setRecentFailure] = useState<LoadFailure | null>(null);
+  const [healthFailure, setHealthFailure] = useState<LoadFailure | null>(null);
 
   // RL-2026-05-052 (#9): refresh recent runs via a callback so we can poll while a
   // run is live — the pulse fetched once on mount, so live project runs never updated.
@@ -252,8 +286,12 @@ export function IdeProjectPulse() {
     if (!projectId) return;
     api
       .getRuns({projectId, page: 0, size: 6})
-      .then((r) => setRecent(r.content ?? []))
-      .catch(() => setRecent([]));
+      .then((r) => {
+        setRecent(r.content ?? []);
+        setRecentFailure(null);
+      })
+      // D4: "No work yet in this project." is a claim about the user's history.
+      .catch((e: unknown) => setRecentFailure(toLoadFailure(e)));
   }, [projectId]);
 
   useEffect(() => {
@@ -267,8 +305,10 @@ export function IdeProjectPulse() {
       .then((h) => {
         const arr = (h as unknown as {repos?: unknown[]}).repos || (Array.isArray(h) ? h : []);
         setHealth(arr as Array<Record<string, unknown>>);
+        setHealthFailure(null);
       })
-      .catch(() => setHealth([]));
+      // D4: an empty health list renders as "No linked repos."
+      .catch((e: unknown) => setHealthFailure(toLoadFailure(e)));
     refreshRuns();
   }, [projectId, refreshRuns]);
 
@@ -289,6 +329,7 @@ export function IdeProjectPulse() {
   }, [hasLiveRun, refreshRuns]);
 
   const avgScore = dash ? (numOf(dash, 'recencyAvgScore') ?? numOf(dash, 'avgScore')) : undefined;
+  const excludedScoreReports = dash ? (numOf(dash, 'excludedScoreReports') ?? 0) : 0;
   const dur = dash ? numOf(dash, 'avgDurationMs') : undefined;
   const runTime = dur ? `${Math.floor(dur / 60000)}m ${Math.floor((dur % 60000) / 1000)}s` : '—';
   const spent = dash ? (numOf(dash, 'totalSpent30d') ?? numOf(dash, 'totalCostUsd')) : undefined;
@@ -342,19 +383,27 @@ export function IdeProjectPulse() {
             {isSuperAdmin && (
               <Metric
                 label='Model spend · 30d'
-                value={spent != null ? `$${spent.toFixed(2)}` : '—'}
+                value={spent != null ? `$${spent.toFixed(4)}` : '—'}
               />
             )}
             <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
           </div>
+          {excludedScoreReports > 0 && (
+            <div style={{marginTop: 6, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+              {excludedScoreReports} invalid validation{' '}
+              {excludedScoreReports === 1 ? 'report was' : 'reports were'} excluded from the score.
+            </div>
+          )}
 
           <div className='ide-h2'>Workspace health</div>
-          {health.length === 0 ? (
+          {healthFailure ? (
+            <LoadError failure={healthFailure} what='linked repositories' />
+          ) : health.length === 0 ? (
             <div className='ide-empty'>No linked repos.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
               {health.map((r, i) => {
-                const drift = numOf(r, 'commitsBehind') ?? numOf(r, 'behindBy') ?? 0;
+                const sync = syncBadge(String(r.syncStatus || 'UNKNOWN'));
                 const wh = (r as {webhookInstalled?: boolean}).webhookInstalled;
                 const open = numOf(r, 'openPrCount') ?? numOf(r, 'openPrs') ?? 0;
                 return (
@@ -369,9 +418,7 @@ export function IdeProjectPulse() {
                     }}
                   >
                     <span style={{flex: 1, fontWeight: 500}}>{repoDisplayName(r)}</span>
-                    <IdeBadge kind={drift > 0 ? 'warn' : 'ok'}>
-                      {drift > 0 ? `drift +${drift}` : 'in sync'}
-                    </IdeBadge>
+                    <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
                     <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook' : 'no webhook'}</IdeBadge>
                     <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{open} open PR</span>
                   </div>
@@ -451,7 +498,9 @@ export function IdeProjectPulse() {
               View all
             </Link>
           </div>
-          {recent === null ? (
+          {recentFailure ? (
+            <LoadError failure={recentFailure} what='work' onRetry={refreshRuns} />
+          ) : recent === null ? (
             <IdeLoader label='Loading work…' />
           ) : recent.length === 0 ? (
             <div className='ide-empty'>No work yet in this project.</div>
@@ -502,7 +551,7 @@ export function IdeProjectPulse() {
                         className='ide-mono'
                         style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                       >
-                        ${cost.toFixed(2)}
+                        ${cost.toFixed(4)}
                       </span>
                     )}
                   </Link>
@@ -598,7 +647,7 @@ function RunDetailPanel({
       {isSuperAdmin && (
         <div className='ide-kv'>
           <span>Model spend</span>
-          <span>${cost.toFixed(2)}</span>
+          <span>${cost.toFixed(4)}</span>
         </div>
       )}
       <div className='ide-kv'>
@@ -701,11 +750,17 @@ export function IdeProjectRuns() {
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<Sub>('runs');
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
+  const [linkedRepos, setLinkedRepos] = useState<ProjectRepoLink[]>([]);
   const [prBusy, setPrBusy] = useState<string | null>(null);
   // C8 — credit-spending dispatch awaiting confirmation (PR-card "Autofix review").
-  const [autofixFor, setAutofixFor] = useState<{prNumber: number; repo: string} | null>(null);
+  const [autofixFor, setAutofixFor] = useState<{
+    prNumber: number;
+    repo: string;
+    repoId: string;
+  } | null>(null);
   const [reviewOpen, setReviewOpen] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -717,8 +772,13 @@ export function IdeProjectRuns() {
     if (!projectId) return;
     api
       .getRuns({projectId, page: 0, size: 50})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setRuns([]));
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailure(null);
+      })
+      // D4: a failure here rendered "No work matches this filter." plus zeroed
+      // filter-tab badges, i.e. a confident count of work the user may well have.
+      .catch((e: unknown) => setRunsFailure(toLoadFailure(e)));
   }, [projectId]);
 
   // Load PR list lazily when the PRs sub-tab is opened. The dashboard endpoint
@@ -745,6 +805,24 @@ export function IdeProjectRuns() {
       cancelled = true;
     };
   }, [projectId, sub, prs]);
+
+  // PR review admission is repository-id based. Resolve the dashboard's display-only
+  // repoFullName through the project's linked repo rows before rendering a paid review action.
+  useEffect(() => {
+    if (!projectId || sub !== 'prs') return;
+    let cancelled = false;
+    api
+      .getProjectRepos(projectId)
+      .then((rows) => {
+        if (!cancelled) setLinkedRepos(rows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedRepos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sub]);
 
   // Selected run → fetch detail + validation report for the split-pane.
   useEffect(() => {
@@ -787,15 +865,15 @@ export function IdeProjectRuns() {
     }
   }
 
-  async function autofix(prNumber: number, repoFullName: string) {
-    if (!projectId || !repoFullName) return;
+  async function autofix(prNumber: number, repoFullName: string, repoId: string) {
+    if (!projectId || !repoFullName || !repoId) return;
     const key = `${repoFullName}#${prNumber}`;
     setPrBusy(key);
     setErr('');
     setMsg('');
     try {
       // Pull PR review comments; the response is { comments: string }.
-      const res = await api.fetchPrReviewComments(projectId, prNumber, repoFullName);
+      const res = await api.fetchPrReviewComments(projectId, prNumber, repoId, repoFullName);
       const text = (res?.comments || '').trim();
       setMsg(
         text
@@ -886,7 +964,9 @@ export function IdeProjectRuns() {
             ))}
           </div>
 
-          {runs === null ? (
+          {runsFailure ? (
+            <LoadError failure={runsFailure} what='work' />
+          ) : runs === null ? (
             <IdeLoader label='Loading work…' />
           ) : filtered.length === 0 ? (
             <div className='ide-empty'>No work matches this filter.</div>
@@ -966,7 +1046,7 @@ export function IdeProjectRuns() {
                         ) : null}
                         {typeof cost === 'number' && cost > 0 && (
                           <span className='ide-mono' style={{fontSize: 11}}>
-                            ${cost.toFixed(2)}
+                            ${cost.toFixed(4)}
                           </span>
                         )}
                       </span>
@@ -1016,6 +1096,12 @@ export function IdeProjectRuns() {
                 const verdict = pr.reviewVerdict ? String(pr.reviewVerdict) : '';
                 const comments = numOf(pr, 'commentsCount') ?? 0;
                 const key = `${repo}#${num}`;
+                const linkedRepo = linkedRepos.find(
+                  (link) =>
+                    repoDisplayName(link).toLowerCase() === repo.toLowerCase() &&
+                    repoSupports(link, 'PR_REVIEW'),
+                );
+                const linkedRepoId = linkedRepo?.repoId ?? '';
                 return (
                   <div key={`${key}-${i}`} className='ide-card'>
                     <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
@@ -1090,7 +1176,7 @@ export function IdeProjectRuns() {
                           Open on GitHub
                         </button>
                       )}
-                      {repo && num > 0 && (
+                      {repo && num > 0 && linkedRepoId && (
                         <button
                           className='ide-btn ghost'
                           style={{padding: '4px 10px'}}
@@ -1102,16 +1188,17 @@ export function IdeProjectRuns() {
                       <button
                         className='ide-btn ghost'
                         style={{padding: '4px 10px'}}
-                        disabled={prBusy === key}
+                        disabled={prBusy === key || !linkedRepoId}
                         // C8 — credit-spending dispatch goes through a confirm modal.
-                        onClick={() => setAutofixFor({prNumber: num, repo})}
+                        onClick={() => setAutofixFor({prNumber: num, repo, repoId: linkedRepoId})}
                       >
                         {prBusy === key ? 'Loading…' : 'Autofix review'}
                       </button>
                     </div>
-                    {reviewOpen === key && repo && num > 0 && (
+                    {reviewOpen === key && repo && num > 0 && linkedRepoId && (
                       <PrReviewPanel
                         projectId={projectId}
+                        repoId={linkedRepoId}
                         repoFullName={repo}
                         prNumber={num}
                         variant='ide'
@@ -1135,7 +1222,7 @@ export function IdeProjectRuns() {
         busy={!!autofixFor && prBusy === `${autofixFor.repo}#${autofixFor.prNumber}`}
         onConfirm={async () => {
           const a = autofixFor;
-          if (a) await autofix(a.prNumber, a.repo);
+          if (a) await autofix(a.prNumber, a.repo, a.repoId);
         }}
         onClose={() => setAutofixFor(null)}
       />
@@ -1145,20 +1232,42 @@ export function IdeProjectRuns() {
 
 export function IdeProjectRepos() {
   const {projectId = ''} = useParams();
+  const authUser = useAuthStore((state) => state.user);
   const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
+  const [reposFailure, setReposFailure] = useState<LoadFailure | null>(null);
   const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
-  const [available, setAvailable] = useState<Array<Record<string, unknown>> | null>(null);
+  const [codeIndex, setCodeIndex] = useState<Record<string, ProjectCodeIndexStatus>>({});
+  const [provider, setProvider] = useState<'GITHUB' | 'BITBUCKET'>('GITHUB');
+  const [available, setAvailable] = useState<api.ScmRemoteRepository[] | null>(null);
+  const [registered, setRegistered] = useState<ProjectRepo[]>([]);
+  const [repoQuery, setRepoQuery] = useState('');
   const [showLink, setShowLink] = useState(false);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [unlinkFor, setUnlinkFor] = useState<{repoId: string; name: string} | null>(null);
 
+  const normalizedQuery = normalizeScmRepoQuery(repoQuery, provider);
+  const filteredAvailable =
+    available?.filter((repo) =>
+      repo.fullName.toLowerCase().includes(normalizedQuery.toLowerCase()),
+    ) ?? [];
+  const attachableTypedSlug =
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalizedQuery) &&
+    !available?.some((repo) => repo.fullName.toLowerCase() === normalizedQuery.toLowerCase())
+      ? normalizedQuery
+      : '';
+
   function load() {
     api
       .getProjectRepos(projectId)
-      .then((l) => setRepos(l as unknown as Array<Record<string, unknown>>))
-      .catch(() => setRepos([]));
+      .then((l) => {
+        setRepos(l as unknown as Array<Record<string, unknown>>);
+        setReposFailure(null);
+      })
+      // D4: "No repos linked. Click 'Link repo' above to add one." invited the
+      // user to duplicate a link for a repo that may already exist.
+      .catch((e: unknown) => setReposFailure(toLoadFailure(e)));
     api
       .getWorkspaceHealth(projectId)
       .then((h) => {
@@ -1173,19 +1282,44 @@ export function IdeProjectRepos() {
         setHealth(map);
       })
       .catch(() => {});
+    api
+      .getProjectCodeIndex(projectId)
+      .then((rows) => setCodeIndex(codeIndexByRepo(rows)))
+      .catch(() => setCodeIndex({}));
   }
   useEffect(() => {
     if (projectId) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  const semanticIndexRunning = Object.values(codeIndex).some(
+    (row) => row.readiness.status === 'INDEXING',
+  );
+  useEffect(() => {
+    if (!projectId || !semanticIndexRunning) return;
+    const timer = window.setInterval(() => {
+      api
+        .getProjectCodeIndex(projectId)
+        .then((rows) => setCodeIndex(codeIndexByRepo(rows)))
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [projectId, semanticIndexRunning]);
+
   async function openLinkPanel() {
     setShowLink(true);
     setErr('');
     if (!available) {
       try {
-        const r = await api.listRepos('ALL');
-        setAvailable(r as unknown as Array<Record<string, unknown>>);
+        const [remoteRepos, registeredRepos] = await Promise.all([
+          api.listScmRepos(
+            provider,
+            provider === 'BITBUCKET' ? authUser?.bitbucketWorkspace || undefined : undefined,
+          ),
+          api.listRepos('ALL'),
+        ]);
+        setAvailable(remoteRepos);
+        setRegistered(registeredRepos);
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : 'Failed to load repos.');
       }
@@ -1207,12 +1341,38 @@ export function IdeProjectRepos() {
     }
   }
 
-  async function link(repoId: string) {
-    setBusy(`link${repoId}`);
+  async function link(remote: {
+    fullName: string;
+    defaultBranch?: string;
+    immutableId?: string;
+    provider?: 'GITHUB' | 'BITBUCKET';
+  }) {
+    const key = remote.fullName;
+    setBusy(`link${key}`);
     setMsg('');
     setErr('');
     try {
-      await api.linkProjectRepo(projectId, repoId);
+      const selectedProvider = remote.provider || provider;
+      let repo = registered.find(
+        (r) =>
+          String(r.scmProvider || 'GITHUB') === selectedProvider &&
+          ((remote.immutableId && r.scmRepositoryId === remote.immutableId) ||
+            r.sourceKey === remote.fullName ||
+            r.githubRepoFullName === remote.fullName),
+      );
+      if (!repo) {
+        repo = await api.createRepo({
+          scope: 'USER',
+          scmProvider: selectedProvider,
+          repoFullName: remote.fullName,
+          scmRepositoryId: remote.immutableId,
+          defaultBranch: remote.defaultBranch,
+          attachAnyway: false,
+        });
+        const createdRepo = repo;
+        setRegistered((current) => [...current, createdRepo]);
+      }
+      await api.linkProjectRepo(projectId, repo.id);
       setMsg('Repo linked.');
       setShowLink(false);
       load();
@@ -1225,6 +1385,29 @@ export function IdeProjectRepos() {
 
   function confirmUnlink(repoId: string, name: string) {
     setUnlinkFor({repoId, name});
+  }
+
+  async function selectProvider(candidate: 'GITHUB' | 'BITBUCKET') {
+    const key = `provider:${candidate}`;
+    if (busy) return;
+    setBusy(key);
+    setProvider(candidate);
+    setRepoQuery('');
+    setAvailable(null);
+    setErr('');
+    try {
+      setAvailable(
+        await api.listScmRepos(
+          candidate,
+          candidate === 'BITBUCKET' ? authUser?.bitbucketWorkspace || undefined : undefined,
+        ),
+      );
+    } catch (e: unknown) {
+      setAvailable([]);
+      setErr(e instanceof Error ? e.message : `Failed to load ${candidate} repos.`);
+    } finally {
+      setBusy('');
+    }
   }
 
   return (
@@ -1248,11 +1431,41 @@ export function IdeProjectRepos() {
           <div className='ide-h2' style={{marginTop: 0}}>
             Available repos
           </div>
+          <div style={{display: 'flex', gap: 6, marginBottom: 10}}>
+            {(['GITHUB', 'BITBUCKET'] as const).map((candidate) => {
+              const configured =
+                candidate === 'GITHUB'
+                  ? !!authUser?.hasGithubPat
+                  : !!authUser?.hasBitbucketAppPassword;
+              return (
+                <button
+                  key={candidate}
+                  className={`ide-btn ${provider === candidate ? '' : 'ghost'}`}
+                  disabled={!configured || !!busy}
+                  title={configured ? undefined : `Connect ${candidate} in Integrations first`}
+                  onClick={() => void selectProvider(candidate)}
+                >
+                  {busy === `provider:${candidate}`
+                    ? 'Loading…'
+                    : candidate === 'GITHUB'
+                      ? 'GitHub'
+                      : 'Bitbucket Cloud'}
+                </button>
+              );
+            })}
+          </div>
+          <input
+            className='ide-input'
+            value={repoQuery}
+            onChange={(event) => setRepoQuery(event.target.value)}
+            placeholder={`Search repos or paste https://${provider === 'GITHUB' ? 'github.com' : 'bitbucket.org'}/workspace/repo`}
+            style={{marginBottom: 10}}
+          />
           {available === null ? (
             <IdeLoader label='Loading repos…' />
-          ) : available.length === 0 ? (
+          ) : available.length === 0 && !attachableTypedSlug ? (
             <div className='ide-empty'>
-              No connected repos yet. Connect GitHub from{' '}
+              No connected repos yet. Connect {provider === 'GITHUB' ? 'GitHub' : 'Bitbucket'} from{' '}
               <Link to='/integrations' style={{color: 'var(--ide-accent)'}}>
                 Integrations
               </Link>
@@ -1260,12 +1473,49 @@ export function IdeProjectRepos() {
             </div>
           ) : (
             <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
-              {available.map((r) => {
-                const rId = repoIdFor(r);
-                const linked = (repos || []).some((p) => repoIdFor(p) === rId);
+              {attachableTypedSlug && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '8px 12px',
+                    background: 'var(--ide-bg-sidebar)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                    {attachableTypedSlug}
+                  </span>
+                  <button
+                    className='ide-btn ghost'
+                    style={{padding: '3px 12px'}}
+                    disabled={busy === `link${attachableTypedSlug}`}
+                    onClick={() =>
+                      link({
+                        fullName: attachableTypedSlug,
+                        provider,
+                      })
+                    }
+                  >
+                    {busy === `link${attachableTypedSlug}` ? '…' : 'Attach by URL'}
+                  </button>
+                </div>
+              )}
+              {filteredAvailable.map((r) => {
+                const registeredRepo = registered.find(
+                  (candidate) =>
+                    String(candidate.scmProvider || 'GITHUB') === r.provider &&
+                    ((candidate.scmRepositoryId && candidate.scmRepositoryId === r.immutableId) ||
+                      candidate.sourceKey === r.fullName ||
+                      candidate.githubRepoFullName === r.fullName),
+                );
+                const linked = (repos || []).some(
+                  (p) => repoDisplayName(p) === r.fullName || repoIdFor(p) === registeredRepo?.id,
+                );
                 return (
                   <div
-                    key={rId}
+                    key={r.fullName}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1276,15 +1526,15 @@ export function IdeProjectRepos() {
                     }}
                   >
                     <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
-                      {repoDisplayName(r)}
+                      {r.fullName}
                     </span>
                     <button
                       className='ide-btn ghost'
                       style={{padding: '3px 12px'}}
-                      disabled={linked || busy === `link${rId}`}
-                      onClick={() => link(rId)}
+                      disabled={linked || busy === `link${r.fullName}`}
+                      onClick={() => link(r)}
                     >
-                      {linked ? 'Linked' : busy === `link${rId}` ? '…' : 'Link'}
+                      {linked ? 'Linked' : busy === `link${r.fullName}` ? '…' : 'Link'}
                     </button>
                   </div>
                 );
@@ -1301,7 +1551,9 @@ export function IdeProjectRepos() {
         </div>
       )}
 
-      {repos === null ? (
+      {reposFailure ? (
+        <LoadError failure={reposFailure} what='linked repositories' onRetry={load} />
+      ) : repos === null ? (
         <IdeLoader label='Loading repos…' />
       ) : repos.length === 0 ? (
         <div className='ide-empty'>No repos linked. Click “Link repo” above to add one.</div>
@@ -1311,46 +1563,116 @@ export function IdeProjectRepos() {
             const id = repoIdFor(r);
             const name = repoDisplayName(r);
             const h = health[id] || health[name] || {};
-            const drift =
-              numOf(h, 'commitsBehind') ?? numOf(h, 'behindBy') ?? numOf(r, 'commitsBehind') ?? 0;
+            const repo =
+              ((r as {repo?: Record<string, unknown>}).repo as
+                | Record<string, unknown>
+                | undefined) || r;
+            // V278 — LOCAL folder sources have no GitHub identity; connection is lease-derived.
+            const isLocal = String((repo as {sourceType?: string}).sourceType || 'SCM') === 'LOCAL';
+            const scmProvider = String((repo as {scmProvider?: string}).scmProvider || 'GITHUB');
+            const canArchitecture = repoSupports(repo, 'ARCHITECTURE');
+            const canSync = repoSupports(repo, 'SYNC');
+            const canWebhook = repoSupports(repo, 'WEBHOOK');
+            const canPrLink = repoSupports(repo, 'PR_LINK');
+            const localOnline =
+              (repo as {localConnectionStatus?: string}).localConnectionStatus === 'ONLINE';
+            const lastSeen = (repo as {sourceLastSeenAt?: string}).sourceLastSeenAt;
+            const revision = (repo as {sourceRevision?: string}).sourceRevision;
+            const sync = syncBadge(String(h.syncStatus || 'UNKNOWN'));
             const wh = (h as {webhookInstalled?: boolean}).webhookInstalled;
             const open = numOf(h, 'openPrCount') ?? numOf(h, 'openPrs') ?? 0;
-            const language = stackLanguage(r);
-            const sizeKb = numOf(r, 'sizeKb');
-            const fullName = (r as {githubRepoFullName?: string}).githubRepoFullName || name;
+            const language = stackLanguage(repo);
+            const sizeKb = numOf(repo, 'sizeKb');
+            const fullName = (repo as {githubRepoFullName?: string}).githubRepoFullName || name;
             const head =
-              (r as {headSha?: string}).headSha ||
+              (repo as {lastSyncedSha?: string}).lastSyncedSha ||
               (h as {currentOriginSha?: string}).currentOriginSha;
             const branch =
-              (r as {defaultBranch?: string}).defaultBranch ||
+              (repo as {defaultBranch?: string}).defaultBranch ||
               (h as {defaultBranch?: string}).defaultBranch ||
               'main';
+            const source = sourceReadinessBadge(
+              String(repo.sourceReadinessStatus || 'UNKNOWN'),
+              String(repo.sourceReadinessReason || ''),
+              numOf(repo, 'sourceFileCount'),
+            );
+            const semanticIndex = codeIndex[id]?.readiness;
+            const semanticKind =
+              semanticIndex?.status === 'READY'
+                ? 'ok'
+                : semanticIndex?.status === 'FAILED'
+                  ? 'bad'
+                  : semanticIndex?.status === 'INDEXING'
+                    ? 'warn'
+                    : 'warn';
+            const folderStatus = String(repo.executespecFolderStatus || 'NOT_BOOTSTRAPPED');
             const archStatus =
-              (r as {architectureStatus?: string}).architectureStatus ||
+              (repo as {architectureStatus?: string}).architectureStatus ||
               (h as {architectureStatus?: string}).architectureStatus ||
               ((h as {isStale?: boolean}).isStale === true ? 'STALE' : undefined);
             return (
               <div key={id} className='ide-card'>
                 <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 8}}>
-                  ▤ {name}
+                  {isLocal ? '⌂' : '▤'} {name}
                 </div>
                 <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
-                  <IdeBadge kind={drift > 0 ? 'warn' : 'ok'}>
-                    {drift > 0 ? `drift +${drift}` : 'in sync'}
-                  </IdeBadge>
-                  <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook ✓' : 'no webhook'}</IdeBadge>
-                  {fullName.includes('/') ? (
-                    <a
-                      href={`https://github.com/${fullName}/pulls`}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                      style={{textDecoration: 'none'}}
-                      title='View pull requests on GitHub'
-                    >
-                      <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
-                    </a>
+                  {isLocal ? (
+                    <>
+                      <IdeBadge kind='ok'>Local folder</IdeBadge>
+                      <IdeBadge kind={localOnline ? 'ok' : 'warn'}>
+                        {localOnline ? 'connector online' : 'connector offline'}
+                      </IdeBadge>
+                      <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                      {semanticIndex && (
+                        <IdeBadge kind={semanticKind}>
+                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
+                          {semanticIndex.coveragePercent.toFixed(0)}%
+                        </IdeBadge>
+                      )}
+                    </>
                   ) : (
-                    <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                    <>
+                      <IdeBadge kind='ok'>
+                        {scmProvider === 'BITBUCKET' ? 'Bitbucket Cloud' : 'GitHub'}
+                      </IdeBadge>
+                      <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
+                      <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
+                      {semanticIndex && (
+                        <IdeBadge kind={semanticKind}>
+                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
+                          {semanticIndex.coveragePercent.toFixed(0)}%
+                        </IdeBadge>
+                      )}
+                      {repoSupports(repo, 'BOOTSTRAP') && (
+                        <IdeBadge kind={folderStatus === 'BOOTSTRAPPED' ? 'ok' : 'warn'}>
+                          {folderStatus === 'BOOTSTRAPPED'
+                            ? '.executespec ready'
+                            : folderStatus === 'BOOTSTRAP_PR_OPEN'
+                              ? 'setup PR open'
+                              : folderStatus === 'BOOTSTRAP_FAILED'
+                                ? 'setup failed'
+                                : 'setup optional'}
+                        </IdeBadge>
+                      )}
+                      {canWebhook && (
+                        <IdeBadge kind={wh ? 'ok' : 'warn'}>
+                          {wh ? 'webhook ✓' : 'no webhook'}
+                        </IdeBadge>
+                      )}
+                      {canPrLink && fullName.includes('/') ? (
+                        <a
+                          href={`https://github.com/${fullName}/pulls`}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          style={{textDecoration: 'none'}}
+                          title='View pull requests on GitHub'
+                        >
+                          <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
+                        </a>
+                      ) : canPrLink ? (
+                        <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                      ) : null}
+                    </>
                   )}
                 </div>
                 <div className='ide-kv'>
@@ -1361,59 +1683,113 @@ export function IdeProjectRepos() {
                   <span>Size</span>
                   <span>{sizeKb != null ? fmtKb(sizeKb) : '—'}</span>
                 </div>
-                <div className='ide-kv'>
-                  <span>HEAD</span>
-                  <span className='ide-mono'>
-                    {head ? `${String(head).slice(0, 7)} · ${branch}` : branch}
-                  </span>
-                </div>
+                {isLocal ? (
+                  <>
+                    <div className='ide-kv'>
+                      <span>Revision</span>
+                      <span className='ide-mono'>
+                        {revision ? String(revision).slice(0, 24) : '—'}
+                      </span>
+                    </div>
+                    <div className='ide-kv'>
+                      <span>Last seen</span>
+                      <span>{lastSeen ? new Date(lastSeen).toLocaleString() : '—'}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className='ide-kv'>
+                    <span>HEAD</span>
+                    <span className='ide-mono'>
+                      {head ? `${String(head).slice(0, 7)} · ${branch}` : branch}
+                    </span>
+                  </div>
+                )}
                 {archStatus && (
                   <div className='ide-kv'>
                     <span>Architecture</span>
                     <span
                       style={{
-                        color: String(archStatus).includes('STALE')
-                          ? 'var(--ide-yellow)'
-                          : 'var(--ide-green)',
+                        // RR-1657: green means "verified current". UNVERIFIED (probe failed, or the
+                        // project has only LOCAL/non-GitHub sources) is not a pass — colouring
+                        // anything-that-isn't-STALE green was the front half of the same fail-open.
+                        color: archStatusColor(String(archStatus)),
                       }}
                     >
                       {String(archStatus)}
                     </span>
                   </div>
                 )}
+                {semanticIndex && (
+                  <>
+                    <div className='ide-kv'>
+                      <span>Semantic source coverage</span>
+                      <span>
+                        {semanticIndex.indexedFiles}/{semanticIndex.eligibleFiles} files ·{' '}
+                        {semanticIndex.coveragePercent.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className='ide-kv'>
+                      <span>Search fallback</span>
+                      <span>ripgrep available · relationship graph not available</span>
+                    </div>
+                  </>
+                )}
                 <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10}}>
-                  <Link
-                    to={`/projects/${projectId}/architecture`}
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px', textDecoration: 'none'}}
-                  >
-                    View architecture
-                  </Link>
-                  <button
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px'}}
-                    disabled={busy === `sync${id}`}
-                    title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
-                    onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
-                  >
-                    {busy === `sync${id}` ? '…' : 'Sync'}
-                  </button>
-                  <button
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px'}}
-                    disabled={busy === `regen${id}`}
-                    title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
-                    onClick={() =>
-                      act(
-                        `regen${id}`,
-                        () => api.regenerateRepoArchitecture(projectId, id),
-                        'Architecture regenerated.',
-                      )
-                    }
-                  >
-                    {busy === `regen${id}` ? '…' : 'Regenerate'}
-                  </button>
-                  {!wh && (
+                  {canArchitecture && (
+                    <Link
+                      to={`/projects/${projectId}/architecture`}
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px', textDecoration: 'none'}}
+                    >
+                      View architecture
+                    </Link>
+                  )}
+                  {!isLocal && canSync && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `sync${id}`}
+                      title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
+                      onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
+                    >
+                      {busy === `sync${id}` ? '…' : 'Sync'}
+                    </button>
+                  )}
+                  {!isLocal && canArchitecture && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `regen${id}`}
+                      title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
+                      onClick={() =>
+                        act(
+                          `regen${id}`,
+                          () => api.regenerateRepoArchitecture(projectId, id),
+                          'Architecture regenerated.',
+                        )
+                      }
+                    >
+                      {busy === `regen${id}` ? '…' : 'Regenerate'}
+                    </button>
+                  )}
+                  {!isLocal && semanticIndex?.status !== 'READY' && (
+                    <button
+                      className='ide-btn ghost'
+                      style={{padding: '4px 10px'}}
+                      disabled={busy === `index${id}` || semanticIndex?.status === 'INDEXING'}
+                      title='Resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
+                      onClick={() =>
+                        act(
+                          `index${id}`,
+                          () => api.refreshProjectCodeIndex(projectId, id),
+                          'Semantic indexing queued. Ripgrep search remains available.',
+                        )
+                      }
+                    >
+                      {busy === `index${id}` ? '…' : 'Resume semantic index'}
+                    </button>
+                  )}
+                  {!isLocal && canWebhook && !wh && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}

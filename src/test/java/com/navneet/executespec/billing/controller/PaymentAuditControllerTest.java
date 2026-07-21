@@ -51,6 +51,21 @@ class PaymentAuditControllerTest {
         .findByOrg(org.mockito.ArgumentMatchers.eq("org-b"), org.mockito.ArgumentMatchers.any());
   }
 
+  @Test
+  void paymentHistoryRejectsUnboundedOrInvalidPagesBeforeQuery() {
+    AppUserDetails principal = principal("admin-1", "admin-org", "SUPER_ADMIN");
+
+    assertThatThrownBy(() -> controller.paymentHistory("org-b", -1, 50, principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+    assertThatThrownBy(() -> controller.paymentHistory("org-b", 0, 201, principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+
+    verify(auditService, never())
+        .findByOrg(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+  }
+
   private static AppUserDetails principal(String userId, String orgId, String globalRole) {
     AppUser user =
         AppUser.builder()

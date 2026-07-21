@@ -74,9 +74,9 @@ public class IntegrationManager {
    * integration-runner identity is configured (single-tenant dev mode).
    */
   private PipelineRun submitIntegrationRun(
-      String userRequest, String sourceType, boolean skipApproval) {
-    String runnerUserId = resolveIntegrationRunnerUserId(sourceType);
-    String runnerOrgId = resolveIntegrationRunnerOrgId(runnerUserId);
+      String userRequest, String sourceType, boolean skipApproval, IntegrationActor actor) {
+    String runnerUserId = actor.userId();
+    String runnerOrgId = actor.orgId();
     // C8 — fail CLOSED: a webhook-triggered run with null user/org attribution bypasses credit
     // gating + tenant attribution + project memory. Refuse it rather than submit an orphaned run.
     // Configure agent.integrations.run-on-behalf-of-user-id (a real user whose org owns webhook
@@ -105,6 +105,19 @@ public class IntegrationManager {
         /* projectId */ null,
         "PROTOTYPE",
         /* selectedRepoIds */ List.of());
+  }
+
+  /**
+   * The identity a run is submitted under. Signed automation (verified inbound webhooks) uses the
+   * configured service runner; interactive triggers MUST use the authenticated caller so quota,
+   * credits, tenant attribution and audit land on whoever actually caused the spend (RR-340).
+   */
+  public record IntegrationActor(String userId, String orgId) {}
+
+  /** The configured service-runner identity used for signature-verified inbound webhooks. */
+  private IntegrationActor resolveWebhookRunner(String sourceType) {
+    String userId = resolveIntegrationRunnerUserId(sourceType);
+    return new IntegrationActor(userId, resolveIntegrationRunnerOrgId(userId));
   }
 
   /**
@@ -152,7 +165,8 @@ public class IntegrationManager {
     saveEventLog(sourceType, eventId);
 
     String userRequest = buildUserRequest(event);
-    PipelineRun run = submitIntegrationRun(userRequest, sourceType, event.skipApproval());
+    IntegrationActor runner = resolveWebhookRunner(sourceType);
+    PipelineRun run = submitIntegrationRun(userRequest, sourceType, event.skipApproval(), runner);
 
     IntegrationRun ir =
         IntegrationRun.builder()
@@ -161,6 +175,8 @@ public class IntegrationManager {
             .sourceId(event.sourceId())
             .sourceUrl(event.sourceUrl())
             .createdAt(Instant.now())
+            .orgId(runner.orgId())
+            .createdByUserId(runner.userId())
             .build();
     integrationRunRepo.save(ir);
 
@@ -173,11 +189,26 @@ public class IntegrationManager {
   }
 
   /**
-   * Directly submit an event (manual triggers that bypass signature check). Returns the new runId.
+   * Directly submit an event from an interactive (manual) trigger. Returns the new runId.
+   *
+   * <p>RR-340 — this path has no signature to authenticate, so it must NOT borrow the service
+   * runner identity. The run is submitted under the authenticated {@code actor}, whose org owns the
+   * quota, credits, audit trail and project memory. The adapter's configured {@code skipApproval}
+   * is also ignored: a human-initiated run always stops at the plan gate, because approval bypass
+   * is a property of trusted signed automation, not of an interactive caller.
    */
-  public String submitEvent(IntegrationEvent event) {
+  public String submitEvent(IntegrationEvent event, IntegrationActor actor) {
+    if (actor == null
+        || actor.userId() == null
+        || actor.userId().isBlank()
+        || actor.orgId() == null
+        || actor.orgId().isBlank()) {
+      throw new IllegalArgumentException(
+          "Manual integration trigger requires an authenticated actor with an owning org");
+    }
     String userRequest = buildUserRequest(event);
-    PipelineRun run = submitIntegrationRun(userRequest, event.sourceType(), event.skipApproval());
+    PipelineRun run =
+        submitIntegrationRun(userRequest, event.sourceType(), /* skipApproval */ false, actor);
 
     IntegrationRun ir =
         IntegrationRun.builder()
@@ -186,6 +217,8 @@ public class IntegrationManager {
             .sourceId(event.sourceId())
             .sourceUrl(event.sourceUrl())
             .createdAt(Instant.now())
+            .orgId(actor.orgId())
+            .createdByUserId(actor.userId())
             .build();
     integrationRunRepo.save(ir);
 
@@ -207,8 +240,28 @@ public class IntegrationManager {
     return Optional.ofNullable(inboundAdapters.get(sourceType));
   }
 
-  /** Returns all integration runs, optionally filtered by source. */
-  public List<IntegrationRun> listIntegrationRuns(String source) {
+  /**
+   * Returns integration runs owned by {@code orgId}, optionally filtered by source.
+   *
+   * <p>RR-339 — an unscoped listing let any authenticated user enumerate every organization's
+   * external issue/page/incident identifiers and source URLs. {@code orgId} is required; the
+   * global-scope variant is {@link #listAllIntegrationRuns(String)} and is SUPER_ADMIN-only at the
+   * controller boundary. Legacy rows carry a NULL {@code org_id} and therefore match no org.
+   */
+  public List<IntegrationRun> listIntegrationRuns(String source, String orgId) {
+    if (orgId == null || orgId.isBlank()) {
+      // Fail closed: no owning org means no visibility, never "everything".
+      return List.of();
+    }
+    if (source != null && !source.isBlank()) {
+      return integrationRunRepo.findByOrgIdAndSourceTypeOrderByCreatedAtDesc(
+          orgId, source.toUpperCase());
+    }
+    return integrationRunRepo.findByOrgIdOrderByCreatedAtDesc(orgId);
+  }
+
+  /** Cross-tenant listing. Callers MUST have already asserted SUPER_ADMIN. */
+  public List<IntegrationRun> listAllIntegrationRuns(String source) {
     if (source != null && !source.isBlank()) {
       return integrationRunRepo.findBySourceTypeOrderByCreatedAtDesc(source.toUpperCase());
     }

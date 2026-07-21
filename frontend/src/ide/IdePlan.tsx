@@ -12,8 +12,18 @@ import {
   isPlanTerminalStatus,
   managedAiBadgeKind,
   managedAiStatusLabel,
+  planFingerprint,
   planStatusPhrase,
 } from '@/ide/planUtils';
+import {
+  ackPayload,
+  approvalConflictMessage,
+  canApprove,
+  classifyApprovalConflict,
+  gateBlocksApproval,
+  toGateView,
+} from '@/ide/planContractGate';
+import {PlanContractGateCard} from '@/ide/PlanContractGateCard';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useSse} from '@/hooks/useSse';
@@ -28,16 +38,54 @@ export default function IdePlan() {
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   useDocumentTitle('Plan approval');
-  const [run, setRun] = useState<api.RunDetail | null>(null);
+  const [loadedRun, setLoadedRun] = useState<api.RunDetail | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [feedback, setFeedback] = useState('');
   const [editing, setEditing] = useState(false);
   const [managedAi, setManagedAi] = useState<api.ManagedAiBalance | null>(null);
+  // RR-819 — the loaded contract-gate report, carried with the runId it was fetched for so a
+  // report belonging to run A can never gate (or un-gate) run B. See `toGateView`.
+  const [loadedGate, setLoadedGate] = useState<{
+    runId: string;
+    report: api.PlanContractGateReport | null;
+  } | null>(null);
+  const [breakingAck, setBreakingAck] = useState('');
+  const [reloadGate, setReloadGate] = useState(0);
+
+  // RR-1459 — the router reuses this component across /plan/:runId, so gate state has to be keyed
+  // by runId. Resetting during render (not in an effect) is what makes it synchronous: no frame
+  // can paint run A's plan, credits, feedback draft or in-flight busy state underneath run B's
+  // route. Without this a user could approve B while reading A.
+  const [gateRunId, setGateRunId] = useState(runId);
+  if (gateRunId !== runId) {
+    setGateRunId(runId);
+    setLoadedRun(null);
+    setBusy('');
+    setErr('');
+    setFeedback('');
+    setEditing(false);
+    // RR-819 — the typed acknowledgement is evidence about ONE plan's contract report. Carrying it
+    // across a route change would let a user acknowledge run A's breaking change and approve run B.
+    setLoadedGate(null);
+    setBreakingAck('');
+  }
+
   useSse(runId || null);
   const streamedRun = useRunStore((state) =>
     state.activeRun?.runId === runId ? state.activeRun : null,
   );
+
+  // RR-1459 — second gate: even a late-resolving fetch or a store write cannot surface a detail
+  // that belongs to a different run than the route we are on.
+  const run = loadedRun && loadedRun.runId === runId ? loadedRun : null;
+
+  // RR-819 — same discipline for the contract gate: only a report fetched for THIS runId, and
+  // whose own runId (when the server sends one) matches the route, can gate this approval.
+  const gate =
+    loadedGate && loadedGate.runId === runId ? toGateView(runId, loadedGate.report) : null;
+  const gateRequiresAck = gateBlocksApproval(gate);
+  const approvalAllowed = canApprove(gate, breakingAck);
 
   useEffect(() => {
     if (!runId) return;
@@ -45,7 +93,7 @@ export default function IdePlan() {
     api
       .getRun(runId)
       .then((r) => {
-        if (!cancelled) setRun(r);
+        if (!cancelled && r && r.runId === runId) setLoadedRun(r);
       })
       .catch(() => {});
     return () => {
@@ -53,10 +101,31 @@ export default function IdePlan() {
     };
   }, [runId, navigate]);
 
+  // RR-819 — fetch the gate report the server composed for this run. A 204 (no contract touched,
+  // the overwhelming majority of runs) resolves to `undefined`, which stores a null report and
+  // leaves approval with exactly the friction it had before this existed. A failed fetch is also
+  // left null: the server is the enforcement point and answers 409 regardless, so a client-side
+  // read failure cannot be used to approve a gated run, only to lose the explanation.
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    api
+      .getPlanContractGate(runId)
+      .then((report) => {
+        if (!cancelled) setLoadedGate({runId, report: report ?? null});
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedGate({runId, report: null});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, reloadGate]);
+
   // RUN_DETAIL replay updates the shared run store. Keep the page-local copy so
   // existing plan rendering and approval actions remain unchanged.
   useEffect(() => {
-    if (streamedRun) setRun(streamedRun);
+    if (streamedRun) setLoadedRun(streamedRun);
   }, [streamedRun]);
 
   useEffect(() => {
@@ -72,18 +141,49 @@ export default function IdePlan() {
       .catch(() => setManagedAi(null));
   }, []);
 
+  // RR-1459 — every mutation is refused unless a plan for THIS runId is loaded, and unless no
+  // other gate mutation is already in flight. `run` is null whenever the loaded detail does not
+  // belong to the route, so this cannot spend against a plan the approver was not shown.
+  function gateMutationBlocked(): boolean {
+    return busy !== '' || !run || run.runId !== runId;
+  }
+
   async function approve() {
+    if (gateMutationBlocked()) return;
+    const approving = run;
+    if (!approving) return;
+    // RR-819 — refuse locally too. The server is the enforcement point, but firing an approval we
+    // already know will 409 would spend a round trip to tell the user what the disabled button
+    // already says.
+    if (!approvalAllowed) return;
     setBusy('a');
     setErr('');
     try {
-      await api.approveRun(runId, true, run?.creditsCharged ?? undefined);
+      const fingerprint = await planFingerprint(approving.planJson);
+      await api.approveRun(
+        runId,
+        true,
+        approving.creditsCharged ?? undefined,
+        undefined,
+        fingerprint,
+        ackPayload(gate, breakingAck),
+      );
       navigate(`/live/${runId}`);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Approve failed.');
+      const serverMessage = e instanceof Error ? e.message : 'Approve failed.';
+      const conflict = classifyApprovalConflict(serverMessage);
+      setErr(approvalConflictMessage(conflict, serverMessage));
+      if (conflict === 'BREAKING_REPORT_STALE') {
+        // What was acknowledged is no longer what is on this run. Drop the stale acknowledgement
+        // and re-read the report so the user re-acknowledges the change they will actually ship.
+        setBreakingAck('');
+        setReloadGate((n) => n + 1);
+      }
       setBusy('');
     }
   }
   async function cancel() {
+    if (gateMutationBlocked()) return;
     setBusy('c');
     setErr('');
     try {
@@ -98,6 +198,7 @@ export default function IdePlan() {
   // loop above picks up the new AWAITING_APPROVAL version.
   async function revise() {
     if (!feedback.trim()) return;
+    if (gateMutationBlocked()) return;
     setBusy('e');
     setErr('');
     try {
@@ -257,7 +358,7 @@ export default function IdePlan() {
               <div style={{display: 'flex', gap: 8, marginTop: 8}}>
                 <button
                   className='ide-btn'
-                  disabled={busy === 'e' || !feedback.trim()}
+                  disabled={busy !== '' || !feedback.trim()}
                   onClick={revise}
                 >
                   {busy === 'e' ? 'Revising…' : 'Submit requested changes'}
@@ -277,11 +378,24 @@ export default function IdePlan() {
             </button>
           )}
 
+          {gateRequiresAck && gate && (
+            <PlanContractGateCard
+              rows={gate.rows}
+              typed={breakingAck}
+              onTypedChange={setBreakingAck}
+              disabled={busy !== ''}
+            />
+          )}
+
           {err && (
             <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '12px 0'}}>{err}</div>
           )}
           <div style={{display: 'flex', gap: 8, marginTop: 16}}>
-            <button className='ide-btn' disabled={busy === 'a'} onClick={approve}>
+            <button
+              className='ide-btn'
+              disabled={busy !== '' || !approvalAllowed}
+              onClick={approve}
+            >
               {busy === 'a'
                 ? 'Approving…'
                 : `Approve and start work · ${run.creditsCharged ?? 1} credit(s)`}
@@ -289,7 +403,7 @@ export default function IdePlan() {
             <button
               className='ide-btn ghost'
               style={{color: 'var(--ide-red)'}}
-              disabled={busy === 'c'}
+              disabled={busy !== ''}
               onClick={cancel}
             >
               Cancel

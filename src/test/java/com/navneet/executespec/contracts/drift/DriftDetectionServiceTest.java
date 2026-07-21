@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -69,12 +70,15 @@ class DriftDetectionServiceTest {
   }
 
   @Test
-  void runCheck_noSnapshot_returnsNoDrift_doesNotPersistEvent() {
+  void runCheck_noSnapshot_isUnavailable_notVerifiedClean() {
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(folderWriter.readFile(eq(repo), anyString(), any())).thenReturn(Optional.empty());
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    // RR-1631 — with no snapshot there is nothing to compare against, so the check is
+    // UNAVAILABLE, not a verified "no drift".
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.UNAVAILABLE);
     assertThat(r.hasDrift()).isFalse();
     assertThat(r.summary()).contains("no .executespec/ snapshot");
     verify(driftRepo, never()).save(any());
@@ -88,10 +92,12 @@ class DriftDetectionServiceTest {
     when(folderWriter.readFile(eq(repo), anyString(), any()))
         .thenReturn(
             Optional.of(new ExecutespecFolderWriter.FileSnapshot(content, "blob-sha", hash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(content);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(content));
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.NO_DRIFT);
     assertThat(r.hasDrift()).isFalse();
     assertThat(r.summary()).isEqualTo("no drift");
     verifyNoInteractions(driftRepo, emitter);
@@ -108,7 +114,8 @@ class DriftDetectionServiceTest {
             Optional.of(
                 new ExecutespecFolderWriter.FileSnapshot(
                     snapshotContent, "blob-sha", snapshotHash)));
-    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any())).thenReturn(sourceContent);
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
     when(driftRepo.save(any(ContractDriftEvent.class)))
         .thenAnswer(
             inv -> {
@@ -119,6 +126,7 @@ class DriftDetectionServiceTest {
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.DRIFT);
     assertThat(r.hasDrift()).isTrue();
     assertThat(r.eventId()).isNotNull();
     verify(driftRepo).save(any(ContractDriftEvent.class));
@@ -134,7 +142,42 @@ class DriftDetectionServiceTest {
   }
 
   @Test
-  void runCheck_missingSourcePath_returnsNoDrift() {
+  void runCheck_sameUnresolvedDiff_reusesEventWithoutDuplicateWriteOrActivity() {
+    String snapshotContent = "openapi: 3.0\ninfo:\n  version: 1.0.0\n";
+    String snapshotHash = DetectorUtils.sha256(snapshotContent);
+    String sourceContent = "openapi: 3.0\ninfo:\n  version: 2.0.0\n";
+    String sourceHash = DetectorUtils.sha256(sourceContent);
+    UUID existingId = UUID.randomUUID();
+    ContractDriftEvent existing =
+        ContractDriftEvent.builder()
+            .id(existingId)
+            .contractId(contractId)
+            .sourceDiff(
+                "content hash differs: snapshot="
+                    + snapshotHash.substring(0, 12)
+                    + " vs source="
+                    + sourceHash.substring(0, 12))
+            .build();
+    when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(folderWriter.readFile(eq(repo), anyString(), any()))
+        .thenReturn(
+            Optional.of(
+                new ExecutespecFolderWriter.FileSnapshot(
+                    snapshotContent, "blob-sha", snapshotHash)));
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
+    when(driftRepo.findUnresolvedByContractId(contractId)).thenReturn(List.of(existing));
+
+    DriftDetectionService.DriftCheckResult result = service.runCheck(contract, projectId, "ghp_x");
+
+    assertThat(result.hasDrift()).isTrue();
+    assertThat(result.eventId()).isEqualTo(existingId);
+    verify(driftRepo, never()).save(any());
+    verifyNoInteractions(emitter);
+  }
+
+  @Test
+  void runCheck_missingSourcePath_isUnavailable() {
     contract.setDetectedPath(null);
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(folderWriter.readFile(any(), anyString(), any()))
@@ -142,33 +185,116 @@ class DriftDetectionServiceTest {
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.UNAVAILABLE);
     assertThat(r.hasDrift()).isFalse();
     assertThat(r.summary()).contains("no detected source path");
   }
 
   @Test
-  void runCheck_sourceReadFails_returnsNoDrift_doesNotPersist() {
+  void runCheck_sourceReadFails_isUnavailable_notNoDrift_doesNotPersist() {
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(folderWriter.readFile(any(), anyString(), any()))
         .thenReturn(Optional.of(new ExecutespecFolderWriter.FileSnapshot("x", "y", "z")));
     when(gitHub.readRepoFile(anyString(), anyString(), any()))
-        .thenReturn("// File not found on GitHub (status 404)");
+        .thenReturn(GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404));
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    // RR-1631 — a GitHub failure used to collapse into the same hasDrift=false as a genuine
+    // match, so an outage / expired PAT silently read as "no drift".
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.UNAVAILABLE);
     assertThat(r.hasDrift()).isFalse();
     assertThat(r.summary()).contains("could not read source");
     verifyNoInteractions(driftRepo);
   }
 
   @Test
-  void runCheck_repoNotFound_returnsNoDrift() {
+  void runCheck_repoNotFound_isUnavailable() {
     when(projectRepoRepo.findById(repoId)).thenReturn(Optional.empty());
 
     DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
 
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.UNAVAILABLE);
     assertThat(r.hasDrift()).isFalse();
     assertThat(r.summary()).contains("repo not found");
+  }
+
+  /**
+   * RR-1631 — the old guard was {@code sourceContent.startsWith("// ")}, which misclassified a
+   * perfectly valid proto / GraphQL / C-style file whose first line is a copyright comment as an
+   * unreadable one. That made drift on such contracts permanently undetectable AND made refresh
+   * throw BAD_GATEWAY forever, so they could never be repaired either.
+   */
+  @Test
+  void runCheck_sourceStartingWithLineComment_isReadNormally_andDriftIsDetected() {
+    String snapshotContent = "// Copyright 2026 Acme\nsyntax = \"proto3\";\nmessage A {}\n";
+    String snapshotHash = DetectorUtils.sha256(snapshotContent);
+    String sourceContent =
+        "// Copyright 2026 Acme\nsyntax = \"proto3\";\nmessage A { int32 b = 1; }\n";
+    when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(folderWriter.readFile(eq(repo), anyString(), any()))
+        .thenReturn(
+            Optional.of(
+                new ExecutespecFolderWriter.FileSnapshot(
+                    snapshotContent, "blob-sha", snapshotHash)));
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(sourceContent));
+    when(driftRepo.findUnresolvedByContractId(any())).thenReturn(java.util.List.of());
+    when(driftRepo.save(any(ContractDriftEvent.class)))
+        .thenAnswer(
+            inv -> {
+              ContractDriftEvent e = inv.getArgument(0);
+              if (e.getId() == null) e.setId(UUID.randomUUID());
+              return e;
+            });
+
+    DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
+
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.DRIFT);
+    assertThat(r.hasDrift()).isTrue();
+  }
+
+  @Test
+  void runCheck_sourceStartingWithLineComment_matchingHashes_isVerifiedClean() {
+    String content = "// Copyright 2026 Acme\ntype Query { hello: String }\n";
+    String hash = DetectorUtils.sha256(content);
+    when(projectRepoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(folderWriter.readFile(eq(repo), anyString(), any()))
+        .thenReturn(
+            Optional.of(new ExecutespecFolderWriter.FileSnapshot(content, "blob-sha", hash)));
+    when(gitHub.readRepoFile(anyString(), eq("api/openapi.yaml"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.success(content));
+
+    DriftDetectionService.DriftCheckResult r = service.runCheck(contract, projectId, "ghp_x");
+
+    assertThat(r.status()).isEqualTo(DriftDetectionService.Status.NO_DRIFT);
+  }
+
+  /**
+   * RR-1631 — the reader no longer signals failure in-band, so there is nothing to string-match.
+   * These assertions pin the replacement contract: a typed failure is a failure regardless of what
+   * it says, and a successful read is a success even when its content reproduces an old sentinel.
+   */
+  @Test
+  void readFailureIsTypedNotInferredFromContent() {
+    assertThat(
+            GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404).successful())
+        .isFalse();
+    assertThat(
+            GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 404)
+                .contentOrNull())
+        .isNull();
+    assertThat(
+            GitHubRepoService.RepoFileResult.success("// Copyright 2026 Acme\nsyntax=\"proto3\";")
+                .successful())
+        .isTrue();
+    // Even a file whose bytes literally reproduce an old sentinel is now a successful read.
+    assertThat(
+            GitHubRepoService.RepoFileResult.success("// File not found on GitHub (status 404)")
+                .successful())
+        .isTrue();
+    assertThat(DriftDetectionService.describe(GitHubRepoService.RepoFileResult.failed("X", 500)))
+        .isEqualTo("X (status 500)");
   }
 
   @Test

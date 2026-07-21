@@ -51,7 +51,8 @@ class CodeReviewServiceTierGateTest {
             mock(SseBroadcaster.class),
             mock(ProjectRepoRepository.class),
             mock(GitHubRepoService.class),
-            tierConfigRepo);
+            tierConfigRepo,
+            mock(com.navneet.executespec.router.ProjectProviderResolver.class));
 
     // Default: per-user count of 0 unless a test overrides.
     lenient()

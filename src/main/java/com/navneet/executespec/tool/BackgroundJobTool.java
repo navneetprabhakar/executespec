@@ -112,6 +112,13 @@ public class BackgroundJobTool implements Tool, FlagGatedTool {
       return ToolResult.err(
           ToolResult.ErrorKind.INVALID_ARGS, "command is required for action=start");
     }
+    // A background job is shell authority under another name: a brownfield reviewer pass that is
+    // forbidden from using `shell` must not be able to start an unbounded process instead
+    // (RR-1542).
+    String reviewerPolicyError = ReviewerMutationScope.validateBackgroundJob();
+    if (reviewerPolicyError != null) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+    }
     ShellSandboxPolicy.ValidationResult v =
         sandboxPolicy.validate(command, ctx.workspaceRoot().toString());
     if (!v.permitted()) {

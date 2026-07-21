@@ -141,4 +141,68 @@ class StringEditMatcherTest {
       assertThat(applied(r).updated()).isEqualTo("line1\nLAST");
     }
   }
+
+  // ---- RR-1541: indent-flexible tier must preserve RELATIVE indentation --------------------
+
+  @Test
+  void indentFlexPreservesNestedPythonIndentationWhenOldStrIsUnindented() {
+    String content = "class A:\n    def f(self):\n        return 1\n";
+    // oldStr copied without the leading indentation → indent-flexible tier, oldIndent empty.
+    String oldStr = "def f(self):\n    return 1";
+    String newStr = "def f(self):\n    if self.x:\n        return 2\n    return 1";
+
+    var result = StringEditMatcher.apply(content, oldStr, newStr, false, null);
+
+    assertThat(result).isInstanceOf(StringEditMatcher.Applied.class);
+    String updated = ((StringEditMatcher.Applied) result).updated();
+    assertThat(updated)
+        .isEqualTo(
+            "class A:\n"
+                + "    def f(self):\n"
+                + "        if self.x:\n"
+                + "            return 2\n"
+                + "        return 1\n");
+    // The pre-fix implementation flattened every line to one uniform indent.
+    assertThat(updated).doesNotContain("    def f(self):\n    if self.x:\n    return 2");
+  }
+
+  @Test
+  void indentFlexPreservesYamlNestingAndBlankLines() {
+    String content = "root:\n  child:\n    key: 1\n";
+    String oldStr = "child:\n  key: 1";
+    String newStr = "child:\n  key: 2\n\n  other: 3";
+
+    var result = StringEditMatcher.apply(content, oldStr, newStr, false, null);
+
+    assertThat(result).isInstanceOf(StringEditMatcher.Applied.class);
+    assertThat(((StringEditMatcher.Applied) result).updated())
+        .isEqualTo("root:\n  child:\n    key: 2\n\n    other: 3\n");
+  }
+
+  @Test
+  void indentFlexIsIdempotentWhenNewStrAlreadyCarriesTheTargetIndent() {
+    String content = "class A:\n    def f(self):\n        return 1\n";
+    String oldStr = "def f(self):\n    return 1";
+    // newStr already indented to the matched block — must round-trip unchanged.
+    String newStr = "    def f(self):\n        return 2";
+
+    var result = StringEditMatcher.apply(content, oldStr, newStr, false, null);
+
+    assertThat(result).isInstanceOf(StringEditMatcher.Applied.class);
+    assertThat(((StringEditMatcher.Applied) result).updated())
+        .isEqualTo("class A:\n    def f(self):\n        return 2\n");
+  }
+
+  @Test
+  void indentFlexPreservesTabRelativeIndentation() {
+    String content = "class A {\n\tvoid f() {\n\t\treturn;\n\t}\n}\n";
+    String oldStr = "void f() {\n\treturn;\n}";
+    String newStr = "void f() {\n\tif (x) {\n\t\treturn;\n\t}\n}";
+
+    var result = StringEditMatcher.apply(content, oldStr, newStr, false, null);
+
+    assertThat(result).isInstanceOf(StringEditMatcher.Applied.class);
+    assertThat(((StringEditMatcher.Applied) result).updated())
+        .isEqualTo("class A {\n\tvoid f() {\n\t\tif (x) {\n\t\t\treturn;\n\t\t}\n\t}\n}\n");
+  }
 }

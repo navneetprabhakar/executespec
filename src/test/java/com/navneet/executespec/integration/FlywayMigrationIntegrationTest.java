@@ -118,6 +118,18 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationBase {
     assertThat(columns("org")).contains("enabled_providers", "model_overrides_json");
   }
 
+  @Test
+  @DisplayName("benchmark event ordering has a database uniqueness backstop")
+  void benchmarkEventSequenceIsUnique() {
+    List<String> constraints =
+        jdbc.queryForList(
+            "SELECT constraint_name FROM information_schema.table_constraints "
+                + "WHERE table_schema = 'public' AND table_name = 'benchmark_event' "
+                + "AND constraint_type = 'UNIQUE'",
+            String.class);
+    assertThat(constraints).contains("uq_benchmark_event_sequence");
+  }
+
   private List<String> columns(String table) {
     return jdbc.queryForList(
         "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND"

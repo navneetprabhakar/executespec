@@ -14,13 +14,25 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Admin-only endpoint for running model evaluations. Secured via SecurityConfig: /api/admin/**
- * requires SUPER_ADMIN role.
+ * Operator-only endpoint for running model evaluations.
+ *
+ * <p>Gated three ways. SecurityConfig maps {@code /api/admin/**} to SUPER_ADMIN; the class-level
+ * {@link org.springframework.security.access.prepost.PreAuthorize} repeats that at the method
+ * boundary so role enforcement is not solely positional in the SecurityConfig matcher chain; and
+ * the {@link org.springframework.context.annotation.Profile} restriction keeps the bean out of the
+ * production graph entirely.
+ *
+ * <p>The profile gate matters because a single call fans out a 54-request platform-key provider
+ * grid with no reservation, idempotency key or budget ceiling, and its synthetic run id means the
+ * spend is unattributed to any customer or managed-AI period. That must never be reachable in prod
+ * (RR-1633). This mirrors the gating already applied to the {@code test/*} fixture controllers.
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/admin/eval")
 @RequiredArgsConstructor
+@org.springframework.context.annotation.Profile({"local", "dev", "benchmark"})
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('SUPER_ADMIN')")
 public class EvalController {
 
   private final ModelEvaluator modelEvaluator;

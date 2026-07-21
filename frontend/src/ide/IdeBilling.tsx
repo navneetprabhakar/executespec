@@ -22,7 +22,6 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {
   billingUsageSummary,
-  FALLBACK_PLAN_CARDS,
   invoiceDisplay,
   managedKind,
   planCardsFrom,
@@ -212,7 +211,7 @@ export function IdeBilling() {
               }}
             >
               <Stat label='Work runs' value={<>{periodRuns}</>} />
-              {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(2)}`} />}
+              {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(4)}`} />}
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
           </div>
@@ -396,7 +395,7 @@ export function IdeBilling() {
             </div>
             <div className='ide-kv'>
               <span>{isSuperAdmin ? 'Model spend (cycle)' : 'Billing meter'}</span>
-              <span>{isSuperAdmin ? `$${totalSpend.toFixed(2)}` : 'AI credits'}</span>
+              <span>{isSuperAdmin ? `$${totalSpend.toFixed(4)}` : 'AI credits'}</span>
             </div>
             <div className='ide-kv' style={{borderBottom: 'none'}}>
               <span>Successful work (30d)</span>
@@ -513,8 +512,14 @@ export function IdePlans() {
   const [err, setErr] = useState('');
   const [busyTier, setBusyTier] = useState('');
 
+  // RR-357: pricing is retryable, because the failure mode is now "we cannot sell" rather
+  // than "sell from a stale constant".
+  const [reloadKey, setReloadKey] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
+    setPlanRows(null);
+    setPlansFailed(false);
     fetchPlans()
       .then((rows) => {
         if (!cancelled) setPlanRows(Array.isArray(rows) ? rows : []);
@@ -527,18 +532,22 @@ export function IdePlans() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const plans: PlanCard[] = useMemo(() => {
-    if (plansFailed) return FALLBACK_PLAN_CARDS;
-    if (planRows === null) return []; // still loading
-    // An empty 200 is indistinguishable from a misconfigured plan table —
-    // degrade to the known ladder rather than selling nothing.
-    if (planRows.length === 0) return FALLBACK_PLAN_CARDS;
-    return planCardsFrom(planRows);
-  }, [planRows, plansFailed]);
+  }, [reloadKey]);
 
   const loading = planRows === null && !plansFailed;
+  // RR-357: fail closed for commerce. A failed fetch OR an empty 200 (indistinguishable from a
+  // misconfigured plan table) means we do not know the prices — so show a retryable
+  // pricing-unavailable state rather than a stale hardcoded ladder customers could buy from.
+  //
+  // This is deliberately keyed on the raw API rows, NOT on the derived cards: planCardsFrom
+  // synthesizes the FREE and ENTERPRISE bookends unconditionally, so an empty response still
+  // produces two cards and a `plans.length === 0` test would never fire.
+  const pricingUnavailable = plansFailed || (planRows !== null && planRows.length === 0);
+
+  const plans: PlanCard[] = useMemo(() => {
+    if (planRows === null || planRows.length === 0) return [];
+    return planCardsFrom(planRows);
+  }, [planRows]);
 
   // Subscribe → gateway hosted checkout. Flow unchanged by TIER-1 (same
   // endpoint + redirect handling): ENTERPRISE → sales mailto, FREE → no-op,
@@ -547,6 +556,8 @@ export function IdePlans() {
   // global cycle toggle is gone.
   async function subscribe(t: string) {
     if (!canManageBilling) return;
+    // RR-357: never start a checkout while the displayed price is unknown.
+    if (pricingUnavailable) return;
     if (t === 'ENTERPRISE') {
       window.location.href = 'mailto:sales@executespec.ai?subject=Enterprise%20plan';
       return;
@@ -595,6 +606,20 @@ export function IdePlans() {
 
       {loading ? (
         <IdeLoader label='Loading plans…' />
+      ) : pricingUnavailable ? (
+        /* RR-357 — commerce fails closed: no invented prices, no purchase path. */
+        <div className='ide-card' style={{maxWidth: 520}}>
+          <div style={{fontWeight: 700, color: 'var(--ide-fg-bright)', marginBottom: 6}}>
+            Pricing is temporarily unavailable
+          </div>
+          <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 14}}>
+            We could not load the current plans, so we will not show prices we cannot confirm. Your
+            existing subscription and access are unaffected. Please try again in a moment.
+          </div>
+          <button className='ide-btn' onClick={() => setReloadKey((k) => k + 1)}>
+            Retry
+          </button>
+        </div>
       ) : (
         <div
           style={{

@@ -1,8 +1,11 @@
 package com.navneet.executespec.sharing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -10,6 +13,8 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.Project;
@@ -24,6 +29,7 @@ import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sharing.controller.ProjectSharePublicController;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
@@ -42,6 +48,7 @@ class ProjectSharePublicControllerTest {
   private ValidationReportRepository reportRepo;
   private PipelineRunRepository runRepo;
   private ProjectSharePublicController controller;
+  private HttpServletRequest request;
 
   @BeforeEach
   void setUp() {
@@ -49,6 +56,7 @@ class ProjectSharePublicControllerTest {
     projectRepo = mock(ProjectRepository.class);
     reportRepo = mock(ValidationReportRepository.class);
     runRepo = mock(PipelineRunRepository.class);
+    request = mock(HttpServletRequest.class);
     ValidationReportService reportService =
         new ValidationReportService(
             reportRepo,
@@ -70,7 +78,31 @@ class ProjectSharePublicControllerTest {
             mock(PrReviewRepository.class),
             mock(PrReviewCommentRepository.class),
             mock(ProjectArchitectureDocRepository.class),
-            projectRepo);
+            projectRepo,
+            new GeneratedSecretScanner(),
+            new ObjectMapper().findAndRegisterModules());
+  }
+
+  @Test
+  void publicPayloadWithCredentialLikeMaterialIsRejectedWithoutReturningTheCredential() {
+    String secret = "github_pat_" + "A1".repeat(25);
+    ProjectShareLink link =
+        ProjectShareLink.builder()
+            .id(UUID.randomUUID())
+            .projectId("p-1")
+            .token("tok-secret")
+            .surface(ProjectShareLink.Surface.PROJECT_OVERVIEW)
+            .label("leaked " + secret)
+            .createdByUserId("u-1")
+            .createdAt(Instant.now())
+            .build();
+    when(linkService.resolveActive(eq("tok-secret"), any())).thenReturn(link);
+
+    ResponseStatusException error =
+        assertThrows(ResponseStatusException.class, () -> controller.meta("tok-secret", request));
+
+    assertEquals(422, error.getStatusCode().value());
+    assertFalse(error.getReason().contains(secret));
   }
 
   @Test
@@ -85,7 +117,7 @@ class ProjectSharePublicControllerTest {
             .createdByUserId("u-1")
             .createdAt(Instant.now())
             .build();
-    when(linkService.resolveActive("tok-report")).thenReturn(link);
+    when(linkService.resolveActive(eq("tok-report"), any())).thenReturn(link);
     when(runRepo.findById("run-1"))
         .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").projectId("p-1").build()));
     when(reportRepo.findByRunId("run-1"))
@@ -105,14 +137,17 @@ class ProjectSharePublicControllerTest {
                     .rubricScore(100)
                     .build()));
 
-    var body = controller.sharedReport("tok-report").getBody();
+    var body = controller.sharedReport("tok-report", request).getBody();
 
     assertNotNull(body);
     assertEquals(100, body.verifiedScore());
     assertEquals(100, body.rubricScore());
     assertNotNull(body.verificationLedger());
+    // RR-1646: the shared ledger still carries a provenance label for the tests row, but the
+    // persisted counts come from runner report files read off disk with no exit-code check, so a
+    // public report must not present them as DETERMINISTIC (independent-of-LLM) proof.
     assertEquals(
-        "DETERMINISTIC",
+        "UNVERIFIED_COUNT",
         body.verificationLedger().stream()
             .filter(entry -> "tests".equals(entry.id()))
             .findFirst()
@@ -126,7 +161,7 @@ class ProjectSharePublicControllerTest {
     Instant updated = Instant.parse("2026-06-02T10:15:30Z");
     ProjectShareLink link = projectOverviewLink("tok-project", "p-1");
     link.setLabel("Migration snapshot");
-    when(linkService.resolveActive("tok-project")).thenReturn(link);
+    when(linkService.resolveActive(eq("tok-project"), any())).thenReturn(link);
     when(projectRepo.findById("p-1"))
         .thenReturn(
             Optional.of(
@@ -144,19 +179,59 @@ class ProjectSharePublicControllerTest {
                     .build()));
 
     ProjectSharePublicController.SharedProjectOverview body =
-        controller.sharedProject("tok-project").getBody();
+        controller.sharedProject("tok-project", request).getBody();
 
     assertNotNull(body);
-    assertEquals("p-1", body.projectId());
     assertEquals("Payments Platform", body.name());
     assertEquals("API migration", body.description());
     assertEquals("ACTIVE", body.status());
-    assertEquals("DEEPSEEK", body.aiProvider());
-    assertEquals("executespec", body.githubOwner());
     assertEquals(created, body.createdAt());
     assertEquals(updated, body.updatedAt());
     assertEquals("Migration snapshot", body.label());
-    verify(linkService).recordView(link);
+    verify(linkService).recordView(eq(link), any());
+  }
+
+  @Test
+  void shared_project_dto_does_not_serialize_internal_tenant_or_routing_fields() throws Exception {
+    ProjectShareLink link = projectOverviewLink("tok-project", "p-1");
+    when(linkService.resolveActive(eq("tok-project"), any())).thenReturn(link);
+    when(projectRepo.findById("p-1"))
+        .thenReturn(
+            Optional.of(
+                Project.builder()
+                    .id("p-1")
+                    .orgId("org-secret")
+                    .name("Payments Platform")
+                    .aiProvider(LlmProvider.DEEPSEEK)
+                    .githubOwner("private-owner")
+                    .createdBy("user-secret")
+                    .build()));
+
+    String json =
+        new ObjectMapper()
+            .findAndRegisterModules()
+            .writeValueAsString(controller.sharedProject("tok-project", request).getBody());
+
+    assertFalse(json.contains("p-1"));
+    assertFalse(json.contains("org-secret"));
+    assertFalse(json.contains("DEEPSEEK"));
+    assertFalse(json.contains("private-owner"));
+    assertFalse(json.contains("user-secret"));
+  }
+
+  @Test
+  void metadata_does_not_disclose_scope_or_project_identifiers() throws Exception {
+    ProjectShareLink link = projectOverviewLink("tok-project", "p-1");
+    link.setScopeId("internal-scope");
+    when(linkService.resolveActive(eq("tok-project"), any())).thenReturn(link);
+
+    String json =
+        new ObjectMapper()
+            .findAndRegisterModules()
+            .writeValueAsString(controller.meta("tok-project", request).getBody());
+
+    assertFalse(json.contains("p-1"));
+    assertFalse(json.contains("internal-scope"));
   }
 
   @Test
@@ -171,10 +246,11 @@ class ProjectSharePublicControllerTest {
             .createdByUserId("u-1")
             .createdAt(Instant.now())
             .build();
-    when(linkService.resolveActive("tok-run")).thenReturn(link);
+    when(linkService.resolveActive(eq("tok-run"), any())).thenReturn(link);
 
     ResponseStatusException ex =
-        assertThrows(ResponseStatusException.class, () -> controller.sharedProject("tok-run"));
+        assertThrows(
+            ResponseStatusException.class, () -> controller.sharedProject("tok-run", request));
 
     assertEquals(404, ex.getStatusCode().value());
   }

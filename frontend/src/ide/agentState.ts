@@ -1,4 +1,8 @@
 import * as api from '@/lib/api';
+import {
+  isAwaitingApprovalRunStatus,
+  isTerminalRunStatus as isTerminalRunStatusShared,
+} from '@/lib/runStatus';
 
 export type AgentUiState =
   | 'idle'
@@ -129,6 +133,7 @@ export type AgentAction =
     }
   | {type: 'load:error'; error: string}
   | {type: 'sessions:set'; sessions: api.AgentSessionResponse[]}
+  | {type: 'session:created'; session: api.AgentSessionResponse}
   | {type: 'session:select'; sessionId: string | null}
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
   | {type: 'events:set'; events: StreamTimelineItem[]}
@@ -193,6 +198,17 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return {...state, status: 'error', error: action.error};
     case 'sessions:set':
       return {...state, sessions: action.sessions};
+    // Canonical creation result. Deduping by id means an idempotent re-create
+    // (same client request id) selects the existing session instead of
+    // appending a duplicate row to the drawer.
+    case 'session:created':
+      return agentReducer(
+        {
+          ...state,
+          sessions: [action.session, ...state.sessions.filter((s) => s.id !== action.session.id)],
+        },
+        {type: 'session:select', sessionId: action.session.id},
+      );
     case 'session:select':
       return {
         ...state,
@@ -613,6 +629,9 @@ export function runPhaseLabel(status?: string | null): string {
   if (['QUEUED', 'PENDING', 'SUBMITTED', 'QUEUED_BATCH'].includes(s)) return 'Queued';
   if (['CLASSIFYING', 'PLANNING'].includes(s)) return 'Planning';
   if (s === 'AWAITING_APPROVAL') return 'Waiting for approval';
+  // RR-1463 — the state between plan approval and the first worker turn. Without this the
+  // card fell through to the default branch and showed the raw enum.
+  if (s === 'APPROVAL_RESUMING') return 'Resuming';
   if (['WORKING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH', 'CODING', 'RUNNING'].includes(s))
     return 'Coding';
   if (['COMPILING', 'BUILDING'].includes(s)) return 'Building';
@@ -626,10 +645,10 @@ export function runPhaseLabel(status?: string | null): string {
   return s ? s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ') : 'Running';
 }
 
+// RR-1536 — delegates to the one shared run-status vocabulary so this panel cannot drift
+// from the plan page and the project rollup again.
 export function isTerminalRunStatus(status?: string | null): boolean {
-  return ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED', 'ERROR'].includes(
-    (status || '').toUpperCase(),
-  );
+  return isTerminalRunStatusShared(status);
 }
 
 export type RunProgress = {done: number; total: number; pct: number; current: string | null};
@@ -655,7 +674,7 @@ export function runProgress(
 /** Route for the run card's "Open" action, by run status. */
 export function runOpenPath(runId: string, status?: string | null): string {
   const s = (status || '').toUpperCase();
-  if (s === 'AWAITING_APPROVAL') return `/plan/${runId}`;
+  if (isAwaitingApprovalRunStatus(s)) return `/plan/${runId}`;
   if (isTerminalRunStatus(s) || s === 'PAUSED') return `/result/${runId}`;
   return `/live/${runId}`;
 }
@@ -699,5 +718,5 @@ export function pct(used: number, total: number): number {
 
 export function currency(value: number): string {
   if (!Number.isFinite(value) || value < 0) return 'n/a';
-  return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(4)}`;
 }

@@ -121,6 +121,58 @@ public class WorkerHistoryCompactor {
   static final int DOSSIER_MAX_TOKENS = 6_000;
 
   /**
+   * RR-1602 — consecutive post-call failures tolerated per {@code (runId, taskId)} before this
+   * compactor stops attempting.
+   *
+   * <p>Three failure paths (blank summary, {@code finish == "length"}, and any exception thrown
+   * after dispatch) returned the ORIGINAL history <i>after the router call had already been
+   * billed</i>. Because the trigger — tight headroom — stays true precisely because compaction
+   * failed, the worker re-entered the same path on every subsequent iteration: one wasted
+   * LIGHTWEIGHT call per iteration, up to 180 on a HIGH-tier worker, for output that is always
+   * discarded. The memo turns an unbounded per-iteration spend into a bounded per-task one.
+   */
+  static final int MAX_CONSECUTIVE_COMPACTION_FAILURES = 2;
+
+  /** Bound on the memo so a long-lived JVM cannot accumulate one entry per task forever. */
+  private static final int FAILURE_MEMO_MAX_ENTRIES = 10_000;
+
+  /**
+   * {@code runId::taskId} → consecutive failures. Cleared on the first success, so a task that
+   * recovers is not permanently penalised.
+   */
+  private final java.util.Map<String, Integer> consecutiveFailures =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  private static String memoKey(ExecutionContext ctx) {
+    return ctx.runId() + "::" + ctx.taskId();
+  }
+
+  private boolean compactionGivenUp(ExecutionContext ctx) {
+    return consecutiveFailures.getOrDefault(memoKey(ctx), 0) >= MAX_CONSECUTIVE_COMPACTION_FAILURES;
+  }
+
+  /** Records a failure that occurred AFTER a billed provider call. Returns the original history. */
+  private List<Message> recordBilledFailure(ExecutionContext ctx, List<Message> history) {
+    if (consecutiveFailures.size() >= FAILURE_MEMO_MAX_ENTRIES) {
+      consecutiveFailures.clear();
+    }
+    int failures = consecutiveFailures.merge(memoKey(ctx), 1, Integer::sum);
+    if (failures >= MAX_CONSECUTIVE_COMPACTION_FAILURES) {
+      log.warn(
+          "WorkerHistoryCompactor giving up for run={} task={} after {} consecutive billed"
+              + " failures — no further compaction calls for this task",
+          ctx.runId(),
+          ctx.taskId(),
+          failures);
+    }
+    return history;
+  }
+
+  private void clearFailures(ExecutionContext ctx) {
+    consecutiveFailures.remove(memoKey(ctx));
+  }
+
+  /**
    * Return a (possibly) compacted copy of {@code history}. Returns the SAME list reference when no
    * compaction happened (flag off / under threshold / no safe boundary / any failure) so the caller
    * can cheaply detect a no-op by identity.
@@ -264,6 +316,16 @@ public class WorkerHistoryCompactor {
       // (e.g. an externally-assembled resume), don't risk a malformed rewrite.
       return history;
     }
+    // RR-1602: three post-dispatch failure paths below return the original history AFTER a billed
+    // call, while the trigger that brought us here stays true — so without this memo the same
+    // wasted call repeats every worker iteration. Check BEFORE any provider spend.
+    if (compactionGivenUp(ctx)) {
+      log.debug(
+          "WorkerHistoryCompactor skipped run={} task={} — consecutive-failure limit reached",
+          ctx.runId(),
+          ctx.taskId());
+      return history;
+    }
 
     // Align the cut to an AssistantMessage boundary so we never split a tool_use/tool_result pair
     // (see class javadoc). Scan DOWN from the target so we summarise as much as is safe.
@@ -302,7 +364,18 @@ public class WorkerHistoryCompactor {
       return history;
     }
 
-    List<Message> middle = history.subList(HEAD_KEEP, cut);
+    // RR-1601 — index 1 must never simply vanish. The rebuild below emits history.get(0), the
+    // folded note, and history.subList(cut, n); index 1 survives ONLY because its TEXT is folded
+    // in. When index 1 is a second SystemMessage, an AssistantMessage, or a media-bearing
+    // UserMessage whose getText() is null (resumed / externally-assembled histories), taskText was
+    // "" and index 1 was neither summarised nor retained — the literal task and its
+    // PromptTrustBoundary-delimited evidence disappeared and the worker continued against a task it
+    // could no longer see. When it is not a text-bearing UserMessage, summarise it instead.
+    final boolean taskTextAtIndexOne =
+        history.get(1) instanceof UserMessage tu1 && tu1.getText() != null;
+    final int middleStart = taskTextAtIndexOne ? HEAD_KEEP : 1;
+
+    List<Message> middle = history.subList(middleStart, cut);
     if (middle.isEmpty()) {
       return history;
     }
@@ -319,8 +392,7 @@ public class WorkerHistoryCompactor {
       return history;
     }
 
-    String taskText =
-        (history.get(1) instanceof UserMessage tu) && tu.getText() != null ? tu.getText() : "";
+    String taskText = taskTextAtIndexOne ? ((UserMessage) history.get(1)).getText() : "";
     String middleText = renderMessages(middle);
 
     String prompt;
@@ -355,13 +427,13 @@ public class WorkerHistoryCompactor {
       String summary = resp.getResult().getOutput().getText();
       if (summary == null || summary.isBlank()) {
         log.warn("WorkerHistoryCompactor empty summary (run={}) — history unchanged", ctx.runId());
-        return history;
+        return recordBilledFailure(ctx, history);
       }
       if (isLengthTruncated(resp)) {
         log.warn(
             "WorkerHistoryCompactor hit max-token finish (run={}) — history unchanged",
             ctx.runId());
-        return history;
+        return recordBilledFailure(ctx, history);
       }
 
       // Rebuild: system(0) + ONE user message folding the task + the compacted progress note +
@@ -393,14 +465,16 @@ public class WorkerHistoryCompactor {
           middle.size(),
           lastInputTokens,
           resolved.getModel());
+      clearFailures(ctx);
       return compacted;
     } catch (Exception e) {
       // Fail-safe: any LLM error → keep the full history. The worker never loses its transcript.
+      // The attempt may still have been billed, so it counts toward the give-up budget (RR-1602).
       log.warn(
           "WorkerHistoryCompactor LLM call failed (run={}): {} — history unchanged",
           ctx.runId(),
           e.getMessage());
-      return history;
+      return recordBilledFailure(ctx, history);
     }
   }
 

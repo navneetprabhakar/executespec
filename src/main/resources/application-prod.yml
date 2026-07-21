@@ -119,6 +119,7 @@ agent:
   github:
     default-owner: ${GITHUB_OWNER:}
   deployment:
+    recovery-safe-enabled: ${DEPLOYMENT_RECOVERY_SAFE_ENABLED:false}
     gcp-project: ${GCP_PROJECT:executespecv1}
     gcp-region: ${GCP_REGION:us-east4}
     artifact-registry:
@@ -127,6 +128,9 @@ agent:
     workspace:
       gcs-bucket: ${GCS_WORKSPACE_BUCKET:executespec-workspaces}
   integrations:
+    # Outbound lifecycle adapters are BEST_EFFORT and non-idempotent today. The release policy
+    # suppresses their dispatch even if an individual adapter is accidentally enabled.
+    enabled: false
     jira:
       webhook-secret: ${JIRA_WEBHOOK_SECRET:}
       dashboard-url: ${DASHBOARD_URL:https://executespec.ai}
@@ -164,7 +168,7 @@ app:
     smtp:
       password: ${SMTP_PASSWORD:}
   jwt:
-    secret: ${JWT_SECRET:executespec-prod-secret-MUST-BE-OVERRIDDEN-via-env-var}
+    secret: ${JWT_SECRET:}
   cors:
     # Plan 1 (this-week #5): pre-emptive Phase-2 surface allow-list. Both
     # subdomains are listed by default so the eventual frontend split
@@ -188,13 +192,14 @@ auth:
 # ── Crypto ────────────────────────────────────────────────────────────────────
 # Encrypt credential fields at rest (GitHub PAT, AI keys, Slack/Jira/Confluence/
 # Bitbucket tokens) via SimpleKeyEncryptionService + the GCP Secret Manager key
-# configured in the base profile. Safe fallback: if the key can't be loaded the
-# service logs a WARN and runs passthrough (no crash — no worse than before). C7.
-# NOTE(operator): once `executespec-crypto-key` is confirmed present + readable,
-# set require-encryption: true here to fail-fast instead of silently storing plaintext.
+# configured in the base profile. 2026-07-17 credential gate: prod FAILS CLOSED —
+# if the key can't be loaded the app refuses to boot instead of silently storing
+# plaintext, and encountering an enc: envelope without a usable key throws instead
+# of returning ciphertext. Rotation via executespec.crypto.key-version + previous-keys.
 executespec:
   crypto:
     enabled: true
+    require-encryption: true
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 # 2026-04-21 — US-first launch. Stripe is the prod default gateway for USD traffic.

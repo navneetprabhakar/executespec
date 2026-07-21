@@ -5,12 +5,21 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -44,11 +53,13 @@ public class RunCodeMapService {
   // project's canonical codemap instead of regenerating + re-summarising from scratch.
   private final ProjectCodeMapRepository projectCodeMapRepo;
   private final ProjectRepoRepository projectRepoRepo;
+  // RR-1586 — the revision this run actually checked out, so a reused project codemap can be proven
+  // to describe the code the planner will plan against.
+  private final RunRepoSnapshotRepository runRepoSnapshotRepo;
+  private final GitHubRepoService gitHub;
   private final LlmRouter llmRouter;
-
-  @org.springframework.beans.factory.annotation.Value(
-      "${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
-  private String anthropicSummaryModel;
+  private final PipelineRunRepository runRepository;
+  private final ModelResolver modelResolver;
 
   public boolean isEligible(String userTier) {
     return userTier != null && ELIGIBLE_TIERS.contains(userTier.toUpperCase());
@@ -90,7 +101,7 @@ public class RunCodeMapService {
     }
 
     // Consolidation: reuse the project's canonical codemap when available.
-    String reused = tryReuseProjectCodeMap(runId, repoUrl, repoFullName, projectId);
+    String reused = tryReuseProjectCodeMap(runId, repoUrl, repoFullName, projectId, pat);
     if (reused != null) return reused;
 
     String branch = (defaultBranch == null || defaultBranch.isBlank()) ? "main" : defaultBranch;
@@ -154,9 +165,19 @@ public class RunCodeMapService {
    * same repo, persist a {@link RunCodeMap} sourced from the project codemap (0 LLM tokens, no
    * regeneration) and return its content. Returns {@code null} when there's no project match, so
    * the caller falls through to the legacy generate-and-summarise path.
+   *
+   * <p>RR-1586 — reuse is now provenance-checked. Previously the match was on {@code repoFullName}
+   * alone: a project codemap generated weeks and many merges ago could be injected into the planner
+   * as this run's repository picture, persisted with the PROJECT codemap's {@code generatedFromSha}
+   * so it looked verified. Reuse now requires the run's own checked-out revision ({@code
+   * run_repo_snapshot}) to either equal the project codemap's revision, or differ from it only
+   * inside {@code .executespec/} (ExecuteSpec's own published artefacts move HEAD without changing
+   * source). Anything else — including a missing snapshot, or a project codemap with no recorded
+   * SHA — regenerates. The persisted row records the RUN's SHA, which is the revision the content
+   * is now asserted to describe.
    */
   private String tryReuseProjectCodeMap(
-      String runId, String repoUrl, String repoFullName, String projectId) {
+      String runId, String repoUrl, String repoFullName, String projectId, String pat) {
     if (projectId == null || projectId.isBlank()) return null;
     try {
       for (ProjectCodeMap pcm : projectCodeMapRepo.findByProjectId(projectId)) {
@@ -171,6 +192,45 @@ public class RunCodeMapService {
                 .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, pcm.getRepoId())
                 .orElse(pcm);
         String latestContent = latest.getContent() != null ? latest.getContent() : content;
+
+        String runSha = runSnapshotSha(runId, repoFullName);
+        if (runSha == null) {
+          log.info(
+              "RunCodeMap run={} NOT reusing project codemap (project={}, repo={}): no run repo"
+                  + " snapshot to verify the revision against — regenerating",
+              runId,
+              projectId,
+              repoFullName);
+          return null;
+        }
+        String projectSha = latest.getGeneratedFromSha();
+        if (projectSha == null || projectSha.isBlank()) {
+          log.info(
+              "RunCodeMap run={} NOT reusing project codemap (project={}, repo={}, v{}): the"
+                  + " project codemap records no source sha — regenerating",
+              runId,
+              projectId,
+              repoFullName,
+              latest.getVersion());
+          return null;
+        }
+        boolean sameRevision = runSha.equalsIgnoreCase(projectSha);
+        boolean executespecOnlyDrift =
+            !sameRevision
+                && gitHub.diffConfinedTo(repoFullName, projectSha, runSha, ".executespec/", pat);
+        if (!sameRevision && !executespecOnlyDrift) {
+          log.info(
+              "RunCodeMap run={} NOT reusing project codemap (project={}, repo={}, v{}): codemap"
+                  + " sha {} != run sha {} with source-level drift — regenerating",
+              runId,
+              projectId,
+              repoFullName,
+              latest.getVersion(),
+              projectSha,
+              runSha);
+          return null;
+        }
+
         RunCodeMap reused =
             RunCodeMap.builder()
                 .runId(runId)
@@ -179,17 +239,22 @@ public class RunCodeMapService {
                 .summary(null) // reusing full project codemap; no separate per-run LLM summary
                 .fileCount(countFiles(latestContent))
                 .routeCount(countRoutes(latestContent))
-                .generatedFromSha(latest.getGeneratedFromSha())
+                // RR-1586 — record the revision THIS run checked out, not the project codemap's, so
+                // the provenance field cannot overstate what was verified.
+                .generatedFromSha(runSha)
                 .inputTokens(0)
                 .outputTokens(0)
                 .build();
         repo.save(reused);
         log.info(
-            "RunCodeMap for run {} REUSED project codemap (project={}, repo={}, v{}) — 0 LLM cost",
+            "RunCodeMap run={} REUSED project codemap (project={}, repo={}, v{}, sha={},"
+                + " executespecOnlyDrift={}) — 0 LLM cost",
             runId,
             projectId,
             repoFullName,
-            latest.getVersion());
+            latest.getVersion(),
+            runSha,
+            executespecOnlyDrift);
         return reused.getRawContent();
       }
     } catch (Exception e) {
@@ -203,12 +268,44 @@ public class RunCodeMapService {
   }
 
   /**
+   * RR-1586 — the commit SHA this run cloned for {@code repoFullName}, or {@code null} when the run
+   * has no snapshot for that repo (standalone run, pre-clone phase, or a repo the run never checked
+   * out). A null answer means "cannot verify" and must never be treated as "matches".
+   */
+  private String runSnapshotSha(String runId, String repoFullName) {
+    for (RunRepoSnapshot snap : runRepoSnapshotRepo.findByRunId(runId)) {
+      if (snap.getRepoFullName() == null || snap.getCommitSha() == null) continue;
+      if (repoFullName.equalsIgnoreCase(snap.getRepoFullName())) return snap.getCommitSha();
+    }
+    return null;
+  }
+
+  /**
    * Returns [summary, inputTokens, outputTokens].
    *
    * <p>The summary is routed through {@link LlmRouter}; a disabled or unavailable transport falls
    * back to the deterministic raw codemap at the caller.
    */
   private String[] summarise(String runId, String repoFullName, String rawMarkdown) {
+    var run =
+        runRepository
+            .findById(runId)
+            .orElseThrow(() -> new IllegalStateException("Run not found for codemap routing"));
+    String providerValue = run.isRoutePinned() ? run.getRequestedProvider() : run.getAiProvider();
+    if (providerValue == null || providerValue.isBlank()) {
+      throw new IllegalStateException("Run provider missing for codemap routing");
+    }
+    LlmProvider provider = LlmProvider.valueOf(providerValue.toUpperCase());
+    ResolvedModel route =
+        run.isRoutePinned()
+            ? ResolvedModel.builder()
+                .requestedProvider(provider)
+                .actualProvider(provider)
+                .model(run.getRequestedModel())
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .fallback(false)
+                .build()
+            : modelResolver.resolve("RunCodeMapService", provider, AgentTier.LIGHTWEIGHT);
     String system =
         """
         You are a senior engineer summarising a code map for use as planner context.
@@ -227,9 +324,11 @@ public class RunCodeMapService {
             + truncate(rawMarkdown, MAX_RAW_CHARS);
     ChatResponse resp =
         llmRouter.callText(
-            "anthropic",
-            anthropicSummaryModel,
-            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            route.providerName(),
+            route.getModel(),
+            java.util.List.of(
+                new SystemMessage(system),
+                new UserMessage(PromptTrustBoundary.wrap("RAW_CODEMAP_SCAN", user))),
             runId,
             "RunCodeMapService",
             "codemap.summary",

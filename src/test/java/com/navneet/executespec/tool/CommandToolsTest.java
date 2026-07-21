@@ -138,7 +138,8 @@ class CommandToolsTest {
                 .timeoutSeconds(5)
                 .sourceDescription("test")
                 .build());
-    BuildProjectTool tool = new BuildProjectTool(resolver, validator, null, null);
+    BuildProjectTool tool =
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
 
     ToolResult result = tool.execute(json("{\"command\":\"printf build-ok\"}"), ctx());
 
@@ -159,7 +160,8 @@ class CommandToolsTest {
                 .timeoutSeconds(5)
                 .sourceDescription("fallback:no-op")
                 .build());
-    BuildProjectTool tool = new BuildProjectTool(resolver, validator, null, null);
+    BuildProjectTool tool =
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
 
     ToolResult result = tool.execute(JSON.createObjectNode(), ctx());
 
@@ -181,7 +183,8 @@ class CommandToolsTest {
                 .timeoutSeconds(5)
                 .sourceDescription("test")
                 .build());
-    BuildProjectTool buildProjectTool = new BuildProjectTool(resolver, validator, null, null);
+    BuildProjectTool buildProjectTool =
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy());
     Tool alias = new BuildAliasTool("runBuild", "alias", buildProjectTool);
 
     ToolResult result = alias.execute(json("{\"command\":\"printf alias-ok\"}"), ctx());
@@ -210,6 +213,7 @@ class CommandToolsTest {
             new WriteFileTool(
                 new FileSandboxPolicy(),
                 new com.navneet.executespec.security.CodeAbuseScanner(),
+                new com.navneet.executespec.security.GeneratedSecretScanner(),
                 mock(com.navneet.executespec.sse.SseBroadcaster.class),
                 new ReadFileStateStore(),
                 null));
@@ -391,16 +395,131 @@ class CommandToolsTest {
     assertThat(((ToolResult.Err) failed).message()).contains("\"exit_code\":1");
   }
 
+  @Test
+  void readFile_blocksCredentialMaterialBeforeItCanEnterModelContext() throws Exception {
+    Files.writeString(root.resolve(".env"), "API_KEY=super-secret-value\n");
+    Files.writeString(root.resolve(".env.example"), "API_KEY=replace-me\n");
+    ReadFileTool tool = readFileTool(new ReadFileStateStore());
+
+    ToolResult denied = tool.execute(json("{\"path\":\".env\"}"), ctx());
+    ToolResult template = tool.execute(json("{\"path\":\".env.example\"}"), ctx());
+
+    assertThat(denied).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) denied).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(template).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) template).content()).contains("replace-me");
+  }
+
+  @Test
+  void readFile_blocksCredentialContentInTemplatesOrdinarySourceAndRanges() throws Exception {
+    String credential = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+    Files.writeString(root.resolve(".env.example"), "ANTHROPIC_API_KEY=" + credential + "\n");
+    Files.writeString(
+        root.resolve("Main.java"), "// fixture\nString key = \"" + credential + "\";\n");
+    ReadFileTool tool = readFileTool(new ReadFileStateStore());
+
+    for (String request :
+        List.of(
+            "{\"path\":\".env.example\"}",
+            "{\"path\":\"Main.java\"}",
+            "{\"path\":\"Main.java\",\"startLine\":2,\"endLine\":2}")) {
+      ToolResult result = tool.execute(json(request), ctx());
+      assertThat(result).isInstanceOf(ToolResult.Err.class);
+      assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+      assertThat(((ToolResult.Err) result).message())
+          .contains("credential content")
+          .doesNotContain(credential);
+    }
+  }
+
+  @Test
+  void shellOutputRedactsSecretShapesBeforeReturningToWorker() {
+    Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
+
+    ToolResult result =
+        tool.execute(json("{\"command\":\"echo api_key=abcdefghijklmnopsecret\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("[REDACTED]")
+        .doesNotContain("abcdefghijklmnopsecret");
+  }
+
   private static ReadFileTool readFileTool(ReadFileStateStore readState) {
-    return new ReadFileTool(null, null, null, null, null, null, readState);
+    return new ReadFileTool(
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        readState,
+        new com.navneet.executespec.security.GeneratedSecretScanner());
   }
 
   private static EditFileTool editFileTool(ReadFileStateStore readState) {
     return new EditFileTool(
         new FileSandboxPolicy(),
         new com.navneet.executespec.security.CodeAbuseScanner(),
+        new com.navneet.executespec.security.GeneratedSecretScanner(),
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         readState,
         null);
+  }
+
+  @Test
+  void reviewerBrownfieldScopeBlocksMoveAndDeleteOutsideAdmittedRoots() throws Exception {
+    // RR-1542 — delete/move (and their rename/deletePath aliases) bypassed ReviewerMutationScope
+    // entirely, so a brownfield reviewer pass confined to `repos/api` could still relocate or
+    // destroy files in a sibling repository it was never admitted to.
+    Files.createDirectories(root.resolve("repos/api"));
+    Files.createDirectories(root.resolve("repos/web"));
+    Files.writeString(root.resolve("repos/api/a.txt"), "api\n");
+    Files.writeString(root.resolve("repos/web/b.txt"), "web\n");
+
+    Tool move = new MovePathTool();
+    Tool delete = new DeletePathTool();
+    Tool renameAlias = new CommandAliasTool("rename", "alias", new MovePathTool());
+    Tool deletePathAlias = new CommandAliasTool("deletePath", "alias", new DeletePathTool());
+
+    var policy =
+        new ReviewerMutationScope.Policy(
+            true, java.util.List.of("repos/api"), java.util.List.of(), false);
+
+    ReviewerMutationScope.withPolicy(
+        policy,
+        () -> {
+          assertThat(delete.execute(json("{\"path\":\"repos/web/b.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          assertThat(deletePathAlias.execute(json("{\"path\":\"repos/web/b.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          assertThat(
+                  move.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/web/a.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          // RR-1543 — a dot-segment escape inside an admitted root must not be admitted either.
+          assertThat(
+                  renameAlias.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/api/../web/a.txt\"}"),
+                      ctx()))
+              .isInstanceOf(ToolResult.Err.class);
+          return null;
+        });
+
+    // Nothing was destroyed or relocated.
+    assertThat(Files.exists(root.resolve("repos/web/b.txt"))).isTrue();
+    assertThat(Files.exists(root.resolve("repos/api/a.txt"))).isTrue();
+
+    // Inside the admitted root the same operations still work.
+    ReviewerMutationScope.withPolicy(
+        policy,
+        () -> {
+          assertThat(
+                  move.execute(
+                      json("{\"src\":\"repos/api/a.txt\",\"dst\":\"repos/api/c.txt\"}"), ctx()))
+              .isInstanceOf(ToolResult.Ok.class);
+          return null;
+        });
+    assertThat(Files.exists(root.resolve("repos/api/c.txt"))).isTrue();
   }
 }

@@ -1,5 +1,7 @@
 package com.navneet.executespec.crypto;
 
+import java.util.List;
+
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,6 +28,7 @@ public class KeyMigrationRunner {
 
   private final SimpleKeyEncryptionService encryptionService;
   private final JdbcTemplate jdbcTemplate;
+  private final CryptoProperties cryptoProperties;
 
   @EventListener(ApplicationReadyEvent.class)
   public void migrateExistingKeys() {
@@ -34,37 +37,85 @@ public class KeyMigrationRunner {
       return;
     }
 
-    log.info("[KeyMigration] Starting plaintext API key encryption migration...");
+    log.info("[KeyMigration] Starting credential envelope migration...");
 
     int totalMigrated = 0;
-    totalMigrated += migrateTable("app_user", "openai_api_key");
-    totalMigrated += migrateTable("app_user", "anthropic_api_key");
-    totalMigrated += migrateTable("app_user", "gemini_api_key");
-    totalMigrated += migrateTable("app_user", "jira_api_token");
-    totalMigrated += migrateTable("app_user", "confluence_api_token");
-
-    totalMigrated += migrateTable("org", "openai_api_key");
-    totalMigrated += migrateTable("org", "anthropic_api_key");
-    totalMigrated += migrateTable("org", "gemini_api_key");
-    totalMigrated += migrateTable("org", "jira_api_token");
-    totalMigrated += migrateTable("org", "confluence_api_token");
+    for (String column : APP_USER_SECRET_COLUMNS) {
+      totalMigrated += migrateTable("app_user", column);
+    }
+    for (String column : ORG_SECRET_COLUMNS) {
+      totalMigrated += migrateTable("org", column);
+    }
+    for (String column : PIPELINE_RUN_SECRET_COLUMNS) {
+      totalMigrated += migrateTable("pipeline_run", column, "run_id");
+    }
+    totalMigrated += migrateTable("org_slack_integration", "bot_token");
 
     if (totalMigrated > 0) {
-      log.info("[KeyMigration] Encrypted {} plaintext API key values", totalMigrated);
+      log.info(
+          "[KeyMigration] Re-wrote {} credential values into versioned envelopes", totalMigrated);
     } else {
-      log.info("[KeyMigration] No plaintext API keys found — all already encrypted or empty");
+      log.info("[KeyMigration] No plaintext/legacy credentials found — all already enveloped");
     }
   }
 
   /**
-   * Reads all non-null values from the given column, encrypts them, and writes back. Skips values
-   * that are already encrypted (heuristic: valid Base64 of sufficient length).
+   * COMPLETE per-tenant secret column sets (2026-07-17 credential gate). The old hardcoded
+   * 10-column list silently missed github_pat, bitbucket_app_password,
+   * deepseek/fireworks/openrouter keys, and the Slack bot token. `personal_access_token.token_hash`
+   * is deliberately absent — it is a one-way SHA-256 hash, not recoverable material.
+   */
+  static final java.util.List<String> APP_USER_SECRET_COLUMNS =
+      java.util.List.of(
+          "openai_api_key",
+          "anthropic_api_key",
+          "gemini_api_key",
+          "deepseek_api_key",
+          "fireworks_api_key",
+          "jira_api_token",
+          "confluence_api_token",
+          "github_pat",
+          "bitbucket_app_password");
+
+  static final java.util.List<String> ORG_SECRET_COLUMNS =
+      java.util.List.of(
+          "openai_api_key",
+          "anthropic_api_key",
+          "gemini_api_key",
+          "open_router_api_key",
+          "deepseek_api_key",
+          "fireworks_api_key",
+          "jira_api_token",
+          "confluence_api_token");
+
+  /**
+   * Legacy run snapshots still carry SCM credentials so an accepted asynchronous run can clone or
+   * push after the request ends. Until those snapshots are replaced with a credential reference,
+   * they require the same at-rest envelope as the account-level source.
+   */
+  static final java.util.List<String> PIPELINE_RUN_SECRET_COLUMNS =
+      java.util.List.of("github_pat", "bitbucket_app_password");
+
+  /**
+   * Reads all non-null values from the given column and rewrites anything that is not yet a
+   * versioned envelope: plaintext encrypts directly; legacy bare-Base64 ciphertext decrypts with
+   * the current key and re-encrypts into the envelope. Already-enveloped rows are skipped exactly
+   * by prefix (no heuristic), so the runner stays idempotent across boots.
    */
   private int migrateTable(String table, String column) {
+    return migrateTable(table, column, "id");
+  }
+
+  private int migrateTable(String table, String column, String keyColumn) {
     try {
-      var rows =
+      // NOTE: use the no-element-type overload — queryForList(sql, Map.class) maps each row to a
+      // SINGLE column and throws "Incorrect column count: expected 1, actual 2" for our two-column
+      // (id, <column>) select. queryForList(sql) returns List<Map<String,Object>> as intended.
+      List<java.util.Map<String, Object>> rows =
           jdbcTemplate.queryForList(
-              "SELECT id, "
+              "SELECT "
+                  + keyColumn
+                  + ", "
                   + column
                   + " FROM "
                   + table
@@ -72,32 +123,55 @@ public class KeyMigrationRunner {
                   + column
                   + " IS NOT NULL AND "
                   + column
-                  + " != ''",
-              java.util.Map.class);
+                  + " != ''");
 
       int count = 0;
       for (var row : rows) {
         String value = (String) row.get(column);
         if (value == null || value.isBlank()) continue;
+        if (encryptionService.isCurrentEnvelope(value)) continue;
 
-        // Skip already-encrypted rows. AES-GCM uses a random IV per call, so
-        // `encrypt(value).equals(value)` is ALWAYS false (except in passthrough mode, which
-        // we already short-circuited above) — meaning the previous heuristic would re-encrypt
-        // every row on every boot. Audit: 2026-05-12 line-by-line review item H #51.
-        if (encryptionService.isLikelyEncrypted(value)) continue;
+        String plaintext = value;
+        if (encryptionService.isEnveloped(value)) {
+          // Rotation is not complete while existing rows remain under a retired decrypt-only key.
+          // Decrypt the old envelope and immediately rewrap it with the active key version so the
+          // previous key can be removed after a successful, verified migration.
+          plaintext = encryptionService.decrypt(value);
+        } else if (encryptionService.isLikelyEncrypted(value)) {
+          // Legacy bare-Base64 ciphertext: recover the plaintext with the current key. The lenient
+          // legacy path returns the input unchanged when it is not actually ciphertext — in that
+          // ambiguous case we still envelope it (it was stored as-is, so it IS the credential).
+          plaintext = encryptionService.decrypt(value);
+        }
 
-        String encrypted = encryptionService.encrypt(value);
+        String enveloped = encryptionService.encrypt(plaintext);
         jdbcTemplate.update(
-            "UPDATE " + table + " SET " + column + " = ? WHERE id = ?", encrypted, row.get("id"));
+            "UPDATE " + table + " SET " + column + " = ? WHERE " + keyColumn + " = ?",
+            enveloped,
+            row.get(keyColumn));
         count++;
       }
 
       if (count > 0) {
-        log.info("[KeyMigration] Encrypted {} values in {}.{}", count, table, column);
+        log.info("[KeyMigration] Enveloped {} values in {}.{}", count, table, column);
       }
       return count;
     } catch (Exception e) {
-      log.warn("[KeyMigration] Failed to migrate {}.{}: {}", table, column, e.getMessage());
+      String message =
+          "[KeyMigration] Failed to migrate "
+              + table
+              + "."
+              + column
+              + " errorClass="
+              + e.getClass().getSimpleName();
+      if (cryptoProperties.isRequireEncryption()) {
+        // In prod/benchmark, starting after a partial credential migration is worse than staying
+        // down: converters may then encounter legacy/plaintext values, new writes can mix formats,
+        // and operators receive a false "encryption required" guarantee. Propagate the original
+        // cause through the ApplicationReadyEvent so Spring aborts startup visibly.
+        throw new IllegalStateException(message);
+      }
+      log.warn(message);
       return 0;
     }
   }

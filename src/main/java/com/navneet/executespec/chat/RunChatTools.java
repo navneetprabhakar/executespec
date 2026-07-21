@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.deployment.WorkspaceFileService;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.SearchFilesTool;
 import com.navneet.executespec.tool.ToolResult;
@@ -45,6 +46,7 @@ public class RunChatTools {
   private final WorkspaceFileService workspaceFileService;
   private final SearchFilesTool searchFilesTool;
   private final ObjectMapper json;
+  private final ContextSanitizer contextSanitizer = new ContextSanitizer();
 
   /**
    * Caller-scoped state every run tool needs. {@code execContext} is the run-workspace-rooted
@@ -234,17 +236,18 @@ public class RunChatTools {
                 ? json.createObjectNode()
                 : json.readTree(toolInput);
       } catch (Exception parseEx) {
-        return errorEnvelope("invalid JSON input: " + parseEx.getMessage()).toString();
+        return errorEnvelope("invalid JSON input").toString();
       }
       try {
         return body.run(args).toString();
       } catch (Exception ex) {
+        String safeFailure = contextSanitizer.sanitizeException(ex);
         log.warn(
-            "Run chat tool '{}' threw {}: {}",
+            "Run chat tool '{}' failed type={} detail={}",
             def.name(),
             ex.getClass().getSimpleName(),
-            ex.getMessage());
-        return errorEnvelope(ex.getClass().getSimpleName() + ": " + ex.getMessage()).toString();
+            safeFailure);
+        return errorEnvelope("tool failed: " + safeFailure).toString();
       }
     }
   }

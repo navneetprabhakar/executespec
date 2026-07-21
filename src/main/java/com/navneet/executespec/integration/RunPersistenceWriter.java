@@ -224,27 +224,62 @@ class RunPersistenceWriter {
             });
   }
 
+  /**
+   * Rebuild an {@link ExecutionResult} from the durable per-task rows, for paths (re-review) that
+   * did not themselves run the executor.
+   *
+   * <p>RR-334 — this reconstruction feeds terminal-status resolution, so it must never invent
+   * success. Previously a {@code null} status counted as COMPLETE, every unrecognised or
+   * still-running status fell through the switch default to COMPLETE, and a run with zero tasks or
+   * only BLOCKED/SKIPPED rows returned {@code ALL_SUCCESS} — meaning a never-executed, in-flight,
+   * schema-drifted or entirely blocked run could be re-reviewed into a COMPLETE terminal state with
+   * publication-eligible validation evidence.
+   *
+   * <p>It is now fail-closed on every axis: every persisted state is enumerated explicitly, an
+   * unknown or non-terminal status counts as a failure rather than a success, and a task set that
+   * is empty or that proves no successful work cannot produce {@code ALL_SUCCESS}.
+   */
   ExecutionResult reconstructExecResultFromTasks(String runId) {
     var tasks = taskRepo.findByRunId(runId);
     int success = 0;
     int warn = 0;
     int failed = 0;
     int skipped = 0;
+    int unproven = 0;
     for (var t : tasks) {
-      String s = t.getStatus() == null ? "COMPLETE" : t.getStatus();
+      String s =
+          t.getStatus() == null ? null : t.getStatus().trim().toUpperCase(java.util.Locale.ROOT);
+      if (s == null) {
+        unproven++;
+        continue;
+      }
       switch (s) {
         case "COMPLETE" -> success++;
         case "PARTIAL" -> warn++;
         case "FAILED" -> failed++;
         case "BLOCKED", "SKIPPED" -> skipped++;
-        default -> success++;
+          // PENDING / WORKING / QUEUED / anything a later schema adds: NOT proof of completion.
+        default -> unproven++;
       }
     }
+    // Unknown and still-running rows are counted as failures for the aggregate verdict so they
+    // cannot be silently dropped from the denominator.
+    failed += unproven;
+
     ExecutionResult.Overall overall;
-    if (failed > 0 && success == 0) overall = ExecutionResult.Overall.FAILED;
-    else if (failed > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else overall = ExecutionResult.Overall.ALL_SUCCESS;
+    if (tasks.isEmpty()) {
+      // No durable task evidence at all — there is nothing that proves this run executed.
+      overall = ExecutionResult.Overall.FAILED;
+    } else if (failed > 0 && success == 0) {
+      overall = ExecutionResult.Overall.FAILED;
+    } else if (failed > 0 || warn > 0) {
+      overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
+    } else if (success == 0) {
+      // Only BLOCKED/SKIPPED rows: nothing was delivered, so this is not a clean success.
+      overall = ExecutionResult.Overall.FAILED;
+    } else {
+      overall = ExecutionResult.Overall.ALL_SUCCESS;
+    }
     return ExecutionResult.builder()
         .overall(overall)
         .tasksExecuted(tasks.size() - skipped)

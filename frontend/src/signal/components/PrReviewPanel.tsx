@@ -32,6 +32,7 @@ const POLL_MS = 2500;
 
 type Props = {
   projectId: string;
+  repoId: string;
   repoFullName: string;
   prNumber: number;
   variant: 'signal' | 'ide';
@@ -56,7 +57,7 @@ function isGate(message: string): boolean {
   );
 }
 
-export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Props) {
+export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, variant}: Props) {
   const navigate = useNavigate();
   const [review, setReview] = useState<api.PrReviewDto | null>(null);
   const [comments, setComments] = useState<api.PrReviewCommentDto[]>([]);
@@ -110,7 +111,7 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
     reviewIdRef.current = null;
     clearPoll();
     api
-      .listPrReviewsForPr(repoFullName, prNumber)
+      .listPrReviewsForPr(projectId, repoId, repoFullName, prNumber)
       .then(async (list) => {
         if (off) return;
         const latest = (list ?? [])[0] ?? null;
@@ -141,14 +142,14 @@ export function PrReviewPanel({projectId, repoFullName, prNumber, variant}: Prop
       off = true;
       clearPoll();
     };
-  }, [repoFullName, prNumber, poll, clearPoll]);
+  }, [projectId, repoId, repoFullName, prNumber, poll, clearPoll]);
 
   async function submit() {
     setSubmitting(true);
     setErr('');
     setGated(false);
     try {
-      const dto = await api.submitPrReview({projectId, repoFullName, prNumber});
+      const dto = await api.submitPrReview({projectId, repoId, repoFullName, prNumber});
       reviewIdRef.current = dto.id;
       setReview(dto);
       setComments([]);

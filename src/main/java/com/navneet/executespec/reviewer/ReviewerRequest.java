@@ -1,5 +1,7 @@
 package com.navneet.executespec.reviewer;
 
+import java.util.List;
+
 import com.navneet.executespec.tool.ExecutionContext;
 
 import lombok.Builder;
@@ -24,7 +26,11 @@ public record ReviewerRequest(
     ExecutionContext context,
     String buildCommand,
     Integer maxIterationsPerPass,
-    Boolean skipWiringPass) {
+    Boolean skipWiringPass,
+    Boolean brownfield,
+    List<String> allowedRepoRoots,
+    List<String> approvedNewFiles,
+    Boolean allowBuildManifestCreation) {
 
   public ReviewerRequest {
     if (provider == null || provider.isBlank())
@@ -32,5 +38,9 @@ public record ReviewerRequest(
     if (model == null || model.isBlank()) throw new IllegalArgumentException("model required");
     if (context == null) throw new IllegalArgumentException("context required");
     if (skipWiringPass == null) skipWiringPass = false;
+    if (brownfield == null) brownfield = false;
+    if (allowedRepoRoots == null) allowedRepoRoots = List.of();
+    if (approvedNewFiles == null) approvedNewFiles = List.of();
+    if (allowBuildManifestCreation == null) allowBuildManifestCreation = false;
   }
 }

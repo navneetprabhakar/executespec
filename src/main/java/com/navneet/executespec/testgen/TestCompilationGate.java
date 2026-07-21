@@ -1,12 +1,9 @@
 package com.navneet.executespec.testgen;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import com.navneet.executespec.testgen.model.TestTask;
 import com.navneet.executespec.testgen.model.TestTaskStatus;
@@ -35,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestCompilationGate {
 
-  private static final long COMPILE_TIMEOUT_SECONDS = 120;
+  private static final Duration COMPILE_TIMEOUT = Duration.ofSeconds(120);
   private static final Pattern ERROR_FILE_PATTERN =
       Pattern.compile("\\[ERROR\\].*?/([A-Z][A-Za-z]+Test)\\.java");
 
@@ -78,21 +75,14 @@ public class TestCompilationGate {
       env.put("JAVA_HOME", javaHome);
       pb.redirectErrorStream(true);
 
-      Process process = pb.start();
-      String output;
-      try (BufferedReader reader =
-          new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-        output = reader.lines().collect(Collectors.joining("\n"));
-      }
-
-      boolean finished = process.waitFor(COMPILE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, COMPILE_TIMEOUT);
+      if (!outcome.finished()) {
         return new CompilationResult(
-            false, "Compilation timed out after " + COMPILE_TIMEOUT_SECONDS + "s", List.of());
+            false, "Compilation timed out after " + COMPILE_TIMEOUT.toSeconds() + "s", List.of());
       }
 
-      int exitCode = process.exitValue();
+      String output = outcome.output();
+      int exitCode = outcome.exitCode();
       if (exitCode == 0) {
         log.info("[TestCompile] Tests compiled successfully for run {}", runId);
         return new CompilationResult(true, null, List.of());
@@ -116,16 +106,38 @@ public class TestCompilationGate {
     }
   }
 
-  /** Mark tasks that had compilation errors as FAILED with error details. */
+  /**
+   * Record the outcome of a FAILED compile against the plan's tasks (RR-1584).
+   *
+   * <p>This method never produces a COMPILED task. {@code failedClassNames} is derived from a
+   * filename regex over compiler output and is empty for whole-project failures — dependency
+   * resolution, a broken POM, an error in a class the regex does not match, a timeout, an absent
+   * {@code mvn}. The previous implementation treated every unlisted task as compiled, so an
+   * unattributable failure was reported to the user as "N tests compiled". A compile that did not
+   * succeed can only mark tasks FAILED; when nothing can be attributed, every task still in flight
+   * is failed with the raw output so the retry pass has something to work from.
+   */
   public void markFailedTasks(Long testPlanId, List<String> failedClassNames, String fullOutput) {
     List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlanId);
+    boolean unattributable = failedClassNames == null || failedClassNames.isEmpty();
     for (TestTask task : tasks) {
-      if (failedClassNames.contains(task.getTaskName())) {
+      boolean namedFailure = !unattributable && failedClassNames.contains(task.getTaskName());
+      boolean inFlight = task.getStatus() == TestTaskStatus.GENERATING;
+      if (namedFailure || (unattributable && inFlight)) {
         task.setStatus(TestTaskStatus.FAILED);
         task.setCompilationError(truncate(fullOutput, 2000));
         testTaskRepository.save(task);
-      } else if (task.getStatus() == TestTaskStatus.GENERATING) {
-        // Mark successfully compiled tasks
+      }
+    }
+  }
+
+  /**
+   * Promote every in-flight task to COMPILED. Only legal after a compile that actually exited 0 —
+   * this is the single transition into COMPILED (RR-1584).
+   */
+  public void markCompiled(Long testPlanId) {
+    for (TestTask task : testTaskRepository.findByTestPlanId(testPlanId)) {
+      if (task.getStatus() == TestTaskStatus.GENERATING) {
         task.setStatus(TestTaskStatus.COMPILED);
         testTaskRepository.save(task);
       }

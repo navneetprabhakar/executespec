@@ -39,12 +39,18 @@ class RunCostTrackerCachePricingTest {
     tracker = new RunCostTracker(pricingRepo, resolver);
     priceCall =
         RunCostTracker.class.getDeclaredMethod(
-            "priceCall", String.class, String.class, int.class, int.class, int.class, int.class);
+            "priceCall",
+            String.class,
+            String.class,
+            long.class,
+            long.class,
+            long.class,
+            long.class);
     priceCall.setAccessible(true);
   }
 
   private double price(
-      String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead)
+      String provider, String model, long inTok, long outTok, long cacheWrite, long cacheRead)
       throws Exception {
     return (double)
         priceCall.invoke(tracker, provider, model, inTok, outTok, cacheWrite, cacheRead);

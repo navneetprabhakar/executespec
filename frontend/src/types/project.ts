@@ -19,6 +19,24 @@ export interface ProjectRepo {
   lastSyncedSha: string | null;
   /** Raw JSON string of {@link StackInfo}; null when not yet detected. */
   detectedStack: string | null;
+  sourceReadinessStatus:
+    | 'UNKNOWN'
+    | 'LINKED'
+    | 'AUTH_VALIDATED'
+    | 'SOURCE_READABLE'
+    | 'INVENTORIED'
+    | 'INDEXING'
+    | 'READY'
+    | 'BLOCKED';
+  sourceReadinessReason: string | null;
+  sourceFileCount: number | null;
+  sourceReadinessCheckedAt: string | null;
+  executespecFolderStatus:
+    | 'NOT_BOOTSTRAPPED'
+    | 'BOOTSTRAP_PR_OPEN'
+    | 'BOOTSTRAPPED'
+    | 'BOOTSTRAP_FAILED';
+  executespecBootstrapPrUrl: string | null;
   /** v2.5.2 — PR webhook installation state. */
   webhookInstalled: boolean;
   /** R-322 — declared monorepo project root (null = repo root). Detected
@@ -31,6 +49,23 @@ export interface ProjectRepo {
   /** R-325 — TRUE when the attach bypassed the size-gate via the
    *  "Attach anyway" opt-in. Drives a per-run credit surcharge. */
   attachedAnyway: boolean;
+  /** V278 — neutral source identity. Legacy GitHub fields above stay populated for SCM rows;
+   *  LOCAL rows carry opaque client-minted identities and a lease-derived connection status. */
+  sourceType?: 'SCM' | 'LOCAL' | null;
+  scmProvider?: string | null;
+  scmRepositoryId?: string | null;
+  scmCloneUrl?: string | null;
+  sourceKey?: string | null;
+  sourceDisplayName?: string | null;
+  localFolderId?: string | null;
+  localInstallationId?: string | null;
+  sourceRevision?: string | null;
+  sourceCapabilities?: string[] | null;
+  sourceMetadata?: Record<string, string> | null;
+  sourceLastSeenAt?: string | null;
+  sourceLeaseExpiresAt?: string | null;
+  /** ONLINE while the connector lease is unexpired; OFFLINE otherwise. Null for SCM rows. */
+  localConnectionStatus?: 'ONLINE' | 'OFFLINE' | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +78,38 @@ export interface ProjectRepoLink {
   relationships: string[];
   linkedAt: string;
   linkedBy: string;
+}
+
+/** V286 — source-bound semantic chunk coverage. This is not a symbol/call relationship graph. */
+export interface ProjectCodeIndexReadiness {
+  projectId: string;
+  repoId: string;
+  currentSourceSha: string;
+  indexedSourceSha: string | null;
+  status: 'UNINDEXED' | 'INDEXING' | 'READY' | 'PARTIAL' | 'STALE' | 'FAILED';
+  reason: string | null;
+  discoveredFiles: number;
+  eligibleFiles: number;
+  indexedFiles: number;
+  refreshedFiles: number;
+  unchangedFiles: number;
+  skippedFiles: number;
+  deletedFiles: number;
+  failedFiles: number;
+  indexedChunks: number;
+  coveragePercent: number;
+  inventoryTruncated: boolean;
+  semanticSearchAvailable: boolean;
+  lexicalFallbackAvailable: boolean;
+  relationshipGraphAvailable: false;
+  retrievalMode: 'SEMANTIC' | 'LEXICAL';
+  embeddingProvider: string | null;
+  embeddingModel: string | null;
+}
+
+export interface ProjectCodeIndexStatus {
+  repoName: string;
+  readiness: ProjectCodeIndexReadiness;
 }
 
 export interface PrSummary {
@@ -105,6 +172,8 @@ export interface ProjectDashboardDTO {
   completedRuns: number;
   failedRuns: number;
   avgScore: number;
+  /** Reports rejected by deterministic validity checks and omitted from avgScore. */
+  excludedScoreReports?: number;
   totalTokens: number;
   totalCostUsd: number;
   /** v2.6.4 — populated by ProjectDashboardController; older responses may omit it. */
@@ -140,7 +209,11 @@ export interface AssessmentResult {
 
 export interface LinkRepoRequest {
   scope: RepoScope;
-  githubRepoFullName: string;
+  scmProvider: 'GITHUB' | 'BITBUCKET';
+  repoFullName: string;
+  scmRepositoryId?: string;
+  /** Compatibility alias accepted by old servers; new callers should not send it. */
+  githubRepoFullName?: string;
   defaultBranch?: string;
   /** R-325 — when true, bypass the {@code executespec.repo.max-size-kb}
    *  hard reject. Set by RepoAttachPopover only after the user clicks

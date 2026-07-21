@@ -67,7 +67,9 @@ class ProjectServiceLifecycleTest {
             orgMemberRepo,
             auditService,
             eventTracking,
-            tierEnforcement);
+            tierEnforcement,
+            mock(com.navneet.executespec.router.ProviderReadinessService.class),
+            mock(com.navneet.executespec.auth.repository.OrgRepository.class));
     when(projectRepo.save(any(Project.class))).thenAnswer(inv -> inv.getArgument(0));
   }
 

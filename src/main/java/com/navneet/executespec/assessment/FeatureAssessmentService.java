@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
@@ -15,11 +16,15 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -46,11 +51,8 @@ public class FeatureAssessmentService {
   private final FeatureFlagService featureFlags;
   private final ObjectMapper objectMapper;
   private final LlmRouter llmRouter;
-
-  // B2 (audit 2026-05-29) — the flag-gated assessment call uses the canonical router so provider
-  // authorization, usage attribution, and model pricing remain in one transport seam.
-  @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
-  private String anthropicAssessModel;
+  private final PipelineRunRepository runRepository;
+  private final ModelResolver modelResolver;
 
   private static final String FLAG_LLM_ENABLED = "assessment.llm.enabled";
   private static final int MAX_CODEMAP_CHARS = 8_000;
@@ -87,6 +89,25 @@ public class FeatureAssessmentService {
 
   private AssessmentResult assessViaLlm(
       String runId, String projectId, String userRequest, List<String> repoNames) throws Exception {
+    var run =
+        runRepository
+            .findById(runId)
+            .orElseThrow(() -> new IllegalStateException("Run not found for assessment routing"));
+    String providerValue = run.isRoutePinned() ? run.getRequestedProvider() : run.getAiProvider();
+    if (providerValue == null || providerValue.isBlank()) {
+      throw new IllegalStateException("Run provider missing for assessment routing");
+    }
+    LlmProvider provider = LlmProvider.valueOf(providerValue.toUpperCase());
+    ResolvedModel route =
+        run.isRoutePinned()
+            ? ResolvedModel.builder()
+                .requestedProvider(provider)
+                .actualProvider(provider)
+                .model(run.getRequestedModel())
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .fallback(false)
+                .build()
+            : modelResolver.resolve("FeatureAssessmentService", provider, AgentTier.LIGHTWEIGHT);
     ProjectArchitectureDoc arch = archService.latest(projectId).orElse(null);
     String archMd = arch == null ? "" : arch.getContent();
     String annotations =
@@ -135,9 +156,11 @@ public class FeatureAssessmentService {
 
     ChatResponse resp =
         llmRouter.callText(
-            "anthropic",
-            anthropicAssessModel,
-            java.util.List.of(new SystemMessage(system), new UserMessage(user)),
+            route.providerName(),
+            route.getModel(),
+            java.util.List.of(
+                new SystemMessage(system),
+                new UserMessage(PromptTrustBoundary.wrap("FEATURE_ASSESSMENT_EVIDENCE", user))),
             runId,
             "FeatureAssessmentService",
             "assessment.llm",

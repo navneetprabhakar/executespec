@@ -16,6 +16,8 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.stereotype.Component;
@@ -76,6 +78,8 @@ public class ReadFileTool implements Tool {
    */
   private final ReadFileStateStore readState;
 
+  private final GeneratedSecretScanner secretScanner;
+
   @Override
   public String name() {
     return "readFile";
@@ -132,6 +136,12 @@ public class ReadFileTool implements Tool {
     if (path == null || path.isBlank()) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "path is required");
     }
+    String policyPath = path.startsWith("project:") ? path.substring("project:".length()) : path;
+    if (SensitiveWorkspacePathPolicy.isSensitive(policyPath)) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.FORBIDDEN,
+          "credential-like files cannot be read into model context: " + policyPath);
+    }
     Integer start = args.hasNonNull("startLine") ? args.get("startLine").asInt() : null;
     Integer end = args.hasNonNull("endLine") ? args.get("endLine").asInt() : null;
     if (start == null && end == null && (args.hasNonNull("offset") || args.hasNonNull("limit"))) {
@@ -169,11 +179,15 @@ public class ReadFileTool implements Tool {
           if (s > lines.length) {
             return ToolResult.ok("(file has " + lines.length + " lines; range starts past EOF)");
           }
-          return ToolResult.ok(String.join("\n", java.util.Arrays.copyOfRange(lines, s - 1, e)));
+          return safeContentResult(
+              String.join("\n", java.util.Arrays.copyOfRange(lines, s - 1, e)));
         }
-        return ToolResult.ok(clampFullRead(content));
+        return safeContentResult(clampFullRead(content));
       } catch (IllegalArgumentException iae) {
-        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, iae.getMessage());
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, "project file read was rejected");
+      } catch (RuntimeException failure) {
+        log.warn("project readFile failed errorClass={}", failure.getClass().getSimpleName());
+        return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "project file read failed");
       }
     }
     try {
@@ -192,17 +206,29 @@ public class ReadFileTool implements Tool {
         int s = start == null ? 1 : start;
         // Range reads are byte-exact and untruncated — this is how the model pages through a file
         // too large to return whole, and the slice it sees is exactly editable via editFile.
-        return ToolResult.ok(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
+        return safeContentResult(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
       }
-      return ToolResult.ok(readFullCapped(resolved));
+      return safeContentResult(readFullCapped(resolved));
     } catch (NoSuchFileException nsfe) {
       return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
     } catch (SecurityException se) {
-      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, "file read was rejected");
     } catch (IOException ioe) {
-      log.warn("readFile IO error path={}", path, ioe);
-      return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+      log.warn("readFile IO error errorClass={}", ioe.getClass().getSimpleName());
+      return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, "file read failed");
     }
+  }
+
+  private ToolResult safeContentResult(String content) {
+    var finding = secretScanner.scan(content);
+    if (finding.isPresent()) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.FORBIDDEN,
+          "credential content cannot be read into model context ("
+              + finding.get().category()
+              + ")");
+    }
+    return ToolResult.ok(content);
   }
 
   /**

@@ -59,6 +59,25 @@ public class EffectiveStandardsResolver {
    * @return list of effective standards with provenance metadata
    */
   public List<Effective> resolve(String orgId, String projectId, String projectLevelYaml) {
+    List<String> sources =
+        projectLevelYaml == null || projectLevelYaml.isBlank()
+            ? List.of()
+            : List.of(projectLevelYaml);
+    return resolveInternal(orgId, projectId, sources, false);
+  }
+
+  /** Resolve every checked-in repository policy and fail closed when any source is malformed. */
+  public List<Effective> resolveProjectSourcesStrict(
+      String orgId, String projectId, List<String> projectLevelYamlSources) {
+    return resolveInternal(
+        orgId,
+        projectId,
+        projectLevelYamlSources == null ? List.of() : projectLevelYamlSources,
+        true);
+  }
+
+  private List<Effective> resolveInternal(
+      String orgId, String projectId, List<String> projectLevelYamlSources, boolean strictProject) {
     Map<String, Effective> byId = new HashMap<>();
 
     // 1 + 2 — load org-level standards + this project's overrides
@@ -86,10 +105,20 @@ public class EffectiveStandardsResolver {
 
     // 4 — merge project-level standards (project overrides org-level when
     // same id, subject to orgLevelLocked)
-    if (projectLevelYaml != null && !projectLevelYaml.isBlank()) {
+    for (String projectLevelYaml : projectLevelYamlSources) {
+      if (projectLevelYaml == null || projectLevelYaml.isBlank()) continue;
       try {
         for (Standard s : parser.parse(projectLevelYaml)) {
           Effective existing = byId.get(s.id());
+          if (existing != null && existing.source() == Source.PROJECT) {
+            if (existing.standard().equals(s)) continue;
+            if (strictProject) {
+              throw new ProjectStandardsInvalidException(
+                  projectId,
+                  new IllegalArgumentException(
+                      "Conflicting checked-in standard id '" + s.id() + "'"));
+            }
+          }
           if (existing != null && existing.orgLevelLocked()) {
             log.warn(
                 "[EffectiveStandardsResolver] project {} attempted to override "
@@ -101,6 +130,9 @@ public class EffectiveStandardsResolver {
           byId.put(s.id(), new Effective(s, Source.PROJECT, false, s.severity(), false));
         }
       } catch (Exception ex) {
+        if (strictProject) {
+          throw new ProjectStandardsInvalidException(projectId, ex);
+        }
         log.warn(
             "[EffectiveStandardsResolver] project {} standards.yaml parse failed: {}",
             projectId,
@@ -200,5 +232,11 @@ public class EffectiveStandardsResolver {
   public enum Source {
     ORG,
     PROJECT
+  }
+
+  public static final class ProjectStandardsInvalidException extends RuntimeException {
+    public ProjectStandardsInvalidException(String projectId, Throwable cause) {
+      super("Checked-in engineering standards are invalid for project " + projectId, cause);
+    }
   }
 }

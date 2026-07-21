@@ -22,6 +22,45 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 final class ValidationVerificationLedgerBuilder {
 
+  /**
+   * RR-1646 / RR-1660 — provenance label for the persisted concrete-test counts.
+   *
+   * <p>{@code DETERMINISTIC} is the one label this ledger uses to claim independence from an LLM.
+   * RR-1646 downgraded these counts to {@code UNVERIFIED_COUNT}/MEDIUM because report files read
+   * off disk carried no proof they described THIS run: no exit-code check, no per-run directory
+   * reset (RR-1582). That was honest but pessimistic — it also understated genuinely proven runs.
+   *
+   * <p>RR-1660 restores the strong label where, and only where, the producer positively proved
+   * provenance: V317 persists {@code validation_report.test_execution_verified}, set TRUE only when
+   * the report directory was reset before launch, the runner's exit status was checked, and every
+   * parsed report postdates the launch.
+   *
+   * <p><b>Three-valued, and null is unproven.</b> {@code null} (no signal recorded — every pre-V317
+   * row, and any producer that establishes no freshness) and {@code FALSE} both keep {@code
+   * UNVERIFIED_COUNT}/MEDIUM. Only TRUE promotes. Treating null as proven-false would be equally
+   * wrong; both non-TRUE states mean the same thing here — not proven.
+   */
+  private static final String UNPROVEN_TEST_COUNT_SOURCE = "UNVERIFIED_COUNT";
+
+  private static final String PROVEN_TEST_COUNT_SOURCE = "DETERMINISTIC";
+
+  private static final String UNPROVEN_TEST_COUNT_CONFIDENCE = "MEDIUM";
+
+  private static final String PROVEN_TEST_COUNT_CONFIDENCE = "HIGH";
+
+  /** True only when V317 recorded a positive execution-provenance proof for these counts. */
+  private static boolean testCountsProven(ValidationReport entity) {
+    return Boolean.TRUE.equals(entity.getTestExecutionVerified());
+  }
+
+  private static String testCountSource(ValidationReport entity) {
+    return testCountsProven(entity) ? PROVEN_TEST_COUNT_SOURCE : UNPROVEN_TEST_COUNT_SOURCE;
+  }
+
+  private static String testCountConfidence(ValidationReport entity) {
+    return testCountsProven(entity) ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE;
+  }
+
   private final ObjectMapper objectMapper;
 
   ValidationVerificationLedgerBuilder(ObjectMapper objectMapper) {
@@ -86,6 +125,38 @@ final class ValidationVerificationLedgerBuilder {
               1));
     }
 
+    if (entity.getExecutableVerificationStatus() != null) {
+      String executableStatus = entity.getExecutableVerificationStatus();
+      // RR-1646 — this row is deterministic only while it rests on the build signal. Once the
+      // status was decided by the concrete-test counts, it inherits their unproven provenance.
+      boolean restsOnTestCounts = Boolean.TRUE.equals(entity.getExecutableTestsRun());
+      out.add(
+          evidence(
+              "executable-verification",
+              "Executable verification",
+              "VERIFICATION",
+              switch (executableStatus) {
+                case "PASSED" -> "PASS";
+                case "BUILD_ONLY" -> "WARN";
+                case "FAILED" -> "FAIL";
+                default -> "UNKNOWN";
+              },
+              restsOnTestCounts ? testCountSource(entity) : "DETERMINISTIC",
+              restsOnTestCounts ? testCountConfidence(entity) : "HIGH",
+              restsOnTestCounts && !testCountsProven(entity)
+                  ? "The admitted product diff has reloadable build evidence and a test-runner"
+                      + " result whose execution freshness is not independently proven."
+                  : "The admitted product diff has reloadable build and concrete-test evidence.",
+              "Executable verification: "
+                  + executableStatus
+                  + (entity.getExecutionFailureStage() == null
+                      ? "."
+                      : "; failure stage: " + entity.getExecutionFailureStage() + "."),
+              "validation_report.executable_verification_status",
+              "PASSED".equals(executableStatus) ? 1 : 0,
+              1));
+    }
+
     Integer testsPassed = entity.getTestsPassed();
     Integer testsTotal = entity.getTestsTotal();
     int total = testsTotal == null ? 0 : testsTotal;
@@ -96,9 +167,15 @@ final class ValidationVerificationLedgerBuilder {
             "Tests",
             "TESTS",
             total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
-            "DETERMINISTIC",
-            total <= 0 ? "MEDIUM" : "HIGH",
-            "Generated or workspace tests passed.",
+            total <= 0 ? UNPROVEN_TEST_COUNT_SOURCE : testCountSource(entity),
+            total <= 0 ? UNPROVEN_TEST_COUNT_CONFIDENCE : testCountConfidence(entity),
+            total > 0 && testCountsProven(entity)
+                ? "Generated or workspace tests passed. The counts are bound to this run's own"
+                    + " execution: report files were reset before launch, the runner's exit status"
+                    + " was checked, and every parsed report postdates the launch."
+                : "Generated or workspace tests passed. Counts are read from persisted test-runner"
+                    + " output; the report carries no execution-freshness token, so a stale or"
+                    + " absent run cannot be ruled out.",
             total <= 0
                 ? "No concrete test execution was captured."
                 : passed + "/" + total + " tests passed.",

@@ -17,6 +17,7 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -53,18 +54,28 @@ public class ContractDetectionService {
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
+  /**
+   * RR-1629 — the registry row and its version row must commit or roll back together. A {@link
+   * TransactionTemplate} is used rather than {@code @Transactional} because {@link #upsertContract}
+   * is invoked from {@link #runForRepo} on {@code this}, and self-invocation bypasses the Spring
+   * proxy entirely.
+   */
+  private final TransactionTemplate transactionTemplate;
+
   public ContractDetectionService(
       List<FileBasedContractDetector> detectors,
       ContractRegistryRepository registryRepo,
       ContractVersionRepository versionRepo,
       ProjectRepoRepository projectRepoRepo,
       org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
-          activityEmitterProvider) {
+          activityEmitterProvider,
+      TransactionTemplate transactionTemplate) {
     this.detectors = detectors;
     this.registryRepo = registryRepo;
     this.versionRepo = versionRepo;
     this.projectRepoRepo = projectRepoRepo;
     this.activityEmitterProvider = activityEmitterProvider;
+    this.transactionTemplate = transactionTemplate;
   }
 
   /**
@@ -93,9 +104,9 @@ public class ContractDetectionService {
       if (files == null) files = List.of();
     } catch (Exception ex) {
       log.warn(
-          "[ContractDetectionService] file list failed for {}: {}",
+          "[ContractDetectionService] file list failed for {} errorClass={}",
           repo.getGithubRepoFullName(),
-          ex.getMessage());
+          ex.getClass().getSimpleName());
       return List.of();
     }
 
@@ -118,9 +129,9 @@ public class ContractDetectionService {
                 null));
       } catch (Exception ex) {
         log.warn(
-            "[ContractDetectionService] detector {} failed: {}",
+            "[ContractDetectionService] detector {} failed errorClass={}",
             detector.detectorName(),
-            ex.getMessage());
+            ex.getClass().getSimpleName());
         summary.add(
             new DetectionResult(
                 detector.detectorName(),
@@ -128,110 +139,129 @@ public class ContractDetectionService {
                 detector.filePatterns(),
                 DetectionResult.Status.FAILED,
                 List.of(),
-                ex.getMessage()));
+                "DETECTOR_FAILED:" + ex.getClass().getSimpleName()));
       }
     }
     return summary;
   }
 
   /**
-   * Upsert a single detected contract: registry row + version row. Returns the contract id. Returns
-   * null on persistence failure (logged).
+   * Upsert a single detected contract: registry row + version row, atomically.
+   *
+   * <p>RR-1629 — both writes happen inside ONE transaction. Previously the registry row was
+   * committed on its own and a failing {@code contract_version} insert was swallowed into a {@code
+   * null} return, which left a registry row advertising a version that had no stored body; the
+   * same-hash early return then guaranteed the version row was never retried. Persistence failures
+   * now propagate to {@link #runForRepo}, which records the detector as {@code FAILED} with the
+   * error class instead of reporting a clean scan.
+   *
+   * @return the contract id; never null
+   * @throws RuntimeException when the registry/version write fails — deliberately not swallowed
    */
   UUID upsertContract(ProjectRepo repo, UUID projectId, DetectedContract dc) {
-    try {
-      Optional<ContractRegistry> existing =
-          registryRepo.findByRepoIdAndName(repo.getId(), dc.name());
-      ContractRegistry contract;
-      boolean firstDetection = false;
-      boolean versionBumped = false;
-      if (existing.isPresent()) {
-        contract = existing.get();
-        if (contract.getCurrentContentHash() != null
-            && contract.getCurrentContentHash().equals(dc.contentHash())) {
-          // No change — same hash, skip.
-          return contract.getId();
-        }
-        contract.setCurrentRegistryVersion(contract.getCurrentRegistryVersion() + 1);
-        contract.setCurrentContentHash(dc.contentHash());
-        contract.setDeclaredSemver(dc.declaredSemver());
-        contract.setDetectedPath(dc.sourcePath());
-        contract.setUpdatedAt(Instant.now());
-        versionBumped = true;
-      } else {
-        contract =
-            ContractRegistry.builder()
-                .repoId(repo.getId())
-                .name(dc.name())
-                .type(dc.type().name())
-                .currentRegistryVersion(1)
-                .currentContentHash(dc.contentHash())
-                .declaredSemver(dc.declaredSemver())
-                .detectedPath(dc.sourcePath())
-                .detectionMethod(ContractRegistry.DetectionMethod.AUTO_FILE.name())
-                .build();
-        firstDetection = true;
-      }
-      contract = registryRepo.save(contract);
+    UpsertOutcome outcome = inTransaction(() -> persistContract(repo, dc));
 
-      ContractVersion version =
-          ContractVersion.builder()
-              .contractId(contract.getId())
-              .registryVersion(contract.getCurrentRegistryVersion())
-              .contentHash(dc.contentHash())
-              .inlineContent(dc.content())
-              .build();
-      versionRepo.save(version);
-
-      ActivityEventEmitter emitter = activityEmitterProvider.getIfAvailable();
-      if (emitter != null) {
-        if (firstDetection) {
-          emitter.emit(
-              projectId,
-              ActivityEventType.CONTRACT_DETECTED,
-              null,
-              "CONTRACT",
-              contract.getId().toString(),
-              "Detected "
-                  + dc.type()
-                  + " contract "
-                  + dc.name()
-                  + " in "
-                  + repo.getGithubRepoFullName(),
-              Map.of(
-                  "repoFullName",
-                  repo.getGithubRepoFullName(),
-                  "type",
-                  dc.type().name(),
-                  "sourcePath",
-                  dc.sourcePath()));
-        } else if (versionBumped) {
-          emitter.emit(
-              projectId,
-              ActivityEventType.CONTRACT_VERSION_CHANGED,
-              null,
-              "CONTRACT",
-              contract.getId().toString(),
-              "Contract " + dc.name() + " bumped to v" + contract.getCurrentRegistryVersion(),
-              Map.of(
-                  "repoFullName",
-                  repo.getGithubRepoFullName(),
-                  "newVersion",
-                  contract.getCurrentRegistryVersion(),
-                  "contentHash",
-                  dc.contentHash()));
-        }
+    // Activity emission is deliberately OUTSIDE the transaction: a feed hiccup must not roll back
+    // the contract write, and the event should only describe state that actually committed.
+    ActivityEventEmitter emitter = activityEmitterProvider.getIfAvailable();
+    if (emitter != null) {
+      if (outcome.firstDetection()) {
+        emitter.emit(
+            projectId,
+            ActivityEventType.CONTRACT_DETECTED,
+            null,
+            "CONTRACT",
+            outcome.contractId().toString(),
+            "Detected "
+                + dc.type()
+                + " contract "
+                + dc.name()
+                + " in "
+                + repo.getGithubRepoFullName(),
+            Map.of(
+                "repoFullName",
+                repo.getGithubRepoFullName(),
+                "type",
+                dc.type().name(),
+                "sourcePath",
+                dc.sourcePath()));
+      } else if (outcome.versionBumped()) {
+        emitter.emit(
+            projectId,
+            ActivityEventType.CONTRACT_VERSION_CHANGED,
+            null,
+            "CONTRACT",
+            outcome.contractId().toString(),
+            "Contract " + dc.name() + " bumped to v" + outcome.registryVersion(),
+            Map.of(
+                "repoFullName",
+                repo.getGithubRepoFullName(),
+                "newVersion",
+                outcome.registryVersion(),
+                "contentHash",
+                dc.contentHash()));
       }
-      return contract.getId();
-    } catch (Exception ex) {
-      log.warn(
-          "[ContractDetectionService] upsert failed for {}/{}: {}",
-          repo.getGithubRepoFullName(),
-          dc.name(),
-          ex.getMessage());
-      return null;
     }
+    return outcome.contractId();
   }
+
+  /** The registry + version writes that must commit or roll back together. */
+  private UpsertOutcome persistContract(ProjectRepo repo, DetectedContract dc) {
+    Optional<ContractRegistry> existing = registryRepo.findByRepoIdAndName(repo.getId(), dc.name());
+    ContractRegistry contract;
+    boolean firstDetection = false;
+    boolean versionBumped = false;
+    if (existing.isPresent()) {
+      contract = existing.get();
+      if (contract.getCurrentContentHash() != null
+          && contract.getCurrentContentHash().equals(dc.contentHash())) {
+        // No change — same hash, skip.
+        return new UpsertOutcome(
+            contract.getId(), contract.getCurrentRegistryVersion(), false, false);
+      }
+      contract.setCurrentRegistryVersion(contract.getCurrentRegistryVersion() + 1);
+      contract.setCurrentContentHash(dc.contentHash());
+      contract.setDeclaredSemver(dc.declaredSemver());
+      contract.setDetectedPath(dc.sourcePath());
+      contract.setUpdatedAt(Instant.now());
+      versionBumped = true;
+    } else {
+      contract =
+          ContractRegistry.builder()
+              .repoId(repo.getId())
+              .name(dc.name())
+              .type(dc.type().name())
+              .currentRegistryVersion(1)
+              .currentContentHash(dc.contentHash())
+              .declaredSemver(dc.declaredSemver())
+              .detectedPath(dc.sourcePath())
+              .detectionMethod(ContractRegistry.DetectionMethod.AUTO_FILE.name())
+              .build();
+      firstDetection = true;
+    }
+    contract = registryRepo.save(contract);
+
+    ContractVersion version =
+        ContractVersion.builder()
+            .contractId(contract.getId())
+            .registryVersion(contract.getCurrentRegistryVersion())
+            .contentHash(dc.contentHash())
+            .inlineContent(dc.content())
+            .build();
+    versionRepo.save(version);
+
+    return new UpsertOutcome(
+        contract.getId(), contract.getCurrentRegistryVersion(), firstDetection, versionBumped);
+  }
+
+  private <T> T inTransaction(java.util.function.Supplier<T> work) {
+    if (transactionTemplate == null) return work.get();
+    return transactionTemplate.execute(status -> work.get());
+  }
+
+  /** Result of the transactional half of an upsert. */
+  private record UpsertOutcome(
+      UUID contractId, int registryVersion, boolean firstDetection, boolean versionBumped) {}
 
   /** Test seam — replaces {@code GitHubRepoService.listRepoFiles}. */
   @FunctionalInterface

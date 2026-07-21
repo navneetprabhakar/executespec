@@ -30,6 +30,7 @@ public class RunTokenAttributor {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final RunCostTracker costTracker;
+  private final RunEffectiveRouteService effectiveRoutes;
 
   public enum Phase {
     PLANNER,
@@ -42,21 +43,23 @@ public class RunTokenAttributor {
    * usage even if the in-memory tracker is later evicted (deploy restart, accumulator eviction).
    */
   public void attributePhase(
-      String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
+      String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
+    int persistedIn = RunCostTracker.saturatedInt(inTok);
+    int persistedOut = RunCostTracker.saturatedInt(outTok);
     runRepo
         .findById(runId)
         .ifPresent(
             r -> {
               switch (phase) {
                 case PLANNER -> {
-                  r.setPlannerInputTokens(inTok);
-                  r.setPlannerOutputTokens(outTok);
+                  r.setPlannerInputTokens(persistedIn);
+                  r.setPlannerOutputTokens(persistedOut);
                   r.setPlannerProvider(providerUpper);
                   r.setPlannerActualModel(model);
                 }
                 case REVIEWER -> {
-                  r.setReviewerInputTokens(inTok);
-                  r.setReviewerOutputTokens(outTok);
+                  r.setReviewerInputTokens(persistedIn);
+                  r.setReviewerOutputTokens(persistedOut);
                   r.setReviewerProvider(providerUpper);
                   r.setReviewerActualModel(model);
                 }
@@ -65,7 +68,7 @@ public class RunTokenAttributor {
             });
     if (inTok > 0 || outTok > 0) {
       try {
-        runRepo.addTokens(runId, inTok, outTok);
+        runRepo.addTokens(runId, persistedIn, persistedOut);
       } catch (Exception e) {
         log.warn("attributePhase addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -78,22 +81,27 @@ public class RunTokenAttributor {
    * still adding only the provided delta to the run total.
    */
   public void attributePhaseAdditional(
-      String runId, Phase phase, int inTok, int outTok, String providerUpper, String model) {
+      String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
+    int persistedIn = RunCostTracker.saturatedInt(inTok);
+    int persistedOut = RunCostTracker.saturatedInt(outTok);
     runRepo
         .findById(runId)
         .ifPresent(
             r -> {
               switch (phase) {
                 case PLANNER -> {
-                  r.setPlannerInputTokens(safe(r.getPlannerInputTokens()) + Math.max(0, inTok));
-                  r.setPlannerOutputTokens(safe(r.getPlannerOutputTokens()) + Math.max(0, outTok));
+                  r.setPlannerInputTokens(
+                      saturatingAdd(safe(r.getPlannerInputTokens()), persistedIn));
+                  r.setPlannerOutputTokens(
+                      saturatingAdd(safe(r.getPlannerOutputTokens()), persistedOut));
                   r.setPlannerProvider(providerUpper);
                   r.setPlannerActualModel(model);
                 }
                 case REVIEWER -> {
-                  r.setReviewerInputTokens(safe(r.getReviewerInputTokens()) + Math.max(0, inTok));
+                  r.setReviewerInputTokens(
+                      saturatingAdd(safe(r.getReviewerInputTokens()), persistedIn));
                   r.setReviewerOutputTokens(
-                      safe(r.getReviewerOutputTokens()) + Math.max(0, outTok));
+                      saturatingAdd(safe(r.getReviewerOutputTokens()), persistedOut));
                   r.setReviewerProvider(providerUpper);
                   r.setReviewerActualModel(model);
                 }
@@ -102,7 +110,7 @@ public class RunTokenAttributor {
             });
     if (inTok > 0 || outTok > 0) {
       try {
-        runRepo.addTokens(runId, inTok, outTok);
+        runRepo.addTokens(runId, persistedIn, persistedOut);
       } catch (Exception e) {
         log.warn("attributePhaseAdditional addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -118,15 +126,17 @@ public class RunTokenAttributor {
   public void attributeWorker(
       String runId,
       ExecutionResult execResult,
-      int totalIn,
-      int totalOut,
+      long totalIn,
+      long totalOut,
       String providerUpper,
       String model) {
+    int persistedTotalIn = RunCostTracker.saturatedInt(totalIn);
+    int persistedTotalOut = RunCostTracker.saturatedInt(totalOut);
     int n = execResult.perTask().size();
     if (n == 0) return;
     if (totalIn > 0 || totalOut > 0) {
       try {
-        runRepo.addTokens(runId, totalIn, totalOut);
+        runRepo.addTokens(runId, persistedTotalIn, persistedTotalOut);
       } catch (Exception e) {
         log.warn("attributeWorker addTokens failed run={}: {}", runId, e.getMessage());
       }
@@ -136,19 +146,30 @@ public class RunTokenAttributor {
     java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
     for (var outcome : execResult.perTask()) {
       RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
-      realPerTask.put(outcome.taskId(), new int[] {s.inputTokens(), s.outputTokens()});
-      sumIn += s.inputTokens();
-      sumOut += s.outputTokens();
+      int taskIn = RunCostTracker.saturatedInt(s.inputTokens());
+      int taskOut = RunCostTracker.saturatedInt(s.outputTokens());
+      realPerTask.put(outcome.taskId(), new int[] {taskIn, taskOut});
+      sumIn = saturatingAdd(sumIn, taskIn);
+      sumOut = saturatingAdd(sumOut, taskOut);
     }
-    int residualIn = Math.max(0, totalIn - sumIn);
-    int residualOut = Math.max(0, totalOut - sumOut);
+    int residualIn = Math.max(0, persistedTotalIn - sumIn);
+    int residualOut = Math.max(0, persistedTotalOut - sumOut);
     int residualPerTaskIn = residualIn / n;
     int residualPerTaskOut = residualOut / n;
+    // RR-1561 — integer division drops up to n-1 tokens per direction. The run total at addTokens
+    // above already counted them, so discarding the remainder made exact reconciliation between
+    // the per-task columns and the run total impossible BY CONSTRUCTION, defeating the stated
+    // purpose of this residual pass. The remainder is handed to the first tasks, one token each.
+    int remainderIn = residualIn - residualPerTaskIn * n;
+    int remainderOut = residualOut - residualPerTaskOut * n;
+    int taskIndex = 0;
     for (var outcome : execResult.perTask()) {
       String taskRowId = idPrefix + outcome.taskId();
       int[] real = realPerTask.get(outcome.taskId());
-      int finalIn = real[0] + residualPerTaskIn;
-      int finalOut = real[1] + residualPerTaskOut;
+      int finalIn = saturatingAdd(real[0], residualPerTaskIn + (taskIndex < remainderIn ? 1 : 0));
+      int finalOut =
+          saturatingAdd(real[1], residualPerTaskOut + (taskIndex < remainderOut ? 1 : 0));
+      taskIndex++;
       // 2026-05-02 — write the model the worker ACTUALLY ran on (tier-resolved from
       // SequentialExecutor.tierConfigFor) instead of the run-level default. Previously every
       // task row got the run default (e.g. claude-haiku for anthropic), masking the workhorse/
@@ -164,6 +185,11 @@ public class RunTokenAttributor {
           outcome.dispatchedModel() != null && !outcome.dispatchedModel().isBlank()
               ? outcome.dispatchedModel()
               : model;
+      // C1 Step 4 — the requested route above is what the executor ASKED for. The route that
+      // actually served the task comes from the physical-attempt ledger; failover and managed-AI
+      // tier locks make the two legitimately diverge. Recording only the requested route fed a
+      // wrong quality prior into ModelProviderCandidateService.
+      EffectiveRouteProjection route = effectiveRoutes.forTask(runId, outcome.taskId());
       taskRepo
           .findById(taskRowId)
           .ifPresent(
@@ -172,8 +198,38 @@ public class RunTokenAttributor {
                 t.setOutputTokens(finalOut);
                 t.setProvider(taskProvider);
                 t.setModel(taskModel);
+                applyEffectiveRoute(t, route, taskProvider, taskModel);
                 taskRepo.save(t);
               });
+    }
+  }
+
+  /**
+   * Writes the projected physical route onto the task row. The requested route is used ONLY when
+   * the ledger proves nothing, and in that case the attribution stays {@code UNATTRIBUTED} so a
+   * consumer can tell an unproven fallback from a ledger-proven route. A {@code MIXED} task keeps
+   * null provider/model — collapsing it to one provider would defeat the projection.
+   */
+  private static void applyEffectiveRoute(
+      com.navneet.executespec.state.entity.AgentTask task,
+      EffectiveRouteProjection route,
+      String fallbackProvider,
+      String fallbackModel) {
+    task.setEffectiveRouteAttribution(route.attribution().name());
+    switch (route.attribution()) {
+      case LEDGER -> {
+        task.setEffectiveProvider(
+            route.provider() == null ? null : route.provider().toUpperCase(java.util.Locale.ROOT));
+        task.setEffectiveModel(route.model());
+      }
+      case MIXED -> {
+        task.setEffectiveProvider(null);
+        task.setEffectiveModel(null);
+      }
+      case UNATTRIBUTED -> {
+        task.setEffectiveProvider(fallbackProvider);
+        task.setEffectiveModel(fallbackModel);
+      }
     }
   }
 
@@ -184,13 +240,19 @@ public class RunTokenAttributor {
    * target task row from its real task snapshot.
    */
   public void attributeWorkerAdditionalTask(
-      String runId, String taskId, int totalIn, int totalOut, String providerUpper, String model) {
+      String runId,
+      String taskId,
+      long totalIn,
+      long totalOut,
+      String providerUpper,
+      String model) {
     if (runId == null || runId.length() < 8 || taskId == null || taskId.isBlank()) {
       return;
     }
     if (totalIn > 0 || totalOut > 0) {
       try {
-        runRepo.addTokens(runId, totalIn, totalOut);
+        runRepo.addTokens(
+            runId, RunCostTracker.saturatedInt(totalIn), RunCostTracker.saturatedInt(totalOut));
       } catch (Exception e) {
         log.warn(
             "attributeWorkerAdditionalTask addTokens failed run={}: {}", runId, e.getMessage());
@@ -206,15 +268,23 @@ public class RunTokenAttributor {
         .findById(taskRowId)
         .ifPresent(
             task -> {
-              task.setInputTokens(snapshot.inputTokens());
-              task.setOutputTokens(snapshot.outputTokens());
+              task.setInputTokens(RunCostTracker.saturatedInt(snapshot.inputTokens()));
+              task.setOutputTokens(RunCostTracker.saturatedInt(snapshot.outputTokens()));
               task.setProvider(providerUpper);
               task.setModel(model);
+              // Re-project after a continuation rerun: leaving the previous pass's effective route
+              // in place would make the row claim a route that no longer served the task.
+              applyEffectiveRoute(
+                  task, effectiveRoutes.forTask(runId, logicalTaskId), providerUpper, model);
               taskRepo.save(task);
             });
   }
 
   private static int safe(Integer value) {
     return value == null ? 0 : Math.max(0, value);
+  }
+
+  private static int saturatingAdd(int left, int right) {
+    return RunCostTracker.saturatedInt((long) left + right);
   }
 }

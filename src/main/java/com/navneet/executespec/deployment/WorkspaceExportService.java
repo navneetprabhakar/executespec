@@ -17,6 +17,7 @@ import java.util.zip.ZipOutputStream;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
 import com.navneet.executespec.deployment.preview.PreviewProjectType;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -42,6 +43,7 @@ public class WorkspaceExportService {
   private final GcsWorkspaceStore gcsStore;
   private final DevDockerfileGenerator dockerfileGen;
   private final WorkspaceRestoreService restoreService;
+  private final ArtifactPublicationGuard publicationGuard;
 
   /**
    * Excluded patterns — internal agent machinery, build artifacts, and VCS metadata that don't
@@ -110,7 +112,18 @@ public class WorkspaceExportService {
                       "[WorkspaceExportService] Serving run {} from GCS archive: {}",
                       runId,
                       run.getGcsWorkspaceKey());
-                  return gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+                  Path archive = gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+                  try {
+                    publicationGuard.assertZipSafe(archive);
+                    return archive;
+                  } catch (IOException unsafe) {
+                    try {
+                      Files.deleteIfExists(archive);
+                    } catch (IOException cleanupFailure) {
+                      unsafe.addSuppressed(cleanupFailure);
+                    }
+                    throw new RuntimeException(unsafe.getMessage(), unsafe);
+                  }
                 } catch (IOException e) {
                   throw new RuntimeException(
                       "Failed to download workspace from GCS: " + e.getMessage(), e);
@@ -145,10 +158,15 @@ public class WorkspaceExportService {
                 throws IOException {
               String relative = workspacePath.relativize(file).toString();
               if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+              if (Files.isSymbolicLink(file)) {
+                log.info("[WorkspaceExportService] Skipping symlink from ZIP: {}", relative);
+                return FileVisitResult.CONTINUE;
+              }
               if (isSecretFile(file.getFileName().toString())) {
                 log.info("[WorkspaceExportService] Skipping secret file from ZIP: {}", relative);
                 return FileVisitResult.CONTINUE;
               }
+              publicationGuard.assertFileSafe(workspacePath, file);
 
               ZipEntry entry = new ZipEntry(relative);
               entry.setTime(attrs.lastModifiedTime().toMillis());
@@ -237,11 +255,16 @@ public class WorkspaceExportService {
                 throws IOException {
               String relative = workspacePath.relativize(file).toString();
               if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+              if (Files.isSymbolicLink(file)) {
+                log.info("[WorkspaceExportService] Skipping symlink from repo ZIP: {}", relative);
+                return FileVisitResult.CONTINUE;
+              }
               if (isSecretFile(file.getFileName().toString())) {
                 log.info(
                     "[WorkspaceExportService] Skipping secret file from repo ZIP: {}", relative);
                 return FileVisitResult.CONTINUE;
               }
+              publicationGuard.assertFileSafe(workspacePath, file);
 
               zos.putNextEntry(new ZipEntry(relative));
               Files.copy(file, zos);

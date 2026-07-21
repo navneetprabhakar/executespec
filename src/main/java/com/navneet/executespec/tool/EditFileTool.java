@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.security.CodeAbuseScanner;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -37,6 +38,7 @@ public class EditFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
   private final CodeAbuseScanner codeAbuseScanner;
+  private final GeneratedSecretScanner generatedSecretScanner;
 
   /**
    * PR-C (2026-05-13) — pushes {@code FILE_WRITTEN} events to RunDetail SSE subscribers the moment
@@ -129,8 +131,19 @@ public class EditFileTool implements Tool {
     if (!editsNode.isArray() || editsNode.isEmpty()) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "edits must be a non-empty array");
     }
+    // RR-1018 — unconditional reserved-namespace deny. Runs BEFORE containment/guardrail checks
+    // because it must hold at every guardrail level, including the production LOW default.
+    String reservedError = ReservedWorkspacePaths.rejectionFor(path);
+    if (reservedError != null) {
+      log.warn("editFile blocked reserved control-plane path={}", path);
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reservedError);
+    }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+      String reviewerPolicyError = ReviewerMutationScope.validateEditFile(path);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       // Guardrail-level file-sandbox gate — no-op at LOW.
       FileSandboxPolicy.Decision sandbox =
           fileSandboxPolicy.validateWrite(ctx.workspaceRoot(), resolved);
@@ -197,6 +210,16 @@ public class EditFileTool implements Tool {
                 + applied.how()
                 + ")");
         idx++;
+      }
+      var secretFinding = generatedSecretScanner.scan(working);
+      if (secretFinding.isPresent()) {
+        log.warn(
+            "editFile blocked generated credential path={} category={}",
+            path,
+            secretFinding.get().category());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "edited content contains a high-confidence credential pattern and cannot be written");
       }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, working);
       if (scanResult.flagged()) {

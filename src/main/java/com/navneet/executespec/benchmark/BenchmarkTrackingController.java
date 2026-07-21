@@ -52,7 +52,8 @@ public class BenchmarkTrackingController {
       String model,
       Integer k,
       Integer totalTasks,
-      String harborJobName) {}
+      String harborJobName,
+      Boolean submissionRequired) {}
 
   /** Body for {@code POST /{id}/event} — one event published by the external verifier. */
   public record EventRequest(
@@ -66,12 +67,19 @@ public class BenchmarkTrackingController {
       Long outputTokens,
       String outcome,
       String reason,
+      String failureClassification,
+      String trajectoryLocation,
+      String trajectorySha256,
+      Long etaSeconds,
       String message,
       String payload) {}
 
   /** Run + its task results + full event stream (the {@code GET /{id}} detail view). */
   public record Detail(
-      BenchmarkRun run, List<BenchmarkTaskResult> tasks, List<BenchmarkEvent> events) {}
+      BenchmarkRun run,
+      List<BenchmarkActiveAttempt> activeAttempts,
+      List<BenchmarkTaskResult> tasks,
+      List<BenchmarkEvent> events) {}
 
   // ── Create ──────────────────────────────────────────────────────────────
 
@@ -101,7 +109,8 @@ public class BenchmarkTrackingController {
         body.k() == null ? 1 : body.k(),
         body.totalTasks() == null ? 0 : body.totalTasks(),
         body.harborJobName(),
-        userId(user));
+        userId(user),
+        Boolean.TRUE.equals(body.submissionRequired()));
   }
 
   // ── Ingest ──────────────────────────────────────────────────────────────
@@ -131,7 +140,22 @@ public class BenchmarkTrackingController {
           body.message(),
           body.payload(),
           body.outcome(),
-          body.reason());
+          body.reason(),
+          body.failureClassification(),
+          body.trajectoryLocation(),
+          body.trajectorySha256(),
+          body.etaSeconds());
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+  }
+
+  /** Rebuild missing/stale task usage from the canonical server-side provider-attempt ledger. */
+  @PostMapping("/{id}/reconcile-usage")
+  public BenchmarkTrackingService.UsageReconciliation reconcileUsage(
+      @AuthenticationPrincipal AppUserDetails user, @PathVariable String id) {
+    try {
+      return service.reconcileUsage(id);
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     }
@@ -149,7 +173,8 @@ public class BenchmarkTrackingController {
   @GetMapping("/{id}")
   public Detail detail(@AuthenticationPrincipal AppUserDetails user, @PathVariable String id) {
     try {
-      return new Detail(service.get(id), service.taskResults(id), service.events(id));
+      return new Detail(
+          service.get(id), service.activeAttempts(id), service.taskResults(id), service.events(id));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     }

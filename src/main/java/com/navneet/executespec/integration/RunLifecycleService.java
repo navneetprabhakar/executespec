@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
@@ -33,8 +34,11 @@ import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -126,6 +130,9 @@ public class RunLifecycleService {
         modelResolver,
         validationReportRepository,
         null,
+        null,
+        null,
+        null,
         null);
   }
 
@@ -166,6 +173,9 @@ public class RunLifecycleService {
   private final ValidationReportRepository validationReportRepository;
   private final FeatureFlagService featureFlagService;
   private final RemoteToolDispatcher remoteToolDispatcher;
+  private final OrgModelOverrideService orgModelOverrideService;
+  private final ModelRegistry modelRegistry;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -533,6 +543,7 @@ public class RunLifecycleService {
     var opt = runRepo.findById(runId);
     if (opt.isEmpty()) return RunOrchestrator.CrashResumeOutcome.NOT_FOUND;
     var run = opt.get();
+    String interruptedInstance = run.getExecutingInstance();
     String status = run.getStatus();
     if (!"PLANNING".equals(status) && !"WORKING".equals(status) && !"REVIEWING".equals(status)) {
       return RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE;
@@ -591,6 +602,26 @@ public class RunLifecycleService {
     run.setResumedAt(claimAt);
     run.setExecutingInstance(RECOVERY_INSTANCE_ID);
     run.setExecutionHeartbeat(claimAt);
+
+    // A local workspace is trustworthy after a same-host process restart. A different host may
+    // proceed only when operators have explicitly configured a shared persistent filesystem. The
+    // existing asynchronous GCS task checkpoint has no persisted acknowledged task frontier, so
+    // it is deliberately not treated as sufficient proof: restoring it could pair T(n-1) files
+    // with a database row that already marks T(n) terminal.
+    boolean sameHostRestart =
+        interruptedInstance != null && interruptedInstance.equals(RECOVERY_INSTANCE_ID);
+    boolean sharedWorkspace =
+        operationalReleasePolicy != null
+            && operationalReleasePolicy.sharedPersistentWorkspaceConfigured();
+    if (operationalReleasePolicy != null && !sameHostRestart && !sharedWorkspace) {
+      String reason =
+          "cross-node recovery refused: no shared persistent workspace or acknowledged checkpoint"
+              + " frontier";
+      log.warn("resumeAfterCrash run={} {}", runId, reason);
+      emitRecoveryEvidence(runId, "UNTRUSTED_WORKSPACE_FRONTIER", "REFUSED", 0);
+      controlPort.terminate(runId, "FAILED", reason, null);
+      return RunOrchestrator.CrashResumeOutcome.WORKSPACE_GONE;
+    }
 
     // Fence each stale in-flight task before submitting the resumed pipeline.  This is deliberately
     // fail-closed: if another worker changed the row between the read above and this CAS, do not
@@ -799,6 +830,7 @@ public class RunLifecycleService {
         log.warn("resume run={} row vanished mid-resume", runId);
         return;
       }
+      bindRunModelOverrides(row);
       // Local-hands intent is durable; never fall back to server-side tools after a JVM restart.
       // A missing client therefore remains a bounded remote-tool wait/error, not an unsafe shell
       // execution. The feature flag is still an operator kill switch.
@@ -815,7 +847,7 @@ public class RunLifecycleService {
         log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
-      String model = row.getWorkerModel();
+      String model = row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
       String upperProvider = provider.toUpperCase();
       String projectId = row.getProjectId();
       List<UUID> selectedRepoIds = deserializeRepoIds(row.getSelectedRepoIds());
@@ -835,6 +867,7 @@ public class RunLifecycleService {
                       .maxIterationsPerTask(null)
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
+                      .routePinned(row.isRoutePinned())
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
                       .workspaceSummary(
@@ -848,6 +881,21 @@ public class RunLifecycleService {
         }
         persistenceWriter.applyExecutionResultToTasks(runId, execResult);
         afterExec = costTracker.snapshot(runId);
+      }
+
+      if (localRun) {
+        // Nothing server-side reviewed or validated this run: the edits happened on the client and
+        // the server workspace is not the delivered artefact. Terminalize with the same honest
+        // LOCAL_EXECUTION contract the original submission used instead of running a reviewer over
+        // a workspace that does not hold the customer's changes.
+        var localTerminal = RunOrchestrator.localExecutionTerminalStatus();
+        controlPort.terminate(
+            runId,
+            localTerminal.status(),
+            localTerminal.reason(),
+            "resume final status: " + localTerminal.reason(),
+            startedAt);
+        return;
       }
 
       persistenceWriter.updateStatus(runId, "REVIEWING");
@@ -870,16 +918,26 @@ public class RunLifecycleService {
 
       contextComposer.ensureReadme(
           runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
-      validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
+      var validationReport =
+          validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
 
       String userRequest = row.getUserRequest();
       String prReviewComments = null; // not threaded for resumed runs
       finalizeRunAfterResume(
-          runId, plan, execResult, reviewResult, startedAt, upperProvider, model);
+          runId,
+          plan,
+          execResult,
+          reviewResult,
+          validationReport.orElse(null),
+          startedAt,
+          upperProvider,
+          model);
     } catch (Exception e) {
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
     } finally {
+      RunModelOverrides.clear();
+      keyContextStore.evict(runId);
       if (localRun) {
         try {
           remoteToolDispatcher.unregister(runId);
@@ -891,6 +949,17 @@ public class RunLifecycleService {
   }
 
   /**
+   * True only when the local-hands transport can actually be rebound. A missing collaborator (the
+   * compatibility constructor) or a disabled flag is treated as unavailable, so a local-hands run
+   * is refused rather than quietly re-executed server-side.
+   */
+  private boolean localHandsTransportAvailable() {
+    return featureFlagService != null
+        && remoteToolDispatcher != null
+        && featureFlagService.isEnabled("worker.local-hands.enabled");
+  }
+
+  /**
    * Compact terminal-status decision for crash-resumed runs. Mirrors the tail of {@code
    * runPipeline} but works against the already-persisted execResult / reviewerResult.
    */
@@ -899,6 +968,7 @@ public class RunLifecycleService {
       com.navneet.executespec.agent.Plan plan,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
+      com.navneet.executespec.report.entity.ValidationReport validationReport,
       Instant startedAt,
       String upperProvider,
       String model) {
@@ -914,6 +984,9 @@ public class RunLifecycleService {
                 .build()
             : execResult;
     var terminal = RunOrchestrator.resolveTerminalStatus(effectiveExec, reviewResult);
+    if (RunOrchestrator.validationReportProvenanceFailed(validationReport)) {
+      terminal = new RunOrchestrator.StatusAndReason("FAILED", "VALIDATION_EVIDENCE_FAILED");
+    }
     controlPort.terminate(
         runId,
         terminal.status(),
@@ -966,6 +1039,19 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Task retry requires PARTIAL / FAILED / COMPLETE run (current: " + status + ")");
     }
+    // Execution locality is run authority, not a per-dispatch default. A run the customer submitted
+    // as local-hands must never be retried through the server-side worker/tool path: that would
+    // execute commands and mutate files on ExecuteSpec's machine after the customer approved only
+    // local execution. Either the local transport is restored (and the retry waits for the client,
+    // failing visibly if it never reconnects) or the retry is refused.
+    final boolean localRun = run.isLocalExecutionRequested();
+    if (localRun && !localHandsTransportAvailable()) {
+      throw new IllegalStateException(
+          "This run executed on your machine (local hands), and local execution is currently"
+              + " unavailable — retrying it here would run the task on ExecuteSpec's servers"
+              + " instead. Submit a fresh run once local execution is available.");
+    }
+
     var task = findTask(runId, taskId);
 
     java.nio.file.Path workspace =
@@ -1017,12 +1103,29 @@ public class RunLifecycleService {
                 PipelineRun row = runRepo.findById(runId).orElse(null);
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
-                String model = row == null ? null : row.getWorkerModel();
+                String model =
+                    row == null
+                        ? null
+                        : row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
                 if (override != null) {
+                  if (row != null && row.isRoutePinned()) {
+                    throw new IllegalStateException(
+                        "An exact-route run cannot approve a different continuation route.");
+                  }
                   provider = override.provider();
                   model = override.model();
                 }
+                bindRunModelOverrides(row);
+                if (row != null && row.getCreatedByUserId() != null) {
+                  keyContextStore.resolveAndPut(runId, row.getCreatedByUserId());
+                }
                 ContinuationUsage approvedUsage = continuationUsageFor(row, override);
+                if (localRun) {
+                  remoteToolDispatcher.registerAfterWorkerRestart(runId);
+                  log.info(
+                      "retry run={} restoring LOCAL-HANDS transport; awaiting client reconnect",
+                      runId);
+                }
 
                 ExecutionContext rootCtx =
                     new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
@@ -1038,7 +1141,9 @@ public class RunLifecycleService {
                             .model(model)
                             .runContext(rootCtx)
                             .maxIterationsPerTask(null)
-                            .enableSmokeTests(true)
+                            .enableSmokeTests(!localRun)
+                            .localHandsMode(localRun)
+                            .routePinned(row != null && row.isRoutePinned())
                             .userConfirmedExpensiveContinuation(override != null)
                             .userConfirmedContinuationAction(
                                 override == null ? null : override.proposedAction())
@@ -1070,11 +1175,11 @@ public class RunLifecycleService {
                     model);
 
                 ReviewerResult reviewResult =
-                    override != null && override.postReview()
+                    !localRun && override != null && override.postReview()
                         ? runReviewerAfterApprovedPostReviewContinuation(
                             runId, plan, rootCtx, provider, model, result, afterRetry)
                         : null;
-                if (override != null && override.postReview()) {
+                if (!localRun && override != null && override.postReview()) {
                   try {
                     validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
                   } catch (Exception e) {
@@ -1085,7 +1190,12 @@ public class RunLifecycleService {
                   }
                 }
 
-                var terminal = RunOrchestrator.resolveTerminalStatus(result, reviewResult);
+                // A local-hands retry never produced server-verified evidence: no server smoke, no
+                // reviewer, no validation. It terminalizes exactly like the original local run.
+                var terminal =
+                    localRun
+                        ? RunOrchestrator.localExecutionTerminalStatus()
+                        : RunOrchestrator.resolveTerminalStatus(result, reviewResult);
                 controlPort.terminate(
                     runId,
                     terminal.status(),
@@ -1100,6 +1210,15 @@ public class RunLifecycleService {
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
                 controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, null);
               } finally {
+                RunModelOverrides.clear();
+                keyContextStore.evict(runId);
+                if (localRun) {
+                  try {
+                    remoteToolDispatcher.unregister(runId);
+                  } catch (Exception ignored) {
+                    log.debug("retry run={} local-hands unregister failed", runId);
+                  }
+                }
                 controlPort.removeActiveRun(runId);
               }
             });
@@ -1146,6 +1265,42 @@ public class RunLifecycleService {
       persistenceWriter.persistReviewFailure(runId, e);
       return RunOrchestrator.reviewerFailedResult(e);
     }
+  }
+
+  private void bindRunModelOverrides(PipelineRun run) {
+    if (run == null) {
+      RunModelOverrides.clear();
+      return;
+    }
+    java.util.Map<String, String> orgOverrides =
+        orgModelOverrideService == null
+            ? java.util.Map.of()
+            : orgModelOverrideService.overridesForRun(run.getOrgId());
+    LlmProvider pinProvider = null;
+    String pinnedModel = null;
+    if (run.isRoutePinned()) {
+      if (run.getRequestedProvider() == null
+          || run.getRequestedModel() == null
+          || run.getRequestedModel().isBlank()) {
+        throw new IllegalStateException(
+            "Persisted exact route is incomplete for run " + run.getRunId());
+      }
+      pinProvider = LlmProvider.valueOf(run.getRequestedProvider().toUpperCase());
+      pinnedModel =
+          modelRegistry == null
+              ? run.getRequestedModel()
+              : modelRegistry.canonicalize(run.getRequestedModel());
+      if (modelRegistry != null) {
+        String owner = modelRegistry.providerFor(pinnedModel);
+        if (owner == null
+            || !com.navneet.executespec.router.ModelAccessService.canRouteModel(
+                pinProvider, pinnedModel, owner)) {
+          throw new IllegalStateException(
+              "Persisted exact route is not dispatchable: " + pinProvider + "/" + pinnedModel);
+        }
+      }
+    }
+    RunModelOverrides.bind(RunModelOverrides.withRunPin(orgOverrides, pinProvider, pinnedModel));
   }
 
   private com.navneet.executespec.state.entity.AgentTask findTask(String runId, String taskId) {

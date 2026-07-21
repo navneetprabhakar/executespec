@@ -28,9 +28,33 @@ final class AgentStreamTurnSupport {
         "search_project_docs",
         "get_tech_debt_summary",
         "web_search",
-        "web_fetch",
-        "spawn_subagent",
-        "spawn_subagents");
+        "web_fetch");
+  }
+
+  /**
+   * The text that must be routed, guarded and persisted for this turn.
+   *
+   * <p>The provider executes {@link #conversationOrCurrentMessage}, which discards {@code message}
+   * entirely whenever {@code conversation} is non-empty. Routing on {@code message} therefore let
+   * content that exists only in the conversation tail bypass the deterministic guards and never
+   * reach the durable transcript. Both now read the same last user entry.
+   */
+  static String routedUserText(StreamTurnRequest request) {
+    if (request == null) return "";
+    List<Map<String, Object>> conversation = request.conversation();
+    if (conversation == null || conversation.isEmpty()) {
+      return request.message() == null ? "" : request.message();
+    }
+    for (int i = conversation.size() - 1; i >= 0; i--) {
+      Map<String, Object> entry = conversation.get(i);
+      if (entry == null) continue;
+      Object role = entry.get("role");
+      if (role != null && !"user".equalsIgnoreCase(String.valueOf(role))) continue;
+      Object content = entry.get("content");
+      String text = content == null ? "" : String.valueOf(content);
+      if (!text.isBlank()) return text;
+    }
+    return request.message() == null ? "" : request.message();
   }
 
   static List<Map<String, Object>> conversationOrCurrentMessage(StreamTurnRequest request) {

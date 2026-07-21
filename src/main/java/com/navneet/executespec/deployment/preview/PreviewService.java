@@ -795,13 +795,13 @@ public class PreviewService {
       broadcaster.emit(
           runId, RunEvent.log(runId, null, "Generating Dockerfile and compose config..."));
 
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
           workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
       log.info("VM preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
 
       // Generate docker-compose.yml with port 8080 (standard container port)
@@ -901,7 +901,7 @@ public class PreviewService {
           runId,
           new RunEvent(
               "PREVIEW_ANALYZING", runId, null, "Generating Dockerfile...", Instant.now()));
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
@@ -915,7 +915,7 @@ public class PreviewService {
           runId,
           type,
           generatedDockerfile);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
 
       // Phase 2: Build Docker image — store Dockerfile in session for diagnostics
       final String dockerfileContent = generatedDockerfile;
@@ -1196,10 +1196,10 @@ public class PreviewService {
               "Preview-engine handoff: building & pushing image…",
               Instant.now()));
 
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
       Path dockerfilePath = workspace.resolve("Dockerfile");
-      Files.writeString(dockerfilePath, generatedDockerfile);
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
       log.info(
           "[{}] preview-engine handoff starting — workspace={}, type={}", runId, workspace, type);
 
@@ -1321,7 +1321,7 @@ public class PreviewService {
 
       // Phase 2: Generate Dockerfile (standard, no Cloud Run port patching)
       checkDeadline(deadline, "Dockerfile generation");
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.write(workspace, ".dockerignore", dockerfileGen.dockerIgnore());
       // Backup user's docker-compose/Dockerfile if they exist (our generated ones take precedence)
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
@@ -1329,7 +1329,7 @@ public class PreviewService {
           workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
       log.info("Preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
 
       // Phase 3: Allocate port + generate docker-compose.yml
       checkDeadline(deadline, "compose file generation");
@@ -1443,8 +1443,9 @@ public class PreviewService {
       } else if (props.getProxy().isEnabled()) {
         // Spring Boot preview proxy mode — PreviewProxyFilter handles preview-*.executespec.ai
         // Traffic flows: LB → Spring Boot :8080 → PreviewProxyFilter → localhost:{port}
-        String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
-        previewUrl = "https://preview-" + shortId + "." + props.getPreviewDomain();
+        // RR-158: the host label is an unguessable per-preview capability, not a runId prefix.
+        previewUrl =
+            "https://preview-" + portPool.hostLabel(runId) + "." + props.getPreviewDomain();
       } else {
         // Fallback: direct port access (local dev only).
         String fallbackHost = props.getFallbackHost();
@@ -1589,8 +1590,8 @@ public class PreviewService {
               Instant.now()));
       log.warn("Preview timed out for run {} during: {}", runId, e.getPhase());
 
-    } catch (IOException e) {
-      fail(runId, "Build failed: " + e.getMessage(), hostPort);
+      // NOTE: the former `catch (IOException)` arm became unreachable when the framework-artifact
+      // writes moved to PreviewArtifactWriter, which reports failures as PreviewException.
     } catch (PreviewException e) {
       fail(runId, e.getMessage(), hostPort);
     } catch (Exception e) {
@@ -1854,6 +1855,9 @@ public class PreviewService {
    */
   @Scheduled(fixedRate = 1800000) // every 30 minutes
   void cleanupOrphans() {
+    if (!props.getCleanup().isOrphanDiscoveryEnabled()) {
+      return;
+    }
     // Docker Compose orphans
     try {
       List<String> projects = composeExecutor.listProjects(COMPOSE_PREFIX);
@@ -1893,6 +1897,14 @@ public class PreviewService {
 
   @PreDestroy
   void shutdownAll() {
+    if (!props.getCleanup().isTeardownOnShutdown()) {
+      if (!active.isEmpty()) {
+        log.info(
+            "Preserving {} active previews across JVM shutdown; TTL cleanup remains authoritative",
+            active.size());
+      }
+      return;
+    }
     int count = active.size();
     if (count > 0) {
       log.info("Shutting down {} active previews", count);

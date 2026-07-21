@@ -269,6 +269,17 @@ public class ModelRegistry {
   }
 
   /**
+   * Returns the configured routing chain tier for a concrete model. This is the canonical
+   * model-tier dimension used by usage/FinOps evidence; callers must not infer it from model-name
+   * prefixes. Unknown forward-compatible models are reported honestly as {@code UNKNOWN}.
+   */
+  public String chainTierFor(String modelName) {
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    String tier = config == null ? null : config.getChainTier();
+    return tier == null || tier.isBlank() ? "UNKNOWN" : tier.toUpperCase(java.util.Locale.ROOT);
+  }
+
+  /**
    * Returns the fallback chain for a model based on its chain-tier. Each entry is a {@code
    * String[]{provider, model}}.
    *

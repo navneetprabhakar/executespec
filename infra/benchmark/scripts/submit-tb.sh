@@ -39,6 +39,8 @@ LOG(){ echo "$(date '+%H:%M:%S') [submit-tb] $*"; }
 
 # ── auth token for the in-app event API ─────────────────────────────────────
 [ -f "$ADMIN_ENV" ] && . "$ADMIN_ENV"
+ESPEC_ADMIN_EMAIL="${ESPEC_ADMIN_EMAIL:-${ES_ADMIN_EMAIL:-}}"
+ESPEC_ADMIN_PW="${ESPEC_ADMIN_PW:-${ES_ADMIN_PW:-}}"
 TK=$(curl -s -X POST "$ES_BASE/api/auth/login" -H 'Content-Type: application/json' \
   -d "{\"email\":\"${ESPEC_ADMIN_EMAIL:-}\",\"password\":\"${ESPEC_ADMIN_PW:-}\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)

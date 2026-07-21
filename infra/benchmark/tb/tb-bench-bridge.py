@@ -2,11 +2,14 @@
 """Bridge a local/VM Harbor Terminal-Bench job dir → the ExecuteSpec benchmark dashboard.
 
 Runs ALONGSIDE a `harbor run`: POSTs a benchmark_run `start`, polls the job dir for each
-trial's `result.json` (written when a trial finishes), POSTs one `TASK_SCORED` per *trial*
+trial, POSTing `TASK_STARTED` as soon as Harbor creates the trial directory and one
+`TASK_SCORED` per *trial* when its `result.json` is written.
 (= per attempt — so k>1 aggregates correctly), and `RUN_DONE` when all trials are in or no new
 trial appears for --idle-min (Harbor done/stuck). Each TASK_SCORED carries the trial's
 reward + esRunId + cost + input/output tokens (from `agent_result` in result.json), plus a
 best-effort outcome/reason so the dashboard distinguishes verifier failures from infra failures.
+While a trial is active, the bridge also rate-limits task-scoped `RUN_PROGRESS` heartbeats so the
+dashboard can distinguish a long-running attempt from a dead telemetry publisher.
 
 Auth: BR_TOKEN, or BR_ADMIN_EMAIL + BR_ADMIN_PW. Base: BR_ES_BASE.
 """
@@ -17,6 +20,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 
@@ -34,6 +38,26 @@ def _req(base, path, token, method="GET", body=None, timeout=30):
 def _login(base, email, pw):
     d = _req(base, "/api/auth/login", None, "POST", {"email": email, "password": pw})
     return d.get("accessToken") or d.get("token")
+
+
+def _authed_req(base, path, auth, method="GET", body=None, timeout=30):
+    """Issue one request and refresh an expired login token exactly once.
+
+    Long benchmark campaigns outlive the one-hour access token. A bridge must not silently stop
+    projecting progress merely because its telemetry credential expired. Static BR_TOKEN-only
+    deployments remain fail-closed because they have no credential with which to refresh.
+    """
+    try:
+        return _req(base, path, auth.get("token"), method, body, timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401 or not auth.get("email") or not auth.get("password"):
+            raise
+        refreshed = _login(base, auth["email"], auth["password"])
+        if not refreshed:
+            raise
+        auth["token"] = refreshed
+        print("bridge: access token refreshed after HTTP 401", flush=True)
+        return _req(base, path, refreshed, method, body, timeout)
 
 
 def _first_text(*vals):
@@ -78,7 +102,7 @@ def _classify_trial(result, reward, exception_text=None):
         return "TIMEOUT", reason or status or "Harbor trial timed out or was cancelled"
     if reward > 0:
         return "PASSED", None
-    setup_failure = _setup_failure_reason(result)
+    setup_failure = _setup_failure_reason(result, exception_text)
     if setup_failure:
         return "INFRA_SETUP_FAILED", setup_failure
     if any(w in hay for w in ("container", "docker", "harbor", "bridge", "tool")):
@@ -90,11 +114,16 @@ def _classify_trial(result, reward, exception_text=None):
     return "FAILED", reason or status
 
 
-def _setup_failure_reason(result):
+def _setup_failure_reason(result, exception_text=None):
     """Detect Harbor failures before the ExecuteSpec agent/verifier ran."""
     if result.get("agent_result") is not None or result.get("verifier_result") is not None:
         return None
-    exc = result.get("exception_info") or result.get("exception") or result.get("error")
+    exc = (
+        result.get("exception_info")
+        or result.get("exception")
+        or result.get("error")
+        or exception_text
+    )
     env = result.get("environment_setup") or {}
     execution = result.get("agent_execution")
     verifier = result.get("verifier")
@@ -169,10 +198,38 @@ def _scan(job_dir):
     return out
 
 
-def _existing_attempts(base, token, rid):
+def _scan_active(job_dir):
+    """Return Harbor trial directories which started but have no result yet."""
+    out = {}
+    try:
+        entries = os.scandir(job_dir)
+    except OSError:
+        return out
+    with entries:
+        for entry in entries:
+            if not entry.is_dir() or not re.search(r"__[A-Za-z0-9]+$", entry.name):
+                continue
+            if os.path.exists(os.path.join(entry.path, "result.json")):
+                continue
+            task = re.sub(r"__[A-Za-z0-9]+$", "", entry.name)
+            if task:
+                out[entry.name] = {"task": task}
+    return out
+
+
+def _harbor_job_finished(job_dir):
+    """Return true only when Harbor's job-level result declares a terminal timestamp."""
+    try:
+        with open(os.path.join(job_dir, "result.json"), encoding="utf-8") as handle:
+            return bool(json.load(handle).get("finished_at"))
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _existing_attempts(base, auth, rid):
     """Return task -> recorded attempt count for an existing benchmark_run."""
     try:
-        detail = _req(base, f"/api/v2/test/benchmark/{rid}", token, "GET")
+        detail = _authed_req(base, f"/api/v2/test/benchmark/{rid}", auth, "GET")
     except Exception as e:  # noqa: BLE001
         print(f"bridge: existing run lookup failed for {rid}: {e}", flush=True)
         return {}
@@ -185,11 +242,55 @@ def _existing_attempts(base, token, rid):
     return attempts
 
 
-def _fail_run(base, token, rid, message, fail_marker=None, payload=None):
+def _heartbeat_active_attempts(
+    base,
+    auth,
+    rid,
+    active_trials,
+    started,
+    posted,
+    attempt_by_trial,
+    last_heartbeat_by_trial,
+    now,
+    heartbeat_seconds,
+):
+    """Refresh already-announced active attempts without allocating new attempts."""
+    sent = 0
+    for trial, info in sorted(active_trials.items()):
+        if trial not in started or trial in posted:
+            continue
+        attempt = attempt_by_trial.get(trial)
+        if attempt is None:
+            continue
+        last = last_heartbeat_by_trial.get(trial, 0)
+        if now - last < heartbeat_seconds:
+            continue
+        try:
+            _authed_req(
+                base,
+                f"/api/v2/test/benchmark/{rid}/event",
+                auth,
+                "POST",
+                {
+                    "type": "RUN_PROGRESS",
+                    "taskName": info["task"],
+                    "attempt": attempt,
+                    "message": "Harbor trial still active",
+                },
+            )
+            last_heartbeat_by_trial[trial] = now
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            # Do not consume the rate-limit window on failure; retry on the next bridge poll.
+            print("bridge: RUN_PROGRESS heartbeat failed", trial, e, flush=True)
+    return sent
+
+
+def _fail_run(base, auth, rid, message, fail_marker=None, payload=None):
     body = {"type": "RUN_FAILED", "message": message}
     if payload is not None:
         body["payload"] = json.dumps(payload)
-    _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", body)
+    _authed_req(base, f"/api/v2/test/benchmark/{rid}/event", auth, "POST", body)
     if fail_marker:
         with open(fail_marker, "w", encoding="utf-8") as fh:
             fh.write(message + "\n")
@@ -211,27 +312,31 @@ def main():
     ap.add_argument("--k", type=int, default=1)
     ap.add_argument("--total", type=int, required=True)  # number of TASKS (not trials)
     ap.add_argument("--poll", type=int, default=15)
+    ap.add_argument("--heartbeat-seconds", type=int, default=60)
     ap.add_argument("--max-min", type=int, default=600)
     ap.add_argument("--idle-min", type=int, default=25)  # finalize if no new trial for this long
     ap.add_argument("--fail-marker")
     a = ap.parse_args()
+    if a.heartbeat_seconds < 1:
+        ap.error("--heartbeat-seconds must be positive")
 
     base = os.environ["BR_ES_BASE"]
-    token = os.environ.get("BR_TOKEN") or _login(
-        base, os.environ["BR_ADMIN_EMAIL"], os.environ["BR_ADMIN_PW"]
-    )
+    email = os.environ.get("BR_ADMIN_EMAIL")
+    password = os.environ.get("BR_ADMIN_PW")
+    token = os.environ.get("BR_TOKEN") or _login(base, email, password)
     if not token:
         print("bridge: login failed")
         return 1
+    auth = {"token": token, "email": email, "password": password}
 
     if a.run_id:
         rid = a.run_id
         print("bridge: resuming benchmark_run id =", rid, flush=True)
     else:
-        run = _req(
+        run = _authed_req(
             base,
             "/api/v2/test/benchmark/start",
-            token,
+            auth,
             "POST",
             {
                 "suite": a.suite,
@@ -248,9 +353,12 @@ def main():
 
     expected_trials = max(a.total, a.total * a.k)
     posted = set()  # trial dirs already posted
+    started = set()  # trial dirs already announced to the dashboard
+    attempt_by_trial = {}  # preserve the same attempt number for start -> score
+    last_heartbeat_by_trial = {}  # trial -> last successful RUN_PROGRESS timestamp
     attempts = {}  # task -> attempt counter
     if a.run_id and a.resume_existing:
-        attempts = _existing_attempts(base, token, rid)
+        attempts = _existing_attempts(base, auth, rid)
         existing_by_task = dict(attempts)
         for trial, info in sorted(_scan(a.job_dir).items()):
             seen = existing_by_task.get(info["task"], 0)
@@ -266,6 +374,42 @@ def main():
     last_change = time.time()
     idle_limit = a.idle_min * 60
     while time.time() < deadline:
+        # Harbor creates a trial directory before result.json. Announce live workers
+        # so the dashboard's active-attempt projection reflects actual execution.
+        active_trials = _scan_active(a.job_dir)
+        for trial, info in sorted(active_trials.items()):
+            if trial in started or trial in posted:
+                continue
+            task = info["task"]
+            attempt = attempts.get(task, 0) + 1
+            try:
+                _authed_req(
+                    base,
+                    f"/api/v2/test/benchmark/{rid}/event",
+                    auth,
+                    "POST",
+                    {"type": "TASK_STARTED", "taskName": task, "attempt": attempt},
+                )
+                started.add(trial)
+                attempt_by_trial[trial] = attempt
+                attempts[task] = attempt
+                last_change = time.time()
+                last_heartbeat_by_trial[trial] = last_change
+                print(f"bridge: started {task} att={attempt}", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print("bridge: TASK_STARTED post failed", trial, e, flush=True)
+        _heartbeat_active_attempts(
+            base,
+            auth,
+            rid,
+            active_trials,
+            started,
+            posted,
+            attempt_by_trial,
+            last_heartbeat_by_trial,
+            time.time(),
+            a.heartbeat_seconds,
+        )
         trials = _scan(a.job_dir)
         fatal_trial = next(
             ((trial, info) for trial, info in sorted(trials.items()) if info.get("fatal")),
@@ -281,7 +425,7 @@ def main():
             try:
                 _fail_run(
                     base,
-                    token,
+                    auth,
                     rid,
                     msg,
                     a.fail_marker,
@@ -298,11 +442,13 @@ def main():
             if trial in posted:
                 continue
             task = info["task"]
-            attempts[task] = attempts.get(task, 0) + 1
+            attempt = attempt_by_trial.get(trial)
+            if attempt is None:
+                attempt = attempts.get(task, 0) + 1
             body = {
                 "type": "TASK_SCORED",
                 "taskName": task,
-                "attempt": attempts[task],
+                "attempt": attempt,
                 "reward": info["reward"],
             }
             if info["esRunId"]:
@@ -318,14 +464,17 @@ def main():
             if info.get("reason"):
                 body["reason"] = info["reason"]
             try:
-                _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", body)
+                _authed_req(base, f"/api/v2/test/benchmark/{rid}/event", auth, "POST", body)
                 posted.add(trial)
+                last_heartbeat_by_trial.pop(trial, None)
+                attempt_by_trial[trial] = attempt
+                attempts[task] = max(attempts.get(task, 0), attempt)
                 last_change = time.time()
                 resolved = len(
                     {trials[t]["task"] for t in posted if trials[t]["reward"] > 0}
                 )
                 print(
-                    f"bridge: {task} att={attempts[task]} reward={info['reward']} "
+                    f"bridge: {task} att={attempt} reward={info['reward']} "
                     f"in={info['in_tok']} out={info['out_tok']}  "
                     f"({len(posted)}/{expected_trials} trials, {resolved} tasks resolved)",
                     flush=True,
@@ -334,23 +483,38 @@ def main():
                 print("bridge: post failed", trial, e, flush=True)
         if len(posted) >= expected_trials:
             break
-        if posted and (time.time() - last_change) > idle_limit:
+        if posted and _harbor_job_finished(a.job_dir) and (time.time() - last_change) > idle_limit:
             print(f"bridge: no new trial for {a.idle_min}m — finalizing", flush=True)
             break
         time.sleep(a.poll)
 
     final = _scan(a.job_dir)
     resolved = len({final[t]["task"] for t in posted if t in final and final[t]["reward"] > 0})
+    complete = len(posted) >= expected_trials
     try:
-        _req(base, f"/api/v2/test/benchmark/{rid}/event", token, "POST", {"type": "RUN_DONE"})
+        if complete:
+            _authed_req(
+                base,
+                f"/api/v2/test/benchmark/{rid}/event",
+                auth,
+                "POST",
+                {"type": "RUN_DONE"},
+            )
+        else:
+            message = (
+                f"INCOMPLETE BENCHMARK RUN: posted {len(posted)}/{expected_trials} trials "
+                f"before the bridge deadline"
+            )
+            _fail_run(base, auth, rid, message, a.fail_marker)
+            print(f"bridge: {message}", flush=True)
     except Exception as e:  # noqa: BLE001
-        print("bridge: RUN_DONE post failed", e, flush=True)
+        print("bridge: terminal status post failed", e, flush=True)
     print(
         f"bridge: done — posted {len(posted)}/{expected_trials} trials, "
         f"{resolved} tasks resolved. run={rid}",
         flush=True,
     )
-    return 0
+    return 0 if complete else 2
 
 
 if __name__ == "__main__":

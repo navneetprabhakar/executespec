@@ -89,6 +89,19 @@ public class AgentActionCatalog {
               ALL_SURFACES,
               true,
               "runId"),
+          // The lifecycle router emits this type, so it must resolve here or every client
+          // validating a proposal against /v2/capabilities mis-renders or rejects a cancellation.
+          // Authority mirrors DELETE /api/runs/{id}: run write access, no tier gate.
+          action(
+              "cancel_run",
+              "Cancel an in-flight run through the existing guarded cancellation path.",
+              "FREE",
+              "destructive",
+              true,
+              "none",
+              ALL_SURFACES,
+              true,
+              "runId"),
           action(
               "create_cloud_run",
               "Create a gated cloud run from a natural-language spec.",
@@ -220,12 +233,23 @@ public class AgentActionCatalog {
     return tierRank(userTier) >= tierRank(requiredTier);
   }
 
+  /**
+   * Ordinal ladder for the V253 tier vocabulary.
+   *
+   * <p>PRO_PLUS and BYOK are first-class paid tiers. They previously fell through to the FREE
+   * default, so the capability contract told paying customers that PRO features were unavailable
+   * while the real endpoints accepted them. The ordering mirrors {@code
+   * TierEnforcementService.TIER_RANK} exactly, and an unrecognised tier now fails loudly instead of
+   * silently degrading, so adding a tier value cannot repeat that quietly.
+   */
   private static int tierRank(String tier) {
     return switch (normalize(tier, "FREE")) {
       case "ENTERPRISE" -> 4;
-      case "TEAM", "MAX" -> 3;
-      case "PRO" -> 2;
-      default -> 1;
+      case "TEAM", "BYOK", "MAX" -> 3;
+      case "PRO_PLUS" -> 2;
+      case "PRO" -> 1;
+      case "FREE" -> 0;
+      default -> throw new IllegalArgumentException("Unknown tier for agent capabilities: " + tier);
     };
   }
 

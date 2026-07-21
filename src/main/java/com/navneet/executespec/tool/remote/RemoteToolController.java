@@ -2,14 +2,18 @@ package com.navneet.executespec.tool.remote;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agentsession.LocalHandsStateService.PendingCall;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,7 +46,9 @@ public class RemoteToolController {
   public ResponseEntity<Void> submitToolResult(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String runId,
-      @RequestBody ToolResultBody body) {
+      @RequestBody ToolResultBody body,
+      HttpServletRequest request) {
+    requirePatLocalHands(request);
     // Only the run owner (the machine executing it) may return tool results.
     guard.requireRunWriteAccess(runId, userDetails);
     if (body == null || body.callId() == null || body.callId().isBlank()) {
@@ -63,7 +69,10 @@ public class RemoteToolController {
   /** Reload pending local-hands calls after a client reconnects and re-emit them over run SSE. */
   @PostMapping("/{runId}/tool-session/reconnect")
   public ResponseEntity<List<PendingCall>> reconnect(
-      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String runId,
+      HttpServletRequest request) {
+    requirePatLocalHands(request);
     guard.requireRunWriteAccess(runId, userDetails);
     return ResponseEntity.ok(dispatcher.reconnect(runId));
   }
@@ -75,7 +84,10 @@ public class RemoteToolController {
    */
   @GetMapping("/{runId}/tool-session/reconnect-status")
   public ResponseEntity<RemoteToolDispatcher.ReconnectStatus> reconnectStatus(
-      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String runId,
+      HttpServletRequest request) {
+    requirePatLocalHands(request);
     guard.requireRunWriteAccess(runId, userDetails);
     return ResponseEntity.ok(dispatcher.reconnectStatus(runId));
   }
@@ -83,7 +95,10 @@ public class RemoteToolController {
   /** Explicit client transport disconnect; pending calls remain resumable until their deadline. */
   @PostMapping("/{runId}/tool-session/disconnect")
   public ResponseEntity<Void> disconnect(
-      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String runId,
+      HttpServletRequest request) {
+    requirePatLocalHands(request);
     guard.requireRunWriteAccess(runId, userDetails);
     dispatcher.disconnect(runId);
     return ResponseEntity.noContent().build();
@@ -92,9 +107,22 @@ public class RemoteToolController {
   /** Read-only recovery surface for clients that lost their SSE replay cursor. */
   @GetMapping("/{runId}/pending-tool-calls")
   public ResponseEntity<List<PendingCall>> pendingCalls(
-      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String runId) {
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String runId,
+      HttpServletRequest request) {
+    requirePatLocalHands(request);
     guard.requireRunAccess(runId, userDetails);
     return ResponseEntity.ok(dispatcher.pendingCalls(runId));
+  }
+
+  static void requirePatLocalHands(HttpServletRequest request) {
+    Object source =
+        request == null
+            ? null
+            : request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE);
+    if (!JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(source)) {
+      throw new AccessDeniedException("local tool transport requires PAT authentication");
+    }
   }
 
   private JsonNode normalizeEnvelope(JsonNode result) {

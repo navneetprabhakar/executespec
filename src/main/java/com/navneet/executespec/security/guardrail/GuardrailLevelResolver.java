@@ -16,9 +16,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>The underlying {@link FeatureFlagService} already handles Redis pub/sub cache invalidation
  * plus a 60s scheduled reload, so callers don't need their own caching layer.
  *
- * <p>Fail-open: any exception reading the flag (Redis hiccup, missing row, unparseable value)
- * resolves to {@link GuardrailLevel#LOW} so a runtime error can never lock users out. See open
- * question #3 in the execution plan.
+ * <p>Fail-safe: a missing, unreadable, or invalid value resolves to {@link GuardrailLevel#HIGH} and
+ * emits both a warning and a metric. Security posture must not silently degrade during a feature
+ * flag/cache outage.
  *
  * <p>Exposes {@link #recordBlock(String)} so every guardrail-driven rejection across the codebase
  * can be counted in a single Prometheus series keyed by layer (input / code_abuse / shell / file)
@@ -40,16 +40,34 @@ public class GuardrailLevelResolver {
     this.meterRegistry = meterRegistry;
   }
 
-  /** Current guardrail level. Fail-open on any resolution error. */
+  /** Current guardrail level. Fail-safe to HIGH on any resolution error. */
   public GuardrailLevel current() {
     try {
-      String value = featureFlagService.getString(FLAG_KEY, "LOW");
-      return GuardrailLevel.parse(value);
+      String value = featureFlagService.getString(FLAG_KEY, null);
+      if (value == null || value.isBlank()) {
+        return resolutionFailure("missing flag value", null);
+      }
+      try {
+        return GuardrailLevel.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+      } catch (IllegalArgumentException invalid) {
+        return resolutionFailure("invalid flag value", invalid);
+      }
     } catch (Exception e) {
-      log.debug(
-          "[GuardrailLevelResolver] falling back to LOW — flag read failed: {}", e.getMessage());
-      return GuardrailLevel.LOW;
+      return resolutionFailure("flag read failed", e);
     }
+  }
+
+  private GuardrailLevel resolutionFailure(String reason, Exception error) {
+    log.warn(
+        "[GuardrailLevelResolver] {} — failing safe to HIGH{}",
+        reason,
+        error == null ? "" : " (" + error.getClass().getSimpleName() + ")");
+    Counter.builder("executespec.security.guardrail.resolution_failures")
+        .description("Guardrail-level resolution failures that triggered HIGH fail-safe posture")
+        .tag("reason", reason.replace(' ', '_'))
+        .register(meterRegistry)
+        .increment();
+    return GuardrailLevel.HIGH;
   }
 
   /**

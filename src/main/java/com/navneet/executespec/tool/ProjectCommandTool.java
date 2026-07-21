@@ -53,6 +53,7 @@ final class ProjectCommandTool implements Tool {
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     String command = textArg(args, "command");
     if (command == null) command = textArg(args, "plannerCommand");
+    final boolean autoDetected = command == null;
     if (command == null) command = detect(ctx.workspaceRoot(), kind);
     if (command == null) {
       return ToolResult.err(
@@ -65,7 +66,27 @@ final class ProjectCommandTool implements Tool {
     if (args != null && args.hasNonNull("timeoutSeconds")) {
       forwarded.put("timeoutSeconds", args.get("timeoutSeconds").asInt());
     }
-    return shellTool.execute(forwarded, ctx);
+    ToolResult result = shellTool.execute(forwarded, ctx);
+    // RR-1545 — when an AUTO-DETECTED command is refused by the sandbox, the model was told only
+    // "command blocked by sandbox", which reads as a platform fault and invites it to burn
+    // iterations retrying a command that can never succeed. Name the real cause: this project's
+    // toolchain is not runnable under the active guardrail level, and an explicit `command` is the
+    // only way forward.
+    if (autoDetected
+        && result instanceof ToolResult.Err err
+        && err.kind() == ToolResult.ErrorKind.FORBIDDEN) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.FORBIDDEN,
+          "auto-detected "
+              + name
+              + " command '"
+              + command
+              + "' is not permitted for this project under the active guardrail level ("
+              + err.message()
+              + "). Do not retry this tool for this project — supply an explicit allowed `command`,"
+              + " or treat this check as unavailable.");
+    }
+    return result;
   }
 
   private static String textArg(JsonNode args, String field) {

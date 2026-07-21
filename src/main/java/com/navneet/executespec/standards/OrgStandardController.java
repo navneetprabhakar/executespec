@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.standards.model.Standard;
+import com.navneet.executespec.standards.model.StandardsParser;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,8 +42,9 @@ import lombok.RequiredArgsConstructor;
  *   <li>{@code DELETE /api/orgs/{orgId}/standards/{standardId}} — remove
  * </ul>
  *
- * <p>YAML body is stored verbatim — it's parsed lazily by {@code StandardsParser} when the standard
- * fires during a run.
+ * <p>YAML is validated before persistence. Each row must contain exactly one standard and its YAML
+ * id must match the row/path id, so a malformed or mismatched active policy cannot disappear later
+ * during enforcement.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgId}/standards")
@@ -49,6 +52,7 @@ import lombok.RequiredArgsConstructor;
 public class OrgStandardController {
 
   private final OrgStandardRepository repo;
+  private final StandardsParser standardsParser;
 
   private void requireOrgScope(AppUserDetails principal, String orgId) {
     if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
@@ -99,11 +103,13 @@ public class OrgStandardController {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Standard already exists for this org");
     }
+    String standardId = body.standardId.trim();
+    validateStandardBody(standardId, body.standardYaml);
     OrgStandard saved =
         repo.save(
             OrgStandard.builder()
                 .orgId(orgId)
-                .standardId(body.standardId.trim())
+                .standardId(standardId)
                 .standardYaml(body.standardYaml)
                 .orgLevelLocked(Boolean.TRUE.equals(body.orgLevelLocked))
                 .build());
@@ -123,6 +129,7 @@ public class OrgStandardController {
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Standard not found"));
     if (body.standardYaml != null && !body.standardYaml.isBlank()) {
+      validateStandardBody(standardId, body.standardYaml);
       row.setStandardYaml(body.standardYaml);
     }
     if (body.orgLevelLocked != null) {
@@ -170,4 +177,21 @@ public class OrgStandardController {
   }
 
   public record StandardUpsert(String standardId, String standardYaml, Boolean orgLevelLocked) {}
+
+  void validateStandardBody(String expectedId, String yaml) {
+    final List<Standard> parsed;
+    try {
+      parsed = standardsParser.parse(yaml);
+    } catch (StandardsParser.ParseException ex) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid standard YAML", ex);
+    }
+    if (parsed.size() != 1) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Each org standard row must contain exactly one standard");
+    }
+    if (!expectedId.equals(parsed.get(0).id())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "standardId must match the id declared in standardYaml");
+    }
+  }
 }

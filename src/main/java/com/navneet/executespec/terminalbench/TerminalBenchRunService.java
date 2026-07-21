@@ -16,6 +16,8 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.RunMode;
@@ -56,6 +58,7 @@ public class TerminalBenchRunService {
   private final SseBroadcaster broadcaster;
   private final JwtUtil jwtUtil;
   private final FeatureFlagService featureFlagService;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /**
    * Per-task wall-clock safety net for Terminal-Bench remote workers. Harbor's internal benchmark
@@ -64,6 +67,10 @@ public class TerminalBenchRunService {
    */
   @Value("${terminal-bench.worker-wall-clock-seconds:1410}")
   private int workerWallClockSeconds;
+
+  /** Tail protected from new LLM/tool work so terminal state and ATIF evidence can flush. */
+  @Value("${terminal-bench.shutdown-reserve-seconds:45}")
+  private int shutdownReserveSeconds;
 
   private static final int TB_DEFAULT_MAX_ITERATIONS = 120;
   private static final int TB_STAGNATION_WARN_AFTER = 16;
@@ -216,7 +223,8 @@ iterating needlessly.
 """;
 
   /** Result of launching a run: the runId plus a freshly minted scoped SSE token for the client. */
-  public record StartResult(String runId, String sseToken) {}
+  public record StartResult(
+      String runId, String sseToken, long absoluteDeadlineEpochMs, long shutdownReserveMs) {}
 
   /**
    * Persist a run (ownership stamped), bind it to remote tool execution, and launch the worker on a
@@ -228,10 +236,21 @@ iterating needlessly.
       String instruction,
       String provider,
       String model,
-      Integer maxIterations) {
+      Integer maxIterations,
+      Long requestedAbsoluteDeadlineEpochMs) {
     String runId = UUID.randomUUID().toString();
+    long now = System.currentTimeMillis();
+    long absoluteDeadlineEpochMs =
+        resolveAbsoluteDeadline(
+            requestedAbsoluteDeadlineEpochMs, now, workerWallClockSeconds, shutdownReserveSeconds);
     String userId = String.valueOf(userDetails.getUser().getId());
     String orgId = userDetails.getUser().getOrgId();
+    // Operator benchmark work is platform-owned, but it still must use the same durable
+    // execution-context contract as customer calls. Without this explicit internal reference the
+    // dispatch guard correctly rejects the first provider call before any tool work occurs.
+    LlmExecutionReference executionReference =
+        executionPolicyFactory.platformInternal(
+            "terminal-bench", "TERMINAL_BENCH_RUN", runId, runId);
 
     // 1) Persist the run row synchronously with ownership stamped BEFORE the async thread starts
     //    (CLAUDE.md race-condition rule). harnessVersion="v2" so GET /api/runs/{id}/cost reads the
@@ -256,11 +275,16 @@ iterating needlessly.
             .totalOutputTokens(0)
             .build();
     stateStore.saveRun(run);
+    broadcaster.registerBenchmarkTrajectory(runId);
 
     // 2) Bind the run to remote tool execution BEFORE the worker runs → isRemote(runId)=true, so
     //    every worker tool call dispatches to the connected client over SSE (ToolRegistry:149)
     //    instead of executing on the server. No worker change required.
-    remoteToolDispatcher.register(runId);
+    remoteToolDispatcher.register(
+        runId,
+        RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH,
+        absoluteDeadlineEpochMs,
+        Math.max(0, shutdownReserveSeconds) * 1000L);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
     log.info("[TB] started remote worker run={} provider={} model={}", runId, provider, model);
 
@@ -269,14 +293,42 @@ iterating needlessly.
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()
         .name("tb-run-" + runId)
-        .start(snapshot.wrap(() -> runWorker(runId, instruction, provider, model, maxIterations)));
+        .start(
+            snapshot.wrap(
+                () ->
+                    runWorker(
+                        runId,
+                        instruction,
+                        provider,
+                        model,
+                        maxIterations,
+                        absoluteDeadlineEpochMs,
+                        executionReference)));
 
     String sseToken = jwtUtil.generateSseToken(userId, runId);
-    return new StartResult(runId, sseToken);
+    return new StartResult(
+        runId, sseToken, absoluteDeadlineEpochMs, Math.max(0, shutdownReserveSeconds) * 1000L);
+  }
+
+  static long resolveAbsoluteDeadline(
+      Long requestedEpochMs, long nowEpochMs, int serverMaxSeconds, int shutdownReserveSeconds) {
+    long serverDeadline = nowEpochMs + Math.max(1, serverMaxSeconds) * 1000L;
+    long minimumUsable = Math.max(0, shutdownReserveSeconds) * 1000L + 1000L;
+    if (requestedEpochMs == null || requestedEpochMs <= 0) return serverDeadline;
+    if (requestedEpochMs - nowEpochMs < minimumUsable) {
+      throw new IllegalArgumentException("absolute deadline leaves no executable budget");
+    }
+    return Math.min(requestedEpochMs, serverDeadline);
   }
 
   private void runWorker(
-      String runId, String instruction, String provider, String model, Integer maxIterations) {
+      String runId,
+      String instruction,
+      String provider,
+      String model,
+      Integer maxIterations,
+      long absoluteDeadlineEpochMs,
+      LlmExecutionReference executionReference) {
     Path workspace = null;
     String finalStatus = "FAILED";
     String reason = null;
@@ -285,7 +337,8 @@ iterating needlessly.
       // Remote mode never touches this dir (tools dispatch before tool.execute), but
       // ExecutionContext requires an absolute path.
       workspace = Files.createTempDirectory("tb-remote-");
-      ExecutionContext ctx = new ExecutionContext(runId, "tb-task", workspace.toRealPath());
+      ExecutionContext ctx =
+          new ExecutionContext(runId, "tb-task", workspace.toRealPath(), executionReference);
       WorkerResult result =
           worker.run(
               WorkerTaskRequest.builder()
@@ -299,6 +352,8 @@ iterating needlessly.
                   .stagnationForceAfter(TB_STAGNATION_FORCE_AFTER)
                   .temperature(0.0)
                   .wallClockSeconds(workerWallClockSeconds)
+                  .absoluteDeadlineEpochMs(absoluteDeadlineEpochMs)
+                  .shutdownReserveMs(Math.max(0, shutdownReserveSeconds) * 1000L)
                   .forceToolChoiceOnSalvage(true)
                   .terminalArtifactDeadlineAfter(TB_ARTIFACT_DEADLINE_AFTER)
                   .terminalTaskMode(true)
@@ -396,10 +451,23 @@ iterating needlessly.
 
   private void finalizeTerminal(String runId, String status, String reason) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+    boolean[] finalized = {false};
     stateStore
         .findRun(runId)
         .ifPresent(
             r -> {
+              // Harbor may abort the adapter and DELETE the remote run while the worker is
+              // unwinding.  Cancellation is terminal and must not be overwritten by this finally
+              // block's late COMPLETE/FAILED write.
+              if (!shouldFinalize(r.getStatus())) {
+                log.info(
+                    "[TB] preserving terminal run={} status={} over late status={}",
+                    runId,
+                    r.getStatus(),
+                    status);
+                return;
+              }
+              finalized[0] = true;
               r.setStatus(status);
               r.setCompletedAt(Instant.now());
               r.setStatusReason(reason);
@@ -412,17 +480,33 @@ iterating needlessly.
                 r.setActualCostUsd(0d);
               }
               if (cost.inputTokens() > 0) {
-                r.setTotalInputTokens(cost.inputTokens());
+                r.setTotalInputTokens(RunCostTracker.saturatedInt(cost.inputTokens()));
               }
               if (cost.outputTokens() > 0) {
-                r.setTotalOutputTokens(cost.outputTokens());
+                r.setTotalOutputTokens(RunCostTracker.saturatedInt(cost.outputTokens()));
               }
               stateStore.saveRun(r);
             });
-    broadcaster.emit(runId, RunEvent.runStatus(runId, status));
-    broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
-    broadcaster.emit(runId, RunEvent.complete(runId, status, reason)); // the adapter's stop signal
-    broadcaster.complete(runId);
+    if (finalized[0]) {
+      stateStore
+          .findRun(runId)
+          .filter(r -> status.equals(r.getStatus()))
+          .ifPresent(
+              ignored -> {
+                broadcaster.emit(runId, RunEvent.runStatus(runId, status));
+                broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
+                broadcaster.emit(runId, RunEvent.complete(runId, status, reason));
+                broadcaster.complete(runId);
+              });
+    }
+  }
+
+  static boolean shouldFinalize(String currentStatus) {
+    return currentStatus == null
+        || !("COMPLETE".equals(currentStatus)
+            || "FAILED".equals(currentStatus)
+            || "CANCELLED".equals(currentStatus)
+            || "PAUSED".equals(currentStatus));
   }
 
   private static void deleteTree(Path root) {

@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,7 @@ public class ProjectDocGeneratorController {
 
   private final ProjectDocGeneratorService service;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final GeneratedSecretScanner secretScanner;
 
   public record GeneratedDocDto(
       UUID id,
@@ -99,11 +101,17 @@ public class ProjectDocGeneratorController {
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         docType + " doc has not been generated for this project yet"));
+    String content = doc.getContent() == null ? "" : doc.getContent();
+    if (secretScanner.scan(content).isPresent()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Generated document contains credential-like material and cannot be downloaded");
+    }
     String filename = type.name().toLowerCase() + ".md";
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
         .contentType(MediaType.parseMediaType("text/markdown; charset=utf-8"))
-        .body(doc.getContent() == null ? "" : doc.getContent());
+        .body(content);
   }
 
   private static DocType parseType(String raw) {

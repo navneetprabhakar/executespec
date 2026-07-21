@@ -1,7 +1,9 @@
 package com.navneet.executespec.agent;
 
 import java.util.List;
+import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
@@ -40,7 +42,13 @@ import lombok.Builder;
  * @param agentRole stable producer role for W0 usage attribution, e.g. {@code WorkerAgent}
  * @param stepId stable phase/step identifier inside the role, e.g. {@code worker.iteration}
  * @param retryOf optional parent step/call id when this request is a retry/failover attempt
+ * @param llmExecutionContextId exact durable execution-context id used for tenant-safe usage
+ *     attribution. Must be paired with {@code llmExecutionScope}; null preserves legacy callers.
+ * @param llmExecutionScope tenant scope used to load {@code llmExecutionContextId}. The router and
+ *     usage recorder never infer a durable context from run/source/correlation strings.
  * @param strictProvider when true, transient failures are not routed to another provider
+ * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
+ *     generated once when omitted and preserved by {@link #toBuilder()}
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -56,6 +64,16 @@ public record LlmRequest(
     String agentRole,
     String stepId,
     String retryOf,
+    String llmExecutionContextId,
+    LlmExecutionScope llmExecutionScope,
+    /**
+     * RR-322 — optional fencing token: the {@code attempt} generation of the execution-context
+     * claim this caller believes it holds. When supplied, {@code LlmExecutionDispatchGuard} rejects
+     * the dispatch if the context's attempt has since advanced, so a worker whose lease was stolen
+     * cannot keep spending against the same context. Null preserves every existing caller.
+     */
+    Integer llmExecutionAttempt,
+    String usageLogicalCallId,
     boolean strictProvider,
     PromptCacheStrategy promptCacheStrategy) {
 
@@ -79,6 +97,17 @@ public record LlmRequest(
     if (messages == null || messages.isEmpty())
       throw new IllegalArgumentException("messages required");
     if (context == null) throw new IllegalArgumentException("context required");
+    if ((llmExecutionContextId == null) != (llmExecutionScope == null)) {
+      throw new IllegalArgumentException(
+          "llmExecutionContextId and llmExecutionScope must be supplied together");
+    }
+    if (llmExecutionContextId == null && context.llmExecutionContextId() != null) {
+      llmExecutionContextId = context.llmExecutionContextId();
+      llmExecutionScope = context.llmExecutionScope();
+    }
+    if (usageLogicalCallId == null || usageLogicalCallId.isBlank()) {
+      usageLogicalCallId = UUID.randomUUID().toString();
+    }
     if (temperature == null) temperature = 0.0;
     if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;
   }

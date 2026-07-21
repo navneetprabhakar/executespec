@@ -24,5 +24,6 @@ class ClientCapabilitiesControllerTest {
     assertThat(response.eventContracts().typedEventsSupported()).isTrue();
     assertThat(response.toolResultContract().strictEnvelope()).isTrue();
     assertThat(response.managedAi().balancePath()).isEqualTo("/api/billing/managed-ai/balance");
+    assertThat(response.providerCatalog().path()).isEqualTo("/api/v3/provider-readiness");
   }
 }

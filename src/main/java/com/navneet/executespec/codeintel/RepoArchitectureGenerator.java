@@ -3,10 +3,13 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -36,6 +39,7 @@ public class RepoArchitectureGenerator {
   // projectArchitectureService→repoArchitectureGenerator→llmRouter (RL-2026-06-002 fix).
   private final ObjectProvider<LlmRouter> llmRouter;
   private final ModelResolver modelResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   private static final String SYSTEM_PROMPT =
       """
@@ -82,18 +86,55 @@ public class RepoArchitectureGenerator {
    * @param codeMapMarkdown the markdown produced by {@link CodeMapGenerator}
    * @param provider LLM provider; falls back to OPENAI on null
    */
-  public Result generate(String repoFullName, String codeMapMarkdown, LlmProvider provider) {
+  public Result generate(
+      String projectId, String repoFullName, String codeMapMarkdown, LlmProvider provider) {
+    return generate(projectId, repoFullName, codeMapMarkdown, provider, null);
+  }
+
+  public Result generate(
+      String projectId,
+      String repoFullName,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId) {
+    return generate(projectId, repoFullName, codeMapMarkdown, provider, actorUserId, null);
+  }
+
+  public Result generate(
+      String projectId,
+      String repoFullName,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     if (codeMapMarkdown == null || codeMapMarkdown.isBlank()) {
       throw new IllegalArgumentException("code map is empty for " + repoFullName);
     }
 
-    LlmProvider effective = provider != null ? provider : ProjectProviderResolver.CANONICAL_DEFAULT;
+    if (provider == null) throw new IllegalArgumentException("provider required");
+    LlmProvider effective = provider;
     ResolvedModel resolved = modelResolver.resolve("RepoArchitectureGenerator", effective);
+    String exactModel = RunModelOverrides.lookup(effective, resolved.getAgentTier());
 
     String userPayload = "Repository: " + repoFullName + "\n\n" + "Code map:\n\n" + codeMapMarkdown;
 
     List<Message> messages =
-        List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload));
+        List.of(
+            new SystemMessage(SYSTEM_PROMPT),
+            new UserMessage(PromptTrustBoundary.wrap("REPO_ARCHITECTURE_EVIDENCE", userPayload)));
+    String contextId = "repo-arch-" + java.util.UUID.randomUUID();
+    var executionReference =
+        confirmedActionReference != null
+            ? confirmedActionReference
+            : executionPolicyFactory.forProject(
+                projectId,
+                "repo-architecture",
+                "ARCHITECTURE",
+                contextId,
+                contextId,
+                effective.name(),
+                exactModel,
+                actorUserId);
 
     // All providers use the canonical text router; architecture generation has no tool callbacks.
     ChatResponse response =
@@ -102,7 +143,8 @@ public class RepoArchitectureGenerator {
             resolved,
             messages,
             "repo-arch-" + safeSlug(repoFullName),
-            "repo-arch");
+            "repo-arch",
+            executionReference);
 
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {

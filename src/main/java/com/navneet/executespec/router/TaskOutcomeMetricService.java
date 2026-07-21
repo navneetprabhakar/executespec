@@ -12,7 +12,25 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-/** Persists deterministic task quality outcomes for future routing decisions. */
+/**
+ * Persists deterministic task quality outcomes for future routing decisions.
+ *
+ * <p><b>Known route-truth limitation (C1, 2026-07-19).</b> {@code model_task_metric} is keyed on
+ * {@code TaskOutcome.dispatchedProvider}/{@code dispatchedModel} — the REQUESTED, tier-resolved
+ * route, not the physical route that served the task. When cross-provider failover or a managed-AI
+ * tier lock substitutes the route, this metric accumulates under a model that did not do the work,
+ * and {@link ModelProviderCandidateService} then consumes it as that model's quality prior.
+ *
+ * <p>The physical route is now recorded per task in {@code agent_task.effective_provider} / {@code
+ * effective_model} (V305), so the corrected evidence exists. The write key here was deliberately
+ * NOT switched in the same change: this table is read as a rolling window of the newest 200 rows
+ * per {@code (provider, model, tier)} key, so re-keying splits history across two keys. Existing
+ * rows are not migrated, so the effective-route key would start below {@code
+ * execution.continuation.outcome-min-sample-tasks} (default 5) and return no prior at all for a
+ * while, while the stale requested-route key keeps serving a wrong prior from its retained history.
+ * That is a routing-ranking change and needs a measured sample-count check against real data plus
+ * its own {@link ModelProviderCandidateService} regression pass before it lands.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

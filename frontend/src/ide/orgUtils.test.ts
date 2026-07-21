@@ -23,7 +23,7 @@ import type * as api from '@/lib/api';
 describe('orgUtils', () => {
   it('formats money and domain inputs consistently', () => {
     expect(formatUsd(null)).toBe('—');
-    expect(formatUsd(12)).toBe('$12.00');
+    expect(formatUsd(12)).toBe('$12.0000');
     expect(domainListFromEmail('forge@executespec.ai')).toEqual(['executespec.ai']);
     expect(domainListFromEmail('forge@gmail.com')).toEqual([]);
     expect(parseDomainList(' Acme.COM, , example.io ')).toEqual(['acme.com', 'example.io']);
@@ -60,7 +60,7 @@ describe('orgUtils', () => {
 
   it('builds org provider key rows by tier', () => {
     const teamRows = orgKeyRows({tier: 'TEAM', hasOpenAiKey: true} as api.OrgDto);
-    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai']);
+    expect(teamRows.map((row) => row.provider)).toEqual(['anthropic', 'openai', 'gemini']);
     expect(teamRows.find((row) => row.provider === 'openai')?.connected).toBe(true);
 
     const enterpriseRows = orgKeyRows({
@@ -72,6 +72,7 @@ describe('orgUtils', () => {
     expect(enterpriseRows.map((row) => row.provider)).toEqual([
       'anthropic',
       'openai',
+      'gemini',
       'openrouter',
       'deepseek',
       'fireworks',

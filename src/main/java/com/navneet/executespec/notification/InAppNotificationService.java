@@ -1,7 +1,8 @@
 package com.navneet.executespec.notification;
 
+import com.navneet.executespec.api.PageBounds;
+
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,7 @@ public class InAppNotificationService {
 
   public Page<Notification> getNotifications(String userId, int page, int size) {
     return notificationRepository.findByUserIdOrderByCreatedAtDesc(
-        userId, PageRequest.of(page, size));
+        userId, PageBounds.request(page, size, 100));
   }
 
   public long getUnreadCount(String userId) {

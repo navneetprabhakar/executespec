@@ -145,6 +145,14 @@ public class AgentProperties {
 
   private Preview preview = new Preview();
 
+  private Deployment deployment = new Deployment();
+
+  @Data
+  public static class Deployment {
+    private boolean enabled = false;
+    private boolean recoverySafeEnabled = false;
+  }
+
   @Data
   public static class Preview {
     private boolean enabled = true;

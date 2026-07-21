@@ -64,8 +64,28 @@ public class AgentTask {
   private Integer cacheWriteTokens = 0; // Anthropic cache_creation_input_tokens (billed at 1.25x)
 
   private Boolean readmeUpdated; // null = not yet reviewed, true/false = reviewer verdict
-  private String provider; // provider used for this task (e.g. "anthropic")
-  private String model; // model used (e.g. "claude-sonnet-4-5")
+  // NOTE: `provider`/`model` are the REQUESTED, tier-resolved route captured from
+  // SequentialExecutor.tierConfigFor. They are what the executor asked for, not necessarily what
+  // served the task — cross-provider failover and managed-AI tier locks rebuild the request before
+  // dispatch. The `effective*` columns below (V305) carry the physical route projected from the
+  // run_step_usage ledger. Do not redefine these two columns; historical rows live in them.
+  private String provider; // requested/tier-resolved provider for this task (e.g. "anthropic")
+  private String model; // requested/tier-resolved model (e.g. "claude-sonnet-4-5")
+
+  /** V305 — physical provider that actually served this task, projected from the usage ledger. */
+  @Column(name = "effective_provider", length = 40)
+  private String effectiveProvider;
+
+  /** V305 — physical model that actually served this task, projected from the usage ledger. */
+  @Column(name = "effective_model", length = 128)
+  private String effectiveModel;
+
+  /**
+   * V305 — {@code LEDGER} / {@code MIXED} / {@code UNATTRIBUTED}. MIXED means more than one route
+   * served the task and is deliberately NOT collapsed to a single provider.
+   */
+  @Column(name = "effective_route_attribution", length = 24)
+  private String effectiveRouteAttribution;
 
   // Tier 5 fields — stuck detection & recovery
   @Column(name = "last_activity_at")
@@ -86,8 +106,8 @@ public class AgentTask {
 
   // 2026-05-10 (V184) — widened to TEXT after the dev-run analysis on
   // 7483896a showed the soft-completion path's `softWarnReason` (worker
-  // stopped without completeTask + 240-char finalAssistantText tail)
-  // routinely exceeded 255 chars and broke the COMPLETE/PARTIAL DB flip.
+  // stopped without completeTask + the historical assistant-text tail) routinely exceeded 255
+  // chars and broke the COMPLETE/PARTIAL DB flip. Current writers persist metadata only.
   // Companion defensive cap at SequentialExecutor.persistTaskStatus
   // ensures the column never absorbs unbounded router stack traces.
   @Column(name = "last_llm_failure", columnDefinition = "TEXT")
@@ -102,10 +122,7 @@ public class AgentTask {
    *   "outcome":           "STOPPED_WITHOUT_COMPLETE",
    *   "iterations":         47,
    *   "iterBudget":         75,
-   *   "tokensIn":           12450, "tokensOut": 3120,
-   *   "lastToolCall":      {"name":"writeFile","args":"...","exitOk":false,"error":"..."},
-   *   "lastLlmError":      "Anthropic 529: overloaded_error",
-   *   "lastAssistantText": "Let me also check..."
+   *   "lastToolCall":      "writeFile(sig=…)[target=app/x.py] -> ERR"
    * }</pre>
    *
    * <p>Surfaced via {@code GET /api/runs/{id}} so operators can diagnose stuck/FAILED tasks without

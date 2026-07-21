@@ -511,6 +511,10 @@ public class StateStore {
    */
   public void setUserCostCap(String runId, Double userCostCap) {
     if (userCostCap == null) return;
+    // RR-825 — fail closed on a cap the enforcement path cannot honour (NaN / ±Infinity / out of
+    // band). Validated here rather than only in RunRequest because the agent confirmation surface
+    // reaches this method without bean validation.
+    com.navneet.executespec.cost.CostCapValues.requireValidOptional(userCostCap);
     runRepo
         .findById(runId)
         .ifPresent(
@@ -2085,18 +2089,26 @@ public class StateStore {
   }
 
   /**
-   * Updates the instance heartbeat for a run. Called every 30s by RunOrchestrator. Uses a
-   * lightweight JPA update to avoid loading the full entity.
+   * RR-071 (2026-07-21) — claims/refreshes the execution lease for a run.
+   *
+   * <p>This previously did a read-modify-write: {@code findById} → mutate two fields → {@code
+   * save}. {@code PipelineRun} has no {@code @Version}, so that {@code save} wrote back EVERY field
+   * of the entity as it looked when the transaction loaded it — a heartbeat could therefore
+   * silently revert a concurrent terminal status, gate, token/cost, publication or cancellation
+   * write. Its javadoc also claimed to be both "called every 30s by RunOrchestrator" and a
+   * "lightweight JPA update to avoid loading the full entity"; neither was true.
+   *
+   * <p>It now delegates to {@link PipelineRunRepository#claimExecutionOwner}, the same fenced
+   * narrow UPDATE the live {@code RunOrchestrator} heartbeat path already uses: it touches only
+   * {@code executing_instance} + {@code execution_heartbeat}, requires the row to still be in a
+   * live execution status, and compare-and-sets the owner (unowned, or already this instance). A
+   * run that has gone terminal, or that another JVM owns, is left alone.
+   *
+   * @return {@code true} when the lease was claimed/refreshed; {@code false} when the row was
+   *     terminal, missing, or owned by a different instance.
    */
-  public void updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            run -> {
-              run.setExecutingInstance(instanceId);
-              run.setExecutionHeartbeat(heartbeat);
-              runRepo.save(run);
-            });
+  public boolean updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
+    return runRepo.claimExecutionOwner(runId, instanceId, heartbeat) > 0;
   }
 
   private String toJson(Object obj) {

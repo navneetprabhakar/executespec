@@ -1,9 +1,13 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {writeSpecHandoff} from '@/lib/specHandoff';
 import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
+import {repoSupports} from '@/ide/projectRepoUi';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
@@ -12,6 +16,11 @@ import {uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
 import {ArchDocView} from '@/ide/projectArchitecturePanels';
+import {ProjectChatConfirmationCard} from '@/ide/ProjectChatConfirmationCard';
+import {
+  ProjectChatConfirmationSession,
+  type PendingProjectChatConfirmation,
+} from '@/ide/projectChatConfirmation';
 import {
   agentTurnToChatBubbles,
   sortAgentChatBubbles,
@@ -20,16 +29,20 @@ import {
 import {
   contractDetectorSummary,
   docStamp,
+  driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
   looksLikeArtifact,
+  summarizeDriftResults,
   techDebtCategories,
+  uiBound,
 } from '@/ide/projectMoreUtils';
 import {
   formatProjectList,
   formatProjectRunList,
   resolveProjectChatSlashAction,
 } from '@/ide/projectChatUtils';
+
 import {
   ProjectBanner as Banner,
   ProjectChatMessageCard as ChatMessageCard,
@@ -50,6 +63,13 @@ export function IdeProjectChat() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [chatInfo, setChatInfo] = useState<api.ProjectChatInfo | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingProjectChatConfirmation | null>(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const confirmationSession = useRef<ProjectChatConfirmationSession | null>(null);
+  if (!confirmationSession.current)
+    confirmationSession.current = new ProjectChatConfirmationSession(api);
   // Backend gates project chat behind TEAM+ (TierConfig.isExecutionViewEnabled).
   // FREE / PRO hit a 403 on chat/info → show an upgrade card instead of a broken shell.
   const [gated, setGated] = useState(false);
@@ -74,8 +94,11 @@ export function IdeProjectChat() {
     }
     api
       .getProjectChatInfo(projectId)
-      .then(() => {
-        if (!cancelled) setGated(false);
+      .then((info) => {
+        if (!cancelled) {
+          setChatInfo(info);
+          setGated(false);
+        }
       })
       .catch((e: unknown) => {
         const m = e instanceof Error ? e.message : '';
@@ -113,8 +136,23 @@ export function IdeProjectChat() {
     return () => {
       cancelled = true;
       if (memTimer) clearTimeout(memTimer);
+      confirmationSession.current?.cancel();
     };
   }, [projectId]);
+
+  useEffect(() => {
+    if (!pendingConfirmation) return;
+    const remaining = Date.parse(pendingConfirmation.confirmation.expiresAt) - Date.now();
+    const timer = window.setTimeout(
+      () => {
+        confirmationSession.current?.cancel();
+        setPendingConfirmation(null);
+        setErr('Project action confirmation expired. Prepare the action again.');
+      },
+      Math.max(0, remaining),
+    );
+    return () => window.clearTimeout(timer);
+  }, [pendingConfirmation]);
 
   useEffect(() => endRef.current?.scrollIntoView({behavior: 'smooth'}), [msgs]);
 
@@ -175,7 +213,9 @@ export function IdeProjectChat() {
     try {
       const r = await api.compileProjectChatToSpec(projectId);
       if (r?.spec) {
-        sessionStorage.setItem('signal:pending-spec', r.spec);
+        // Retain the project identity the compile came from; the composer used
+        // to receive only the spec text.
+        writeSpecHandoff({spec: r.spec, source: 'project-chat-compile', projectId});
         window.location.href = `/projects/${projectId}`;
       }
     } catch (e: unknown) {
@@ -215,6 +255,69 @@ export function IdeProjectChat() {
       ...(prev ?? []),
       {role: 'assistant', content, ts: new Date().toISOString()},
     ]);
+  }
+
+  async function prepareProjectAction(action: api.ProjectChatConfirmedAction) {
+    if (!chatInfo || !projectId || confirmationBusy) return;
+    setConfirmationBusy(true);
+    setErr('');
+    try {
+      const model = chatInfo.confirmedActionModels?.[action] || '';
+      let target: Record<string, string>;
+      if (action === 'REGENERATE_ARCHITECTURE') {
+        target = {branch: ''};
+      } else if (action === 'GENERATE_PROJECT_DOC') {
+        target = {docType: 'EXPLANATION'};
+      } else {
+        const repos = (await api.getProjectRepos(projectId)) as unknown as Array<
+          Record<string, unknown>
+        >;
+        const repo = repos[0];
+        if (!repo) throw new Error('Code review needs at least one linked repository.');
+        target = {repoId: repoIdFor(repo)};
+      }
+      if (!model) throw new Error('This action has no exact confirmed model route.');
+      const scope: api.ProjectChatActionScope = {
+        action,
+        provider: chatInfo.provider,
+        model,
+        target,
+      };
+      const session = confirmationSession.current;
+      if (!session) throw new Error('Project action confirmation is unavailable.');
+      const pending = await session.issue(projectId, scope);
+      setPendingConfirmation(pending);
+    } catch (e: unknown) {
+      confirmationSession.current?.cancel();
+      setPendingConfirmation(null);
+      setErr(e instanceof Error ? e.message : 'Could not prepare project action.');
+    } finally {
+      setConfirmationBusy(false);
+    }
+  }
+
+  async function consumeProjectAction() {
+    if (!pendingConfirmation || confirmationBusy) return;
+    setConfirmationBusy(true);
+    setErr('');
+    try {
+      const session = confirmationSession.current;
+      if (!session) throw new Error('Project action confirmation is unavailable.');
+      const completed = await session.consume();
+      setPendingConfirmation(null);
+      note(`Project action completed:\n${JSON.stringify(completed.result, null, 2)}`);
+    } catch (e: unknown) {
+      // consume() clears before dispatch. Never keep or retry the bearer after any outcome.
+      setPendingConfirmation(null);
+      setErr(e instanceof Error ? e.message : 'Project action failed. Prepare it again to retry.');
+    } finally {
+      setConfirmationBusy(false);
+    }
+  }
+
+  function cancelProjectAction() {
+    confirmationSession.current?.cancel();
+    setPendingConfirmation(null);
   }
 
   async function handleSlashCommand(raw: string): Promise<boolean> {
@@ -486,6 +589,49 @@ export function IdeProjectChat() {
               ))
             )}
           </div>
+
+          <div className='ide-card ide-project-chat-artifacts-card'>
+            <div className='ide-project-chat-rail-head static'>Confirmed actions</div>
+            <div className='ide-project-chat-rail-body' style={{display: 'grid', gap: 8}}>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('REGENERATE_ARCHITECTURE')}
+              >
+                Prepare architecture regeneration
+              </button>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('GENERATE_PROJECT_DOC')}
+              >
+                Prepare explanation doc
+              </button>
+              <button
+                type='button'
+                className='ide-btn ghost'
+                disabled={gated || confirmationBusy || !!pendingConfirmation}
+                onClick={() => void prepareProjectAction('RUN_CODE_REVIEW')}
+              >
+                Prepare code review
+              </button>
+              <div className='muted' style={{fontSize: 11}}>
+                Semantic search, subagents, and plan mutations are not confirmable from project
+                chat.
+              </div>
+            </div>
+          </div>
+
+          {pendingConfirmation && (
+            <ProjectChatConfirmationCard
+              pending={pendingConfirmation}
+              busy={confirmationBusy}
+              onConfirm={() => void consumeProjectAction()}
+              onCancel={cancelProjectAction}
+            />
+          )}
         </aside>
       </div>
 
@@ -509,7 +655,6 @@ export function IdeProjectCode() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
   const [sub, setSub] = useState<CodeSub>('browse');
-  const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -524,6 +669,8 @@ export function IdeProjectCode() {
   // Browse state
   const [repoId, setRepoId] = useState('');
   const [files, setFiles] = useState<string[] | null>(null);
+  const [filesError, setFilesError] = useState('');
+  const [fileReload, setFileReload] = useState(0);
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState<Record<string, string>>({});
   // Mobile tree search query. The mobile view still renders the real folder
@@ -532,43 +679,50 @@ export function IdeProjectCode() {
   const [mobileCodeMode, setMobileCodeMode] = useState<'tree' | 'file'>('tree');
 
   // Other tabs
-  const [debt, setDebt] = useState<api.TechDebtReport | null | undefined>(undefined);
-  const [docs, setDocs] = useState<api.GeneratedDocRow[] | null>(null);
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null | undefined>(undefined);
   const [standards, setStandards] = useState<api.ComplianceReport | null | undefined>(undefined);
 
-  useEffect(() => {
-    if (!projectId) return;
-    api
-      .getProjectRepos(projectId)
-      .then((l) => {
+  // D4 — repos / tech debt / docs each render an affirmative "you have none"
+  // empty state, so a failed load must not collapse into one.
+  const reposState = useAsyncData(
+    () =>
+      api.getProjectRepos(projectId).then((l) => {
         const arr = l as unknown as Array<Record<string, unknown>>;
-        setRepos(arr);
         if (arr[0]) setRepoId(repoIdFor(arr[0]));
-      })
-      .catch(() => setRepos([]));
-    api
-      .getTechDebt(projectId, 30)
-      .then(setDebt)
-      .catch(() => setDebt(null));
-    Promise.all([
-      api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
-      api.getProjectDoc(projectId, 'SETUP').catch(() => null),
-    ])
-      .then(([e, s]) => setDocs([e, s].filter(Boolean) as api.GeneratedDocRow[]))
-      .catch(() => setDocs([]));
-  }, [projectId]);
+        return arr;
+      }),
+    [projectId],
+    !!projectId,
+  );
+  const repos = reposState.data ?? [];
+  const debtState = useAsyncData(() => api.getTechDebt(projectId, 30), [projectId], !!projectId);
+  const debt = debtState.data;
+  const docsState = useAsyncData(
+    () =>
+      Promise.all([
+        api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
+        api.getProjectDoc(projectId, 'SETUP').catch(() => null),
+      ]).then(([e, s]) => [e, s].filter(Boolean) as api.GeneratedDocRow[]),
+    [projectId],
+    !!projectId,
+  );
+  const docs = docsState.data;
+  const setDocs = docsState.setData;
 
   // Browse — file list per selected repo.
   useEffect(() => {
     if (sub !== 'browse' || !repoId) return;
     setFiles(null);
+    setFilesError('');
     setActive(null);
     api
       .listRepoFiles(projectId, repoId)
       .then((r) => setFiles(r.files ?? []))
-      .catch(() => setFiles([]));
-  }, [projectId, repoId, sub]);
+      .catch((e: unknown) => {
+        setFiles([]);
+        setFilesError(e instanceof Error ? e.message : 'Repository file inventory unavailable.');
+      });
+  }, [projectId, repoId, sub, fileReload]);
 
   // Health — lazy on tab open.
   useEffect(() => {
@@ -690,7 +844,15 @@ export function IdeProjectCode() {
   // Code-review target — the repo currently chosen in the shared header
   // <select> (falls back to the first linked repo). The full review surface
   // (scan / severity-grouped issues / autofix / report) is per-repo.
-  const reviewRepoId = repoId || (repos[0] ? repoIdFor(repos[0]) : '');
+  const reviewRepos = useMemo(
+    () => repos.filter((repo) => repoSupports(repo, 'CODE_REVIEW')),
+    [repos],
+  );
+  const reviewRepoId = reviewRepos.some((repo) => repoIdFor(repo) === repoId)
+    ? repoId
+    : reviewRepos[0]
+      ? repoIdFor(reviewRepos[0])
+      : '';
   const reviewRepo = useMemo(
     () => repos.find((r) => repoIdFor(r) === reviewRepoId) ?? null,
     [repos, reviewRepoId],
@@ -727,11 +889,12 @@ export function IdeProjectCode() {
           {(sub === 'browse' || sub === 'review') && repos.length > 0 && (
             <select
               className='ide-select'
+              aria-label='Repository'
               value={repoId}
               onChange={(e) => setRepoId(e.target.value)}
               style={{width: 'auto'}}
             >
-              {repos.map((r) => (
+              {(sub === 'review' ? reviewRepos : repos).map((r) => (
                 <option key={repoIdFor(r)} value={repoIdFor(r)}>
                   {repoDisplayName(r)}
                 </option>
@@ -743,7 +906,15 @@ export function IdeProjectCode() {
           active={sub}
           onSelect={(k) => setSub(k as CodeSub)}
           tabs={[
-            {key: 'browse', label: files == null ? 'Files' : `Files · ${files.length}`},
+            {
+              key: 'browse',
+              label:
+                files == null
+                  ? 'Files'
+                  : filesError
+                    ? 'Files · unavailable'
+                    : `Files · ${files.length}`,
+            },
             {key: 'debt', label: `Issues · ${debtCats.length}`},
             {key: 'review', label: 'Review'},
             {key: 'health', label: 'Repo health'},
@@ -756,7 +927,13 @@ export function IdeProjectCode() {
 
       {/* ── Browse ── */}
       {sub === 'browse' &&
-        (repos.length === 0 ? (
+        (reposState.failure ? (
+          <LoadError
+            failure={reposState.failure}
+            what='linked repositories'
+            onRetry={reposState.reload}
+          />
+        ) : repos.length === 0 ? (
           <div className='ide-empty'>No repos linked.</div>
         ) : (
           <div style={{flex: 1, minHeight: 0, position: 'relative'}}>
@@ -764,6 +941,13 @@ export function IdeProjectCode() {
               <div className='ide-split-files' style={{width: 260}}>
                 {files === null ? (
                   <IdeLoader label='Loading files…' pad={20} />
+                ) : filesError ? (
+                  <div className='ide-empty' style={{padding: 16}}>
+                    <div style={{color: 'var(--ide-red)', marginBottom: 10}}>{filesError}</div>
+                    <button className='ide-btn ghost' onClick={() => setFileReload((n) => n + 1)}>
+                      Retry file inventory
+                    </button>
+                  </div>
                 ) : (
                   <IdeFileTree files={files} activePath={active} onOpen={open} />
                 )}
@@ -839,7 +1023,9 @@ export function IdeProjectCode() {
       {/* ── Tech debt ── */}
       {sub === 'debt' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {debt === undefined ? (
+          {debtState.failure ? (
+            <LoadError failure={debtState.failure} what='code issues' onRetry={debtState.reload} />
+          ) : debtState.loading ? (
             <IdeLoader label='Loading code issues…' />
           ) : debtCats.length === 0 ? (
             <div className='ide-empty'>
@@ -872,8 +1058,18 @@ export function IdeProjectCode() {
       {/* ── Code review (full whole-repo surface) ── */}
       {sub === 'review' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {repos.length === 0 ? (
+          {reposState.failure ? (
+            <LoadError
+              failure={reposState.failure}
+              what='linked repositories'
+              onRetry={reposState.reload}
+            />
+          ) : repos.length === 0 ? (
             <div className='ide-empty'>No repos linked — link one to review code.</div>
+          ) : reviewRepos.length === 0 ? (
+            <div className='ide-empty'>
+              Code Review currently requires a linked GitHub repository.
+            </div>
           ) : !reviewRepo ? (
             <IdeLoader label='Loading…' />
           ) : (
@@ -897,7 +1093,9 @@ export function IdeProjectCode() {
             <div className='ide-empty'>No repos linked.</div>
           ) : (
             health.repos.map((r) => {
-              const drift = r.isStale;
+              const syncStatus = r.syncStatus || 'UNKNOWN';
+              const drift = syncStatus === 'DRIFTED';
+              const syncKnown = syncStatus !== 'UNKNOWN';
               return (
                 <div key={r.repoId} className='ide-card' style={{marginBottom: 8}}>
                   <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
@@ -910,10 +1108,12 @@ export function IdeProjectCode() {
                         style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
                       >
                         {(r.currentOriginSha || '').slice(0, 7) || '—'}{' '}
-                        {drift ? '· stale vs origin' : '· in sync'}
+                        {drift ? '· stale vs origin' : syncKnown ? '· in sync' : '· status unknown'}
                       </div>
                     </div>
-                    <IdeBadge kind={drift ? 'warn' : 'ok'}>{drift ? 'Drift' : 'Healthy'}</IdeBadge>
+                    <IdeBadge kind={!syncKnown || drift ? 'warn' : 'ok'}>
+                      {drift ? 'Drift' : syncKnown ? 'Healthy' : 'Unknown'}
+                    </IdeBadge>
                     {drift && (
                       // §3.4 — codemap-stale recovery CTA: Sync/Regenerate live on Repos.
                       <Link
@@ -1045,7 +1245,13 @@ export function IdeProjectCode() {
       {/* ── Docs ── */}
       {sub === 'docs' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
-          {(docs || []).length === 0 ? (
+          {docsState.failure ? (
+            <LoadError
+              failure={docsState.failure}
+              what='generated docs'
+              onRetry={docsState.reload}
+            />
+          ) : (docs || []).length === 0 ? (
             <div className='ide-empty'>No generated docs yet. Use the buttons below.</div>
           ) : (
             (docs || []).map((d) => (
@@ -1142,6 +1348,9 @@ export function IdeProjectArchitecture() {
   const [invariants, setInvariants] = useState<api.InvariantSummary[] | null>(null);
   const [violations, setViolations] = useState<api.InvariantViolation[]>([]);
   const [adrs, setAdrs] = useState<api.AdrSummary[] | null>(null);
+  const [adrCapability, setAdrCapability] = useState<api.AdrCapability | null | undefined>(
+    undefined,
+  );
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [coverage, setCoverage] = useState<Record<
     string,
@@ -1159,20 +1368,27 @@ export function IdeProjectArchitecture() {
 
   function refresh() {
     if (!projectId) return;
+    // The current map is the primary surface. Render it as soon as its own request completes;
+    // history, rules, decisions, staleness, repos, and coverage must not form a shared latency
+    // barrier around it.
+    setArch(undefined);
+    uiBound(api.getArchitectureDoc(projectId))
+      .then(setArch)
+      .catch(() => setArch(null));
     Promise.allSettled([
-      api.getArchitectureDoc(projectId),
-      api.getArchitectureVersions(projectId),
-      api.listProjectInvariants(projectId),
-      api.listProjectInvariantViolations(projectId),
-      api.listProjectAdrs(projectId, false),
-      api.getArchitectureStaleness(projectId),
-      api.getProjectRepos(projectId),
-    ]).then(async ([a, v, inv, viol, adr, st, rp]) => {
-      setArch(a.status === 'fulfilled' ? a.value : null);
+      uiBound(api.getArchitectureVersions(projectId)),
+      uiBound(api.listProjectInvariants(projectId)),
+      uiBound(api.listProjectInvariantViolations(projectId)),
+      uiBound(api.listProjectAdrs(projectId, false)),
+      uiBound(api.getProjectAdrCapability(projectId)),
+      uiBound(api.getArchitectureStaleness(projectId)),
+      uiBound(api.getProjectRepos(projectId)),
+    ]).then(async ([v, inv, viol, adr, adrCap, st, rp]) => {
       setVersions(v.status === 'fulfilled' ? (v.value as ArchitectureDoc[]) : []);
       setInvariants(inv.status === 'fulfilled' ? inv.value : []);
       if (viol.status === 'fulfilled') setViolations(viol.value);
       setAdrs(adr.status === 'fulfilled' ? adr.value : []);
+      setAdrCapability(adrCap.status === 'fulfilled' ? adrCap.value : null);
       if (st.status === 'fulfilled') setStaleness(st.value);
       if (rp.status === 'fulfilled') {
         const list = rp.value as unknown as Array<Record<string, unknown>>;
@@ -1246,8 +1462,8 @@ export function IdeProjectArchitecture() {
     setMsg('');
     try {
       const r = await api.checkRepoDrift(projectId, repoId);
-      const n = r.filter((d) => d.hasDrift).length;
-      setMsg(n > 0 ? `${n} drift result${n === 1 ? '' : 's'} detected.` : 'No drift detected.');
+      // RR-1658 — counting `hasDrift` alone reported an UNAVAILABLE check as clean.
+      setMsg(driftSummaryMessage(summarizeDriftResults(r)));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Drift check failed.');
     } finally {
@@ -1288,8 +1504,10 @@ export function IdeProjectArchitecture() {
     setErr('');
     setMsg('');
     try {
-      await api.checkProjectDrift(projectId);
-      setMsg('Project-wide drift check started.');
+      // RR-1658 — this endpoint returns the per-contract results synchronously, so report
+      // them rather than an unconditional "started" that hides drifted and unavailable rows.
+      const r = await api.checkProjectDrift(projectId);
+      setMsg(`Project-wide drift check complete. ${driftSummaryMessage(summarizeDriftResults(r))}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Drift check failed.');
     } finally {
@@ -1355,8 +1573,8 @@ export function IdeProjectArchitecture() {
                     {arch?.version ? `v${arch.version}` : 'Latest'}
                   </div>
                 </div>
-                <IdeBadge kind={staleness?.stale ? 'warn' : 'ok'}>
-                  {staleness?.stale ? 'Stale' : 'Up to date'}
+                <IdeBadge kind={!staleness || staleness.stale ? 'warn' : 'ok'}>
+                  {!staleness ? 'Freshness unknown' : staleness.stale ? 'Stale' : 'Up to date'}
                 </IdeBadge>
               </div>
               {docMd ? (
@@ -1397,6 +1615,7 @@ export function IdeProjectArchitecture() {
               <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
                 <select
                   className='ide-select'
+                  aria-label='Compare from version'
                   style={{width: 'auto'}}
                   value={diffFrom ?? ''}
                   onChange={(e) => setDiffFrom(e.target.value ? Number(e.target.value) : null)}
@@ -1411,6 +1630,7 @@ export function IdeProjectArchitecture() {
                 <span style={{color: 'var(--ide-fg-muted)'}}>→</span>
                 <select
                   className='ide-select'
+                  aria-label='Compare to version'
                   style={{width: 'auto'}}
                   value={diffTo ?? ''}
                   onChange={(e) => setDiffTo(e.target.value ? Number(e.target.value) : null)}
@@ -1544,43 +1764,65 @@ export function IdeProjectArchitecture() {
       {sub === 'adrs' &&
         (adrs === null ? (
           <IdeLoader label='Loading decisions…' />
-        ) : adrs.length === 0 ? (
-          <div className='ide-empty'>No architecture decisions yet.</div>
         ) : (
-          <div className='ide-card' style={{padding: 0}}>
-            {adrs.map((adr, i) => {
-              const status = (adr.status || 'PROPOSED').toUpperCase();
-              return (
-                <div
-                  key={adr.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '11px 16px',
-                    borderBottom: i < adrs.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                  }}
-                >
-                  <div style={{flex: 1, minWidth: 0}}>
-                    <span style={{fontWeight: 600}}>
-                      ADR {String(adr.adrIdInRepo ?? '').padStart(4, '0')} ·{' '}
-                      {adr.title || 'untitled'}
-                    </span>
-                    {adr.decisionDate && (
-                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginLeft: 8}}>
-                        {new Date(adr.decisionDate).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                  <IdeBadge
-                    kind={status === 'ACCEPTED' ? 'ok' : status === 'DEPRECATED' ? 'bad' : 'warn'}
-                  >
-                    {status}
-                  </IdeBadge>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <div
+              className='ide-card'
+              style={{
+                marginBottom: 10,
+                borderColor: 'var(--ide-warning)',
+                color: 'var(--ide-fg-muted)',
+              }}
+            >
+              {adrCapability === null
+                ? 'Decision indexing readiness is unknown because the capability check failed.'
+                : adrCapability?.automaticIngestion
+                  ? 'Checked-in architecture decisions are synchronized automatically.'
+                  : adrs.length > 0
+                    ? 'These are cached decision records. Checked-in ADR files are not discovered or synchronized automatically.'
+                    : 'Checked-in ADR discovery is not available yet; an empty cache does not prove that the repositories contain no architecture decisions.'}
+            </div>
+            {adrs.length === 0 ? (
+              <div className='ide-empty'>No cached architecture decisions.</div>
+            ) : (
+              <div className='ide-card' style={{padding: 0}}>
+                {adrs.map((adr, i) => {
+                  const status = (adr.status || 'PROPOSED').toUpperCase();
+                  return (
+                    <div
+                      key={adr.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '11px 16px',
+                        borderBottom: i < adrs.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                      }}
+                    >
+                      <div style={{flex: 1, minWidth: 0}}>
+                        <span style={{fontWeight: 600}}>
+                          ADR {String(adr.adrIdInRepo ?? '').padStart(4, '0')} ·{' '}
+                          {adr.title || 'untitled'}
+                        </span>
+                        {adr.decisionDate && (
+                          <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginLeft: 8}}>
+                            {new Date(adr.decisionDate).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <IdeBadge
+                        kind={
+                          status === 'ACCEPTED' ? 'ok' : status === 'DEPRECATED' ? 'bad' : 'warn'
+                        }
+                      >
+                        {status}
+                      </IdeBadge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         ))}
 
       {/* ── Contracts ── */}

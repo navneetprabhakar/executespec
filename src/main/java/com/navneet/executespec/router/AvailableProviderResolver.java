@@ -3,8 +3,10 @@ package com.navneet.executespec.router;
 import java.util.EnumSet;
 import java.util.Set;
 
-import com.navneet.executespec.agent.ResolvedKeys;
-import com.navneet.executespec.agent.RunKeyStore;
+import com.navneet.executespec.agent.ApiKeyResolver;
+import com.navneet.executespec.executioncontext.LlmExecutionContextService;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmPolicySnapshot;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -13,9 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Resolves which LLM providers are available for a given run. Bridges the existing {@link
- * ResolvedKeys} / {@link RunKeyStore} system with the {@link ModelResolver}'s provider-based model
- * resolution.
+ * Resolves which LLM providers are available for a given run from the same durable V282 policy
+ * snapshot enforced by the transport router. It never reads the retired advisory RunKeyStore.
  *
  * <p>Resolution rules:
  *
@@ -33,7 +34,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AvailableProviderResolver {
 
-  private final RunKeyStore runKeyStore;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final LlmExecutionContextService executionContextService;
+  private final ApiKeyResolver apiKeyResolver;
 
   @Value("${spring.ai.anthropic.api-key:}")
   private String systemAnthropicKey;
@@ -54,87 +57,58 @@ public class AvailableProviderResolver {
   private String systemFireworksKey;
 
   /**
-   * Determine which providers are available for a given run. Uses the already-resolved keys from
-   * {@link RunKeyStore}.
+   * Determine which providers are available for a given run. Missing/stale tenant policy fails
+   * closed to an empty set so continuation cannot invent a platform candidate.
    *
    * @param runId the pipeline run ID
    * @return set of available providers; empty means no provider is configured or allowed
    */
   public Set<LlmProvider> resolve(String runId) {
-    ResolvedKeys keys = runKeyStore.get(runId);
-    if (keys == null) {
-      // No resolved keys yet (e.g. system-generated run) — use system keys
-      return resolveSystemProviders();
-    }
-
-    Set<LlmProvider> available = EnumSet.noneOf(LlmProvider.class);
-    String keySourceMode = keys.keySourceMode() != null ? keys.keySourceMode() : "HYBRID";
-
-    if ("SYSTEM".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
-      // System keys available
-      if (isPresent(systemAnthropicKey)) available.add(LlmProvider.ANTHROPIC);
-      if (isPresent(systemOpenAiKey)) available.add(LlmProvider.OPENAI);
-      if (isPresent(systemGeminiKey)) available.add(LlmProvider.GEMINI);
-      if (isPresent(systemOpenRouterKey)) available.add(LlmProvider.OPENROUTER);
-      if (isPresent(systemDeepSeekKey)) available.add(LlmProvider.DEEPSEEK);
-      if (isPresent(systemFireworksKey)) available.add(LlmProvider.FIREWORKS);
-    }
-
-    if ("OWN_KEYS".equals(keySourceMode) || "HYBRID".equals(keySourceMode)) {
-      // User/org keys
-      if (keys.anthropicKey() != null) available.add(LlmProvider.ANTHROPIC);
-      if (keys.openAiKey() != null) available.add(LlmProvider.OPENAI);
-      if (keys.geminiKey() != null) available.add(LlmProvider.GEMINI);
-      // OpenRouter (Enterprise gateway) — offered whenever the org key is present. Only Enterprise
-      // org admins can set the key (gated at OrgController), so key-present implies Enterprise.
-      if (keys.openRouterKey() != null) available.add(LlmProvider.OPENROUTER);
-      if (keys.deepSeekKey() != null) available.add(LlmProvider.DEEPSEEK);
-      if (keys.fireworksKey() != null) available.add(LlmProvider.FIREWORKS);
-    }
-
-    // Apply org-level enabled provider policy
-    if (keys.enabledProviders() != null && !keys.enabledProviders().isEmpty()) {
-      available.removeIf(p -> !keys.isProviderAllowed(providerToString(p)));
-    }
-    available.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
-
-    // Do not bypass an explicit key-source or provider policy. In particular, falling back to
-    // system keys here would let an OWN_KEYS run (or a run whose enabledProviders excludes every
-    // configured system key) silently spend on a platform provider. Callers can surface the empty
-    // set as an unavailable-provider outcome; the submit pre-flight already gives OWN_KEYS users a
-    // direct configuration error before a run starts.
-    if (available.isEmpty()) {
+    try {
+      var reference = executionPolicyFactory.forRun(runId);
+      var context = executionContextService.require(reference.scope(), reference.contextId());
+      var policy = context.policySnapshot();
+      var current = apiKeyResolver.resolveWithProvenance(context.getKeySubjectUserId());
+      if (!context.getOrgId().equals(current.orgId())
+          || !policy.keySourceMode().name().equals(current.keys().keySourceMode())) {
+        log.warn("Provider availability rejected stale tenant/key policy for run {}", runId);
+        return Set.of();
+      }
+      Set<LlmProvider> available = EnumSet.noneOf(LlmProvider.class);
+      for (String provider : policy.allowedProviders()) {
+        LlmPolicySnapshot.CredentialSource source = policy.providerKeySources().get(provider);
+        boolean present =
+            source == LlmPolicySnapshot.CredentialSource.PLATFORM
+                ? systemProviderPresent(provider)
+                : current.originFor(provider) != null
+                    && current.originFor(provider).name().equals(source.name());
+        if (!present || !current.keys().isProviderAllowed(provider)) continue;
+        try {
+          LlmProvider parsed =
+              LlmProvider.valueOf("google".equals(provider) ? "GEMINI" : provider.toUpperCase());
+          if (!ModelAccessService.isDisabledProvider(provider)) available.add(parsed);
+        } catch (IllegalArgumentException ignored) {
+          // Unknown persisted provider stays unavailable.
+        }
+      }
+      return Set.copyOf(available);
+    } catch (RuntimeException invalidContext) {
       log.warn(
-          "No providers available for run {} after key-source/provider policy filtering", runId);
+          "Provider availability failed closed for run {}: {}", runId, invalidContext.getMessage());
       return Set.of();
     }
-
-    log.debug("Available providers for run {}: {} (mode={})", runId, available, keySourceMode);
-    return available;
   }
 
   /** Resolve providers from system-level keys only (used when no run context is available). */
-  private Set<LlmProvider> resolveSystemProviders() {
-    Set<LlmProvider> providers = EnumSet.noneOf(LlmProvider.class);
-    if (isPresent(systemAnthropicKey)) providers.add(LlmProvider.ANTHROPIC);
-    if (isPresent(systemOpenAiKey)) providers.add(LlmProvider.OPENAI);
-    if (isPresent(systemGeminiKey)) providers.add(LlmProvider.GEMINI);
-    if (isPresent(systemOpenRouterKey)) providers.add(LlmProvider.OPENROUTER);
-    if (isPresent(systemDeepSeekKey)) providers.add(LlmProvider.DEEPSEEK);
-    if (isPresent(systemFireworksKey)) providers.add(LlmProvider.FIREWORKS);
-    providers.removeIf(p -> ModelAccessService.isDisabledProvider(providerToString(p)));
-
-    return providers;
-  }
-
-  private static String providerToString(LlmProvider provider) {
+  private boolean systemProviderPresent(String provider) {
     return switch (provider) {
-      case ANTHROPIC -> "anthropic";
-      case OPENAI -> "openai";
-      case GEMINI -> "gemini";
-      case OPENROUTER -> "openrouter";
-      case DEEPSEEK -> "deepseek";
-      case FIREWORKS -> "fireworks";
+      case "anthropic" -> isPresent(systemAnthropicKey);
+      case "openai" -> isPresent(systemOpenAiKey);
+      case "gemini", "google" -> isPresent(systemGeminiKey);
+      case "openrouter" -> isPresent(systemOpenRouterKey);
+      case "deepseek" -> isPresent(systemDeepSeekKey);
+      case "fireworks" -> isPresent(systemFireworksKey);
+      default -> false;
     };
   }
 

@@ -1,6 +1,9 @@
 # `codereview/` — Whole-repo Code Review agent
 
-> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+The authenticated Markdown report download is a publication boundary: high-confidence credential
+material fails closed with 422 and the matched value is never returned.
+
+> Last reviewed: 2026-07-17. **Current worktree contract; not yet released.**
 >
 > Paid-tier feature (FREE → 403; PRO=4/month, TEAM/ENTERPRISE=unlimited). Schema in V172.
 > Phase 4 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `CodeReviewAutofixService` dispatches a patch-mode run per severity bucket on demand.
@@ -27,11 +30,28 @@ by `CodeReviewMarkdownRenderer` (severity-grouped, file-anchored, suggested-fix
 blocks). The markdown is the chat surface's primary handoff to the user — same
 shape as `ProjectGeneratedDoc` / `RepoArchitectureDoc`.
 
+## V292 Project Chat confirmed route
+
+`RUN_CODE_REVIEW` can also be started from the explicit Web or CLI/OpenTUI Project Chat action.
+This is not a model-generated proposal: the human selects the linked `repoId`, sees the
+action-specific route and budget, and confirms it. The server validates that provider/model against
+the current host-project policy with Enterprise org matrix overrides bound, then consumes a hashed,
+actor/org/project/action/target/route/budget-scoped bearer before scheduling the scan.
+
+`CodeReviewService.submitConfirmedScan` accepts the exact provider/model and one shared
+`LlmExecutionReference`. It propagates the route into the asynchronous executor with
+`RunModelOverrides` and clears it afterward. `CodeReviewAgent.AgentRequest` repeats the expected
+model and rejects provider/model drift before dispatch, so the async boundary cannot silently
+switch provider, step models, or fail over. Usage is attributed to the initiating project member;
+credential resolution stays bound to the host project subject. The confirmed-action cap is 300,000
+total tokens, $5, and two provider calls. Failure to construct or honor the exact route returns 503,
+and the already-consumed grant remains burned.
+
 ## Files
 
 - `CodeReviewAgent.java` — single-call PLANNING-tier agent. Emits `submitCodeReview` tool call. Parser drops malformed issues + normalizes unknown source/severity values.
 - `CodeReviewService.java` — orchestrator. Tier gate → idempotency → CLONING → STATIC_RUNNING (semgrep) → LLM_RUNNING (`CodeReviewAgent`) → COMPLETE / FAILED. SSE on `code-review-{scanId}`. Persists issues + markdown report atomically. Cost attribution via `RunCostTracker.snapshot("code-review-{id}")`.
-- `CodeReviewController.java` — REST surface. `POST /api/code-reviews` returns 202 + QUEUED row. List, detail, latest-for-repo, and markdown download endpoints.
+- `CodeReviewController.java` — REST surface. `POST /api/code-reviews` requires a linked `repoId`, write-guards the project, and replaces the caller's `repoFullName` with the canonical durable identity before tier/quota checks. Direct detail/report reads are project-read-guarded. List, latest-for-repo, and markdown download endpoints remain available to authorised project readers.
 - `SemgrepRunner.java` — wraps the `semgrep` subprocess. Configurable via `codereview.semgrep.{ruleset,timeout-seconds,binary}` properties; default `p/ci`. Streams stdout/stderr concurrently to avoid pipe-buffer deadlock; tolerates exit codes 0 (no findings) and 1 (findings present), warns + returns empty on 2+.
 - `CodeReviewAgent.java` — single-call PLANNING-tier agent. Emits `submitCodeReview` tool call.
 - `CodeReviewMarkdownRenderer.java` — pure formatter. No LLM calls, no DB queries. Severity-grouped (CRITICAL → MAJOR → MINOR → INFO), file-anchored, with suggested-fix code blocks.
@@ -53,11 +73,69 @@ useful 20 in the LLM's prompt without paying for a full-repo upload:
 - `-10` files under 200 chars
 
 Files referenced by static findings get a `+50` bump so the LLM sees the actual hot
-spots semgrep flagged.
+spots semgrep flagged. The bump is applied at admission, not after the walk, so the
+bounded retention below still produces the old ranking.
 
 Total walk capped at 5,000 files; per-file content capped at 12,000 chars. Skipped
 entirely: `.git/`, `node_modules/`, `target/`, `build/`, `dist/`, `.gradle/`,
 `.mvn/`, `.idea/`, `.vscode/`, `.lock` files, minified JS/CSS, binary assets.
+
+### Bounded retention (RR-433)
+
+The sampler used to decode every eligible file into a String and hold all of them
+until after the walk — 5,000 files x 1 MB was a multi-gigabyte live-heap ceiling
+before any provider call, and concurrent reviews could take the JVM down with
+unrelated runs on it. Now:
+
+- each candidate is streamed once, retaining at most `MAX_BYTES_PER_FILE` characters
+  while counting every line, so LOC no longer requires materializing whole files;
+- retention is a bounded top-K heap of `MAX_FILES_IN_PROMPT` already-truncated,
+  already-redacted excerpts (~240 KB), independent of repository size;
+- a cumulative 256 MB read budget is checked against `BasicFileAttributes.size()`
+  BEFORE each file is opened, plus a 120s walk deadline. Hitting either stops the
+  walk and logs a warning; `totalFiles` / `totalLoc` are then a lower bound.
+
+### Scan-coverage honesty (RR-1685)
+
+A lower bound that is stated as a fact is a false claim, and the review prompt
+stated `File count: N / Total LOC: M` with no qualifier. `SampleResult.coverage`
+now records WHY the bounded walk ended — `COMPLETE`, `TRUNCATED_FILE_LIMIT`,
+`TRUNCATED_READ_BUDGET`, `TRUNCATED_TIME_BUDGET`, `TRUNCATED_WALK_FAILED` — and
+`CodeReviewAgent.AgentRequest.scanCoverage` carries it into `composeUserPrompt`,
+which renders `Scanned file count: N (LOWER BOUND — not the whole repository)`
+plus an explicit `Coverage:` line whenever the walk did not finish. A **null**
+coverage is rendered as `UNKNOWN` and still marked as a lower bound, because "we
+did not record whether the scan finished" is not "the scan finished". A
+non-directory workspace is `TRUNCATED_WALK_FAILED`, so an unreadable clone is
+never reported as a fully measured empty repository. Same family as RR-1657 /
+RR-1658. Pinned by `CodeReviewScanCoverageTest`.
+
+Also note the counts measure different populations: `totalFiles` counts every
+non-skipped file under the per-file size cap, while `totalLoc` counts lines only
+of the language-recognised files actually read — hence the prompt now says
+"Scanned file count" and "Lines of code read" rather than implying a repository
+total. **Not covered:** `code_review_scan.total_files_scanned` /
+`total_loc` and the `CodeReviewController` DTO still persist and expose the bare
+numbers with no coverage marker; that needs a migration and is out of scope here.
+
+### Credential boundary (RR-435)
+
+Raw config and source used to reach the review model verbatim, and the score
+heuristic explicitly boosted `.env`. Prompt-injection wrapping is not
+confidentiality. Now, reusing the platform primitives rather than a new redactor:
+
+- `SensitiveWorkspacePathPolicy` excludes `.env`, credential stores, private keys and
+  keystores from `shouldSkip` outright (`.env.example` and declared templates stay
+  inspectable), and drops static findings anchored on those paths;
+- `GeneratedSecretScanner.redactRecognizedSecrets` runs over every retained excerpt
+  before it is held in the candidate set, and over every semgrep snippet and message
+  before it is mapped into `CodeReviewAgent.StaticFinding`;
+- the `.env` term is gone from `scoreFile`; `docker` / `config` remain.
+
+**Bound on the claim:** this covers high-confidence provider/PAT/cloud/PEM formats and
+the declared sensitive-path set. Customer-specific credential formats, PII and
+business identifiers in ordinary source are NOT redacted, and reviewing a repository
+still discloses its source to the configured provider.
 
 ## Schema
 
@@ -84,9 +162,16 @@ code_review_issue
 
 `CodeReviewService.submitScan` short-circuits when a COMPLETE scan exists for
 `(projectId, repoFullName, scannedSha)`. Re-running on the same HEAD is safe and
-returns the existing row.
+returns the existing row. The service no longer falls back to cloning an arbitrary caller-supplied
+GitHub full name if the admitted `repoId` disappears or changes identity before dispatch; it fails
+the scan instead.
 
 ## Outstanding (post-PR follow-ups)
+
+`CodeReviewService` has an explicit Spring-selected production constructor in addition to its
+package-private compatibility constructor. Keep the production constructor explicit whenever the
+dependency list changes; Lombok does not generate `@RequiredArgsConstructor` when another
+constructor already exists. The benchmark-profile boot gate caught this contract on 2026-07-18.
 
 - semgrep auto-installation in the prod GCE container (today: graceful fallback to
   LLM-only when not on PATH).

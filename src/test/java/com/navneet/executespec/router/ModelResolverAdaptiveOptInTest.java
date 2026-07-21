@@ -31,7 +31,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
  *
  * <ul>
  *   <li>Default (no flag set, no JVM property): adaptive routing is OFF — user's provider is always
- *       used (subject only to circuit-breaker failover)
+ *       used; circuit-breaker failover occurs later in the policy-aware router
  *   <li>Feature flag ON: adaptive routing fires (back-compat for ops scenarios that want it)
  *   <li>JVM strict-provider property ON: adaptive routing skipped regardless of flag
  *   <li>FeatureFlagService unwired (null): adaptive routing OFF (test / standalone safety)
@@ -164,6 +164,21 @@ class ModelResolverAdaptiveOptInTest {
 
     assertThat(resolved.getActualProvider()).isEqualTo(LlmProvider.DEEPSEEK);
     assertThat(resolved.getModel()).isEqualTo("deepseek-v4-pro-native");
+    verify(perfTracker, never())
+        .isMateriallyBetter(anyString(), anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void unhealthyPrimaryIsPreservedForPolicyAwareRouterFailover() {
+    ModelResolver r = newResolver(true);
+    when(healthTracker.isHealthy(LlmProvider.ANTHROPIC)).thenReturn(false);
+    when(healthTracker.isHealthy(LlmProvider.GEMINI)).thenReturn(true);
+
+    ResolvedModel resolved = r.resolve("Worker", LlmProvider.ANTHROPIC);
+
+    assertThat(resolved.getActualProvider()).isEqualTo(LlmProvider.ANTHROPIC);
+    assertThat(resolved.getModel()).isEqualTo("claude-haiku-4-5-20251001");
+    assertThat(resolved.isFallback()).isFalse();
     verify(perfTracker, never())
         .isMateriallyBetter(anyString(), anyString(), anyString(), anyString());
   }

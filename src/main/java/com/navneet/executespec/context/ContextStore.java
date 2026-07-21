@@ -1,7 +1,9 @@
 package com.navneet.executespec.context;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -16,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -198,7 +201,7 @@ public class ContextStore {
     }
     if (diskCheckpointEnabled) {
       try {
-        Files.deleteIfExists(diskCheckpointPath(ctx));
+        Files.deleteIfExists(guardedCheckpointPath(ctx));
       } catch (Exception e) {
         log.warn(
             "ContextStore disk delete FAILED run={} task={}: {}",
@@ -245,10 +248,18 @@ public class ContextStore {
     }
     if (diskCheckpointEnabled && workspaceRoot != null) {
       try {
-        Path workerDir = workspaceRoot.resolve(".agent-context").resolve("worker");
-        if (Files.isDirectory(workerDir)) {
+        // RR-500 — this loop DELETES files. The workspace holds a customer-controlled clone, so
+        // `.agent-context` / `.agent-context/worker` may be a symlink to a host directory. Prove
+        // containment with no-follow semantics before enumerating, and again per entry, so cleanup
+        // can never delete outside the run workspace.
+        Path workerDir = SafeWorkspacePath.resolveWithin(workspaceRoot, ".agent-context/worker");
+        if (Files.isDirectory(workerDir, LinkOption.NOFOLLOW_LINKS)) {
           try (var files = Files.list(workerDir)) {
-            for (Path file : files.filter(Files::isRegularFile).toList()) {
+            for (Path file :
+                files
+                    .filter(f -> Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS))
+                    .filter(f -> SafeWorkspacePath.isWithin(workspaceRoot, f))
+                    .toList()) {
               if (Files.deleteIfExists(file)) deleted++;
             }
           }
@@ -275,7 +286,17 @@ public class ContextStore {
         log.debug("ContextStore Redis exists failed run={} task={}", ctx.runId(), ctx.taskId());
       }
     }
-    return diskCheckpointEnabled && Files.isRegularFile(diskCheckpointPath(ctx));
+    if (!diskCheckpointEnabled) return false;
+    try {
+      return Files.isRegularFile(guardedCheckpointPath(ctx), LinkOption.NOFOLLOW_LINKS);
+    } catch (IOException | SecurityException e) {
+      log.warn(
+          "ContextStore disk exists probe refused run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      return false;
+    }
   }
 
   /** Workspace-local checkpoint path; the workspace is the durable handoff boundary. */
@@ -284,12 +305,41 @@ public class ContextStore {
     return ctx.workspaceRoot().resolve(".agent-context").resolve("worker").resolve(task + ".json");
   }
 
+  /**
+   * Same target as {@link #diskCheckpointPath(ExecutionContext)}, but proven to stay inside the run
+   * workspace (RR-500). The workspace holds a cloned, customer-controlled repository, so {@code
+   * .agent-context} or {@code .agent-context/worker} can be a symlink pointing at a host directory.
+   * Without this check the checkpoint write escapes the workspace and — far worse — run cleanup
+   * enumerates and DELETES every regular file in the link target.
+   *
+   * @throws IOException when the workspace root cannot be canonicalized
+   * @throws SecurityException when any component is a symlink or escapes the workspace
+   */
+  private static Path guardedCheckpointPath(ExecutionContext ctx) throws IOException {
+    String task = safeSegment(ctx.taskId());
+    return SafeWorkspacePath.resolveWithin(
+        ctx.workspaceRoot(), ".agent-context/worker/" + task + ".json");
+  }
+
   private boolean writeDiskCheckpoint(ExecutionContext ctx, String json) {
     if (!diskCheckpointEnabled) return false;
-    Path target = diskCheckpointPath(ctx);
-    Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+    Path target;
+    Path temp;
+    try {
+      target = guardedCheckpointPath(ctx);
+      temp = target.resolveSibling(target.getFileName() + ".tmp");
+    } catch (IOException | SecurityException e) {
+      log.warn(
+          "ContextStore disk checkpoint REFUSED run={} task={}: {}",
+          ctx.runId(),
+          ctx.taskId(),
+          e.getMessage());
+      return false;
+    }
     try {
       Files.createDirectories(target.getParent());
+      // Re-prove containment: createDirectories ran against a customer-controlled tree.
+      SafeWorkspacePath.requireWithin(ctx.workspaceRoot(), target);
       Files.writeString(
           temp,
           json + "\n",
@@ -322,8 +372,10 @@ public class ContextStore {
   private Optional<SavedContext> readDiskCheckpoint(ExecutionContext ctx) {
     if (!diskCheckpointEnabled) return Optional.empty();
     try {
-      Path path = diskCheckpointPath(ctx);
-      if (!Files.isRegularFile(path)) return Optional.empty();
+      Path path = guardedCheckpointPath(ctx);
+      if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+        return Optional.empty();
+      }
       Optional<SavedContext> snapshot =
           deserializeForContext(Files.readString(path, StandardCharsets.UTF_8), ctx);
       if (snapshot.isEmpty()) {

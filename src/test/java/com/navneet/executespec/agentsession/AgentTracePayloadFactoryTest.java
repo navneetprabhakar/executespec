@@ -93,6 +93,70 @@ class AgentTracePayloadFactoryTest {
         .contains("forbid_run_for_non_execution_route", "allow_non_run");
   }
 
+  @Test
+  void classifierDecidedRoutesAreNotRecordedAsDeterministic() {
+    var response =
+        new com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse(
+            "t1",
+            "READ_ONLY_CODE_HELP",
+            0.9,
+            "read_only_code_help",
+            false,
+            "reply",
+            null,
+            new com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy(
+                false, false, "no run"),
+            "trace-1");
+
+    var deterministic =
+        factory.build(
+            response,
+            session(),
+            "WEB",
+            "",
+            "hi",
+            false,
+            null,
+            "deterministic_pre_router",
+            AgentIntentService.RouteAttribution.deterministic(false));
+    assertThat(deterministic.get("modelProvider")).isEqualTo("deterministic");
+    assertThat(deterministic.get("model")).isEqualTo("none");
+    assertThat(deterministic.get("classifierAttempted")).isEqualTo(false);
+    assertThat(deterministic.get("deterministicRule")).isEqualTo("deterministic_pre_router");
+
+    var classified =
+        factory.build(
+            response,
+            session(),
+            "WEB",
+            "",
+            "hi",
+            false,
+            null,
+            "deterministic_pre_router",
+            AgentIntentService.RouteAttribution.classifier(
+                "anthropic", "claude-haiku-4-5-20251001", "orchestrator-routing-anthropic"));
+    assertThat(classified.get("modelProvider")).isEqualTo("anthropic");
+    assertThat(classified.get("model")).isEqualTo("claude-haiku-4-5-20251001");
+    assertThat(classified.get("promptId")).isEqualTo("orchestrator-routing-anthropic");
+    assertThat(classified.get("classifierAttempted")).isEqualTo(true);
+    assertThat(classified.get("deterministicRule")).isNull();
+
+    var attemptedButFellBack =
+        factory.build(
+            response,
+            session(),
+            "WEB",
+            "",
+            "hi",
+            false,
+            null,
+            "deterministic_pre_router",
+            AgentIntentService.RouteAttribution.deterministic(true));
+    assertThat(attemptedButFellBack.get("modelProvider")).isEqualTo("deterministic");
+    assertThat(attemptedButFellBack.get("classifierAttempted")).isEqualTo(true);
+  }
+
   private static AgentSession session() {
     return AgentSession.builder()
         .id("s1")

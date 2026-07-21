@@ -2554,6 +2554,63 @@
   padding: 0;
   overflow-x: auto;
 }
+.ide-benchmark-mobile-list {
+  display: none;
+}
+.ide-benchmark-mobile-card-head,
+.ide-benchmark-mobile-dataset,
+.ide-benchmark-mobile-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ide-benchmark-mobile-card-head {
+  align-items: flex-start;
+}
+.ide-benchmark-mobile-model {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.ide-benchmark-mobile-provider,
+.ide-benchmark-mobile-dataset {
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+}
+.ide-benchmark-mobile-provider {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.ide-benchmark-mobile-dataset {
+  margin-top: 12px;
+}
+.ide-benchmark-mobile-dataset > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ide-benchmark-mobile-progress {
+  margin-top: 12px;
+}
+.ide-benchmark-mobile-progress > div {
+  min-width: 0;
+}
+.ide-benchmark-mobile-submission {
+  margin-top: 10px;
+}
+.ide-benchmark-mobile-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ide-border);
+}
+.ide-benchmark-mobile-metrics > div,
+.ide-benchmark-mobile-metrics > div > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .ide-benchmark-table {
   width: 100%;
   min-width: 920px;
@@ -2755,6 +2812,63 @@
   }
   .ide-benchmark-table {
     min-width: 820px;
+  }
+  .ide-benchmark-table-card {
+    overflow: visible;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+  .ide-benchmark-mobile-list {
+    display: grid;
+    gap: 10px;
+  }
+  .ide-benchmark-mobile-card {
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--ide-border);
+    border-radius: 8px;
+    background: var(--ide-bg-sidebar);
+    color: var(--ide-fg);
+  }
+  .ide-benchmark-mobile-open {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--ide-border);
+    border-radius: 6px;
+    background: var(--ide-bg-input);
+    color: var(--ide-fg-muted);
+    cursor: pointer;
+  }
+  .ide-benchmark-mobile-open:hover {
+    color: var(--ide-fg-bright);
+    background: var(--ide-list-hover);
+  }
+  .ide-benchmark-mobile-open:focus-visible {
+    outline: 2px solid var(--ide-accent);
+    outline-offset: 2px;
+  }
+  .ide-benchmark-table {
+    display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .ide-benchmark-mobile-progress {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ide-benchmark-mobile-progress > div {
+    width: 100%;
+  }
+  .ide-benchmark-mobile-metrics {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -4257,4 +4371,266 @@
   .agent-gate-card .agent-card-actions .ide-btn {
     width: 100%;
   }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Screens tab — static UI render (no container, no deploy).
+   The stage hosts a sandboxed iframe of model-authored markup, so the frame
+   is styled as an inert surface: no interaction affordances of our own.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.ide-screens {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ide-screens-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ide-screens-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ide-screens-status {
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+}
+
+.ide-screens-viewports {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ide-screens .ide-chip {
+  background: transparent;
+  border: 1px solid var(--ide-border);
+  border-radius: 4px;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.ide-screens .ide-chip:hover {
+  color: var(--ide-fg);
+}
+
+.ide-screens .ide-chip.is-active {
+  background: var(--ide-bg-widget);
+  border-color: var(--ide-border-strong);
+  color: var(--ide-fg-bright);
+}
+
+/* The honesty label. Deliberately always visible rather than a dismissible
+   tooltip: this output is an approximation and must never read as evidence. */
+.ide-screens-note {
+  background: var(--ide-bg-widget);
+  border-left: 2px solid var(--ide-border-strong);
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+.ide-screens-error {
+  color: var(--ide-error, #f14c4c);
+  font-size: 13px;
+}
+
+.ide-screens-empty {
+  border: 1px dashed var(--ide-border);
+  border-radius: 6px;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.ide-screens-empty h3 {
+  color: var(--ide-fg-bright);
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.ide-screens-empty p {
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 46ch;
+}
+
+.ide-screens-body {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 200px 1fr;
+}
+
+.ide-screens-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ide-screens-item {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--ide-fg-muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 2px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.ide-screens-item:hover {
+  background: var(--ide-bg-widget);
+}
+
+.ide-screens-item.is-active {
+  background: var(--ide-bg-widget);
+  border-left-color: var(--ide-accent, #0078d4);
+  color: var(--ide-fg-bright);
+}
+
+.ide-screens-item-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-screens-item-target {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.ide-screens-stage {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.ide-screens-loading {
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  padding: 24px;
+}
+
+.ide-screens-frame {
+  background: #fff;
+  border: 1px solid var(--ide-border);
+  border-radius: 2px;
+  flex: none;
+  overflow: hidden;
+}
+
+/* Phone and tablet targets get device-like chrome so a 390px render is not
+   mistaken for a narrow web page. */
+.ide-screens-frame.is-device {
+  border: 8px solid #1a1a1a;
+  border-radius: 28px;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 35%);
+}
+
+.ide-screens-failed {
+  border-top: 1px solid var(--ide-border);
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+  padding-top: 10px;
+}
+
+.ide-screens-failed summary {
+  cursor: pointer;
+}
+
+.ide-screens-failed ul {
+  line-height: 1.7;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.ide-screens-failed code {
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .ide-screens-body {
+    grid-template-columns: 1fr;
+  }
+
+  /* The switcher becomes a horizontal strip so the stage keeps full width. */
+  .ide-screens-list {
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .ide-screens-item {
+    border-bottom: 2px solid transparent;
+    border-left: 0;
+    flex: none;
+  }
+
+  .ide-screens-item.is-active {
+    border-bottom-color: var(--ide-accent, #0078d4);
+    border-left-color: transparent;
+  }
+
+  .ide-screens-viewports {
+    margin-left: 0;
+    overflow-x: auto;
+  }
+
+  .ide-screens-stage {
+    padding: 4px 0;
+  }
+}
+
+/* RR-623: sandboxed artifact preview. The isolation is in the iframe's sandbox
+ * attribute (see SandboxedArtifactPreview) — this is presentation only. */
+.agent-artifact-preview {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  background: var(--ide-bg-widget);
+}
+.agent-artifact-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ide-border);
+  font-size: 12px;
+}
+.agent-artifact-preview-note {
+  margin-left: auto;
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+}
+.agent-artifact-preview-frame {
+  width: 100%;
+  height: 320px;
+  border: 0;
+  background: #fff;
 }

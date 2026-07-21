@@ -10,21 +10,91 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TurnResponse;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
-
 @Component
-@RequiredArgsConstructor
 class AgentRecordedTurnService {
 
   private final AgentIntentService intentService;
   private final AgentTurnRecorder turnRecorder;
   private final AgentEventRecorder eventRecorder;
   private final AgentSessionRepository sessionRepo;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final ChatSecurityAuditService chatSecurityAuditService;
 
-  TurnResponse record(AgentSession session, String sessionId, TurnRequest request) {
+  AgentRecordedTurnService(
+      AgentIntentService intentService,
+      AgentTurnRecorder turnRecorder,
+      AgentEventRecorder eventRecorder,
+      AgentSessionRepository sessionRepo) {
+    this(intentService, turnRecorder, eventRecorder, sessionRepo, null, null);
+  }
+
+  @Autowired
+  AgentRecordedTurnService(
+      AgentIntentService intentService,
+      AgentTurnRecorder turnRecorder,
+      AgentEventRecorder eventRecorder,
+      AgentSessionRepository sessionRepo,
+      ProjectAccessGuard projectAccessGuard,
+      ChatSecurityAuditService chatSecurityAuditService) {
+    this.intentService = intentService;
+    this.turnRecorder = turnRecorder;
+    this.eventRecorder = eventRecorder;
+    this.sessionRepo = sessionRepo;
+    this.projectAccessGuard = projectAccessGuard;
+    this.chatSecurityAuditService = chatSecurityAuditService;
+  }
+
+  TurnResponse record(
+      AgentSession session, String sessionId, TurnRequest request, AppUserDetails principal) {
+    // A recorded turn spends provider budget and can produce a run proposal, so the actor is
+    // mandatory. The guard used to be opt-in by argument nullability: any caller passing null
+    // silently obtained an unauthorized, unaudited turn on a project-scoped session.
+    if (principal == null || principal.getUser() == null) {
+      throw new SecurityException("authenticated user is required to record an agent turn");
+    }
+    if (session.getProjectId() != null && !session.getProjectId().isBlank()) {
+      if (projectAccessGuard == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "project authorization unavailable");
+      }
+      try {
+        projectAccessGuard.assertCanWrite(session.getProjectId(), principal);
+      } catch (RuntimeException denied) {
+        if (chatSecurityAuditService != null) {
+          chatSecurityAuditService.record(
+              "CHAT_TURN_DENIED",
+              sessionId,
+              session.getProjectId(),
+              principal,
+              "agent_recorded_turn",
+              ChatToolPolicy.Capability.SPEND_AI,
+              "DENIED");
+        }
+        throw denied;
+      }
+      if (chatSecurityAuditService == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "chat security audit unavailable");
+      }
+      chatSecurityAuditService.record(
+          "CHAT_TURN_ALLOWED",
+          sessionId,
+          session.getProjectId(),
+          principal,
+          "agent_recorded_turn",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "ALLOWED");
+    }
     String message = request == null ? "" : request.message();
     InterpretIntentRequest intentRequest =
         new InterpretIntentRequest(
@@ -32,10 +102,29 @@ class AgentRecordedTurnService {
             message,
             session.getProjectId(),
             request == null ? null : request.repoContext(),
-            request == null ? null : request.clientCapabilities());
-    OrchestratorDecision orchestratorDecision =
-        intentService.decide(
-            intentRequest, session.getDefaultProvider(), session.getDefaultModel());
+            request == null ? null : request.clientCapabilities(),
+            // Project-scoped recorded turns only reach here after assertCanWrite above.
+            session.getProjectId() == null || session.getProjectId().isBlank()
+                ? null
+                : Boolean.TRUE);
+    OrchestratorDecision orchestratorDecision;
+    try {
+      orchestratorDecision =
+          intentService.decide(
+              intentRequest, session.getDefaultProvider(), session.getDefaultModel());
+    } catch (org.springframework.web.server.ResponseStatusException inputDenied) {
+      if (chatSecurityAuditService != null) {
+        chatSecurityAuditService.record(
+            "CHAT_INPUT_DENIED",
+            sessionId,
+            session.getProjectId(),
+            principal,
+            "agent_recorded_input",
+            ChatToolPolicy.Capability.SPEND_AI,
+            "DENIED");
+      }
+      throw inputDenied;
+    }
     // The orchestrator decision is canonical for this turn. Re-running the classifier through
     // the legacy adapter would spend a second model call and could produce a different route,
     // causing the persisted transcript and returned decision to disagree.

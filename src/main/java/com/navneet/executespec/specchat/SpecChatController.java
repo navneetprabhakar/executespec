@@ -21,6 +21,8 @@ import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.InputSanitizer;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -54,6 +56,10 @@ import lombok.extern.slf4j.Slf4j;
  * the {@code spec.chat.enabled} flag is ON (V229, default OFF); when OFF the endpoint returns an
  * explicit not-enabled {@code done} event so the default pipeline is byte-identical.
  *
+ * <p>The enabled loop is dispatched through {@link SpecChatTurnDispatcher} — bounded globally and
+ * per user — instead of running on the servlet thread, so provider latency cannot consume the HTTP
+ * worker pool. Over-ceiling turns are rejected with HTTP 429 before any emitter is streamed.
+ *
  * <p>RL-2026-05-052.
  */
 @RestController
@@ -68,12 +74,22 @@ public class SpecChatController {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final ProjectAccessGuard projectAccessGuard;
   private final AgentIntentService agentIntentService;
+  private final InputSanitizer inputSanitizer;
+  private final ContextSanitizer contextSanitizer;
+  private final ChatSecurityAuditService chatSecurityAuditService;
+  private final SpecChatTurnDispatcher turnDispatcher;
+
+  /**
+   * Hard ceiling on one compatibility chat turn. The old emitter had no timeout at all, so a wedged
+   * provider call held the response open indefinitely.
+   */
+  static final long TURN_TIMEOUT_MS = 10 * 60 * 1000L;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestBody SpecChatRequest request,
-      @RequestHeader(value = "X-Forwarded-For", required = false) String forwardedFor,
+      @RequestHeader(value = "X-Forwarded-For", required = false) String ignoredForwardedFor,
       HttpServletRequest http) {
 
     if (userDetails == null) {
@@ -85,6 +101,19 @@ public class SpecChatController {
     if (request.conversation() == null || request.conversation().isEmpty()) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "conversation must contain at least the current turn");
+    }
+    try {
+      request = sanitizeRequest(request);
+    } catch (RuntimeException denied) {
+      chatSecurityAuditService.record(
+          "CHAT_INPUT_DENIED",
+          request.sessionId(),
+          request.projectId(),
+          userDetails,
+          "spec_chat_input",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "DENIED");
+      throw denied;
     }
 
     String orgId =
@@ -101,9 +130,21 @@ public class SpecChatController {
     // Project-scoped chat binds project read tools. Validate the caller before creating the audit
     // row or entering the agent loop so an arbitrary projectId cannot become an IDOR oracle.
     if (request.projectId() != null && !request.projectId().isBlank()) {
-      projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+      try {
+        projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+      } catch (RuntimeException denied) {
+        chatSecurityAuditService.record(
+            "CHAT_TURN_DENIED",
+            request.sessionId(),
+            request.projectId(),
+            userDetails,
+            "spec_chat_turn",
+            ChatToolPolicy.Capability.SPEND_AI,
+            "DENIED");
+        throw denied;
+      }
     }
-    String ip = clientIp(forwardedFor, http);
+    String ip = clientIp(http);
     String ipHash = sha256(ip);
 
     String effectiveProvider =
@@ -113,6 +154,14 @@ public class SpecChatController {
             : aiProviderPreferenceService.preferredProvider(userDetails);
 
     SpecChatAudit audit = upsertAudit(request, userId, orgId, ipHash, effectiveProvider);
+    chatSecurityAuditService.record(
+        "CHAT_TURN_ALLOWED",
+        request.sessionId(),
+        request.projectId(),
+        userDetails,
+        "spec_chat_turn",
+        ChatToolPolicy.Capability.SPEND_AI,
+        "ALLOWED");
 
     log.info(
         "spec-chat session={} user={} org={} project={} turn={} ipHash={}",
@@ -123,7 +172,7 @@ public class SpecChatController {
         audit.getTurnCount(),
         ipHash);
 
-    SseEmitter emitter = new SseEmitter(0L);
+    SseEmitter emitter = new SseEmitter(TURN_TIMEOUT_MS);
 
     // Flag OFF (default) → explicit not-enabled response; the real loop never runs, so the default
     // pipeline is byte-identical. The audit row above is still written (an unenabled session
@@ -147,18 +196,49 @@ public class SpecChatController {
       return emitter;
     }
 
-    // Flag ON → run the real agentic loop. Phase 1 runs it inline in the request thread (the
-    // feature
-    // is flag-gated); SpecChatService documents the async-before-prod requirement.
+    // Flag ON → run the real agentic loop OFF the servlet thread. The loop performs multiple
+    // provider rounds plus outbound web calls; running it inline pinned one Tomcat worker (and its
+    // connection) for that entire duration, so a handful of slow turns could exhaust the web tier
+    // and block auth/billing/run-control. Admission is bounded per user and per JVM.
+    final SpecChatRequest turnRequest = request;
+    boolean admitted =
+        turnDispatcher.submit(
+            userId,
+            request.sessionId(),
+            () ->
+                runTurnOffRequestThread(
+                    emitter,
+                    turnRequest,
+                    userDetails,
+                    userId,
+                    orgId,
+                    effectiveProvider,
+                    audit.getId()));
+    if (!admitted) {
+      throw new ResponseStatusException(
+          HttpStatus.TOO_MANY_REQUESTS,
+          "too many concurrent chat turns — wait for the current turn to finish");
+    }
+    return emitter;
+  }
+
+  private void runTurnOffRequestThread(
+      SseEmitter emitter,
+      SpecChatRequest request,
+      AppUserDetails userDetails,
+      String userId,
+      String orgId,
+      String effectiveProvider,
+      String auditId) {
     try {
-      emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", audit.getId())));
+      emitter.send(SseEmitter.event().name("ack").data(Map.of("audit_id", auditId)));
       // Emit the same typed route evidence used by the v2 agent-session endpoint. This keeps the
       // compatibility path observable without granting the legacy chat loop any new authority:
       // the route classifier can only propose a route, while existing chat tools still enforce
       // action and plan-gate policy.
-      emitRouteDecision(emitter, request, effectiveProvider);
+      emitRouteDecision(emitter, request, effectiveProvider, userDetails);
       specChatService.runTurn(
-          sseSink(emitter),
+          sseSink(emitter, userDetails, request),
           userDetails,
           request.sessionId(),
           request.projectId(),
@@ -167,18 +247,26 @@ public class SpecChatController {
           effectiveProvider);
       emitter.complete();
     } catch (Exception e) {
+      // A client disconnect surfaces here as an IO failure from the sink and stops the loop, which
+      // is the intended cancellation: no further provider round is started for a gone caller.
       log.warn(
           "spec-chat turn failed (session {}, user {}): {}",
           request.sessionId(),
           userId,
-          e.getMessage());
-      emitter.completeWithError(e);
+          contextSanitizer.sanitizeException(e));
+      try {
+        emitter.completeWithError(e);
+      } catch (RuntimeException ignored) {
+        log.debug("spec-chat emitter already closed for session {}", request.sessionId());
+      }
     }
-    return emitter;
   }
 
   private void emitRouteDecision(
-      SseEmitter emitter, SpecChatRequest request, String effectiveProvider) {
+      SseEmitter emitter,
+      SpecChatRequest request,
+      String effectiveProvider,
+      AppUserDetails principal) {
     try {
       OrchestratorDecision decision =
           agentIntentService.decide(
@@ -200,9 +288,22 @@ public class SpecChatController {
               "requires_user_confirmation", decision.requiresUserConfirmation(),
               "assistant_reply", decision.assistantReply() == null ? "" : decision.assistantReply(),
               "trace_id", decision.traceId() == null ? "" : decision.traceId()));
+      chatSecurityAuditService.record(
+          decision.requiresUserConfirmation()
+              ? "CHAT_CONFIRMATION_REQUIRED"
+              : "CHAT_ROUTE_DECISION",
+          request.sessionId(),
+          request.projectId(),
+          principal,
+          decision.route(),
+          decision.policy() != null && decision.policy().runApiAllowed()
+              ? ChatToolPolicy.Capability.SPEND_AI
+              : ChatToolPolicy.Capability.PROJECT_READ,
+          decision.requiresUserConfirmation() ? "REQUIRED" : "ROUTED");
     } catch (RuntimeException e) {
       // Advisory route evidence must not turn a compatibility chat request into an outage.
-      log.debug("legacy spec-chat route evidence unavailable: {}", e.getMessage());
+      log.debug(
+          "legacy spec-chat route evidence unavailable: {}", contextSanitizer.sanitizeException(e));
     }
   }
 
@@ -243,6 +344,18 @@ public class SpecChatController {
         .findBySessionId(request.sessionId())
         .map(
             existing -> {
+              if (!userId.equals(existing.getUserId()) || !orgId.equals(existing.getOrgId())) {
+                throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN, "session is not owned by caller");
+              }
+              String requestedProject =
+                  request.projectId() == null || request.projectId().isBlank()
+                      ? null
+                      : request.projectId();
+              if (!java.util.Objects.equals(requestedProject, existing.getProjectId())) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "session project scope cannot be changed");
+              }
               existing.setLastTurnAt(Instant.now());
               existing.setTurnCount(existing.getTurnCount() + 1);
               if (provider != null) {
@@ -266,30 +379,59 @@ public class SpecChatController {
   }
 
   /** Adapt {@link SpecChatService.Sink} to this request's SSE emitter (null-safe data maps). */
-  private SpecChatService.Sink sseSink(SseEmitter emitter) {
+  private SpecChatService.Sink sseSink(
+      SseEmitter emitter, AppUserDetails principal, SpecChatRequest request) {
     return new SpecChatService.Sink() {
+      private final java.util.Map<String, String> toolById =
+          new java.util.concurrent.ConcurrentHashMap<>();
+
       @Override
       public void token(String delta) {
-        send(emitter, "token", Map.of("delta", delta == null ? "" : delta));
+        send(
+            emitter,
+            "token",
+            Map.of("delta", delta == null ? "" : contextSanitizer.sanitizeOutput(delta)));
       }
 
       @Override
       public void toolCall(String tool, String argsJson, String id) {
+        if (id != null && tool != null) toolById.put(id, tool);
+        chatSecurityAuditService.record(
+            "CHAT_TOOL_REQUESTED",
+            request.sessionId(),
+            request.projectId(),
+            principal,
+            tool,
+            ChatToolPolicy.capability(tool),
+            "REQUESTED");
         send(
             emitter,
             "tool_call",
             Map.of(
                 "tool", tool == null ? "" : tool,
-                "args", argsJson == null ? "" : argsJson,
+                "args", argsJson == null ? "" : contextSanitizer.sanitizeOutput(argsJson),
                 "id", id == null ? "" : id));
       }
 
       @Override
       public void toolResult(String id, String resultJson) {
+        String tool = id == null ? null : toolById.remove(id);
+        chatSecurityAuditService.record(
+            "CHAT_TOOL_RESULT",
+            request.sessionId(),
+            request.projectId(),
+            principal,
+            tool,
+            ChatToolPolicy.capability(tool),
+            resultJson != null && resultJson.contains("\"ok\":true") ? "OK" : "ERROR");
         send(
             emitter,
             "tool_result",
-            Map.of("id", id == null ? "" : id, "result", resultJson == null ? "" : resultJson));
+            Map.of(
+                "id",
+                id == null ? "" : id,
+                "result",
+                resultJson == null ? "" : contextSanitizer.sanitizeOutput(resultJson)));
       }
 
       @Override
@@ -306,6 +448,45 @@ public class SpecChatController {
     };
   }
 
+  private SpecChatRequest sanitizeRequest(SpecChatRequest request) {
+    List<Map<String, Object>> sanitized = new java.util.ArrayList<>();
+    for (Map<String, Object> turn : request.conversation()) {
+      if (turn == null) continue;
+      Map<String, Object> copy = new java.util.LinkedHashMap<>(turn);
+      String role = String.valueOf(copy.getOrDefault("role", "user"));
+      Object raw = copy.get("content");
+      String content = raw == null ? "" : inputSanitizer.normalize(String.valueOf(raw));
+      if ("user".equalsIgnoreCase(role)) {
+        // The legacy marker is client-authored compatibility metadata, not an attestation. Scan
+        // the complete payload before splitting it so a forged marker cannot bypass ingress.
+        inputSanitizer.scan(content);
+        int localContext = content.indexOf("EXECUTESPEC_LOCAL_CONTEXT:");
+        String instruction = localContext < 0 ? content : content.substring(0, localContext);
+        if (localContext >= 0) {
+          content =
+              instruction
+                  + "\n\n"
+                  + com.navneet.executespec.agent.PromptTrustBoundary.wrap(
+                      "LOCAL_CONTEXT",
+                      contextSanitizer.sanitizeInput(
+                          content.substring(localContext), "legacy-local-context"));
+        }
+      } else if ("assistant".equalsIgnoreCase(role)) {
+        content = contextSanitizer.sanitizeOutput(content);
+      } else {
+        content = contextSanitizer.sanitizeInput(content, "legacy-client-context");
+      }
+      copy.put("content", content);
+      sanitized.add(java.util.Collections.unmodifiableMap(copy));
+    }
+    return new SpecChatRequest(
+        request.sessionId(),
+        request.projectId(),
+        request.localContext(),
+        List.copyOf(sanitized),
+        request.providerOverride());
+  }
+
   /**
    * Send one SSE event; a client-disconnect IOException surfaces to the caller's completeWithError.
    */
@@ -317,10 +498,7 @@ public class SpecChatController {
     }
   }
 
-  private static String clientIp(String forwardedFor, HttpServletRequest http) {
-    if (forwardedFor != null && !forwardedFor.isBlank()) {
-      return forwardedFor.split(",")[0].trim();
-    }
+  private static String clientIp(HttpServletRequest http) {
     return http.getRemoteAddr();
   }
 

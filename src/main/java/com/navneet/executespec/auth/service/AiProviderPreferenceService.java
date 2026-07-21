@@ -8,6 +8,7 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.router.ProviderReadinessService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 public class AiProviderPreferenceService {
 
   private final AppUserRepository userRepo;
+  private final ProviderReadinessService providerReadinessService;
 
   public String preferredProvider(AppUserDetails userDetails) {
     AppUser user = requireUser(userDetails);
@@ -39,6 +41,18 @@ public class AiProviderPreferenceService {
   public String updatePreferredProvider(AppUserDetails userDetails, String provider) {
     AppUser user = requireUser(userDetails);
     String normalized = normalizeProvider(provider);
+    boolean eligible =
+        providerReadinessService.resolve(user.getId()).stream()
+            .anyMatch(
+                readiness ->
+                    readiness.provider().equalsIgnoreCase(normalized)
+                        && (readiness.dispatchable()
+                            || readiness.state() == ProviderReadinessService.State.CIRCUIT_OPEN));
+    if (!eligible) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Provider " + normalized + " is not permitted and credentialed for this account.");
+    }
     user.setPreferredAiProvider(normalized);
     user.setUpdatedAt(Instant.now());
     userRepo.save(user);

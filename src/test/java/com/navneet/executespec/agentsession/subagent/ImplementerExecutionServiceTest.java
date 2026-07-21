@@ -50,10 +50,14 @@ class ImplementerExecutionServiceTest {
       new AppUserDetails(
           AppUser.builder().id("u1").email("u@example.com").status("ACTIVE").build(), null);
   private Path root;
+  private ImplementerWorkspaceScope workspaceScope;
 
   @BeforeEach
   void setUp() throws Exception {
-    root = Files.createTempDirectory("implementer-execution");
+    Path workspaceBase = Files.createTempDirectory("implementer-execution");
+    workspaceScope = new ImplementerWorkspaceScope(workspaceBase.toString());
+    // The authorized root is derived from the session, never from the caller's request.
+    root = workspaceScope.resolve(session("CLI"), null);
     when(flags.isEnabled(ImplementerExecutionService.FLAG)).thenReturn(true);
     when(turns.countBySessionId("session")).thenReturn(0L);
     when(events.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -66,16 +70,7 @@ class ImplementerExecutionServiceTest {
     assertThatThrownBy(
             () ->
                 service.execute(
-                    "session",
-                    "reservation",
-                    root.toString(),
-                    "change it",
-                    null,
-                    null,
-                    2,
-                    null,
-                    user,
-                    "org"))
+                    "session", "reservation", null, "change it", null, null, 2, null, user, "org"))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("IMPLEMENTER is disabled");
     verify(sessions, never()).findById("session");
@@ -88,16 +83,7 @@ class ImplementerExecutionServiceTest {
     assertThatThrownBy(
             () ->
                 service.execute(
-                    "session",
-                    "reservation",
-                    root.toString(),
-                    "change it",
-                    null,
-                    null,
-                    2,
-                    null,
-                    user,
-                    "org"))
+                    "session", "reservation", null, "change it", null, null, 2, null, user, "org"))
         .isInstanceOf(SecurityException.class)
         .hasMessage("IMPLEMENTER requires a CLI or VS Code session");
     verify(protocol, never()).authorizeWriter(any(), any(), any(), any(), any());
@@ -132,7 +118,7 @@ class ImplementerExecutionServiceTest {
             .execute(
                 "session",
                 "reservation",
-                root.toString(),
+                null,
                 "change it",
                 "ANTHROPIC",
                 null,
@@ -176,7 +162,7 @@ class ImplementerExecutionServiceTest {
                     .execute(
                         "session",
                         "reservation",
-                        root.toString(),
+                        null,
                         "change it",
                         null,
                         null,
@@ -201,7 +187,8 @@ class ImplementerExecutionServiceTest {
             eq("session"), eq("reservation"), eq(root.toString()), eq("u1"), eq("org")))
         .thenReturn(activeReservation());
     var expected = com.navneet.executespec.tool.ToolResult.ok("authorized");
-    when(mutations.mutate(any(), any(), any(), any(), any(), any(), any())).thenReturn(expected);
+    when(mutations.mutateResolved(any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(expected);
     doAnswer(
             invocation -> {
               @SuppressWarnings("unchecked")
@@ -232,31 +219,78 @@ class ImplementerExecutionServiceTest {
             anyInt(), any(), any());
 
     service()
-        .execute(
-            "session",
-            "reservation",
-            root.toString(),
-            "change it",
-            null,
-            null,
-            1,
-            null,
-            user,
-            "org");
+        .execute("session", "reservation", null, "change it", null, null, 1, null, user, "org");
     verify(mutations)
-        .mutate(
+        .mutateResolved(
             eq("session"),
             eq("reservation"),
-            eq(root.toString()),
+            eq(root),
             eq("writeFile"),
             any(),
             eq(user),
             eq("org"));
   }
 
+  @Test
+  void callerSuppliedAbsoluteServerPathIsRefusedBeforeAnyModelCall() throws Exception {
+    Path elsewhere = Files.createTempDirectory("host-directory");
+    when(sessions.findById("session")).thenReturn(Optional.of(session("CLI")));
+    ImplementerExecutionService service = service();
+    assertThatThrownBy(
+            () ->
+                service.execute(
+                    "session",
+                    "reservation",
+                    elsewhere.toString(),
+                    "change it",
+                    null,
+                    null,
+                    2,
+                    null,
+                    user,
+                    "org"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("relative");
+    verify(protocol, never()).authorizeWriter(any(), any(), any(), any(), any());
+    verify(chat, never())
+        .runTurnBoundedWithTools(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            anyInt(), any(), any());
+  }
+
+  @Test
+  void traversalOutOfTheSessionSandboxIsRefused() {
+    when(sessions.findById("session")).thenReturn(Optional.of(session("CLI")));
+    ImplementerExecutionService service = service();
+    assertThatThrownBy(
+            () ->
+                service.execute(
+                    "session",
+                    "reservation",
+                    "../../etc",
+                    "change it",
+                    null,
+                    null,
+                    2,
+                    null,
+                    user,
+                    "org"))
+        .isInstanceOf(SecurityException.class);
+    verify(protocol, never()).authorizeWriter(any(), any(), any(), any(), any());
+  }
+
   private ImplementerExecutionService service() {
     return new ImplementerExecutionService(
-        flags, sessions, turns, events, mutations, protocol, tools, chat, new ObjectMapper());
+        flags,
+        sessions,
+        turns,
+        events,
+        mutations,
+        workspaceScope,
+        protocol,
+        tools,
+        chat,
+        new ObjectMapper());
   }
 
   private AgentSession session(String surface) {

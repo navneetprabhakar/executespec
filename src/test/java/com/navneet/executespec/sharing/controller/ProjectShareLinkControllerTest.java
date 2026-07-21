@@ -15,6 +15,7 @@ import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
+import com.navneet.executespec.sharing.entity.ProjectShareLinkAudit;
 import com.navneet.executespec.sharing.service.ProjectShareLinkService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -43,8 +44,6 @@ class ProjectShareLinkControllerTest {
     AppUserDetails viewer = userDetails("u-viewer", "org-1", "ORG_ADMIN");
     Project project = project();
     when(accessGuard.assertCanRead("p1", viewer)).thenReturn(project);
-    when(projectMemberRepo.findByProjectIdAndUserId("p1", "u-viewer"))
-        .thenReturn(Optional.of(projectMember("u-viewer", "PROJECT_VIEWER")));
     when(linkService.listForProject("p1")).thenReturn(List.of(link("secret-token")));
     when(linkService.activeCountForProject("p1")).thenReturn(1L);
 
@@ -56,19 +55,18 @@ class ProjectShareLinkControllerTest {
   }
 
   @Test
-  void listIncludesTokensForProjectDeveloper() {
+  void listNeverReturnsPersistedBearerForProjectDeveloper() {
     AppUserDetails developer = userDetails("u-dev", "org-1", "DEVELOPER");
     Project project = project();
     when(accessGuard.assertCanRead("p1", developer)).thenReturn(project);
-    when(projectMemberRepo.findByProjectIdAndUserId("p1", "u-dev"))
-        .thenReturn(Optional.of(projectMember("u-dev", "PROJECT_DEVELOPER")));
     when(linkService.listForProject("p1")).thenReturn(List.of(link("secret-token")));
     when(linkService.activeCountForProject("p1")).thenReturn(1L);
 
     var body = controller.list("p1", developer).getBody();
 
     assertNotNull(body);
-    assertEquals("secret-token", body.links().get(0).token());
+    assertNull(body.links().get(0).token());
+    assertEquals("secret-t", body.links().get(0).tokenPrefix());
   }
 
   @Test
@@ -101,7 +99,7 @@ class ProjectShareLinkControllerTest {
             eq(ProjectShareLink.Surface.PROJECT_OVERVIEW),
             isNull(),
             eq("demo"),
-            isNull(),
+            any(java.time.Instant.class),
             same(orgAdmin.getUser())))
         .thenReturn(link("secret-token"));
 
@@ -116,6 +114,53 @@ class ProjectShareLinkControllerTest {
 
     assertNotNull(body);
     assertEquals("secret-token", body.token());
+  }
+
+  @Test
+  void auditRejectsProjectViewer() {
+    AppUserDetails viewer = userDetails("u-viewer", "org-1", "DEVELOPER");
+    Project project = project();
+    ProjectMember membership = projectMember("u-viewer", "PROJECT_VIEWER");
+    when(accessGuard.assertCanRead("p1", viewer)).thenReturn(project);
+    when(projectMemberRepo.findByProjectIdAndUserId("p1", "u-viewer"))
+        .thenReturn(Optional.of(membership));
+
+    assertThrows(
+        ResponseStatusException.class, () -> controller.audit("p1", UUID.randomUUID(), viewer));
+
+    verify(linkService, never()).auditForLink(anyString(), any());
+  }
+
+  @Test
+  void auditAllowsProjectAdminAndReturnsSecretFreeFacts() {
+    AppUserDetails admin = userDetails("u-admin", "org-1", "DEVELOPER");
+    Project project = project();
+    ProjectMember membership = projectMember("u-admin", "PROJECT_ADMIN");
+    UUID linkId = UUID.randomUUID();
+    when(accessGuard.assertCanRead("p1", admin)).thenReturn(project);
+    when(projectMemberRepo.findByProjectIdAndUserId("p1", "u-admin"))
+        .thenReturn(Optional.of(membership));
+    when(linkService.auditForLink("p1", linkId))
+        .thenReturn(
+            List.of(
+                ProjectShareLinkAudit.builder()
+                    .id(UUID.randomUUID())
+                    .linkId(linkId)
+                    .projectId("p1")
+                    .eventType("ACCESS")
+                    .outcome("ALLOWED")
+                    .surface("PROJECT_OVERVIEW")
+                    .clientIpHash("ip-hash")
+                    .userAgentHash("ua-hash")
+                    .occurredAt(java.time.Instant.now())
+                    .build()));
+
+    var body = controller.audit("p1", linkId, admin).getBody();
+
+    assertNotNull(body);
+    assertEquals(1, body.size());
+    assertEquals("ACCESS", body.get(0).eventType());
+    assertEquals("ip-hash", body.get(0).clientIpHash());
   }
 
   private static AppUserDetails userDetails(String userId, String orgId, String orgRole) {
@@ -152,8 +197,11 @@ class ProjectShareLinkControllerTest {
         .id(UUID.randomUUID())
         .projectId("p1")
         .token(token)
+        .tokenHash(org.apache.commons.codec.digest.DigestUtils.sha256Hex(token))
+        .tokenPrefix(token.substring(0, Math.min(8, token.length())))
         .surface(ProjectShareLink.Surface.PROJECT_OVERVIEW)
         .label("demo")
+        .expiresAt(java.time.Instant.now().plusSeconds(3600))
         .build();
   }
 }

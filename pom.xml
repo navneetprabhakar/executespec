@@ -500,6 +500,12 @@
       <artifactId>spring-security-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
+      <version>4.12.0</version>
+      <scope>test</scope>
+    </dependency>
 
     <!-- ArchUnit — enforces architectural rules as JUnit tests -->
     <dependency>
@@ -580,6 +586,15 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+          <!-- spring-boot:run forks the application JVM. Propagate the same fail-closed live-test
+               properties used by Surefire so -Plive-llm-test actually enables the guarded runtime
+               after an exact provider-budget reservation is supplied. Packaged production JARs are
+               unaffected; the default Maven properties above remain false. -->
+          <systemPropertyVariables>
+            <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
+            <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
+            <executespec.live-llm.reservation-id>${executespec.live-llm.reservation-id}</executespec.live-llm.reservation-id>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <plugin>
@@ -649,6 +664,15 @@
           <execution>
             <id>prepare-agent</id>
             <goals><goal>prepare-agent</goal></goals>
+            <configuration>
+              <!-- The JaCoCo agent appends to jacoco.exec by default. If a test JVM is ever killed
+                   mid-write (Ctrl-C, OOM, timeout) the exec file is left truncated, and because
+                   every later run appends to it the `report` goal then fails permanently with
+                   "Unknown block type 0" on any workspace that isn't cleaned — breaking the build
+                   for reasons unrelated to the code. Starting each run from a fresh exec file makes
+                   the coverage step self-healing. -->
+              <append>false</append>
+            </configuration>
           </execution>
           <execution>
             <id>report</id>

@@ -66,11 +66,6 @@ public class AnonymousRunController {
   }
 
   private static String clientIp(HttpServletRequest req) {
-    String xff = req.getHeader("X-Forwarded-For");
-    if (xff != null && !xff.isBlank()) {
-      int comma = xff.indexOf(',');
-      return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-    }
     return req.getRemoteAddr();
   }
 

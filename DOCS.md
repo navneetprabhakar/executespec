@@ -14,12 +14,10 @@ The long-form ExecuteSpec **backend** documentation has moved to the central doc
 | [`backend/plans`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/plans) · [`adr`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/adr) · [`reason-log`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/reason-log) | Plans, architecture decisions, reason logs |
 | [`backend/business`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/business) · [`competitive-analysis`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/competitive-analysis) · [`reference`](https://github.com/navneetprabhakar/executespec-docs/tree/main/backend/reference) | Business, competitive analysis, catalog formats |
 
-**Stays in this repo:** `README.md`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, and the API
-specification at `docs/openapi.yaml`. Frontend restoration guides that are tied to this repo's live
-theme files also stay here:
+**Stays in this repo:** `README.md`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`, `DOCS.md`, runtime
+prompts, package-local contributor context, and executable code-local runbooks. The API contract,
+historical plans, evidence, GTM decisions, benchmark handoffs, and theme design history are
+classified in the central docs repository; see its
+[`document_map.md`](../executespec-docs/backend/reference/document_map.md) for the relocation map.
 
-- `docs/theme-restore-geist-clone.md`
-- `docs/theme-restore-graphite-signal.md`
-
-The marketing `website/` tree also remains here (it is a site, not docs — a candidate for its own
-repo).
+The executable marketing site and its public press-kit/asset-construction READMEs remain here.

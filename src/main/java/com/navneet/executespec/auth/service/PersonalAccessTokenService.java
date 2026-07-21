@@ -17,10 +17,12 @@ import com.navneet.executespec.auth.entity.PersonalAccessToken;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.PersonalAccessTokenRepository;
+import com.navneet.executespec.auth.security.PatScopePolicy;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
@@ -54,30 +56,61 @@ public class PersonalAccessTokenService {
 
   private static final int CAP_OTHER = 3;
 
+  /** Bounded default lifetime applied when a client omits {@code expiresInDays} (RR-1337). */
+  public static final int DEFAULT_EXPIRY_DAYS = 90;
+
+  /** Upper bound on any requested PAT lifetime. */
+  public static final int MAX_EXPIRY_DAYS = 365;
+
   private final PersonalAccessTokenRepository repo;
   private final AppUserRepository appUserRepo;
   private final OrgRepository orgRepo;
   private final SecureRandom secureRandom = new SecureRandom();
 
   /** Carries the one-time plaintext alongside the persisted row. The plaintext is never stored. */
-  public record CreatedToken(String plaintext, PersonalAccessToken token) {}
+  public record CreatedToken(
+      String plaintext, PersonalAccessToken token, List<String> autoRevokedTokenIds) {}
 
+  /** Secret-free resolved identity and capabilities for the authentication filter. */
+  public record ResolvedToken(String tokenId, String userId, String scopes) {}
+
+  @Transactional
   public CreatedToken create(String userId, CreatePatRequest req) {
     String name = req.name() == null ? "" : req.name().strip();
     if (name.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token name is required");
     }
-    Instant expiresAt = null;
-    if (req.expiresInDays() != null) {
-      if (req.expiresInDays() <= 0) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expiresInDays must be positive");
-      }
-      expiresAt = Instant.now().plus(req.expiresInDays(), ChronoUnit.DAYS);
+    // RR-1337 — a PAT is a device credential; it must always have a bounded lifetime. Callers that
+    // omit expiresInDays (the web CLI/VS Code device-login mint did exactly this) previously got a
+    // token that never expired, so a stolen device credential stayed valid until manual revocation.
+    int expiresInDays = req.expiresInDays() == null ? DEFAULT_EXPIRY_DAYS : req.expiresInDays();
+    if (expiresInDays <= 0) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "expiresInDays must be positive");
     }
+    if (expiresInDays > MAX_EXPIRY_DAYS) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "expiresInDays must be at most " + MAX_EXPIRY_DAYS);
+    }
+    Instant expiresAt = Instant.now().plus(expiresInDays, ChronoUnit.DAYS);
+
+    // Serialize the complete read/evict/insert sequence on the owning user row. Without this lock,
+    // concurrent device logins can all observe the same active set and exceed the tier cap.
+    AppUser lockedUser =
+        appUserRepo
+            .findByIdForUpdate(userId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
 
     // Anti-abuse: cap concurrently-active device logins (FREE 1 / others 3) by auto-revoking the
     // least-recently-used active token(s) so the new one fits — login never fails.
-    enforceDeviceCap(userId);
+    List<String> autoRevokedTokenIds = enforceDeviceCap(userId, lockedUser);
+
+    String scopes;
+    try {
+      scopes = PatScopePolicy.normalizeRequested(req.scopes());
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+    }
 
     byte[] bytes = new byte[RANDOM_BYTES];
     secureRandom.nextBytes(bytes);
@@ -90,13 +123,13 @@ public class PersonalAccessTokenService {
             .name(name)
             .tokenHash(DigestUtils.sha256Hex(plaintext))
             .tokenPrefix(plaintext.substring(0, DISPLAY_PREFIX_LEN))
-            .scopes("full")
+            .scopes(scopes)
             .createdAt(Instant.now())
             .expiresAt(expiresAt)
             .build();
     repo.save(token);
     log.info("[PAT] Created token {} for user {} (expiresAt={})", token.getId(), userId, expiresAt);
-    return new CreatedToken(plaintext, token);
+    return new CreatedToken(plaintext, token, List.copyOf(autoRevokedTokenIds));
   }
 
   public List<PersonalAccessToken> list(String userId) {
@@ -121,6 +154,12 @@ public class PersonalAccessTokenService {
    * min to keep the per-request auth path off the write path.
    */
   public String resolveUserId(String plaintext) {
+    ResolvedToken resolved = resolveToken(plaintext);
+    return resolved == null ? null : resolved.userId();
+  }
+
+  /** Resolve PAT identity plus persisted capabilities without exposing the token hash/plaintext. */
+  public ResolvedToken resolveToken(String plaintext) {
     if (plaintext == null || !plaintext.startsWith(TOKEN_PREFIX)) {
       return null;
     }
@@ -134,7 +173,7 @@ public class PersonalAccessTokenService {
       return null;
     }
     stampLastUsed(token, now);
-    return token.getUserId();
+    return new ResolvedToken(token.getId(), token.getUserId(), token.getScopes());
   }
 
   private void stampLastUsed(PersonalAccessToken token, Instant now) {
@@ -146,7 +185,10 @@ public class PersonalAccessTokenService {
       token.setLastUsedAt(now);
       repo.save(token);
     } catch (Exception e) {
-      log.debug("[PAT] lastUsedAt stamp failed for {}: {}", token.getId(), e.getMessage());
+      log.debug(
+          "[PAT] lastUsedAt stamp failed for {} errorClass={}",
+          token.getId(),
+          e.getClass().getSimpleName());
     }
   }
 
@@ -155,8 +197,8 @@ public class PersonalAccessTokenService {
    * a new one will fit. Login never fails — the newest device wins; an older device is signed out
    * (its next request 401s). FREE = 1 active token; every other tier = 3.
    */
-  private void enforceDeviceCap(String userId) {
-    int cap = deviceLoginCap(effectiveTier(userId));
+  private List<String> enforceDeviceCap(String userId, AppUser lockedUser) {
+    int cap = deviceLoginCap(effectiveTier(lockedUser));
     Instant now = Instant.now();
     List<PersonalAccessToken> active =
         repo.findByUserIdAndRevokedAtIsNull(userId).stream()
@@ -164,16 +206,19 @@ public class PersonalAccessTokenService {
             .sorted(Comparator.comparing(PersonalAccessTokenService::lastActiveAt))
             .collect(Collectors.toCollection(ArrayList::new));
     int evict = active.size() - (cap - 1); // leave room for the incoming token
+    List<String> revokedIds = new ArrayList<>();
     for (int i = 0; i < evict; i++) {
       PersonalAccessToken old = active.get(i);
       old.setRevokedAt(now);
       repo.save(old);
+      revokedIds.add(old.getId());
       log.info(
           "[PAT] device-login cap {} reached for user {} — auto-revoked LRU token {}",
           cap,
           userId,
           old.getId());
     }
+    return revokedIds;
   }
 
   /** LRU ordering key: last use if present, else creation time. */
@@ -189,11 +234,7 @@ public class PersonalAccessTokenService {
    * Effective tier: the org's tier when the user belongs to one, else the user's own (default FREE)
    * — mirrors {@code TierEnforcementService}'s org-or-user resolution.
    */
-  private String effectiveTier(String userId) {
-    AppUser user = appUserRepo.findById(userId).orElse(null);
-    if (user == null) {
-      return "FREE";
-    }
+  private String effectiveTier(AppUser user) {
     if (user.getOrgId() != null) {
       return orgRepo.findById(user.getOrgId()).map(Org::getTier).orElseGet(user::getTier);
     }

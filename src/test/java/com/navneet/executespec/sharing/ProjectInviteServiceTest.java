@@ -41,6 +41,7 @@ class ProjectInviteServiceTest {
           mock(OrgRepository.class),
           mock(OrgMemberRepository.class),
           mock(MailService.class),
+          mock(com.navneet.executespec.auth.service.TierEnforcementService.class),
           mock(ActivityEventEmitter.class),
           mock(InAppNotificationService.class));
 

@@ -56,6 +56,21 @@ public class AgentAttachmentService {
   private static final int MIN_EXTRACT_CHARS = 8;
   private static final int MAX_EXTRACT_CHARS = 50_000;
 
+  /**
+   * RR-490 per-turn aggregate bounds. The per-upload 10 MB cap bounded one file, not one turn: the
+   * turn request accepted an unbounded id list, and both the text and media paths iterated it
+   * without dedupe, so repeating a single valid 10 MB image id a few thousand times expanded into
+   * gigabytes of base64 payload maps before any provider call. These caps are applied to the
+   * requested id list itself, before any load or allocation.
+   */
+  static final int MAX_ATTACHMENTS_PER_TURN = 8;
+
+  /** Aggregate ceiling on injected upload text across one turn. */
+  static final int MAX_TURN_TEXT_CHARS = 150_000;
+
+  /** Aggregate ceiling on raw media bytes across one turn (base64 expands this ~4/3). */
+  static final int MAX_TURN_MEDIA_BYTES = 12 * 1024 * 1024;
+
   private final AgentAttachmentStore store;
   private final DocumentExtractor extractor;
   private final InputSanitizer inputSanitizer;
@@ -166,14 +181,19 @@ public class AgentAttachmentService {
    * session's files.
    */
   public String injectionBlock(String sessionId, List<String> attachmentIds) {
-    if (attachmentIds == null || attachmentIds.isEmpty()) return "";
+    List<String> ids = normalizeTurnIds(attachmentIds);
+    if (ids.isEmpty()) return "";
     StringBuilder sb = new StringBuilder();
     int included = 0;
-    for (String id : attachmentIds) {
+    int chars = 0;
+    for (String id : ids) {
       var found = store.get(sessionId, id);
       if (found.isEmpty()) continue;
       StoredAttachment a = found.get();
       if (a.rawBytes() != null && a.rawBytes().length > 0) continue;
+      String text = a.sanitizedText() == null ? "" : a.sanitizedText();
+      if (chars + text.length() > MAX_TURN_TEXT_CHARS) break;
+      chars += text.length();
       sb.append("\n=== BEGIN UPLOADED FILE: ")
           .append(a.filename())
           .append(" (")
@@ -196,13 +216,46 @@ public class AgentAttachmentService {
         + sb;
   }
 
-  /** Return validated binary attachments for multimodal provider serialization. */
-  public List<StoredAttachment> mediaAttachments(String sessionId, List<String> attachmentIds) {
+  /**
+   * Deduplicates the client-supplied attachment id list, preserving first-seen order, and rejects a
+   * turn that asks for more than {@link #MAX_ATTACHMENTS_PER_TURN} distinct attachments (RR-490).
+   *
+   * <p>Deduplication is the load-bearing half: the amplification did not need many
+   * <em>distinct</em> uploads, only many <em>repetitions</em> of one. The count cap then bounds the
+   * honest case.
+   */
+  static List<String> normalizeTurnIds(List<String> attachmentIds) {
     if (attachmentIds == null || attachmentIds.isEmpty()) return List.of();
-    return attachmentIds.stream()
-        .map(id -> store.get(sessionId, id).orElse(null))
-        .filter(a -> a != null && a.rawBytes() != null && a.rawBytes().length > 0)
-        .toList();
+    java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
+    for (String id : attachmentIds) {
+      if (id == null || id.isBlank()) continue;
+      unique.add(id.trim());
+    }
+    if (unique.size() > MAX_ATTACHMENTS_PER_TURN) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          "at most " + MAX_ATTACHMENTS_PER_TURN + " attachments may be sent with one turn");
+    }
+    return List.copyOf(unique);
+  }
+
+  /**
+   * Return validated binary attachments for multimodal provider serialization, deduplicated and
+   * bounded by both count and total raw bytes (RR-490).
+   */
+  public List<StoredAttachment> mediaAttachments(String sessionId, List<String> attachmentIds) {
+    List<String> ids = normalizeTurnIds(attachmentIds);
+    if (ids.isEmpty()) return List.of();
+    List<StoredAttachment> media = new java.util.ArrayList<>();
+    long bytes = 0;
+    for (String id : ids) {
+      StoredAttachment a = store.get(sessionId, id).orElse(null);
+      if (a == null || a.rawBytes() == null || a.rawBytes().length == 0) continue;
+      if (bytes + a.rawBytes().length > MAX_TURN_MEDIA_BYTES) break;
+      bytes += a.rawBytes().length;
+      media.add(a);
+    }
+    return List.copyOf(media);
   }
 
   /**
@@ -243,6 +296,11 @@ public class AgentAttachmentService {
       tmp = Files.createTempFile("agent-upload-", "-" + filename);
       Files.write(tmp, bytes);
       return extractor.extract(tmp, mime);
+    } catch (com.navneet.executespec.project.rag.DocumentAdmissionException rejected) {
+      // Typed rejections (encrypted / oversized / corrupt / timed out) must not be laundered into
+      // an empty document; the caller rejects a null extraction the same way it rejects "".
+      log.warn("attachment extract rejected for {}: {}", filename, rejected.code());
+      return null;
     } catch (IOException e) {
       log.warn("attachment extract failed for {}: {}", filename, e.getMessage());
       return null;

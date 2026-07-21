@@ -44,19 +44,77 @@ public class InvariantChecker {
    */
   public List<Finding> check(
       String invariantYaml, List<String> repoFilePaths, ContentLoader loader) {
-    if (invariantYaml == null || invariantYaml.isBlank()) return List.of();
+    return checkDetailed(invariantYaml, repoFilePaths, loader).findings();
+  }
+
+  /**
+   * Honest result used by production enforcement. Invalid and unsupported policy must not collapse
+   * into an empty finding set, which is indistinguishable from a verified pass.
+   */
+  public CheckResult checkDetailed(
+      String invariantYaml, List<String> repoFilePaths, ContentLoader loader) {
+    if (invariantYaml == null || invariantYaml.isBlank()) {
+      return new CheckResult(CheckStatus.INVALID, List.of(), "empty invariant YAML");
+    }
     try {
       Object raw = SafeYamlLoader.load(invariantYaml);
       // Support both single-invariant body and a one-element list
       if (raw instanceof List<?> l && !l.isEmpty()) raw = l.get(0);
-      if (!(raw instanceof Map)) return List.of();
+      if (!(raw instanceof Map)) {
+        return new CheckResult(CheckStatus.INVALID, List.of(), "invariant must be an object");
+      }
       @SuppressWarnings("unchecked")
       Map<String, Object> spec = (Map<String, Object>) raw;
-      return checkOne(spec, repoFilePaths, loader);
+      Object enforcementRaw = spec.get("enforcement");
+      if (!(enforcementRaw instanceof Map<?, ?> enforcement)) {
+        return new CheckResult(CheckStatus.INVALID, List.of(), "missing enforcement object");
+      }
+      Object ruleRaw = enforcement.get("rule");
+      if (!(ruleRaw instanceof Map<?, ?> rawRule)) {
+        return new CheckResult(CheckStatus.INVALID, List.of(), "missing enforcement.rule object");
+      }
+      Object kindRaw = rawRule.get("kind");
+      String kind = kindRaw == null ? null : kindRaw.toString();
+      if (kind == null || kind.isBlank()) {
+        return new CheckResult(CheckStatus.INVALID, List.of(), "missing enforcement.rule.kind");
+      }
+      String normalizedKind = kind.toLowerCase(java.util.Locale.ROOT);
+      if (!java.util.Set.of("exclusive-writer", "no-direct-call", "layer-isolation")
+          .contains(normalizedKind)) {
+        return new CheckResult(
+            CheckStatus.UNSUPPORTED, List.of(), "unsupported rule kind: " + kind);
+      }
+      @SuppressWarnings("unchecked")
+      Map<String, Object> rule = (Map<String, Object>) rawRule;
+      String validationError = validateRule(normalizedKind, rule);
+      if (validationError != null) {
+        return new CheckResult(CheckStatus.INVALID, List.of(), validationError);
+      }
+      List<Finding> findings = checkOne(spec, repoFilePaths, loader);
+      return new CheckResult(
+          findings.isEmpty() ? CheckStatus.PASS : CheckStatus.VIOLATIONS, findings, null);
     } catch (Exception ex) {
-      log.warn("[InvariantChecker] parse failed: {}", ex.getMessage());
-      return List.of();
+      log.warn("[InvariantChecker] parse failed: {}", ex.getClass().getSimpleName());
+      return new CheckResult(CheckStatus.INVALID, List.of(), "invariant YAML could not be parsed");
     }
+  }
+
+  private static String validateRule(String kind, Map<String, Object> rule) {
+    return switch (kind) {
+      case "exclusive-writer" ->
+          strOrNull(rule.get("table")) == null || !(rule.get("allowed_writers") instanceof List)
+              ? "exclusive-writer requires table and allowed_writers"
+              : null;
+      case "no-direct-call" ->
+          strOrNull(rule.get("from")) == null || strOrNull(rule.get("forbidden_target")) == null
+              ? "no-direct-call requires from and forbidden_target"
+              : null;
+      case "layer-isolation" ->
+          strOrNull(rule.get("from")) == null || strOrNull(rule.get("forbidden")) == null
+              ? "layer-isolation requires from and forbidden"
+              : null;
+      default -> "unsupported rule kind: " + kind;
+    };
   }
 
   @SuppressWarnings("unchecked")
@@ -176,4 +234,13 @@ public class InvariantChecker {
   }
 
   public record Finding(String ruleKind, String file, String message) {}
+
+  public enum CheckStatus {
+    PASS,
+    VIOLATIONS,
+    INVALID,
+    UNSUPPORTED
+  }
+
+  public record CheckResult(CheckStatus status, List<Finding> findings, String diagnostic) {}
 }

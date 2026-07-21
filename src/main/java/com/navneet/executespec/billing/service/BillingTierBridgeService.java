@@ -3,8 +3,10 @@ package com.navneet.executespec.billing.service;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.exception.BillingException;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 
@@ -77,19 +79,43 @@ public class BillingTierBridgeService {
         user.getEmail(), downgradedPlan != null ? downgradedPlan.getName() : "");
   }
 
-  private String authTierFor(String planTier) {
-    return switch (planTier) {
-      case "STARTER" -> "FREE";
+  /**
+   * Translate a {@code billing_plan.tier} value into the canonical auth tier.
+   *
+   * <p>RR-410: this switch previously had no case for {@code PRO_PLUS} or {@code BYOK} — both
+   * first-class paid tiers since V253 — and its {@code default} was {@code FREE}. Every successful
+   * Razorpay verification and Stripe invoice activation runs through here, so a customer who paid
+   * for Pro+ or BYOK was immediately persisted as FREE (and, for BYOK, left in the contradictory
+   * {@code tier=FREE, keySourceMode=OWN_KEYS} state).
+   *
+   * <p>The mapping is now exhaustive against {@link TierEnforcementService#TIER_RANK} — the single
+   * canonical tier vocabulary — and an unknown tier throws instead of silently degrading to FREE.
+   * Failing the activation is loud and recoverable; silently granting FREE for a paid charge is
+   * neither.
+   */
+  static String authTierFor(String planTier) {
+    String normalized = planTier == null ? "" : planTier.trim().toUpperCase();
+    return switch (normalized) {
+        // Retired/legacy plan-tier spellings that still map onto a live auth tier.
+      case "STARTER", "FREE" -> "FREE";
+      case "MAX" -> "TEAM";
+        // V253 canonical ladder.
       case "PRO" -> "PRO";
+      case "PRO_PLUS" -> "PRO_PLUS";
+      case "BYOK" -> "BYOK";
       case "TEAM" -> "TEAM";
       case "ENTERPRISE" -> "ENTERPRISE";
-      case "MAX" -> "TEAM";
-      default -> "FREE";
+      default ->
+          throw new BillingException(
+              "Cannot activate subscription: unknown billing plan tier '"
+                  + planTier
+                  + "'. Refusing to persist a default entitlement for a paid plan.");
     };
   }
 
-  private String keySourceModeFor(String keyMode) {
-    return switch (keyMode) {
+  static String keySourceModeFor(String keyMode) {
+    String normalized = keyMode == null ? "" : keyMode.trim().toUpperCase();
+    return switch (normalized) {
       case "BYOK" -> "OWN_KEYS";
       case "MANAGED", "PLATFORM" -> "SYSTEM";
       default -> "HYBRID";

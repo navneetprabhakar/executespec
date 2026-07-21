@@ -110,7 +110,8 @@ public class AstCheckEnforcer {
     try {
       namePattern = Pattern.compile(regex);
     } catch (Exception ex) {
-      log.warn("[AstCheckEnforcer] naming-pattern: invalid regex '{}': {}", regex, ex.getMessage());
+      log.warn(
+          "[AstCheckEnforcer] naming-pattern invalid errorClass={}", ex.getClass().getSimpleName());
       return List.of();
     }
     DeclarationKind decl = DeclarationKind.parse(declarationKindRaw);
@@ -185,25 +186,40 @@ public class AstCheckEnforcer {
       case JAVA -> Pattern.compile("(?m)^\\s*import\\s+(?:static\\s+)?([\\w.]+)\\s*;");
       case TYPESCRIPT ->
           Pattern.compile("(?m)^\\s*import\\s+(?:[\\s\\S]*?\\bfrom\\s+)?['\"]([^'\"]+)['\"]");
-      case OTHER -> Pattern.compile("(?m)^\\s*(?:import|from|require\\()['\"]?([\\w./@-]+)['\"]?");
+        // Require whitespace after the import/from keyword, otherwise Python `import os` /
+        // `from os import path` and Go `import "fmt"` never match (\s is not in the capture class),
+        // silently passing forbidden-import and dependency-direction rules (RR-1639).
+      case OTHER ->
+          Pattern.compile("(?m)^\\s*(?:import\\s+|from\\s+|require\\()['\"]?([\\w./@-]+)['\"]?");
     };
   }
 
   private List<Declaration> extractDeclarations(String content, Lang lang, DeclarationKind kind) {
     List<Declaration> out = new ArrayList<>();
+    // Naming extraction is defined only for JAVA and TYPESCRIPT. The previous catch-all "(\w+)"
+    // for OTHER turned every word token in a .py/.md/.yaml/.txt file into a "declaration", so a
+    // single naming-pattern standard flagged essentially every word in every non-Java/TS file —
+    // forcing PARTIAL/STANDARDS_BLOCKING_VIOLATION on almost every run (RR-1632).
+    if (lang == Lang.OTHER) {
+      return out;
+    }
     Pattern p =
         switch (lang) {
           case JAVA ->
               kind == DeclarationKind.METHOD
+                  // The negative lookahead keeps call sites and constructor invocations out of the
+                  // declaration set: without it `return computeValue(` and `new HashMap(` matched
+                  // as declarations and were flagged by the name rule (RR-1638).
                   ? Pattern.compile(
-                      "(?m)^\\s*(?:public|private|protected)?\\s*(?:static\\s+)?[\\w<>,\\s]+\\s+(\\w+)\\s*\\(")
+                      "(?m)^\\s*(?!(?:return|if|for|while|switch|catch|else|do|throw|new)\\b)"
+                          + "(?:public|private|protected)?\\s*(?:static\\s+)?[\\w<>,\\[\\]\\s]+\\s+(\\w+)\\s*\\(")
                   : Pattern.compile(
                       "(?m)^\\s*(?:public|private|protected)?\\s*(?:abstract\\s+|final\\s+)?\\bclass\\s+(\\w+)");
           case TYPESCRIPT ->
               kind == DeclarationKind.METHOD
                   ? Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+(\\w+)")
                   : Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:abstract\\s+)?class\\s+(\\w+)");
-          case OTHER -> Pattern.compile("(\\w+)"); // never used directly
+          case OTHER -> throw new IllegalStateException("OTHER handled by the guard above");
         };
     Matcher m = p.matcher(content);
     while (m.find()) {

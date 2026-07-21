@@ -27,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
@@ -140,7 +141,11 @@ public class OpenAiNativeToolClient {
               .retrieve()
               .body(JsonNode.class);
     } catch (Exception e) {
-      log.error("OpenAI native tool call failed", e);
+      if (e instanceof RestClientResponseException responseError) {
+        log.error("OpenAI native tool call failed http={}", responseError.getStatusCode());
+      } else {
+        log.error("OpenAI native tool call failed errorClass={}", e.getClass().getSimpleName());
+      }
       throw e;
     }
     if (response == null) {
@@ -319,7 +324,7 @@ public class OpenAiNativeToolClient {
     List<Generation> generations = new ArrayList<>();
     JsonNode choices = response.path("choices");
     if (!choices.isArray()) {
-      throw new IllegalStateException("OpenAI response missing 'choices' array: " + response);
+      throw new IllegalStateException("OpenAI response missing required choices array");
     }
     for (JsonNode choice : choices) {
       JsonNode message = choice.path("message");
@@ -386,6 +391,16 @@ public class OpenAiNativeToolClient {
       // hits on a multi-iteration task is a flag that the prefix is mutating.
       int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+
+      // OpenAI-compatible providers expose reasoning as a subset of completion tokens under
+      // completion_tokens_details. Preserve it as a separate audit dimension without adding it to
+      // completion again. DeepSeek variants may also return a top-level reasoning_tokens field.
+      long reasoningTokens =
+          usage.path("completion_tokens_details").path("reasoning_tokens").asLong(0);
+      if (reasoningTokens == 0) reasoningTokens = usage.path("reasoning_tokens").asLong(0);
+      if (reasoningTokens > 0) {
+        metaBuilder.keyValue("reasoning_tokens", reasoningTokens);
+      }
 
       Double providerCost = numberOrNull(usage.path("cost"));
       if (providerCost != null) {

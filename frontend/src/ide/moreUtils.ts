@@ -1,5 +1,6 @@
 import type {TierPermissions} from '@/hooks/useTierPermissions';
 import type * as api from '@/lib/api';
+import {isLiveRunStatus} from '@/lib/runStatus';
 
 export const PAGE_SIZE = 30;
 
@@ -25,19 +26,11 @@ export interface LinkRow {
   sub: string;
 }
 
-export const LIVE_STATUSES = new Set([
-  'CLASSIFYING',
-  'PLANNING',
-  'EXECUTING',
-  'AWAITING_APPROVAL',
-  'RUNNING',
-  'PROVIDER_SWITCHING',
-  'REVIEWING',
-  'PAUSED',
-]);
-
+// RR-1536 — this list used to be maintained independently of the plan page's and the
+// agent panel's, and like them it omitted APPROVAL_RESUMING and WORKING. It now delegates
+// to the one shared vocabulary in lib/runStatus.
 export function isLiveStatus(status?: string | null): boolean {
-  return LIVE_STATUSES.has((status || '').toUpperCase());
+  return isLiveRunStatus(status);
 }
 
 export function scoreOf(r: api.RunSummary): number | null | undefined {
@@ -121,10 +114,13 @@ export function accountEmail(user: api.AuthUser | null | undefined): string {
 
 export function usageLabel(permissions: TierPermissions | null): string {
   if (!permissions) return '- / -';
+  if ((permissions.quotaModel || '').toUpperCase() === 'MANAGED_AI_CREDITS') {
+    return 'Managed AI credits';
+  }
   return `${permissions.currentRunCount} / ${workCapLabel(permissions)}`;
 }
 
-export function limitRows(permissions: TierPermissions | null): LabelRow[] {
+export function limitRows(permissions: TierPermissions | null, tier?: string): LabelRow[] {
   return [
     {
       k: 'Monthly work cap',
@@ -135,7 +131,9 @@ export function limitRows(permissions: TierPermissions | null): LabelRow[] {
       k: 'Max org seats',
       v: permissions
         ? permissions.maxOrgMembers === -1
-          ? 'Unlimited'
+          ? tier === 'PRO'
+            ? 'Personal workspace'
+            : 'Unlimited'
           : String(permissions.maxOrgMembers)
         : '-',
     },

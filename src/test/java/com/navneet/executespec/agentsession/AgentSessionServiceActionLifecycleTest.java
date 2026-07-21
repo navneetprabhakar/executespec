@@ -38,6 +38,7 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -63,6 +64,7 @@ class AgentSessionServiceActionLifecycleTest {
   @Mock PipelineRunRepository pipelineRunRepo;
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock ModelAccessService modelAccessService;
+  @Mock ChatSecurityAuditService chatSecurityAuditService;
   @Mock AgentRunSubmissionGate runSubmissionGate;
 
   private AgentSessionService service;
@@ -89,7 +91,8 @@ class AgentSessionServiceActionLifecycleTest {
                 runAccessGuard,
                 aiProviderPreferenceService,
                 modelAccessService),
-            new AgentActionLifecycleService(intentService, eventRecorder, sessionRepo),
+            new AgentActionLifecycleService(
+                intentService, eventRecorder, sessionRepo, projectAccessGuard),
             new AgentGateReadService(pipelineRunRepo, runAccessGuard, gateCardFactory),
             new AgentOrchestratorTurnService(
                 turnRepo,
@@ -115,7 +118,11 @@ class AgentSessionServiceActionLifecycleTest {
                 eventRecorder,
                 tracePayloadFactory,
                 sessionRepo,
-                aiProviderPreferenceService),
+                aiProviderPreferenceService,
+                modelAccessService,
+                null,
+                projectAccessGuard,
+                chatSecurityAuditService),
             new AgentStreamTurnLifecycle(turnRepo, eventRecorder, usageRepo),
             contextResolver);
     lenient()
@@ -326,8 +333,8 @@ class AgentSessionServiceActionLifecycleTest {
             user());
 
     assertThat(response.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
-    assertThat(response.requiresUserConfirmation()).isTrue();
-    assertThat(response.proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(response.requiresUserConfirmation()).isFalse();
+    assertThat(response.proposedAction()).isNull();
     assertThat(response.policy().runApiAllowed()).isFalse();
     assertThat(response.reasonCode()).isEqualTo("read_only_permission_blocks_run");
   }

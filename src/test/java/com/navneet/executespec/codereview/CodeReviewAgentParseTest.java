@@ -32,7 +32,11 @@ class CodeReviewAgentParseTest {
   @BeforeEach
   void setUp() {
     agent =
-        new CodeReviewAgent(mock(LlmRouter.class), mock(ModelResolver.class), new ObjectMapper());
+        new CodeReviewAgent(
+            mock(LlmRouter.class),
+            mock(ModelResolver.class),
+            new ObjectMapper(),
+            mock(com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory.class));
   }
 
   @Test

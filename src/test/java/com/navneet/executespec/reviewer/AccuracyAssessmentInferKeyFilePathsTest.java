@@ -35,6 +35,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
   private AccuracyAssessmentService svc;
   private Method inferKeyFilePaths;
+  private Method inferTestFilePaths;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -48,11 +49,49 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     inferKeyFilePaths =
         AccuracyAssessmentService.class.getDeclaredMethod("inferKeyFilePaths", String.class);
     inferKeyFilePaths.setAccessible(true);
+    inferTestFilePaths =
+        AccuracyAssessmentService.class.getDeclaredMethod("inferTestFilePaths", String.class);
+    inferTestFilePaths.setAccessible(true);
   }
 
   @SuppressWarnings("unchecked")
   private List<String> infer(String fileTree) throws Exception {
     return (List<String>) inferKeyFilePaths.invoke(svc, fileTree);
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<String> inferTests(String fileTree) throws Exception {
+    return (List<String>) inferTestFilePaths.invoke(svc, fileTree);
+  }
+
+  @Test
+  void testEvidenceSelectsCommonConventionsWithoutDisplacingProductionFiles() throws Exception {
+    String tree =
+        String.join(
+            "\n",
+            "src/email.py",
+            "tests/test_email.py",
+            "src/EmailServiceTest.java",
+            "frontend/src/email.spec.ts",
+            "frontend/src/email.test.tsx",
+            "target/generated/GeneratedTest.java",
+            "node_modules/pkg/test.js");
+
+    assertThat(infer(tree)).contains("src/email.py").doesNotContain("tests/test_email.py");
+    assertThat(inferTests(tree))
+        .containsExactlyInAnyOrder(
+            "tests/test_email.py",
+            "src/EmailServiceTest.java",
+            "frontend/src/email.spec.ts",
+            "frontend/src/email.test.tsx");
+  }
+
+  @Test
+  void testEvidenceIsBounded() throws Exception {
+    StringBuilder tree = new StringBuilder();
+    for (int i = 0; i < 12; i++) tree.append("tests/test_case_").append(i).append(".py\n");
+
+    assertThat(inferTests(tree.toString())).hasSize(AccuracyAssessmentService.TEST_FILE_CAP);
   }
 
   @Test

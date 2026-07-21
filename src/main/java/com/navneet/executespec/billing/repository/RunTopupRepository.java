@@ -66,6 +66,28 @@ public interface RunTopupRepository extends JpaRepository<RunTopup, UUID> {
       @Param("paymentId") String paymentId,
       @Param("now") Instant now);
 
+  /**
+   * RR-110 — conditional {@code PENDING -> CREDITED} claim keyed by top-up id, for the Stripe
+   * checkout path.
+   *
+   * <p>The Stripe path used to do a read / status-check / ordinary {@code save()}, with no
+   * optimistic version on {@link RunTopup} and no conditional activation query. Two concurrent
+   * deliveries of the same valid Stripe event could therefore both observe {@code PENDING} and each
+   * call {@code grantPurchasedCredits}, which is an additive update rather than an idempotent one —
+   * granting the purchased AI credits twice for a single payment. Exactly one caller can now win
+   * this UPDATE; a loser sees {@code 0} rows and must not grant.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE RunTopup r SET r.gatewayOrderId = :sessionId, r.gatewayPaymentId = :paymentId, "
+          + "r.remaining = 0, r.status = 'CREDITED', r.expiresAt = null, r.updatedAt = :now "
+          + "WHERE r.id = :id AND r.status = 'PENDING'")
+  int claimPendingStripeTopup(
+      @Param("id") UUID id,
+      @Param("sessionId") String sessionId,
+      @Param("paymentId") String paymentId,
+      @Param("now") Instant now);
+
   @Modifying
   @Query(
       "UPDATE RunTopup r SET r.remaining = r.remaining - 1, r.updatedAt = :now "
