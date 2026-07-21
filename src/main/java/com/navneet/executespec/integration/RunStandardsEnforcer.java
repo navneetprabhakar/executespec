@@ -99,7 +99,7 @@ class RunStandardsEnforcer {
     java.util.List<String> repoFilePaths = new java.util.ArrayList<>();
     java.util.List<Path> sourceFiles = new java.util.ArrayList<>();
     collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
-    var report = standardsRunner.run(effective, workspaceRoot, repoFilePaths, sourceFiles);
+    var report = standardsRunner.run(runId, effective, workspaceRoot, repoFilePaths, sourceFiles);
     java.util.List<com.navneet.executespec.standards.StandardsViolation> rows =
         toStandardsViolationRows(runUuid, projectId, report, STANDARDS_MAX_VIOLATIONS_PERSIST);
     int persisted = 0;

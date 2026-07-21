@@ -37,6 +37,11 @@ class SandboxContainerCommandTest {
   /** Stands in for anything on the host that is not a sandbox workspace. */
   @TempDir Path hostElsewhere;
 
+  /** Stands in for the configured {@code agent.workspace} root (RR-1703, route (b)). */
+  @TempDir Path agentWorkspaceRoot;
+
+  private static final String RUN_ID = "run-abc123";
+
   private Path root;
   private Path work;
 
@@ -194,6 +199,104 @@ class SandboxContainerCommandTest {
         root,
         SANDBOX_ID,
         EPOCH);
+  }
+
+  // ---- RR-1703 — derived-source run-workspace admission (route (b)) ----
+
+  /**
+   * The keystone of RR-1703: a run workspace at {@code agent.workspace/<runId>} — which lives
+   * OUTSIDE the sandbox root and was therefore unmountable — is now admitted, and the mount source
+   * is the DERIVED run-workspace path, not whatever the caller put in the spec.
+   */
+  @Test
+  void aRunWorkspaceIsAdmittedAndTheDerivedPathIsWhatGetsMounted() throws IOException {
+    // The derived mount source is agent.workspace/<runId> as the code resolves it (absolute +
+    // normalized, NOT canonicalized), so it must be asserted the same way — a toRealPath() would
+    // diverge on platforms whose temp root is itself a symlink (macOS /var -> /private/var).
+    Path expectedMount = agentWorkspaceRoot.toAbsolutePath().normalize().resolve(RUN_ID);
+    Files.createDirectories(expectedMount);
+
+    String joined = String.join(" ", createRunScoped(RUN_ID, "/does-not-matter"));
+
+    assertThat(joined)
+        .as("the run workspace, which is outside the sandbox root, is now bindable")
+        .contains("--volume " + expectedMount + ":/workspace:rw");
+  }
+
+  /**
+   * Derived-source, stated as a test: the caller's spec host path is never used as a mount source.
+   * Even a spec naming the Docker socket produces a mount of the run's own derived workspace.
+   */
+  @Test
+  void theCallerSuppliedHostPathIsIgnoredInFavourOfTheDerivedRunWorkspace() throws IOException {
+    Path expectedMount = agentWorkspaceRoot.toAbsolutePath().normalize().resolve(RUN_ID);
+    Files.createDirectories(expectedMount);
+
+    String joined = String.join(" ", createRunScoped(RUN_ID, "/var/run/docker.sock"));
+
+    assertThat(joined).contains("--volume " + expectedMount + ":/workspace:rw");
+    assertThat(joined).doesNotContain("docker.sock");
+  }
+
+  /**
+   * The containment property, proved structurally: the mount source is a function of the run id the
+   * sandbox carries, so a sandbox for run A binds A's workspace and a sandbox for run B binds B's —
+   * neither can reach the other's, because neither can name the other's id.
+   */
+  @Test
+  void aSandboxForOneRunCannotMountAnotherRunsWorkspace() throws IOException {
+    Path base = agentWorkspaceRoot.toAbsolutePath().normalize();
+    Path aWorkspace = Files.createDirectories(base.resolve("run-a"));
+    Path bWorkspace = Files.createDirectories(base.resolve("run-b"));
+
+    String forA = String.join(" ", createRunScoped("run-a", bWorkspace.toString()));
+
+    assertThat(forA).contains("--volume " + aWorkspace + ":/workspace:rw");
+    assertThat(forA)
+        .as("run A's sandbox binds A's workspace even when the spec names run B's")
+        .doesNotContain("run-b");
+  }
+
+  @Test
+  void aRunWorkspaceThatDoesNotExistYetIsRefused() {
+    // The directory under agentWorkspaceRoot/<runId> was never created.
+    assertThatThrownBy(() -> createRunScoped(RUN_ID, "/x"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void aRunIdThatCouldTraverseOutOfTheWorkspaceRootIsRefused() {
+    for (String unsafe : List.of("../etc", "a/b", "..", ".", "", "run$(id)")) {
+      assertThatThrownBy(() -> createRunScoped(unsafe, "/x"))
+          .as("run id %s must be refused", unsafe)
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  /**
+   * RR-328 applied to the derived source: the only real symlink risk is the host source path of the
+   * bind. A run workspace that is itself a link to somewhere on the host must not smuggle that
+   * target into the container.
+   */
+  @Test
+  @DisabledOnOs(OS.WINDOWS)
+  void aRunWorkspaceReachedThroughASymlinkIsRefused() throws IOException {
+    Path outside = Files.createDirectories(hostElsewhere.resolve("secrets")).toRealPath();
+    Files.createSymbolicLink(agentWorkspaceRoot.resolve("run-linked"), outside);
+
+    assertThatThrownBy(() -> createRunScoped("run-linked", "/x"))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private List<String> createRunScoped(String runId, String specHostPath) {
+    return SandboxContainerCommand.create(
+        "es-sbx-1",
+        specWithMount(new SandboxRuntimeSpec.WritableMount(specHostPath, "/workspace")),
+        root,
+        SANDBOX_ID,
+        EPOCH,
+        agentWorkspaceRoot,
+        runId);
   }
 
   @Test

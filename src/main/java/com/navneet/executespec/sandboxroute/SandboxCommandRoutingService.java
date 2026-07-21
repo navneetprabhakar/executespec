@@ -55,16 +55,16 @@ import lombok.extern.slf4j.Slf4j;
  * or reports unavailable. The lease it requests is at least as long as the command's own timeout,
  * so an ordinary long build does not lapse mid-command.
  *
- * <h2>Known limitation, stated rather than implied away</h2>
+ * <h2>Run-workspace admission (RR-1703)</h2>
  *
- * <p>{@code SandboxContainerCommand} admits a writable mount only when its host path resolves
- * inside {@code executespec.sandbox.workspace-root/<sandboxId>} (RR-821). A run workspace lives
- * under {@code agent.workspace/<runId>} and is therefore NOT admissible today, so with the flags on
- * and a real run workspace, provisioning is refused and every routed command reports {@link
- * SandboxExecResult.Status#UNAVAILABLE}. That is the correct failure — a build that cannot be
- * contained does not run — but it means the flags are not yet operable end to end. Closing it needs
- * a change inside {@code sandbox/}, which this lane does not own; see the handoff note in the
- * remediation report.
+ * <p>A run workspace lives under {@code agent.workspace/<runId>}, not under {@code
+ * executespec.sandbox.workspace-root/<sandboxId>}, so the RR-821 mount rule used to refuse every
+ * real run and make every routed command {@link SandboxExecResult.Status#UNAVAILABLE}. That blocker
+ * is closed: {@code ContainerStrictV1Runtime} now DERIVES the writable mount source from the
+ * sandbox's own immutable run id ({@code agent.workspace/<runId>}) and proves it through {@code
+ * security/SafeWorkspacePath} before binding it — a sandbox for run A can only ever mount run A's
+ * own workspace. The mount source is never a value this service or any tool passes in; the {@code
+ * workspaceRoot} argument below is used only to build the spec's container-path mapping.
  */
 @Service
 @RequiredArgsConstructor

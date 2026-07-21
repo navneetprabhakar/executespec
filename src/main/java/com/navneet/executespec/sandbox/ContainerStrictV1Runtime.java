@@ -6,9 +6,10 @@ import java.util.List;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -30,7 +31,6 @@ import lombok.extern.slf4j.Slf4j;
  * require an exact label match before touching it (RR-327).
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class ContainerStrictV1Runtime implements RunSandboxRuntime {
 
@@ -38,6 +38,29 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
 
   private final SandboxProperties properties;
   private final FeatureFlagService featureFlags;
+
+  /**
+   * The configured {@code agent.workspace} root. A run's workspace lives at {@code
+   * agent.workspace/<runId>}, and RR-1703 derives the writable mount source from it plus the
+   * sandbox's own run id rather than from any caller-supplied path.
+   */
+  private final Path agentWorkspaceRoot;
+
+  @Autowired
+  public ContainerStrictV1Runtime(
+      SandboxProperties properties,
+      FeatureFlagService featureFlags,
+      @Value("${agent.workspace}") String agentWorkspaceRoot) {
+    this(properties, featureFlags, Path.of(agentWorkspaceRoot));
+  }
+
+  /** Test seam: the workspace root is supplied directly rather than resolved from configuration. */
+  ContainerStrictV1Runtime(
+      SandboxProperties properties, FeatureFlagService featureFlags, Path agentWorkspaceRoot) {
+    this.properties = properties;
+    this.featureFlags = featureFlags;
+    this.agentWorkspaceRoot = agentWorkspaceRoot;
+  }
 
   @Override
   public SandboxIsolationProfile profile() {
@@ -79,12 +102,17 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
             // RR-821 — mount admission is scoped to THIS sandbox's own directory, derived from
             // the sandbox id. Passing only the global workspace root admitted the root itself
             // and every sibling tenant's workspace.
+            // RR-1703 — the writable run-workspace mount source is DERIVED here from the configured
+            // agent.workspace root and this sandbox's own immutable run id, never taken from the
+            // caller's spec, so a sandbox for run A can only ever bind agent.workspace/A.
             SandboxContainerCommand.create(
                 name,
                 spec,
                 Path.of(properties.getWorkspaceRoot()),
                 String.valueOf(sandbox.id()),
-                sandbox.runtimeEpoch()),
+                sandbox.runtimeEpoch(),
+                agentWorkspaceRoot,
+                sandbox.runId()),
             properties.getCommandTimeoutSeconds());
     if (started.exitCode() != 0) {
       throw new IllegalStateException(

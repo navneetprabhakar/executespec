@@ -68,6 +68,22 @@ public final class SandboxContainerCommand {
   private SandboxContainerCommand() {}
 
   /**
+   * The argv that starts a strict sandbox container detached, admitting mounts only under the
+   * sandbox's own derived directory (route (a) — used for tests and any future staged workspace).
+   *
+   * <p>Equivalent to {@link #create(String, SandboxRuntimeSpec, Path, String, long, Path, String)}
+   * with no run scope, so no run workspace is admissible through it.
+   */
+  public static List<String> create(
+      String containerName,
+      SandboxRuntimeSpec spec,
+      Path globalWorkspaceRoot,
+      String sandboxId,
+      long runtimeEpoch) {
+    return create(containerName, spec, globalWorkspaceRoot, sandboxId, runtimeEpoch, null, null);
+  }
+
+  /**
    * The argv that starts a strict sandbox container detached.
    *
    * <p>RR-821 — mount admission is scoped to the sandbox's OWN directory, derived here from the
@@ -76,6 +92,21 @@ public final class SandboxContainerCommand {
    * were both bindable read-write. The caller cannot supply the admission root directly; it can
    * only supply the identity the root is derived from.
    *
+   * <p>RR-1703 — derived-source run-workspace admission. A run's workspace lives at {@code
+   * agent.workspace/<runId>}, NOT under {@code globalWorkspaceRoot}, so the RR-821 rule alone
+   * refuses every real run and every routed build/test/lint reports UNAVAILABLE. Route (b): when a
+   * run scope is supplied, the writable mount's HOST path is <em>derived here</em> from THIS
+   * sandbox's own immutable {@code runId} — {@code agentWorkspaceRoot/<runId>} — and the caller's
+   * spec supplies only the container path. The derived path is then proved through {@link
+   * #requireRunWorkspace}: a real, non-symlinked directory canonically contained beneath {@code
+   * agentWorkspaceRoot}. Because the mount source is a function of the sandbox's own run id and
+   * never a caller-supplied path, a sandbox for run A can only ever mount {@code
+   * agentWorkspaceRoot/A}; it cannot reach run B's workspace, a sibling tenant's, the workspace
+   * root itself, or anything outside it. This is as strict as staging into {@code
+   * globalWorkspaceRoot/<sandboxId>} (route (a)) — both bind a per-owner unique subtree — without
+   * the copy cost or the broken write-back, and the container's own filesystem namespace means a
+   * symlink INSIDE the mounted tree resolves inside the container, not on the host.
+   *
    * <p>RR-327 — the container is stamped with {@link #LABEL_SANDBOX_ID} and {@link
    * #LABEL_SANDBOX_EPOCH} so a later destroy can prove it is removing the resource this sandbox
    * generation created rather than trusting a name.
@@ -83,17 +114,27 @@ public final class SandboxContainerCommand {
    * @param globalWorkspaceRoot the configured {@code sandbox.runtime.workspace-root}
    * @param sandboxId this sandbox's immutable identifier
    * @param runtimeEpoch the sandbox's runtime generation at creation time
+   * @param agentWorkspaceRoot the configured {@code agent.workspace} root, or null for no run scope
+   * @param runId this sandbox's immutable run id, or null for no run scope; when both this and
+   *     {@code agentWorkspaceRoot} are present, the writable mount host path is DERIVED from them
+   *     and the caller's spec host path is ignored
    */
   public static List<String> create(
       String containerName,
       SandboxRuntimeSpec spec,
       Path globalWorkspaceRoot,
       String sandboxId,
-      long runtimeEpoch) {
+      long runtimeEpoch,
+      Path agentWorkspaceRoot,
+      String runId) {
     if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
       throw new IllegalArgumentException("unsafe container name: " + containerName);
     }
     Path sandboxRoot = ownedWorkspaceRoot(globalWorkspaceRoot, sandboxId);
+    Path runWorkspaceRoot =
+        (agentWorkspaceRoot != null && runId != null)
+            ? requireRunWorkspace(agentWorkspaceRoot, runId)
+            : null;
     var limits = spec.limits();
     List<String> argv = new ArrayList<>(List.of("docker", "run", "--detach"));
 
@@ -122,10 +163,18 @@ public final class SandboxContainerCommand {
         List.of(
             "--tmpfs", "%s:rw,noexec,nosuid,size=%d".formatted(TMPFS_MOUNT, limits.tmpfsBytes())));
     for (SandboxRuntimeSpec.WritableMount mount : spec.writableMounts()) {
-      requireAbsolute(mount.hostPath(), "writable mount host path");
       requireAbsolute(mount.containerPath(), "writable mount container path");
-      requireContained(mount.hostPath(), sandboxRoot);
-      argv.addAll(List.of("--volume", mount.hostPath() + ":" + mount.containerPath() + ":rw"));
+      String hostPath;
+      if (runWorkspaceRoot != null) {
+        // Derived-source (b): the host path is a function of this sandbox's own run id, never the
+        // caller's spec. The spec supplies only the container path.
+        hostPath = runWorkspaceRoot.toString();
+      } else {
+        requireAbsolute(mount.hostPath(), "writable mount host path");
+        requireContained(mount.hostPath(), sandboxRoot);
+        hostPath = mount.hostPath();
+      }
+      argv.addAll(List.of("--volume", hostPath + ":" + mount.containerPath() + ":rw"));
     }
 
     argv.addAll(List.of("--workdir", spec.workdir()));
@@ -239,6 +288,60 @@ public final class SandboxContainerCommand {
       throw new IllegalArgumentException("refusing to treat the host root as a sandbox root");
     }
     return root.resolve(sandboxId).normalize();
+  }
+
+  /**
+   * Derives and proves THIS sandbox's own run workspace as a mount source (RR-1703, route (b)).
+   *
+   * <p>The path is a function of the configured {@code agent.workspace} root and the sandbox's
+   * immutable {@code runId} — {@code agentWorkspaceRoot/<runId>} — so it can never be a
+   * caller-supplied path. The run id is validated as a single opaque path segment and the resolved
+   * path is required to be a direct child of the workspace root, so a caller-influenced id can
+   * never traverse out of, or sideways within, that root.
+   *
+   * <p>Containment is proved on disk exactly as {@link #requireContained} proves it for the sandbox
+   * root: the target must already exist as a real directory (checked {@code NOFOLLOW_LINKS}), and
+   * {@link SafeWorkspacePath#requireWithin} proves no symbolic link on any existing component and
+   * canonical containment beneath the workspace root. A run workspace that is missing, a file, or
+   * reached through a link is a refusal — which fails provisioning closed, exactly as the sandbox
+   * seam requires. The result is the normalized path Docker will bind.
+   *
+   * @param agentWorkspaceRoot the configured {@code agent.workspace} root
+   * @param runId this sandbox's immutable run id
+   */
+  static Path requireRunWorkspace(Path agentWorkspaceRoot, String runId) {
+    if (agentWorkspaceRoot == null) {
+      throw new IllegalArgumentException("agent workspace root must be provided");
+    }
+    if (runId == null || !runId.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")) {
+      throw new IllegalArgumentException("unsafe run id: " + runId);
+    }
+    Path base = agentWorkspaceRoot.toAbsolutePath().normalize();
+    if (base.getNameCount() == 0) {
+      throw new IllegalArgumentException(
+          "refusing to treat the host root as the run workspace base");
+    }
+    Path derived = base.resolve(runId).normalize();
+    if (!base.equals(derived.getParent())) {
+      // The validated single-segment run id guarantees this, but prove it rather than assume it:
+      // the mount source must be a direct child of the workspace root, never a deeper or sibling
+      // path.
+      throw new IllegalArgumentException(
+          "run workspace must be a direct child of the agent workspace root: " + runId);
+    }
+    try {
+      if (!Files.isDirectory(derived, LinkOption.NOFOLLOW_LINKS)) {
+        throw new IllegalArgumentException(
+            "run workspace is not an existing real directory: " + runId);
+      }
+      SafeWorkspacePath.requireWithin(base, derived);
+    } catch (IOException | SecurityException notContained) {
+      // The message names the run id, never what it resolved to: a rejection must not become a
+      // probe for the host's filesystem layout.
+      throw new IllegalArgumentException(
+          "run workspace does not resolve inside the agent workspace root: " + runId, notContained);
+    }
+    return derived;
   }
 
   /**

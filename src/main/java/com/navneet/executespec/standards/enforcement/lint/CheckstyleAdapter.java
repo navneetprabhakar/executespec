@@ -48,7 +48,7 @@ public class CheckstyleAdapter implements LintAdapter {
   }
 
   @Override
-  public LintResult run(Path repoRoot, Path configPath, List<Path> changedFiles) {
+  public LintResult run(String runId, Path repoRoot, Path configPath, List<Path> changedFiles) {
     LintExecutionPolicy.Admission admission =
         policy.admit(tool(), repoRoot, configPath, changedFiles);
     if (!admission.allowed()) {
@@ -67,7 +67,7 @@ public class CheckstyleAdapter implements LintAdapter {
       argv.add(".");
     }
 
-    LintProcessRunner.Result res = runner.run(repoRoot, argv, policy.timeoutSeconds());
+    LintProcessRunner.Result res = runner.run(runId, repoRoot, argv, policy.timeoutSeconds());
     if (!res.executed()) {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());
