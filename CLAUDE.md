@@ -726,7 +726,22 @@ another's). The older V299, V301 and V302 statements above describe prior source
 
 **V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
 tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from
-that range; the next free number outside it is V318.
+that range; the next free number outside it is V318. **V320** is the integrations lane of the same
+wave: it adds explicit `integration_run.org_id` / `created_by_user_id` ownership columns so
+`GET /api/integrations/runs` can be scoped to the caller's org (RR-339) and so an interactive
+trigger records the actor that caused it (RR-340). Legacy rows keep a NULL `org_id` and are visible
+only to SUPER_ADMIN.
+
+**Inbound integration webhooks fail closed (RR-637, 2026-07-21).** Bitbucket and ServiceNow
+previously returned successfully from `verifySignature` when no webhook secret was configured —
+"no secret" was treated as "skip verification", so any network caller could submit attacker-authored
+PR/incident text as a pipeline run under the configured runner identity. All four inbound adapters
+(Jira, Confluence, PagerDuty, Bitbucket, ServiceNow) now reject every request when their
+`agent.integrations.<source>.webhook-secret` is missing or blank. **Behaviour change:** any live
+Bitbucket/ServiceNow integration running without a configured secret stops working until the secret
+is set. Manual Jira/Confluence triggers additionally require ORG_ADMIN, run under the caller's own
+user/org rather than the global `run-on-behalf-of-user-id` runner, and always stop at the plan gate
+regardless of the adapter's `skip-approval` setting.
 SWE-bench and ProgramBench terminal capture now dispatch through the dedicated virtual-thread
 benchmark-capture executor instead of self-invoking ineffective `@Async` methods; capture restart
 ownership remains open.
