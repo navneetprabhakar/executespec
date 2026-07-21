@@ -16,7 +16,6 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.security.SafeWorkspacePath;
@@ -82,6 +81,9 @@ public class ExecutespecFolderWriter {
   private final ObjectMapper json;
   private final GitHubRepoService gh;
 
+  /** Git Data plumbing: blob → tree → commit → ref. See {@link GitObjectWriter}. */
+  private final GitObjectWriter gitObjects;
+
   @Autowired
   public ExecutespecFolderWriter(ObjectMapper json, GitHubRepoService gh) {
     this(HttpClient.newHttpClient(), json, gh);
@@ -92,6 +94,7 @@ public class ExecutespecFolderWriter {
     this.http = http;
     this.json = json;
     this.gh = gh;
+    this.gitObjects = new GitObjectWriter(http, json);
   }
 
   /**
@@ -189,59 +192,10 @@ public class ExecutespecFolderWriter {
   }
 
   /**
-   * RR-536 — build one commit containing every validated file and move exactly one ref to it.
-   *
-   * <p>The previous implementation looped GitHub Contents-API PUTs, one commit per file. In
-   * DIRECT_PUSH mode each PUT landed on the customer's default branch immediately, so a failure on
-   * file 3 of 5 left files 1 and 2 permanently committed while the caller was told nothing was
-   * written; the caller then retried and produced more commits. PR mode had the same shape plus an
-   * orphaned branch. Governance artifacts read back internally inconsistent.
-   *
-   * <p>Blobs, trees and commits are content-addressed and invisible until a ref points at them, so
-   * every step before the ref update is free of visible side effects — an abort there leaves the
-   * repository byte-identical and the objects are garbage collected. The ref update itself is the
-   * single atomic act:
-   *
-   * <ul>
-   *   <li>DIRECT_PUSH updates the default branch with {@code force=false}. Because the new commit's
-   *       parent is the base SHA we read, GitHub rejects the update if the branch has advanced —
-   *       that is the compare-and-swap, and a lost race fails cleanly rather than clobbering.
-   *   <li>PR mode creates a brand-new branch ref that already contains the whole commit, then opens
-   *       the PR. If the PR call fails the branch is deleted so no orphan is left behind.
-   * </ul>
-   *
-   * @return the commit SHA that the ref now points at, or empty when nothing was published
+   * PR mode: build one commit carrying every drifted file, place it on a brand-new branch, then
+   * open the PR. Nothing is visible in the repository until the branch ref is created, so a failure
+   * before that point publishes nothing at all.
    */
-  private Optional<String> buildCommit(
-      String repoFullName, String baseSha, Map<String, String> files, String message, String pat) {
-    Optional<String> baseTree = getCommitTreeSha(repoFullName, baseSha, pat);
-    if (baseTree.isEmpty()) {
-      log.warn(
-          "[ExecutespecFolderWriter] could not read base commit {} on {}", baseSha, repoFullName);
-      return Optional.empty();
-    }
-    Map<String, String> blobsByPath = new java.util.LinkedHashMap<>();
-    for (Map.Entry<String, String> e : files.entrySet()) {
-      Optional<String> blob = createBlob(repoFullName, e.getValue(), pat);
-      if (blob.isEmpty()) {
-        // No ref has moved, so abandoning here leaves the repository untouched.
-        log.warn(
-            "[ExecutespecFolderWriter] blob creation failed for {} on {}; nothing published",
-            e.getKey(),
-            repoFullName);
-        return Optional.empty();
-      }
-      blobsByPath.put(e.getKey(), blob.get());
-    }
-    Optional<String> tree = createTree(repoFullName, baseTree.get(), blobsByPath, pat);
-    if (tree.isEmpty()) {
-      log.warn(
-          "[ExecutespecFolderWriter] tree creation failed on {}; nothing published", repoFullName);
-      return Optional.empty();
-    }
-    return createCommit(repoFullName, "ExecuteSpec: " + message, tree.get(), baseSha, pat);
-  }
-
   private Optional<PullRequestInfo> prFlow(
       ProjectRepo repo,
       String defaultBranch,
@@ -250,7 +204,7 @@ public class ExecutespecFolderWriter {
       String prDescription,
       String pat) {
     String repoFullName = repo.getGithubRepoFullName();
-    Optional<String> baseSha = getRefSha(repoFullName, defaultBranch, pat);
+    Optional<String> baseSha = gitObjects.getRefSha(repoFullName, defaultBranch, pat);
     if (baseSha.isEmpty()) {
       log.warn(
           "[ExecutespecFolderWriter] could not resolve {} default branch SHA for {}",
@@ -286,13 +240,12 @@ public class ExecutespecFolderWriter {
       return Optional.empty();
     }
 
-    // One commit carrying every drifted file. Nothing is visible in the repository until the ref
-    // below is created, so any failure up to that point publishes nothing at all.
-    Optional<String> commitSha = buildCommit(repoFullName, baseSha.get(), drifted, prTitle, pat);
+    Optional<String> commitSha =
+        gitObjects.buildCommit(repoFullName, baseSha.get(), drifted, prTitle, pat);
     if (commitSha.isEmpty()) return Optional.empty();
 
     String branchName = synthesiseBranchName(prTitle);
-    if (!createBranchAt(repoFullName, branchName, commitSha.get(), pat)) {
+    if (!gitObjects.createBranchAt(repoFullName, branchName, commitSha.get(), pat)) {
       log.warn(
           "[ExecutespecFolderWriter] could not create branch {} on {}", branchName, repoFullName);
       return Optional.empty();
@@ -313,7 +266,7 @@ public class ExecutespecFolderWriter {
           "[ExecutespecFolderWriter] branch {} pushed but PR open failed for {} — deleting branch",
           branchName,
           repoFullName);
-      if (!deleteRef(repoFullName, branchName, pat)) {
+      if (!gitObjects.deleteRef(repoFullName, branchName, pat)) {
         log.error(
             "[ExecutespecFolderWriter] orphan branch {} on {} could not be deleted; it must be "
                 + "cleaned up manually",
@@ -325,6 +278,11 @@ public class ExecutespecFolderWriter {
     return Optional.of(new PullRequestInfo(prUrl, branchName, List.copyOf(drifted.keySet()), true));
   }
 
+  /**
+   * DIRECT_PUSH mode: build the same single commit, then compare-and-swap the default branch onto
+   * it. {@code force=false} plus a parent of the SHA we planned against means GitHub refuses the
+   * update if anyone else moved the branch meanwhile, so a lost race publishes nothing.
+   */
   private Optional<PullRequestInfo> directPush(
       ProjectRepo repo,
       String defaultBranch,
@@ -332,7 +290,7 @@ public class ExecutespecFolderWriter {
       String commitMessage,
       String pat) {
     String repoFullName = repo.getGithubRepoFullName();
-    Optional<String> baseSha = getRefSha(repoFullName, defaultBranch, pat);
+    Optional<String> baseSha = gitObjects.getRefSha(repoFullName, defaultBranch, pat);
     if (baseSha.isEmpty()) {
       log.warn(
           "[ExecutespecFolderWriter] could not resolve {} SHA for {}; DIRECT_PUSH aborted",
@@ -341,12 +299,10 @@ public class ExecutespecFolderWriter {
       return Optional.empty();
     }
     Optional<String> commitSha =
-        buildCommit(repoFullName, baseSha.get(), files, commitMessage, pat);
+        gitObjects.buildCommit(repoFullName, baseSha.get(), files, commitMessage, pat);
     if (commitSha.isEmpty()) return Optional.empty();
 
-    // Compare-and-swap on the default branch: force=false plus a parent of baseSha means GitHub
-    // refuses the update if anyone else moved the branch since we read it.
-    if (!fastForwardRef(repoFullName, defaultBranch, commitSha.get(), pat)) {
+    if (!gitObjects.fastForwardRef(repoFullName, defaultBranch, commitSha.get(), pat)) {
       log.warn(
           "[ExecutespecFolderWriter] DIRECT_PUSH ref update rejected on {}/{} — nothing published",
           repoFullName,
@@ -355,186 +311,6 @@ public class ExecutespecFolderWriter {
     }
     return Optional.of(
         new PullRequestInfo(null, defaultBranch, List.copyOf(files.keySet()), false));
-  }
-
-  Optional<String> getRefSha(String repoFullName, String branch, String pat) {
-    try {
-      HttpRequest req =
-          HttpRequest.newBuilder()
-              .uri(
-                  URI.create(
-                      "https://api.github.com/repos/"
-                          + repoFullName
-                          + "/git/refs/heads/"
-                          + URLEncoder.encode(branch, StandardCharsets.UTF_8)))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json")
-              .GET()
-              .build();
-      HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-      if (res.statusCode() != 200) return Optional.empty();
-      JsonNode tree = json.readTree(res.body());
-      JsonNode obj = tree.path("object").path("sha");
-      return obj.isMissingNode() ? Optional.empty() : Optional.of(obj.asText());
-    } catch (Exception ex) {
-      log.debug("getRefSha failed for {}@{}: {}", repoFullName, branch, ex.getMessage());
-      return Optional.empty();
-    }
-  }
-
-  /** Tree SHA of an existing commit; the base every new tree is layered on. */
-  Optional<String> getCommitTreeSha(String repoFullName, String commitSha, String pat) {
-    JsonNode body =
-        sendJson(
-            "GET",
-            "https://api.github.com/repos/" + repoFullName + "/git/commits/" + commitSha,
-            null,
-            pat,
-            200);
-    if (body == null) return Optional.empty();
-    JsonNode sha = body.path("tree").path("sha");
-    return sha.isMissingNode() ? Optional.empty() : Optional.of(sha.asText());
-  }
-
-  /**
-   * Create a dangling blob. Invisible to the repository until a tree and commit reference it, so a
-   * batch that aborts after some blobs exist has published nothing.
-   */
-  Optional<String> createBlob(String repoFullName, String content, String pat) {
-    ObjectNode req = json.createObjectNode();
-    req.put(
-        "content", Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8)));
-    req.put("encoding", "base64");
-    JsonNode body =
-        sendJson(
-            "POST", "https://api.github.com/repos/" + repoFullName + "/git/blobs", req, pat, 201);
-    return sha(body);
-  }
-
-  /** One tree carrying every path in the batch, layered over the base commit's tree. */
-  Optional<String> createTree(
-      String repoFullName, String baseTreeSha, Map<String, String> blobsByPath, String pat) {
-    ObjectNode req = json.createObjectNode();
-    req.put("base_tree", baseTreeSha);
-    var entries = req.putArray("tree");
-    for (Map.Entry<String, String> e : blobsByPath.entrySet()) {
-      ObjectNode entry = entries.addObject();
-      entry.put("path", e.getKey());
-      entry.put("mode", "100644");
-      entry.put("type", "blob");
-      entry.put("sha", e.getValue());
-    }
-    JsonNode body =
-        sendJson(
-            "POST", "https://api.github.com/repos/" + repoFullName + "/git/trees", req, pat, 201);
-    return sha(body);
-  }
-
-  /** One commit for the whole batch, parented on the SHA the batch was planned against. */
-  Optional<String> createCommit(
-      String repoFullName, String message, String treeSha, String parentSha, String pat) {
-    ObjectNode req = json.createObjectNode();
-    req.put("message", message);
-    req.put("tree", treeSha);
-    req.putArray("parents").add(parentSha);
-    JsonNode body =
-        sendJson(
-            "POST", "https://api.github.com/repos/" + repoFullName + "/git/commits", req, pat, 201);
-    return sha(body);
-  }
-
-  /**
-   * Create a new branch ref pointing straight at the batch commit.
-   *
-   * <p>Only 201 counts. The former implementation also treated a 422 "already exists" as success,
-   * which would have opened a PR from a ref this call did not place — the branch could point
-   * anywhere.
-   */
-  boolean createBranchAt(String repoFullName, String newBranch, String commitSha, String pat) {
-    ObjectNode req = json.createObjectNode();
-    req.put("ref", "refs/heads/" + newBranch);
-    req.put("sha", commitSha);
-    return sendJson(
-            "POST", "https://api.github.com/repos/" + repoFullName + "/git/refs", req, pat, 201)
-        != null;
-  }
-
-  /**
-   * Move an existing branch to {@code commitSha} without forcing. GitHub rejects the update when
-   * the commit is not a descendant of the current head, which is exactly the compare-and-swap this
-   * needs: a concurrent writer wins and we publish nothing rather than overwriting them.
-   */
-  boolean fastForwardRef(String repoFullName, String branch, String commitSha, String pat) {
-    ObjectNode req = json.createObjectNode();
-    req.put("sha", commitSha);
-    req.put("force", false);
-    return sendJson(
-            "PATCH",
-            "https://api.github.com/repos/"
-                + repoFullName
-                + "/git/refs/heads/"
-                + URLEncoder.encode(branch, StandardCharsets.UTF_8),
-            req,
-            pat,
-            200)
-        != null;
-  }
-
-  /** Compensation for an orphaned branch whose PR never opened. */
-  boolean deleteRef(String repoFullName, String branch, String pat) {
-    try {
-      HttpRequest req =
-          HttpRequest.newBuilder()
-              .uri(
-                  URI.create(
-                      "https://api.github.com/repos/"
-                          + repoFullName
-                          + "/git/refs/heads/"
-                          + URLEncoder.encode(branch, StandardCharsets.UTF_8)))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json")
-              .DELETE()
-              .build();
-      HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-      return res.statusCode() == 204 || res.statusCode() == 404;
-    } catch (Exception ex) {
-      log.debug("deleteRef failed for {}@{}: {}", repoFullName, branch, ex.getMessage());
-      return false;
-    }
-  }
-
-  private static Optional<String> sha(JsonNode body) {
-    if (body == null) return Optional.empty();
-    JsonNode sha = body.path("sha");
-    return sha.isMissingNode() ? Optional.empty() : Optional.of(sha.asText());
-  }
-
-  /** Single JSON transport for the Git Data calls. Returns null on any non-expected status. */
-  private JsonNode sendJson(
-      String method, String url, ObjectNode requestBody, String pat, int expectedStatus) {
-    try {
-      HttpRequest.BodyPublisher publisher =
-          requestBody == null
-              ? HttpRequest.BodyPublishers.noBody()
-              : HttpRequest.BodyPublishers.ofString(requestBody.toString());
-      HttpRequest.Builder builder =
-          HttpRequest.newBuilder()
-              .uri(URI.create(url))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json");
-      if (requestBody != null) builder.header("Content-Type", "application/json");
-      HttpResponse<String> res =
-          http.send(
-              builder.method(method, publisher).build(), HttpResponse.BodyHandlers.ofString());
-      if (res.statusCode() != expectedStatus) {
-        log.debug("{} {} returned {}", method, url, res.statusCode());
-        return null;
-      }
-      return json.readTree(res.body());
-    } catch (Exception ex) {
-      log.debug("{} {} failed: {}", method, url, ex.getMessage());
-      return null;
-    }
   }
 
   Optional<FileSnapshot> getContents(String repoFullName, String branch, String path, String pat) {
