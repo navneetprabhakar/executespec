@@ -243,6 +243,11 @@ public class AgentAttachmentService {
       tmp = Files.createTempFile("agent-upload-", "-" + filename);
       Files.write(tmp, bytes);
       return extractor.extract(tmp, mime);
+    } catch (com.navneet.executespec.project.rag.DocumentAdmissionException rejected) {
+      // Typed rejections (encrypted / oversized / corrupt / timed out) must not be laundered into
+      // an empty document; the caller rejects a null extraction the same way it rejects "".
+      log.warn("attachment extract rejected for {}: {}", filename, rejected.code());
+      return null;
     } catch (IOException e) {
       log.warn("attachment extract failed for {}: {}", filename, e.getMessage());
       return null;

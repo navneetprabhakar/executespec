@@ -52,5 +52,29 @@ public class ProjectDocumentIndexJob {
         log.warn("Project document recovery attempt failed for document id {}", document.getId());
       }
     }
+    reconcileLexicalDegradation(cutoff);
+  }
+
+  /**
+   * Lexical publication is a degradation, not a destination: a document indexed lexically during a
+   * key outage or provider switch would otherwise stay lexical forever, because the claim guard
+   * treats LEXICAL_READY as terminal. Re-claim those rows once the project's route can produce
+   * compatible vectors again. The staleness cutoff plus the per-document attempt ceiling bound how
+   * often a still-failing route is retried.
+   */
+  private void reconcileLexicalDegradation(OffsetDateTime cutoff) {
+    List<ProjectDocument> lexical =
+        repository.findRecoverable(
+            List.of(ProjectDocument.Status.LEXICAL_READY), cutoff, PageRequest.of(0, 20));
+    for (ProjectDocument document : lexical) {
+      try {
+        if (!service.embeddingAvailability(document.getProjectId()).semanticSearchAvailable()) {
+          continue;
+        }
+        service.reindexForSemantic(document.getId());
+      } catch (RuntimeException e) {
+        log.warn("Project document semantic reindex failed for document id {}", document.getId());
+      }
+    }
   }
 }

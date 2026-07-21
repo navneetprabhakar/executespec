@@ -105,6 +105,60 @@ class RetrievalServiceTest {
     assertThat(result.content()).isEmpty();
   }
 
+  /**
+   * RR-1528: semantic SQL is structurally blind to LEXICAL_READY documents, so a threshold-clearing
+   * semantic hit must not suppress a lexical-only document that answers the question.
+   */
+  @Test
+  void semanticHitsAreUnionedWithLexicalOnlyDocumentsInAMixedCorpus() {
+    when(embeddings.availability("p1")).thenReturn(semanticAvailability());
+    float[] vector = new float[] {0.1f};
+    when(embeddings.embedQueryForProject(
+            eq("p1"),
+            eq("refund policy"),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(vector);
+    when(chunks.nearest("p1", vector, 3))
+        .thenReturn(List.of(hit("architecture.md", "Service boundaries")));
+    when(chunks.lexicalOnlyDocuments("p1", "refund policy", 3))
+        .thenReturn(
+            List.of(
+                new ChunkStore.RetrievedChunk(
+                    "d2", "refunds.md", 0, "Refunds are issued within 14 days.", 9, 0.3)));
+
+    var result = service.retrieveWithReadiness("p1", "refund policy", 3, 1000);
+
+    assertThat(result.mode()).isEqualTo("SEMANTIC_WITH_LEXICAL");
+    assertThat(result.reason())
+        .isEqualTo("GOVERNED_OPENAI_EMBEDDING_UNIONED_WITH_LEXICAL_ONLY_DOCUMENTS");
+    assertThat(result.content()).contains("Service boundaries").contains("within 14 days");
+  }
+
+  @Test
+  void aPurelySemanticCorpusKeepsTheUnchangedSemanticContract() {
+    when(embeddings.availability("p1")).thenReturn(semanticAvailability());
+    float[] vector = new float[] {0.1f};
+    when(embeddings.embedQueryForProject(
+            eq("p1"),
+            eq("architecture"),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(vector);
+    when(chunks.nearest("p1", vector, 3))
+        .thenReturn(List.of(hit("architecture.md", "Service boundaries")));
+    when(chunks.lexicalOnlyDocuments("p1", "architecture", 3)).thenReturn(List.of());
+
+    var result = service.retrieveWithReadiness("p1", "architecture", 3, 100);
+
+    assertThat(result.mode()).isEqualTo("SEMANTIC");
+    assertThat(result.reason()).isEqualTo("GOVERNED_OPENAI_EMBEDDING");
+  }
+
   private static ChunkStore.RetrievedChunk hit(String filename, String content) {
     return new ChunkStore.RetrievedChunk("d1", filename, 0, content, 8, 0.1);
   }

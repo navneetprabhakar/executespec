@@ -187,7 +187,7 @@ public class LlmExecutionDispatchGuard {
     checkBudget(context);
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
-      return platformDispatch(context, provider, policy);
+      return platformCapabilityDispatch(context, provider, policy);
     }
     if (!reference.scope().isolationKey().equals(context.getIsolationKey())
         || !reference.scope().orgId().equals(context.getOrgId())) {
@@ -227,7 +227,7 @@ public class LlmExecutionDispatchGuard {
               LlmDispatchPolicyException.Reason.POLICY_STALE,
               "OWN_KEYS context cannot dispatch with platform credentials");
         }
-        yield platformDispatch(context, provider, policy);
+        yield platformCapabilityDispatch(context, provider, policy);
       }
     };
   }
@@ -257,22 +257,13 @@ public class LlmExecutionDispatchGuard {
     return new ResolvedDispatch(key, source, context);
   }
 
-  private ResolvedDispatch platformDispatch(
-      LlmExecutionContext context, String provider, LlmPolicySnapshot policy) {
-    if (policy.providerKeySources().get(provider) != LlmPolicySnapshot.CredentialSource.PLATFORM) {
-      throw reject(
-          LlmDispatchPolicyException.Reason.CREDENTIAL_SOURCE_CHANGED,
-          "Execution policy did not authorize a platform credential");
-    }
-    if (!platformKeyPresent(provider)) {
-      throw reject(
-          LlmDispatchPolicyException.Reason.CREDENTIAL_UNAVAILABLE,
-          "The authorized platform credential is not configured");
-    }
-    return new ResolvedDispatch(null, RunKeyContext.Source.PLATFORM, context);
-  }
-
-  /** Non-chat transports need the actual platform key after this guard authorizes its use. */
+  /**
+   * Resolves the actual platform credential once this guard has authorized PLATFORM as the exact
+   * key source. Every caller — chat and non-chat provider capabilities alike — receives a usable
+   * key or an explicit {@code CREDENTIAL_UNAVAILABLE} rejection; a {@code PLATFORM} dispatch is
+   * never returned with a withheld (null/blank) key, because a caller that needs the key on its own
+   * transport would otherwise degrade silently instead of failing.
+   */
   private ResolvedDispatch platformCapabilityDispatch(
       LlmExecutionContext context, String provider, LlmPolicySnapshot policy) {
     if (policy.providerKeySources().get(provider) != LlmPolicySnapshot.CredentialSource.PLATFORM) {
@@ -328,11 +319,6 @@ public class LlmExecutionDispatchGuard {
       double spent = value(usageRepository.sumSuccessfulCostByContextId(id));
       if (BigDecimal.valueOf(spent).compareTo(context.getMaxCostUsd()) >= 0) throw budget();
     }
-  }
-
-  private boolean platformKeyPresent(String provider) {
-    String key = platformKey(provider);
-    return key != null && !key.isBlank();
   }
 
   private String platformKey(String provider) {
