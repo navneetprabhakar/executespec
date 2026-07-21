@@ -137,22 +137,26 @@ public class PreviewRenderController {
    * ignores both in {@code <meta>} — so the embedding page's {@code sandbox} attribute has to carry
    * the opaque origin.
    */
-  private String withEmbeddedCsp(String html) {
+  // Package-private so the hostile-markup cases can be pinned directly.
+  String withEmbeddedCsp(String html) {
     String meta =
         "<meta http-equiv=\"Content-Security-Policy\" content=\""
             + guard.contentSecurityPolicy().replace("\"", "&quot;")
             + "\">";
 
-    java.util.regex.Matcher head = java.util.regex.Pattern.compile("(?i)<head[^>]*>").matcher(html);
-    if (head.find()) {
-      return html.substring(0, head.end()) + meta + html.substring(head.end());
-    }
-    // No <head> to extend: wrap the bundle so the policy still applies to it.
-    return "<!doctype html><html><head>"
-        + meta
-        + "</head><body style=\"margin:0\">"
-        + html
-        + "</body></html>";
+    // RR-306: this used to splice the meta tag in after the first regex match for `<head...>`.
+    // A regex cannot tell a real head tag from the same characters inside a comment, a script
+    // string or an attribute, so model output containing an earlier decoy left the real document
+    // head untouched and the policy inert inside a comment — exactly where the load-bearing
+    // directives stop applying.
+    //
+    // Instead the server owns the front of the document and never edits the model's markup. A
+    // meta element emitted before any other markup is placed into the document head by the HTML
+    // parser's "before html" / "before head" insertion modes, so it is the FIRST head child no
+    // matter what the model wrote. A later `<html>` or `<head>` start tag in the model's output
+    // merges attributes rather than opening a second head, and a later doctype is ignored, so the
+    // policy cannot be displaced or duplicated out of effect.
+    return "<!doctype html>" + meta + html;
   }
 
   // ---------------------------------------------------------------- mapping

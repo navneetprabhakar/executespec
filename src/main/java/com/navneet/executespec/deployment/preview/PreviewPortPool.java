@@ -24,6 +24,18 @@ public class PreviewPortPool {
   private final ConcurrentHashMap<String, Integer> allocations = new ConcurrentHashMap<>();
 
   /**
+   * runId → unguessable preview host label (RR-158). Separate from {@link #allocations} because the
+   * label is the routing capability, not an identifier that can be derived from the run.
+   */
+  private final ConcurrentHashMap<String, String> hostLabels = new ConcurrentHashMap<>();
+
+  private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+
+  /** Exactly 32 lowercase hex characters — 128 bits. Nothing else is a routable preview host. */
+  private static final java.util.regex.Pattern LABEL_PATTERN =
+      java.util.regex.Pattern.compile("[0-9a-f]{32}");
+
+  /**
    * Ports reserved but not yet bound by Docker — prevents TOCTOU between allocate() and Docker
    * bind.
    */
@@ -106,6 +118,9 @@ public class PreviewPortPool {
   }
 
   public void release(String runId) {
+    // Retire the routing capability with the allocation so a stopped preview's host stops
+    // resolving immediately.
+    hostLabels.remove(runId);
     Integer port = allocations.remove(runId);
     if (port != null) {
       reservedPorts.remove(port);
@@ -123,18 +138,42 @@ public class PreviewPortPool {
   }
 
   /**
-   * Find the port allocated for a runId that starts with the given prefix. Used by
-   * PreviewProxyFilter to resolve short IDs (first 8 chars of runId) from preview-*.executespec.ai
-   * Host headers.
+   * Host label for a run's preview, minted on first use and stable for the life of the allocation.
    *
-   * @return allocated port, or -1 if no match found
+   * <p>RR-158: the proxy used to resolve {@code preview-<shortId>} by scanning for the first runId
+   * with that <em>prefix</em>, so a single character reached whichever active preview happened to
+   * sort first — roughly sixteen unauthenticated requests to land inside another tenant's preview.
+   * The routing key is now an unguessable 128-bit capability that is matched exactly, and it is
+   * deliberately not derived from the runId so possession of a run id is not possession of the
+   * preview.
    */
-  public int findPortByPrefix(String prefix) {
-    for (var entry : allocations.entrySet()) {
-      if (entry.getKey().startsWith(prefix)) {
-        return entry.getValue();
-      }
+  public String hostLabel(String runId) {
+    return hostLabels.computeIfAbsent(runId, k -> mintLabel());
+  }
+
+  /**
+   * Resolve a preview port from a host label. Exact match only — no prefix, no partial. Returns -1
+   * for an unknown, expired or malformed label.
+   */
+  public int findPortByHostLabel(String label) {
+    if (label == null || !LABEL_PATTERN.matcher(label).matches()) {
+      return -1;
     }
-    return -1;
+    String runId =
+        hostLabels.entrySet().stream()
+            .filter(e -> e.getValue().equals(label))
+            .map(java.util.Map.Entry::getKey)
+            .findFirst()
+            .orElse(null);
+    if (runId == null) {
+      return -1;
+    }
+    return allocations.getOrDefault(runId, -1);
+  }
+
+  private String mintLabel() {
+    byte[] raw = new byte[16];
+    RANDOM.nextBytes(raw);
+    return java.util.HexFormat.of().formatHex(raw);
   }
 }
