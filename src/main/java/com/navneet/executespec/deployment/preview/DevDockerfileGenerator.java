@@ -41,6 +41,46 @@ public class DevDockerfileGenerator {
     return previewProperties.getInteractive().isWritableTerminalEnabled() ? "\"--writable\", " : "";
   }
 
+  /**
+   * Pinned Node distribution image used as a {@code COPY --from} source (RR-385, partial).
+   *
+   * <p>Replaces the previous bootstrap, which appeared at nine generation sites:
+   *
+   * <pre>{@code curl -fsSL https://deb.nodesource.com/setup_20.x | bash -}</pre>
+   *
+   * <p>That form fetched a shell script over the network at image-build time and executed it as
+   * root with no integrity check, so whoever controlled (or could intercede in) that endpoint on
+   * the day of the build chose what ran in the build. Copying the interpreter out of a tagged
+   * upstream image removes the remote-shell-execution primitive entirely and makes the Node version
+   * a declared input rather than "whatever the vendor script installs today".
+   *
+   * <p><b>Deliberately a tag, not a digest.</b> A {@code sha256:} pin would be strictly stronger,
+   * but it must be refreshed by a human on every upstream security release or previews silently age
+   * onto an unpatched Node. Digest pinning belongs with the lockfile/SBOM work in the RR-385
+   * architectural remainder, which has somewhere to record and rotate the expected digest. Until
+   * then this still trusts Docker Hub to serve the same content for the tag.
+   */
+  private static final String PINNED_NODE_IMAGE = "node:20-bookworm-slim";
+
+  /**
+   * Dockerfile lines that install Node + npm from {@link #PINNED_NODE_IMAGE}.
+   *
+   * <p>Emitted in place of the NodeSource bootstrap. Every call site's base image ({@code
+   * eclipse-temurin:21}, {@code python:3.12-slim}, {@code rust:1.77-slim}) is glibc-based, which is
+   * what makes copying a bookworm-built binary across valid — do NOT reuse this on an Alpine/musl
+   * base without swapping the source image for the matching variant.
+   */
+  static String pinnedNodeInstall() {
+    return "COPY --from="
+        + PINNED_NODE_IMAGE
+        + " /usr/local/bin/node /usr/local/bin/node\n"
+        + "COPY --from="
+        + PINNED_NODE_IMAGE
+        + " /usr/local/lib/node_modules /usr/local/lib/node_modules\n"
+        + "RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \\\n"
+        + "    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx\n";
+  }
+
   /** Captures the layout of a full-stack project with separate frontend/backend subdirectories. */
   record FullStackLayout(
       String frontendDir,
@@ -569,8 +609,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Maven deps
     if (be != null) {
@@ -622,8 +662,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Python deps
     if (be != null) {
@@ -742,8 +782,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Pre-build backend deps (cargo fetch)
     if (be != null) {
@@ -825,8 +865,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install frontend Node deps
     if (fe != null) {
@@ -1746,8 +1786,8 @@ public class DevDockerfileGenerator {
     // Use JDK image with Node installed
     sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Maven deps first (slow, cached)
     if (be != null) {
@@ -1792,8 +1832,8 @@ public class DevDockerfileGenerator {
     // Use Python image with Node installed
     sb.append("FROM python:3.12-slim\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Python deps
     if (be != null) {
@@ -1914,8 +1954,8 @@ public class DevDockerfileGenerator {
     var sb = new StringBuilder();
     sb.append("FROM rust:1.77-slim\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     if (be != null) {
       sb.append("COPY ")
@@ -1984,8 +2024,8 @@ public class DevDockerfileGenerator {
     var sb = new StringBuilder();
     sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     if (fe != null) {
       sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
@@ -2525,11 +2565,13 @@ COPY requirements.txt* pyproject.toml* ./
            WORKDIR /app
            LABEL preview=true
            RUN apt-get update && apt-get install -y curl && \
-               curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-               apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
-           RUN npm install -g @modelcontextprotocol/inspector
-           COPY requirements.txt* pyproject.toml* ./
+               rm -rf /var/lib/apt/lists/*
            """
+        + pinnedNodeInstall()
+        + """
+          RUN npm install -g @modelcontextprotocol/inspector
+          COPY requirements.txt* pyproject.toml* ./
+          """
         + installStep
         + "\n"
         + """
