@@ -105,7 +105,10 @@ public class ContractDriftController {
     String pat = patFor(auth);
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
     String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
-    if (sourceContent == null || sourceContent.startsWith("// ")) {
+    // RR-1631 — match the exact reader sentinels, not any "// " prefix: a proto/GraphQL source
+    // file whose first line is `// Copyright …` is a successful read, and treating it as an error
+    // here made such a contract permanently un-refreshable.
+    if (DriftDetectionService.isSourceReadFailure(sourceContent)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_GATEWAY, "could not read source: " + sourceContent);
     }
