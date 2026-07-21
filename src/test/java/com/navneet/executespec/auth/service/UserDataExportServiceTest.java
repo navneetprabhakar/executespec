@@ -23,6 +23,7 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.repository.InvoiceRepository;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 /**
  * P5.4 (GA-readiness, 2026-05-06) — pins the data-export bundle contract.
@@ -45,6 +47,7 @@ class UserDataExportServiceTest {
   private AppUserRepository userRepo;
   private OrgRepository orgRepo;
   private ProjectRepository projectRepo;
+  private ProjectMemberRepository projectMemberRepo;
   private PipelineRunRepository runRepo;
   private NotificationRepository notificationRepo;
   private BillingSubscriptionRepository subRepo;
@@ -57,15 +60,25 @@ class UserDataExportServiceTest {
     userRepo = mock(AppUserRepository.class);
     orgRepo = mock(OrgRepository.class);
     projectRepo = mock(ProjectRepository.class);
+    projectMemberRepo = mock(ProjectMemberRepository.class);
     runRepo = mock(PipelineRunRepository.class);
     notificationRepo = mock(NotificationRepository.class);
     subRepo = mock(BillingSubscriptionRepository.class);
     invoiceRepo = mock(InvoiceRepository.class);
     svc =
         new UserDataExportService(
-            userRepo, orgRepo, projectRepo, runRepo, notificationRepo, subRepo, invoiceRepo);
+            userRepo,
+            orgRepo,
+            projectRepo,
+            projectMemberRepo,
+            runRepo,
+            notificationRepo,
+            subRepo,
+            invoiceRepo);
     lenient().when(orgRepo.findById(anyString())).thenReturn(Optional.empty());
     lenient().when(projectRepo.findByOrgId(anyString())).thenReturn(List.of());
+    lenient().when(projectRepo.findAllById(any())).thenReturn(List.of());
+    lenient().when(projectMemberRepo.findProjectIdsByUserId(anyString())).thenReturn(List.of());
     Page<?> emptyPage = new PageImpl<>(List.of());
     lenient()
         .when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(anyString(), any()))
@@ -294,6 +307,139 @@ class UserDataExportServiceTest {
     assertThat(payloadStr).contains("Acme Inc").contains("run-1");
   }
 
+  /**
+   * RR-205 — a "personal" DSAR must NOT include another org member's project. Org holds two
+   * projects: one the requester created and one another user created (requester is not a member).
+   * Only the requester-owned project must appear.
+   */
+  @Test
+  void payloadJson_excludesOtherMembersProjects() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+
+    Project mine = new Project();
+    mine.setId("proj-mine");
+    mine.setName("My Project");
+    mine.setOrgId("org-1");
+    mine.setCreatedBy("user-123");
+
+    Project theirs = new Project();
+    theirs.setId("proj-theirs");
+    theirs.setName("Someone Else Project");
+    theirs.setOrgId("org-1");
+    theirs.setCreatedBy("user-999");
+
+    when(projectRepo.findByOrgId("org-1")).thenReturn(List.of(mine, theirs));
+    // requester is a member of no project.
+    when(projectMemberRepo.findProjectIdsByUserId("user-123")).thenReturn(List.of());
+
+    String payloadStr =
+        new String(
+            readZip(svc.exportForUser("user-123").zipBytes()).get("payload.json"),
+            StandardCharsets.UTF_8);
+
+    assertThat(payloadStr).contains("proj-mine").contains("My Project");
+    assertThat(payloadStr).doesNotContain("proj-theirs");
+    assertThat(payloadStr).doesNotContain("Someone Else Project");
+  }
+
+  /**
+   * RR-205 — a project the requester did not create but IS a member of (including cross-org
+   * external collaboration) is attributable and must be included.
+   */
+  @Test
+  void payloadJson_includesMemberProjectFromAnotherOrg() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+    when(projectRepo.findByOrgId("org-1")).thenReturn(List.of());
+    when(projectMemberRepo.findProjectIdsByUserId("user-123")).thenReturn(List.of("proj-foreign"));
+
+    Project foreign = new Project();
+    foreign.setId("proj-foreign");
+    foreign.setName("Shared Project");
+    foreign.setOrgId("other-org");
+    foreign.setCreatedBy("user-999");
+    when(projectRepo.findAllById(List.of("proj-foreign"))).thenReturn(List.of(foreign));
+
+    String payloadStr =
+        new String(
+            readZip(svc.exportForUser("user-123").zipBytes()).get("payload.json"),
+            StandardCharsets.UTF_8);
+    assertThat(payloadStr).contains("proj-foreign").contains("Shared Project");
+  }
+
+  /**
+   * RR-206 — when a collection exceeds the row cap the manifest must report the TRUE total and flag
+   * the truncation, so the Article 15/20 completeness claim is honest.
+   */
+  @Test
+  void manifest_reportsHonestTruncationWhenRowCapped() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+
+    com.navneet.executespec.state.entity.PipelineRun run =
+        new com.navneet.executespec.state.entity.PipelineRun();
+    run.setRunId("run-1");
+    run.setCreatedByUserId("user-123");
+    // content of 1 row, but a total of 500 in the store → truncated.
+    when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(anyString(), any()))
+        .thenReturn(new PageImpl<>(List.of(run), PageRequest.of(0, 200), 500));
+
+    Map<String, byte[]> entries = readZip(svc.exportForUser("user-123").zipBytes());
+    @SuppressWarnings("unchecked")
+    Map<String, Object> manifest = MAPPER.readValue(entries.get("manifest.json"), Map.class);
+
+    assertThat(manifest.get("truncated")).isEqualTo(true);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> truncation = (Map<String, Object>) manifest.get("truncation");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> runsStat = (Map<String, Object>) truncation.get("runs");
+    assertThat(runsStat.get("totalRows")).isEqualTo(500);
+    assertThat(runsStat.get("includedRows")).isEqualTo(1);
+    assertThat(runsStat.get("truncated")).isEqualTo(true);
+  }
+
+  /**
+   * RR-207 — the serialized-byte budget stops admitting rows before heap blows up, and the
+   * truncation is reported via the same manifest signal. Driven with a tiny cap to avoid allocating
+   * 20 MiB in the test.
+   */
+  @Test
+  void export_byteCapTruncatesAndIsReported() throws Exception {
+    long original = UserDataExportService.MAX_EXPORT_PAYLOAD_BYTES;
+    try {
+      UserDataExportService.MAX_EXPORT_PAYLOAD_BYTES = 300; // bytes — one small run fits, not three
+      when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+
+      List<com.navneet.executespec.state.entity.PipelineRun> runs = new java.util.ArrayList<>();
+      for (int i = 0; i < 5; i++) {
+        com.navneet.executespec.state.entity.PipelineRun r =
+            new com.navneet.executespec.state.entity.PipelineRun();
+        r.setRunId("run-" + i);
+        r.setCreatedByUserId("user-123");
+        r.setUserRequest("x".repeat(200)); // each projection well over the 300-byte total budget
+        runs.add(r);
+      }
+      when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(anyString(), any()))
+          .thenReturn(new PageImpl<>(runs, PageRequest.of(0, 200), 5));
+
+      Map<String, byte[]> entries = readZip(svc.exportForUser("user-123").zipBytes());
+      @SuppressWarnings("unchecked")
+      Map<String, Object> manifest = MAPPER.readValue(entries.get("manifest.json"), Map.class);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> payload = MAPPER.readValue(entries.get("payload.json"), Map.class);
+
+      @SuppressWarnings("unchecked")
+      List<Object> includedRuns = (List<Object>) payload.get("runs");
+      assertThat(includedRuns.size()).isLessThan(5);
+      assertThat(manifest.get("truncated")).isEqualTo(true);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> truncation = (Map<String, Object>) manifest.get("truncation");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> runsStat = (Map<String, Object>) truncation.get("runs");
+      assertThat(runsStat.get("byteCapReached")).isEqualTo(true);
+    } finally {
+      UserDataExportService.MAX_EXPORT_PAYLOAD_BYTES = original;
+    }
+  }
+
   private Org buildOrg() {
     Org org = new Org();
     org.setId("org-1");
@@ -306,6 +452,8 @@ class UserDataExportServiceTest {
     p.setId("proj-1");
     p.setName("Demo Project");
     p.setOrgId("org-1");
+    // RR-205: attributable to the requester (owned) so the export includes it.
+    p.setCreatedBy("user-123");
     return p;
   }
 
