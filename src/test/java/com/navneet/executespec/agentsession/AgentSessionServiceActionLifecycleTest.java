@@ -91,7 +91,8 @@ class AgentSessionServiceActionLifecycleTest {
                 runAccessGuard,
                 aiProviderPreferenceService,
                 modelAccessService),
-            new AgentActionLifecycleService(intentService, eventRecorder, sessionRepo),
+            new AgentActionLifecycleService(
+                intentService, eventRecorder, sessionRepo, projectAccessGuard),
             new AgentGateReadService(pipelineRunRepo, runAccessGuard, gateCardFactory),
             new AgentOrchestratorTurnService(
                 turnRepo,

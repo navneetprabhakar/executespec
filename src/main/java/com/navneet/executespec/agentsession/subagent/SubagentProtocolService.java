@@ -26,6 +26,7 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocol.SpawnReque
 import com.navneet.executespec.agentsession.subagent.SubagentProtocol.WriterReservation;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -399,9 +400,9 @@ public class SubagentProtocolService {
   /**
    * Fail-closed budget/cancellation check that an executor calls before each child turn.
    *
-   * <p>The check also advances the child heartbeat when the turn is admitted. A child model call
-   * can legitimately run for longer than the startup-recovery stale window; without this write, a
-   * rolling restart could mistake a still-active child for an abandoned one and cancel it. The
+   * <p>The check also advances the child heartbeat when the turn is admitted. Admission alone is
+   * NOT sufficient liveness evidence: a single model round can outlive the startup-recovery stale
+   * window, so the executor must also renew the lease mid-turn through {@link #heartbeat}. The
    * timestamp is advisory only (the status/budget checks remain the authority) and is persisted in
    * the same transaction as the admission decision.
    */
@@ -435,6 +436,24 @@ public class SubagentProtocolService {
         metadata.maxCostUsd(),
         reason == null,
         reason);
+  }
+
+  /**
+   * Renews a live child's lease mid-turn so a long provider call is not read as abandonment.
+   *
+   * <p>This carries no authority: it never changes status, budget or ownership, and it refuses to
+   * touch a terminal child. It runs in its own transaction because the executing turn holds no
+   * transaction of its own while the provider call is in flight.
+   *
+   * @return true when the lease was renewed; false when the child is gone or already terminal.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public boolean heartbeat(String childSessionId, String actorUserId, String actorOrgId) {
+    AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
+    if (!List.of("READY", "RUNNING").contains(child.getStatus())) return false;
+    child.setUpdatedAt(Instant.now());
+    sessionRepository.save(child);
+    return true;
   }
 
   /** Claims a READY child for execution. Idempotent while the child is already RUNNING. */

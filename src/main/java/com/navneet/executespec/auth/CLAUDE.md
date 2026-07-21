@@ -13,6 +13,12 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   `api:read,runs:write,projects:write,agent:write,settings:write`. Billing, token management,
   `/api/admin/**`, `/api/v2/test/**`, and unknown mutations require an explicit capability or
   `full`. The filter stamps resolved token id/scopes request attributes after authorization.
+- Boundary-crossing agent routes require the UNION of both capabilities, decided before the generic
+  `/api/agent/` prefix rule: `POST /api/orchestrator/turn/confirm` creates a billable run and needs
+  `agent:write` AND `runs:write`; `/api/agent/sessions/{id}/writer/**` mutates files on the caller's
+  machine and needs `agent:write` AND the new `local:write`. `local:write` is deliberately excluded
+  from `CLIENT_DEFAULT_SCOPES` — a chat-capable token is not a local-filesystem writer — so a token
+  that wants the writer seam must request it explicitly. `full` tokens are unaffected.
 - Device-cap LRU revocation is returned in `CreatedToken.autoRevokedTokenIds` and the controller
   appends one `USER_PAT_AUTO_REVOKED` audit event per displaced token.
 

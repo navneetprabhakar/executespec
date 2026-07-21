@@ -44,7 +44,8 @@ class AgentActionLifecycleServiceTest {
         new AgentActionLifecycleService(
             new AgentIntentService(),
             new AgentEventRecorder(eventRepo, new ObjectMapper()),
-            sessionRepo);
+            sessionRepo,
+            null);
     when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
     when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
   }
@@ -75,7 +76,8 @@ class AgentActionLifecycleServiceTest {
                 null,
                 new ClientCapabilities(true, true, true, true),
                 "VSCODE"),
-            capabilities);
+            capabilities,
+            null);
 
     assertThat(planned.sessionId()).isEqualTo("s1");
     assertThat(planned.actionId()).isNotBlank();

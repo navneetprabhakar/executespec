@@ -97,7 +97,10 @@ class AgentStreamTurnStarter {
           ChatToolPolicy.Capability.SPEND_AI,
           "ALLOWED");
     }
-    String message = request == null ? "" : request.message();
+    // Route, guard and persist the exact text the provider will execute. `request.message()` is
+    // discarded by the runner whenever `conversation` is non-empty, so routing on it left
+    // conversation-only content unrouted, unguarded and absent from the durable transcript.
+    String message = AgentStreamTurnSupport.routedUserText(request);
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
@@ -139,16 +142,21 @@ class AgentStreamTurnStarter {
       session.setDefaultModel(
           modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel));
     }
-    com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision decision;
+    AgentIntentService.RoutedDecision routed;
     try {
-      decision =
-          intentService.decide(
+      routed =
+          intentService.decideWithAttribution(
               new InterpretIntentRequest(
                   sessionId,
                   message,
                   session.getProjectId(),
                   request == null ? null : request.repoContext(),
-                  request == null ? null : request.clientCapabilities()),
+                  request == null ? null : request.clientCapabilities(),
+                  // A project-scoped stream turn only reaches this line after assertCanWrite above,
+                  // so write authority is already proven for this actor and project.
+                  session.getProjectId() == null || session.getProjectId().isBlank()
+                      ? null
+                      : Boolean.TRUE),
               effectiveProvider,
               session.getDefaultModel());
     } catch (org.springframework.web.server.ResponseStatusException inputDenied) {
@@ -164,6 +172,8 @@ class AgentStreamTurnStarter {
       }
       throw inputDenied;
     }
+    com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision decision =
+        routed.decision();
     AgentTurn turn =
         turnRecorder.record(
             session,
@@ -201,7 +211,8 @@ class AgentStreamTurnStarter {
             message,
             false,
             null,
-            "deterministic_pre_router");
+            "deterministic_pre_router",
+            routed.attribution());
     // Persist the resolved route alongside the decision. Replay clients must not infer the
     // provider/model from the current account preference after a later provider switch.
     startPayload.put("provider", effectiveProvider);
