@@ -1,12 +1,12 @@
-const EXECUTING_STATUSES = new Set(['EXECUTING', 'RUNNING', 'REVIEWING', 'BUILDING']);
-const TERMINAL_STATUSES = new Set([
-  'COMPLETE',
-  'COMPLETED',
-  'PARTIAL',
-  'FAILED',
-  'ERROR',
-  'CANCELLED',
-]);
+// RR-1463 — the plan page's own executing/terminal sets omitted APPROVAL_RESUMING and
+// WORKING, so a run approved in another tab stayed on the static gate instead of routing
+// to Live. Both predicates now delegate to the one shared vocabulary in lib/runStatus.
+import {
+  isExecutingRunStatus,
+  isPlanningRunStatus,
+  isQueuedRunStatus,
+  isTerminalRunStatus,
+} from '@/lib/runStatus';
 
 export function formatPlanUsd(value?: number | null): string {
   return value == null ? '—' : `$${value.toFixed(4)}`;
@@ -21,32 +21,21 @@ export function managedAiBadgeKind(state?: string | null): 'ok' | 'warn' | 'bad'
 }
 
 export function isPlanExecutingStatus(status?: string | null): boolean {
-  return EXECUTING_STATUSES.has((status || '').toUpperCase());
+  return isExecutingRunStatus(status);
 }
 
 export function isPlanTerminalStatus(status?: string | null): boolean {
-  return TERMINAL_STATUSES.has((status || '').toUpperCase());
+  return isTerminalRunStatus(status);
 }
 
 export function planStatusPhrase(status: string): string {
   const normalized = status.toUpperCase();
   if (isPlanTerminalStatus(normalized)) return 'finished — see the result page';
   if (normalized === 'REVIEWING') return 'in review';
-  if (
-    normalized === 'WORKING' ||
-    normalized === 'EXECUTING' ||
-    normalized === 'RUNNING' ||
-    normalized === 'BUILDING'
-  ) {
-    return 'executing';
-  }
-  if (
-    normalized === 'PLANNING' ||
-    normalized === 'CLASSIFYING' ||
-    normalized === 'PENDING' ||
-    normalized === 'SUBMITTED' ||
-    normalized === ''
-  ) {
+  // APPROVAL_RESUMING is the state a just-approved run occupies while the pipeline
+  // picks it back up, so it reads as execution rather than the generic fallback.
+  if (isExecutingRunStatus(normalized)) return 'executing';
+  if (isPlanningRunStatus(normalized) || isQueuedRunStatus(normalized) || normalized === '') {
     return 'being planned';
   }
   return 'in progress';

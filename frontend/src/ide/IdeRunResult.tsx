@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
@@ -21,7 +21,7 @@ import {
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
-import {costReconciliation, phaseCostRows} from '@/ide/runCostLedger';
+import {costReconciliation, phaseCostRows, stepCallsView} from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
@@ -111,6 +111,9 @@ export default function IdeRunResult() {
   // Re-run button with "No generated code or test plan is available to re-run".
   const [testsFailure, setTestsFailure] = useState<LoadFailure | null>(null);
   const [costEvidenceFailure, setCostEvidenceFailure] = useState<LoadFailure | null>(null);
+  // RR-1552 — separates "the ledger was withheld from this reader" from "this run made no
+  // provider calls"; both used to render as the latter.
+  const stepCalls = useMemo(() => stepCallsView(costEvidence), [costEvidence]);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
   const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
@@ -2447,7 +2450,19 @@ export default function IdeRunResult() {
                 <div className='ide-card' style={{overflowX: 'auto'}}>
                   {costEvidenceFailure ? (
                     <LoadError failure={costEvidenceFailure} what='per-call attribution' />
-                  ) : (costEvidence?.stepCalls ?? []).length === 0 ? (
+                  ) : stepCalls.kind === 'restricted' ? (
+                    // RR-1552 — the ledger exposes per-attempt key source, routing and spend, so
+                    // the backend restricts it to org admins. Saying "none available" here would
+                    // be a claim about the run; this is a claim about the reader's access.
+                    <div className='ide-empty'>
+                      Per-call attribution is restricted to organization admins.
+                      {stepCalls.total > 0
+                        ? ` This run recorded ${stepCalls.total.toLocaleString()} provider ${
+                            stepCalls.total === 1 ? 'call' : 'calls'
+                          }; the totals above include them.`
+                        : ' The totals above still reflect the full run.'}
+                    </div>
+                  ) : stepCalls.kind !== 'rows' ? (
                     <div className='ide-empty'>
                       No per-call attribution is available for this run.
                     </div>
@@ -2464,7 +2479,7 @@ export default function IdeRunResult() {
                         </tr>
                       </thead>
                       <tbody>
-                        {costEvidence?.stepCalls.map((call) => (
+                        {stepCalls.rows.map((call) => (
                           <tr key={call.id} style={{borderTop: '1px solid var(--ide-border)'}}>
                             <td style={{padding: '7px 8px 7px 0'}}>
                               {call.agentRole || 'unattributed'}
@@ -2491,6 +2506,14 @@ export default function IdeRunResult() {
                         ))}
                       </tbody>
                     </table>
+                  )}
+                  {stepCalls.kind === 'rows' && stepCalls.hasMore && (
+                    // RR-1558 paged the ledger newest-first. Without this the table silently
+                    // looks like the complete history of the run.
+                    <div style={{marginTop: 8, fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                      Showing the {stepCalls.rows.length.toLocaleString()} most recent of{' '}
+                      {stepCalls.total.toLocaleString()} provider calls.
+                    </div>
                   )}
                 </div>
                 {(() => {

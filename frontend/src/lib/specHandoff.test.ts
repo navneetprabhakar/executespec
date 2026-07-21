@@ -59,3 +59,54 @@ describe('specHandoff', () => {
     expect(consumeSpecHandoff()).toBeNull();
   });
 });
+
+// RR-1537 — the parser validated 2 of 7 envelope fields and cast the rest through, so a
+// malformed envelope in sessionStorage produced a value whose runtime shape contradicted
+// its declared type — and a non-string projectId reached run submission.
+describe('parseSpecHandoff malformed envelopes', () => {
+  const base = {
+    schemaVersion: 1,
+    handoffId: 'h1',
+    spec: 'build a thing',
+    projectId: 'p1',
+    repoId: 'r1',
+    scope: 'PROJECT',
+    source: 'onboarding-sample',
+    createdAt: '2026-07-20T00:00:00.000Z',
+  };
+
+  it('normalizes a non-string projectId instead of passing it to run submission', () => {
+    for (const bad of [{}, 42, [], true]) {
+      const parsed = parseSpecHandoff(JSON.stringify({...base, projectId: bad}));
+      expect(parsed?.projectId, JSON.stringify(bad)).toBeNull();
+      // A PROJECT scope is not honourable without a project, so it degrades to GLOBAL.
+      expect(parsed?.scope, JSON.stringify(bad)).toBe('GLOBAL');
+    }
+  });
+
+  it('rejects a source outside the declared union', () => {
+    expect(parseSpecHandoff(JSON.stringify({...base, source: 'attacker'}))?.source).toBe('legacy');
+    expect(parseSpecHandoff(JSON.stringify({...base, source: 7}))?.source).toBe('legacy');
+  });
+
+  it('replaces an unparseable createdAt rather than keeping it', () => {
+    const parsed = parseSpecHandoff(JSON.stringify({...base, createdAt: 'not-a-date'}));
+    expect(Number.isNaN(Date.parse(parsed?.createdAt ?? ''))).toBe(false);
+  });
+
+  it('mints an id when handoffId is absent, blank or the wrong type', () => {
+    for (const bad of [undefined, '', '   ', 5, {}]) {
+      const parsed = parseSpecHandoff(JSON.stringify({...base, handoffId: bad}));
+      expect(typeof parsed?.handoffId, JSON.stringify(bad ?? null)).toBe('string');
+      expect(parsed?.handoffId, JSON.stringify(bad ?? null)).not.toBe('');
+    }
+  });
+
+  it('normalizes a non-string repoId to null', () => {
+    expect(parseSpecHandoff(JSON.stringify({...base, repoId: {}}))?.repoId).toBeNull();
+  });
+
+  it('keeps a well-formed envelope untouched', () => {
+    expect(parseSpecHandoff(JSON.stringify(base))).toEqual(base);
+  });
+});

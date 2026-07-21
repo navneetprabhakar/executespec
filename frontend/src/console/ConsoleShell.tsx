@@ -82,7 +82,15 @@ export default function ConsoleShell() {
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerCloseRef = useRef<HTMLButtonElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const [apiError, setApiError] = useState(false);
+  // RR-1655 — the three shell loaders used to share one `apiError` boolean and leave their
+  // state at `[]`/`0` on failure, so a projects-only read failure rendered the affirmative
+  // "you have none" copy ("No work yet", the empty-projects "New project" affordance) for a
+  // user who may well have both, while any single failure raised the workspace-wide banner
+  // over two rails that had rendered real data. Each source now tracks its own outcome.
+  const [runsFailed, setRunsFailed] = useState(false);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const [unreadFailed, setUnreadFailed] = useState(false);
+  const apiError = runsFailed || projectsFailed || unreadFailed;
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('es:nav:collapsed') === '1',
   );
@@ -105,21 +113,30 @@ export default function ConsoleShell() {
   const refreshRuns = useCallback(() => {
     api
       .getRuns({size: 6})
-      .then((r) => setRuns(r.content ?? []))
-      .catch(() => setApiError(true));
+      .then((r) => {
+        setRuns(r.content ?? []);
+        setRunsFailed(false);
+      })
+      .catch(() => setRunsFailed(true));
   }, []);
   // Unread notification count for the top-bar bell (founder report #2) — same cadence.
   const refreshUnread = useCallback(() => {
     api
       .getUnreadCount()
-      .then((r) => setUnread(r.count ?? 0))
-      .catch(() => setApiError(true));
+      .then((r) => {
+        setUnread(r.count ?? 0);
+        setUnreadFailed(false);
+      })
+      .catch(() => setUnreadFailed(true));
   }, []);
   const refreshProjects = useCallback(() => {
     api
       .getProjects()
-      .then((items) => setProjects(items.filter((p) => !p.archivedAt)))
-      .catch(() => setApiError(true));
+      .then((items) => {
+        setProjects(items.filter((p) => !p.archivedAt));
+        setProjectsFailed(false);
+      })
+      .catch(() => setProjectsFailed(true));
   }, []);
   // Sandbox sessions back the "latest sandbox" command. This is a secondary
   // palette affordance, so a failure must stay silent rather than raise the
@@ -474,10 +491,11 @@ export default function ConsoleShell() {
             type='button'
             className='con-api-error-retry'
             onClick={() => {
-              setApiError(false);
-              refreshRuns();
-              refreshUnread();
-              refreshProjects();
+              // Retry only the sources that actually failed; a successful reload clears
+              // its own flag, and the banner disappears once none remain set.
+              if (runsFailed) refreshRuns();
+              if (unreadFailed) refreshUnread();
+              if (projectsFailed) refreshProjects();
             }}
           >
             Retry
@@ -557,9 +575,14 @@ export default function ConsoleShell() {
               <RunsIcon size={12} />
               Recent work
               <span style={{flex: 1}} />
-              <span className='con-side-count'>{runs.length}</span>
+              <span className='con-side-count'>{runsFailed ? '—' : runs.length}</span>
             </summary>
-            {runs.length === 0 ? (
+            {runsFailed && runs.length === 0 ? (
+              // RR-1655 — never claim the account has no work when the read failed.
+              <button type='button' className='con-side-empty' onClick={refreshRuns}>
+                Couldn&apos;t load recent work — retry
+              </button>
+            ) : runs.length === 0 ? (
               <div className='con-side-empty'>No work yet</div>
             ) : (
               runs.slice(0, 5).map((r) => (
@@ -582,9 +605,15 @@ export default function ConsoleShell() {
               <ProjectsIcon size={12} />
               Projects
               <span style={{flex: 1}} />
-              <span className='con-side-count'>{projects.length}</span>
+              <span className='con-side-count'>{projectsFailed ? '—' : projects.length}</span>
             </summary>
-            {projects.length === 0 ? (
+            {projectsFailed && projects.length === 0 ? (
+              // RR-1655 — offering "New project" as the only affordance told a user with
+              // projects that they had none. Retry the read instead.
+              <button type='button' className='con-side-empty' onClick={refreshProjects}>
+                Couldn&apos;t load projects — retry
+              </button>
+            ) : projects.length === 0 ? (
               <button type='button' className='con-runitem' onClick={() => navigate('/projects')}>
                 <PlusIcon size={13} />
                 <span className='con-runitem-label'>New project</span>
