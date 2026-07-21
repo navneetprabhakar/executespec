@@ -132,10 +132,24 @@ confidentiality. Now, reusing the platform primitives rather than a new redactor
   before it is mapped into `CodeReviewAgent.StaticFinding`;
 - the `.env` term is gone from `scoreFile`; `docker` / `config` remain.
 
-**Bound on the claim:** this covers high-confidence provider/PAT/cloud/PEM formats and
-the declared sensitive-path set. Customer-specific credential formats, PII and
-business identifiers in ordinary source are NOT redacted, and reviewing a repository
-still discloses its source to the configured provider.
+**Surface minimisation + disclosure audit (RR-435 follow-up, 2026-07-21):**
+
+- a file flagged by a static finding is now sent as bounded line WINDOWS around each
+  finding anchor (`readBoundedWindows`, `FINDING_CONTEXT_LINES = 40`, overlapping
+  windows merged, each line keeps its 1-based number) instead of the whole
+  `MAX_BYTES_PER_FILE` head, so a large flagged file discloses only the relevant
+  neighbourhood. Non-anchored files keep the head read;
+- `sampleFiles(root, findings, auditKey)` writes a SERVER-LOG-ONLY audit line
+  (`auditDisclosure`) naming every file and line range that crossed the boundary to
+  the review model plus the char count — never into the prompt, so the disclosure is
+  auditable after the fact without becoming a new disclosure channel.
+
+**Bound on the claim (unchanged — RR-435 stays PARTIAL):** redaction covers only
+high-confidence provider/PAT/cloud/PEM formats and the declared sensitive-path set.
+Pattern-based redaction cannot catch a secret in an unrecognised format, there is no
+general PII redactor, and reviewing a repository still discloses its source to the
+configured provider. This work REDUCES the disclosed surface and ADDS an audit trail;
+it does not close disclosure.
 
 ## Schema
 

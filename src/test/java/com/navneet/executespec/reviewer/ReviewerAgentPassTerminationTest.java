@@ -107,6 +107,90 @@ class ReviewerAgentPassTerminationTest {
   }
 
   @Test
+  void abandonedPassThreadLosesWriteAuthorityMidFlight() throws Exception {
+    // RR-272 / RR-1687 — the concrete claim: after the reviewer abandons a timed-out pass, a
+    // writeFile from that still-running worker thread is REFUSED, not merely un-vouched-for. The
+    // worker ignores interruption (an in-flight tool batch) and keeps probing its own write
+    // authority; the value it observes must flip to a "revoked" refusal once the control thread
+    // abandons it. Greenfield request, so the ONLY reason a write is refused is revocation.
+    java.util.concurrent.atomic.AtomicReference<String> writeAfterAbandon =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    AtomicBoolean release = new AtomicBoolean(false);
+    when(worker.run(any()))
+        .thenAnswer(
+            inv -> {
+              long deadline = System.currentTimeMillis() + 20_000;
+              while (!release.get() && System.currentTimeMillis() < deadline) {
+                String verdict =
+                    com.navneet.executespec.tool.ReviewerMutationScope.validateWriteFile(
+                        "src/anything.java", true, true);
+                if (verdict != null) {
+                  writeAfterAbandon.set(verdict);
+                  break;
+                }
+                try {
+                  Thread.sleep(20);
+                } catch (InterruptedException ignored) {
+                  // deliberately swallowed — models an in-flight tool batch
+                }
+              }
+              return WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build();
+            });
+    agent.setTerminationReserveSecondsForTest(3);
+
+    try {
+      agent.runPassWithTimeout(request(), 3, "reviewer-general", "system", 1, null);
+      assertThat(writeAfterAbandon.get())
+          .as("a writeFile from the abandoned pass thread must be refused")
+          .isNotNull()
+          .contains("revoked");
+    } finally {
+      release.set(true);
+    }
+  }
+
+  @Test
+  void abandonedPassMarksWorkspaceNonQuiescentSoPreReviewCaptureCanSkipIt() throws Exception {
+    // RR-1686 — once a pass could not be proven terminated, its workspace is flagged so a
+    // concurrent review of the same workspace does not run its pre-review build smoke over a tree
+    // the abandoned thread may still hold. Unique workspace path so the JVM-shared marker set does
+    // not carry state in from another test in this class.
+    Path uniqueWorkspace = Path.of("target", "rr1686-" + System.nanoTime()).toAbsolutePath();
+    ReviewerRequest req =
+        ReviewerRequest.builder()
+            .provider("anthropic")
+            .model("claude-sonnet-5")
+            .context(new ExecutionContext("run-rr1686", "review", uniqueWorkspace))
+            .build();
+    assertThat(ReviewerAgent.isWorkspaceNonQuiescent(req)).isFalse();
+
+    AtomicBoolean release = new AtomicBoolean(false);
+    when(worker.run(any()))
+        .thenAnswer(
+            inv -> {
+              long deadline = System.currentTimeMillis() + 20_000;
+              while (!release.get() && System.currentTimeMillis() < deadline) {
+                try {
+                  Thread.sleep(20);
+                } catch (InterruptedException ignored) {
+                  // deliberately swallowed
+                }
+              }
+              return WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build();
+            });
+    agent.setTerminationReserveSecondsForTest(1);
+
+    try {
+      ReviewerAgent.PassRun run =
+          agent.runPassWithTimeout(req, 3, "reviewer-general", "system", 1, null);
+      assertThat(run.workspaceQuiescent()).isFalse();
+      assertThat(ReviewerAgent.isWorkspaceNonQuiescent(req)).isTrue();
+    } finally {
+      release.set(true);
+    }
+  }
+
+  @Test
   void abandonedReviewResultCarriesNoWorkspaceEvidence() {
     ReviewerResult abandoned =
         ReviewerResult.builder()

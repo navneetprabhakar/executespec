@@ -567,7 +567,8 @@ public class ReviewerAgent {
       String taskIdSuffix,
       String systemPrompt,
       long wallClockSeconds,
-      String preBuildError) {
+      String preBuildError,
+      com.navneet.executespec.tool.ReviewerMutationScope.Lease lease) {
     ExecutionContext passCtx = req.context().child(req.context().taskId() + "-" + taskIdSuffix);
     // v2.5.12 — resolve from the model matrix.
     com.navneet.executespec.router.LlmProvider reviewerProvider;
@@ -612,7 +613,7 @@ public class ReviewerAgent {
             req.approvedNewFiles(),
             Boolean.TRUE.equals(req.allowBuildManifestCreation()));
     return com.navneet.executespec.tool.ReviewerMutationScope.withPolicy(
-        mutationPolicy, () -> worker.run(workerRequest));
+        mutationPolicy, lease, () -> worker.run(workerRequest));
   }
 
   /**
@@ -673,6 +674,17 @@ exit=0 — the harness will reject premature completions.
    * build-failing path; the run-end final smoke will catch a real failure either way.
    */
   private String capturePreReviewBuildError(ReviewerRequest req) {
+    // RR-1686 — do not run the pre-review build smoke over a workspace an abandoned reviewer pass
+    // (from this or a concurrent review of the same workspace) may still be mutating. Returning
+    // null is the existing "could not capture" fail-safe: the reviewer simply proceeds without a
+    // build-error target rather than measuring a workspace generation another thread is writing.
+    if (isWorkspaceNonQuiescent(req)) {
+      log.warn(
+          "capturePreReviewBuildError skipped run={} — workspace flagged non-quiescent by an"
+              + " abandoned reviewer pass; not reading a tree another thread may still hold",
+          req.context() == null ? null : req.context().runId());
+      return null;
+    }
     try {
       ObjectNode buildArgs = objectMapper.createObjectNode();
       if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
@@ -721,13 +733,18 @@ exit=0 — the harness will reject premature completions.
       String preBuildError) {
     AtomicReference<Thread> passThread = new AtomicReference<>();
     CountDownLatch terminated = new CountDownLatch(1);
+    // RR-272 / RR-1687 — the revocation handle for THIS pass. Bound onto the worker thread via
+    // runPass -> ReviewerMutationScope.withPolicy; retained here so that if we abandon the pass we
+    // can strip its write authority even while its thread is still running.
+    com.navneet.executespec.tool.ReviewerMutationScope.Lease lease =
+        new com.navneet.executespec.tool.ReviewerMutationScope.Lease();
     Future<WorkerResult> future =
         passExecutor.submit(
             () -> {
               passThread.set(Thread.currentThread());
               try {
                 return runPass(
-                    req, maxIter, taskIdSuffix, systemPrompt, timeoutSeconds, preBuildError);
+                    req, maxIter, taskIdSuffix, systemPrompt, timeoutSeconds, preBuildError, lease);
               } finally {
                 terminated.countDown();
               }
@@ -735,7 +752,8 @@ exit=0 — the harness will reject premature completions.
     try {
       return new PassRun(future.get(timeoutSeconds, TimeUnit.SECONDS), true);
     } catch (TimeoutException te) {
-      boolean quiescent = awaitPassTermination(future, passThread, terminated, taskIdSuffix);
+      boolean quiescent =
+          awaitPassTermination(future, passThread, terminated, taskIdSuffix, lease, req);
       String summary =
           quiescent
               ? "review pass timeout after " + timeoutSeconds + "s"
@@ -752,7 +770,8 @@ exit=0 — the harness will reject premature completions.
               .build(),
           quiescent);
     } catch (InterruptedException ie) {
-      boolean quiescent = awaitPassTermination(future, passThread, terminated, taskIdSuffix);
+      boolean quiescent =
+          awaitPassTermination(future, passThread, terminated, taskIdSuffix, lease, req);
       Thread.currentThread().interrupt();
       return new PassRun(
           WorkerResult.builder()
@@ -785,8 +804,15 @@ exit=0 — the harness will reject premature completions.
       Future<WorkerResult> future,
       AtomicReference<Thread> passThread,
       CountDownLatch terminated,
-      String taskIdSuffix) {
+      String taskIdSuffix,
+      com.navneet.executespec.tool.ReviewerMutationScope.Lease lease,
+      ReviewerRequest req) {
     future.cancel(true);
+    // RR-272 / RR-1687 — revoke write authority BEFORE we start waiting, not after. The worker
+    // thread only observes interruption at an iteration boundary, so it may still issue a
+    // writeFile/editFile/shell during the reserve window; revoking now makes every such call fail
+    // closed, whether the pass is brownfield or greenfield. Revocation is permanent and idempotent.
+    lease.revoke();
     long reserve = terminationReserveSeconds;
     long deadline = System.currentTimeMillis() + reserve * 1000L;
     boolean wasInterrupted = false;
@@ -812,6 +838,12 @@ exit=0 — the harness will reject premature completions.
     } finally {
       if (wasInterrupted) Thread.currentThread().interrupt();
     }
+    // RR-1686 — the pass thread outlived the reserve window and may still be mutating this
+    // workspace. Record the workspace as non-quiescent for the JVM's lifetime so a CONCURRENT
+    // review of the same workspace (a sibling of RR-272) does not run its pre-review build smoke
+    // over a tree this abandoned thread still holds. There is no safe removal point: we cannot
+    // prove the thread ever stopped, so the flag is deliberately permanent.
+    markWorkspaceNonQuiescent(req);
     log.error(
         "ReviewerAgent pass {} TIMED OUT and did NOT terminate within {}s of cancellation."
             + " The workspace may still be mutating; abandoning all further review evidence for"
@@ -820,6 +852,38 @@ exit=0 — the harness will reject premature completions.
         taskIdSuffix,
         reserve);
     return false;
+  }
+
+  /**
+   * Workspaces (by canonical root) whose reviewer pass could not be proven terminated. Consulted by
+   * {@link #capturePreReviewBuildError} so a concurrent review of the same workspace does not read
+   * a tree an abandoned thread from another review may still hold (RR-1686). JVM-scoped and
+   * append-only: an unproven termination is never rescinded.
+   */
+  private static final java.util.Set<String> NON_QUIESCENT_WORKSPACES =
+      java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  private static String workspaceKey(ReviewerRequest req) {
+    try {
+      java.nio.file.Path root = req.context() == null ? null : req.context().workspaceRoot();
+      if (root == null) return null;
+      return root.toAbsolutePath().normalize().toString();
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
+
+  private static void markWorkspaceNonQuiescent(ReviewerRequest req) {
+    String key = workspaceKey(req);
+    if (key != null) NON_QUIESCENT_WORKSPACES.add(key);
+  }
+
+  /**
+   * Package-private for tests: is this request's workspace known to be held by an abandoned pass?
+   */
+  static boolean isWorkspaceNonQuiescent(ReviewerRequest req) {
+    String key = workspaceKey(req);
+    return key != null && NON_QUIESCENT_WORKSPACES.contains(key);
   }
 
   /**
