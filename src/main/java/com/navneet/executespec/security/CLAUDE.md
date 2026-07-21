@@ -11,15 +11,39 @@ tokens, generic secrets/passwords, and private-key blocks from outputs. `sanitiz
 returns a bounded, secret-free description; chat/tool/SSE paths must never expose a raw exception
 message.
 
+`SafeWorkspacePath` is the shared path-containment boundary for framework-owned filesystem access
+into customer-controlled trees (cloned repositories, run workspaces, generated test scaffolds). It
+enforces relative-only paths, rejects dot/empty segments, proves canonical-root containment, and
+rejects a symbolic link in any existing component; a not-yet-existing leaf is permitted only under an
+already-validated existing parent. `requireSafeRelativePosixPath` is the SCM-side variant for
+repository-relative paths written through a provider API where there is no local root to
+canonicalize against. Every failure is a refusal — the write, read or delete does not happen and is
+not redirected. Callers: `integration/RunContextComposer`, `context/ContextStore` (including the
+destructive run-end cleanup), `context/ContextAgent`, `context/ContextAgentScanner`,
+`context/ContextEvidenceBundleWriter`, `context/RunJournalStore`, `codereview/CodeReviewService`,
+`testgen/TestWorkerAgent`, and `folder/ExecutespecFolderWriter`. It duplicates the rules already in
+`tool/PathSafety` and `deployment/WorkspaceFileService`; folding those two onto this helper is a
+tracked follow-up owned by their respective lanes.
+
 `SensitiveWorkspacePathPolicy` blocks credential-like workspace paths before tool output enters an
 LLM context. `ReadFileTool` and `WorkspaceFileService` reject those paths, `SearchFilesTool` omits their hits and redacts
 secret-shaped previews, and host `ShellSandboxPolicy` rejects explicit credential-file references;
 shell output is redacted as a second boundary. `WorkspaceFileService` also rejects symbolic-link
 reads and proves real-path containment, so run chat/file APIs cannot follow a repository link to a
-host secret. Safe configuration templates remain inspectable.
+host secret. Safe configuration templates remain inspectable. `WorkspaceFileService.readFileDiff`
+applies the same policy plus `SafeWorkspacePath.requireSafeRelativePosixPath` before any head,
+GitHub-fallback or `git show <baseSha>:<path>` read, so a credential file deleted from the head can
+no longer be served back out of history as `FileDiff.base` (RR-859).
 
 `ArtifactPublicationGuard` is the final, fail-closed egress boundary. It streams the complete Git
-candidate set (tracked plus non-ignored untracked files) immediately before GitHub/Bitbucket push,
+candidate set (tracked plus non-ignored untracked files) immediately before GitHub/Bitbucket push.
+**RR-080:** a tracked entry is scanned from its INDEXED blob by object id through one long-lived
+`git cat-file --batch` child, not from the worktree file, so a secret that was staged and then
+overwritten or deleted on disk is still blocked; the worktree copy is scanned as well, because a
+caller that stages after this gate publishes those bytes instead. **RR-081:** `ls-files -z` records
+are parsed as raw bytes — the object id decides what is scanned and the path is only a bounded label,
+so a non-UTF-8 tracked name cannot skip inspection, and an untracked entry whose name is undecodable
+is refused (`UNDECODABLE_GIT_PATH`) rather than treated as absent. It also
 scans every local or restored-GCS workspace ZIP member, and validates both newly generated and
 historical project-export tarballs before download/publication. ZIP/TAR readers enforce entry-count,
 per-entry and total-inflated limits, reject traversal and unsupported TAR entry types, and scan

@@ -84,10 +84,29 @@ public class ArtifactPublicationGuard {
         throw new PublicationBlockedException("CANDIDATE_LIST_TOO_LARGE", "(repository)");
       }
       byte[] output = Files.readAllBytes(candidateList);
-      for (String record : nulSeparated(output)) {
-        GitCandidate candidate = parseGitCandidate(record);
-        assertLabelSafe(candidate.relativePath());
-        if (!candidate.gitlink()) {
+      List<GitCandidate> candidates = new ArrayList<>();
+      for (byte[] record : nulSeparated(output)) {
+        candidates.add(parseGitCandidate(record));
+      }
+      try (GitBlobReader blobs = new GitBlobReader(repoRoot)) {
+        for (GitCandidate candidate : candidates) {
+          assertLabelSafe(candidate.label());
+          if (candidate.gitlink()) {
+            // A gitlink publishes only its path/metadata; the submodule checkout is not our tree.
+            continue;
+          }
+          if (candidate.objectId() != null) {
+            // RR-080 — the INDEXED blob is what an outgoing commit carries. Scanning the worktree
+            // file alone let a secret be staged and then overwritten or deleted on disk.
+            blobs.scan(candidate.objectId(), candidate.label(), this::assertStreamSafe);
+          } else if (!candidate.pathDecodable()) {
+            // RR-081 — an untracked entry whose raw Git bytes are not valid UTF-8 cannot be
+            // resolved to a filesystem path we can prove we scanned. Fail closed.
+            throw new PublicationBlockedException(
+                "UNDECODABLE_GIT_PATH", "(undecodable artifact path)");
+          }
+          // Tracked entries are additionally scanned on disk: if the caller stages after this gate,
+          // the worktree copy is what becomes the commit. Untracked entries only exist on disk.
           assertRepositoryPathSafe(repoRoot, candidate.relativePath());
         }
       }
@@ -240,26 +259,67 @@ public class ArtifactPublicationGuard {
     }
   }
 
-  private static List<String> nulSeparated(byte[] bytes) {
-    List<String> paths = new ArrayList<>();
+  static List<byte[]> nulSeparated(byte[] bytes) {
+    List<byte[]> records = new ArrayList<>();
     int start = 0;
     for (int i = 0; i < bytes.length; i++) {
       if (bytes[i] == 0) {
-        if (i > start) paths.add(new String(bytes, start, i - start, StandardCharsets.UTF_8));
+        if (i > start) records.add(java.util.Arrays.copyOfRange(bytes, start, i));
         start = i + 1;
       }
     }
-    if (start < bytes.length)
-      paths.add(new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8));
-    return paths;
+    if (start < bytes.length) records.add(java.util.Arrays.copyOfRange(bytes, start, bytes.length));
+    return records;
   }
 
-  private static GitCandidate parseGitCandidate(String record) {
-    int tab = record.indexOf('\t');
-    if (tab < 0) return new GitCandidate(record, false);
-    String metadata = record.substring(0, tab);
-    String path = record.substring(tab + 1);
-    return new GitCandidate(path, metadata.startsWith("160000 "));
+  /**
+   * Parses one {@code git ls-files -z --stage --cached --others --exclude-standard} record from its
+   * RAW bytes. Tracked entries are {@code <mode> <oid> <stage>\t<path>}; untracked entries carry
+   * the bare path. Path bytes on Unix are arbitrary, so they are kept as bytes and only decoded as
+   * a bounded label — never used to decide whether the content was inspected (RR-081).
+   */
+  static GitCandidate parseGitCandidate(byte[] record) {
+    int tab = -1;
+    for (int i = 0; i < record.length; i++) {
+      if (record[i] == '\t') {
+        tab = i;
+        break;
+      }
+    }
+    byte[] pathBytes =
+        tab < 0 ? record : java.util.Arrays.copyOfRange(record, tab + 1, record.length);
+    boolean decodable = isStrictUtf8(pathBytes);
+    String path = new String(pathBytes, StandardCharsets.UTF_8);
+    if (tab < 0) return new GitCandidate(path, decodable, null, false);
+
+    String metadata = new String(record, 0, tab, StandardCharsets.UTF_8);
+    String[] fields = metadata.split(" ");
+    boolean gitlink = fields.length > 0 && "160000".equals(fields[0]);
+    String objectId = fields.length > 1 && isHexObjectId(fields[1]) ? fields[1] : null;
+    return new GitCandidate(path, decodable, objectId, gitlink);
+  }
+
+  private static boolean isStrictUtf8(byte[] bytes) {
+    try {
+      StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+          .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+          .decode(java.nio.ByteBuffer.wrap(bytes));
+      return true;
+    } catch (java.nio.charset.CharacterCodingException e) {
+      return false;
+    }
+  }
+
+  private static boolean isHexObjectId(String value) {
+    if (value == null || value.length() < 40 || value.length() > 64) return false;
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+      if (!hex) return false;
+    }
+    return true;
   }
 
   private static void validateTarHeader(byte[] header) throws IOException {
@@ -364,7 +424,85 @@ public class ArtifactPublicationGuard {
     }
   }
 
-  private record GitCandidate(String relativePath, boolean gitlink) {}
+  record GitCandidate(
+      String relativePath, boolean pathDecodable, String objectId, boolean gitlink) {
+    String label() {
+      return pathDecodable ? relativePath : "(undecodable git path)";
+    }
+  }
+
+  /** Callback shape shared with {@link #assertStreamSafe(String, InputStream)}. */
+  private interface StreamAssertion {
+    void assertSafe(String label, InputStream content) throws IOException;
+  }
+
+  /**
+   * Streams immutable Git blobs by object id through a single long-lived {@code git cat-file
+   * --batch} child. Requests are issued one at a time and drained immediately, so the child's
+   * stdout pipe can never fill while we are still writing to its stdin.
+   */
+  private static final class GitBlobReader implements AutoCloseable {
+    private final Process process;
+    private final InputStream out;
+    private final java.io.OutputStream in;
+
+    private GitBlobReader(Path repoRoot) throws IOException {
+      this.process =
+          new ProcessBuilder("git", "-C", repoRoot.toString(), "cat-file", "--batch")
+              .redirectErrorStream(false)
+              .start();
+      this.out = new java.io.BufferedInputStream(process.getInputStream());
+      this.in = process.getOutputStream();
+    }
+
+    private void scan(String objectId, String label, StreamAssertion assertion) throws IOException {
+      in.write((objectId + "\n").getBytes(StandardCharsets.US_ASCII));
+      in.flush();
+      String header = readHeaderLine();
+      String[] fields = header.split(" ");
+      if (fields.length < 3 || !"blob".equals(fields[1])) {
+        throw new PublicationBlockedException("GIT_BLOB_READ_FAILED", safePath(label));
+      }
+      long size;
+      try {
+        size = Long.parseLong(fields[2]);
+      } catch (NumberFormatException e) {
+        throw new PublicationBlockedException("GIT_BLOB_READ_FAILED", safePath(label));
+      }
+      FixedLengthInputStream body = new FixedLengthInputStream(out, size);
+      try {
+        assertion.assertSafe(label, body);
+      } finally {
+        // Always drain the member plus its trailing newline so the stream stays framed even when a
+        // finding short-circuits the scan.
+        body.drain();
+        if (out.read() < 0) throw new EOFException("git cat-file ended before member padding");
+      }
+    }
+
+    private String readHeaderLine() throws IOException {
+      StringBuilder line = new StringBuilder();
+      int value;
+      while ((value = out.read()) >= 0) {
+        if (value == '\n') return line.toString();
+        line.append((char) value);
+        if (line.length() > 512) {
+          throw new PublicationBlockedException("GIT_BLOB_READ_FAILED", "(repository)");
+        }
+      }
+      throw new PublicationBlockedException("GIT_BLOB_READ_FAILED", "(repository)");
+    }
+
+    @Override
+    public void close() {
+      try {
+        in.close();
+      } catch (IOException ignored) {
+        // The child is destroyed below regardless.
+      }
+      process.destroy();
+    }
+  }
 
   private static final class FixedLengthInputStream extends InputStream {
     private final InputStream delegate;
@@ -392,6 +530,14 @@ public class ArtifactPublicationGuard {
       if (read < 0) throw new EOFException("archive member ended early");
       remaining -= read;
       return read;
+    }
+
+    /** Consumes any unread member bytes so a shared framed stream stays aligned. */
+    private void drain() throws IOException {
+      byte[] scratch = new byte[8192];
+      while (remaining > 0) {
+        if (read(scratch, 0, scratch.length) < 0) break;
+      }
     }
   }
 

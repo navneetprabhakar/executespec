@@ -12,12 +12,14 @@ import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.billing.entity.BillingGatewayObligation;
 import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.gateway.PaymentGateway;
 import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.billing.service.BillingGatewayObligationService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -75,6 +77,9 @@ public class TierLifecycleService {
   private final ObjectProvider<PaymentGatewayRouter> gatewayRouterProvider;
   private final ObjectProvider<FeatureFlagService> featureFlagProvider;
 
+  /** V310 — durable per-subscriber cancellation obligations (RR-352 / RR-353). */
+  private final ObjectProvider<BillingGatewayObligationService> obligationServiceProvider;
+
   /**
    * Transition a tier between lifecycle states. Validates the transition against the allowed set,
    * writes the new state + audit row. Does NOT (yet) fire gateway side-effects for SUNSETTING — see
@@ -83,8 +88,73 @@ public class TierLifecycleService {
    * @throws ResponseStatusException 422 if the transition is illegal, 404 if the tier doesn't
    *     exist, 409 if the 14-day observation window isn't satisfied for HIDDEN→SUNSETTING.
    */
-  @Transactional
+  /**
+   * <b>RR-352 / RR-353.</b> Two defects lived in the old shape of this method.
+   *
+   * <p>RR-352 (false sunset): it always saved {@code SUNSETTING} first, then invoked side effects
+   * whose feature flag defaults OFF. A flag-off or missing-dependency run returned a "skipped"
+   * result that was discarded, and no scheduler ever retried. The product could therefore state
+   * that a tier was sunsetting while every existing subscription renewed indefinitely, with no
+   * customer notice and no recoverable work item. Capability is now checked BEFORE the state
+   * change, so the transition is rejected rather than committed as false terminal state.
+   *
+   * <p>RR-353 (payment side-effect atomicity): the cascade ran inside this transaction, so each
+   * accepted {@code cancelAtPeriodEnd} was followed by subscription/audit saves in the same
+   * transaction — a later DB or audit failure rolled local state back after the gateway had already
+   * accepted the cancellation, and per-item catches let the lifecycle row commit with a partial
+   * cascade. The cascade now runs AFTER this transaction commits, over durable per-subscriber
+   * obligations recorded before each gateway call, with confirmation written in separate short
+   * transactions.
+   */
   public TierConfig transitionTier(
+      String tier, LifecycleState target, String actorUserId, String reason) {
+    if (target == LifecycleState.SUNSETTING) {
+      requireSunsettingCapability(tier);
+    }
+    TierConfig saved = commitTierTransition(tier, target, actorUserId, reason);
+    if (target == LifecycleState.SUNSETTING) {
+      // Outside the committed transaction — see RR-353 above.
+      executeSunsettingSideEffects(tier, actorUserId);
+    }
+    return saved;
+  }
+
+  /**
+   * Reject a SUNSETTING transition that cannot actually cancel subscribers.
+   *
+   * <p>A safety flag may stop new sagas; it may not manufacture a terminal state whose obligations
+   * will never run. HTTP 409 rather than 500: the operator's request is well-formed, the system is
+   * simply not configured to honour it yet.
+   */
+  void requireSunsettingCapability(String tier) {
+    FeatureFlagService flags =
+        featureFlagProvider != null ? featureFlagProvider.getIfAvailable() : null;
+    if (flags == null || !flags.isEnabled(SUNSETTING_ENABLED_FLAG)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Cannot sunset "
+              + tier
+              + ": subscriber cancellation is disabled. Enable "
+              + SUNSETTING_ENABLED_FLAG
+              + " first — otherwise the tier would read as SUNSETTING while every subscription"
+              + " keeps renewing.");
+    }
+    BillingSubscriptionRepository subRepo =
+        subscriptionRepoProvider != null ? subscriptionRepoProvider.getIfAvailable() : null;
+    PaymentGatewayRouter router =
+        gatewayRouterProvider != null ? gatewayRouterProvider.getIfAvailable() : null;
+    if (subRepo == null || router == null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Cannot sunset "
+              + tier
+              + ": billing dependencies are unavailable, so subscriber cancellations cannot be"
+              + " queued.");
+    }
+  }
+
+  @Transactional
+  TierConfig commitTierTransition(
       String tier, LifecycleState target, String actorUserId, String reason) {
     TierConfig row =
         tierConfigRepo
@@ -119,11 +189,6 @@ public class TierLifecycleService {
         target,
         actorUserId,
         reason);
-
-    // Fire SUNSETTING side-effects only when transitioning INTO that state.
-    if (target == LifecycleState.SUNSETTING) {
-      executeSunsettingSideEffects(tier, actorUserId);
-    }
 
     return saved;
   }
@@ -320,7 +385,10 @@ public class TierLifecycleService {
     int queued = 0;
     int failed = 0;
     List<String> errors = new ArrayList<>();
+    BillingGatewayObligationService obligations =
+        obligationServiceProvider != null ? obligationServiceProvider.getIfAvailable() : null;
     for (BillingSubscription sub : subs) {
+      BillingGatewayObligation obligation = null;
       try {
         String gatewayName =
             sub.getPaymentGateway() != null ? sub.getPaymentGateway() : sub.getGateway();
@@ -329,10 +397,44 @@ public class TierLifecycleService {
           failed++;
           continue;
         }
+
+        // RR-352 / RR-353: commit ONE durable obligation per subscriber before the external
+        // call. A crash mid-cascade, or a later failure in this loop, therefore leaves a
+        // retryable work item per customer rather than an unrecorded cancellation.
+        if (obligations != null) {
+          obligation =
+              obligations.record(
+                  BillingGatewayObligation.builder()
+                      .kind(BillingGatewayObligation.KIND_TIER_SUNSET_CANCEL)
+                      .subscriptionId(sub.getId())
+                      .userId(sub.getUserId())
+                      .orgId(sub.getOrgId())
+                      .gateway(gatewayName)
+                      .gatewayRef(sub.getGatewaySubscriptionId())
+                      .detail("Tier " + tier + " sunset — cancel at period end")
+                      .idempotencyKey(
+                          BillingGatewayObligationService.key(
+                              BillingGatewayObligation.KIND_TIER_SUNSET_CANCEL,
+                              tier,
+                              sub.getId(),
+                              sub.getGatewaySubscriptionId()))
+                      .build());
+          if (obligation.isConfirmed()) {
+            queued++;
+            continue;
+          }
+        }
+
         PaymentGateway gateway = router.resolveByName(gatewayName);
         gateway.cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
+        // RR-354-adjacent: record the queued cancellation on the canonical fields too, so
+        // readers using the boolean contract agree with the free-form status string.
         sub.setStatus("CANCELLING_AT_PERIOD_END");
+        sub.setCancelAtPeriodEnd(true);
         subRepo.save(sub);
+        if (obligation != null) {
+          obligations.markSucceeded(obligation.getId(), sub.getGatewaySubscriptionId());
+        }
         auditService.record(
             ActivityAudit.builder()
                 .eventType("TIER_SUNSET_QUEUED")
@@ -350,10 +452,14 @@ public class TierLifecycleService {
             gatewayName,
             tier);
       } catch (Exception e) {
+        if (obligation != null && obligations != null) {
+          obligations.markFailed(obligation.getId(), e.getMessage());
+        }
         log.error(
-            "SUNSETTING cancel-at-period-end failed: sub={}, tier={}, error={}",
+            "SUNSETTING cancel-at-period-end failed: sub={}, tier={}, obligation={}, error={}",
             sub.getGatewaySubscriptionId(),
             tier,
+            obligation != null ? obligation.getId() : null,
             e.getMessage(),
             e);
         errors.add(sub.getId() + ":" + e.getMessage());

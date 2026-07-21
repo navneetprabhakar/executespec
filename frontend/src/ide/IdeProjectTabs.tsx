@@ -57,6 +57,21 @@ function relTime(input?: string | null): string {
   return `${d}d ago`;
 }
 
+/**
+ * Colour for the per-repo architecture badge (RR-1657).
+ *
+ * Only `GENERATED` is an affirmative "verified current" claim and earns green. `STALE` is a known
+ * negative (yellow). `UNVERIFIED` — the server could not probe the repositories, or the project has
+ * only LOCAL/non-GitHub sources — is neither, and must not be rendered as a pass. The previous
+ * `includes('STALE') ? yellow : green` painted every unknown state green.
+ */
+const archStatusColor = (status: string): string => {
+  const s = status.toUpperCase();
+  if (s.includes('STALE')) return 'var(--ide-yellow)';
+  if (s === 'GENERATED') return 'var(--ide-green)';
+  return 'var(--ide-fg-muted)';
+};
+
 const LIVE = new Set(['CLASSIFYING', 'PLANNING', 'EXECUTING', 'AWAITING_APPROVAL', 'RUNNING']);
 const isLive = (s?: string) => LIVE.has((s || '').toUpperCase());
 const scoreOf = (r: unknown) => (r as {verifiedScore?: number}).verifiedScore;
@@ -1694,9 +1709,10 @@ export function IdeProjectRepos() {
                     <span>Architecture</span>
                     <span
                       style={{
-                        color: String(archStatus).includes('STALE')
-                          ? 'var(--ide-yellow)'
-                          : 'var(--ide-green)',
+                        // RR-1657: green means "verified current". UNVERIFIED (probe failed, or the
+                        // project has only LOCAL/non-GitHub sources) is not a pass — colouring
+                        // anything-that-isn't-STALE green was the front half of the same fail-open.
+                        color: archStatusColor(String(archStatus)),
                       }}
                     >
                       {String(archStatus)}

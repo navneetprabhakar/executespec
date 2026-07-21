@@ -1,7 +1,5 @@
 package com.navneet.executespec.deployment.preview;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -56,9 +54,14 @@ public class ComposeFileGenerator {
     if (databaseType != null) {
       allEnvVars.putAll(buildDbConnectionVars(databaseType, projectType));
     }
-    // User-provided vars override auto-injected ones
+    // User-provided vars override auto-injected ones — after validation (RR-156)
     if (envVars != null) {
-      allEnvVars.putAll(envVars);
+      envVars.forEach(
+          (k, v) -> {
+            validateEnvName(k);
+            validateEnvValue(k, v);
+            allEnvVars.put(k, v);
+          });
     }
 
     var sb = new StringBuilder();
@@ -126,17 +129,22 @@ public class ComposeFileGenerator {
     sb.append("  preview-net:\n");
     sb.append("    driver: bridge\n");
 
+    String compose = sb.toString();
+    // RR-156: the generated document is executed by the host Docker daemon, so before it is
+    // written it must be parsed back and shown to contain only the services and directives this
+    // generator intended. If any user-controlled value had escaped its scalar and introduced a
+    // top-level key or a privileged directive, that shows up here and the preview fails closed.
+    assertNoInjectedDirectives(compose);
+
     Path composeFile = workspacePath.resolve("docker-compose.yml");
-    try {
-      Files.writeString(composeFile, sb.toString());
-      log.debug(
-          "Generated docker-compose.yml at {} (db={}, envVars={})",
-          composeFile,
-          databaseType,
-          allEnvVars.size());
-    } catch (IOException e) {
-      throw new PreviewException("Failed to write docker-compose.yml: " + e.getMessage(), e);
-    }
+    // RR-476: symlink-safe, containment-checked write — the customer repository controls this
+    // directory and could otherwise aim the write at a host file.
+    PreviewArtifactWriter.write(workspacePath, "docker-compose.yml", compose);
+    log.debug(
+        "Generated docker-compose.yml at {} (db={}, envVars={})",
+        composeFile,
+        databaseType,
+        allEnvVars.size());
     return composeFile;
   }
 
@@ -307,6 +315,106 @@ public class ComposeFileGenerator {
     }
 
     return env;
+  }
+
+  // ------------------------------------------------------------------ RR-156 injection defence
+
+  /**
+   * Environment variable names accepted into a generated Compose file. POSIX identifier shape only
+   * — the exact set a shell can export. Anything else (a name containing a newline, a colon, an
+   * indentation-breaking space, or YAML structure characters) is a Compose-injection attempt, not a
+   * variable name.
+   */
+  private static final java.util.regex.Pattern ENV_NAME =
+      java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_]{0,127}");
+
+  /**
+   * Top-level Compose keys this generator is allowed to emit. Anything else appearing in the parsed
+   * document means a value broke out of its scalar.
+   */
+  private static final java.util.Set<String> ALLOWED_TOP_LEVEL_KEYS =
+      java.util.Set.of("services", "networks");
+
+  /** Service-level keys this generator is allowed to emit. */
+  private static final java.util.Set<String> ALLOWED_SERVICE_KEYS =
+      java.util.Set.of(
+          "build",
+          "image",
+          "ports",
+          "deploy",
+          "environment",
+          "depends_on",
+          "networks",
+          "restart",
+          "security_opt",
+          "cap_drop",
+          "extra_hosts",
+          "tmpfs",
+          "healthcheck");
+
+  private void validateEnvName(String name) {
+    if (name == null || !ENV_NAME.matcher(name).matches()) {
+      // Deliberately does not echo the name: it is attacker-controlled text.
+      throw new PreviewException(
+          "Invalid preview environment variable name. Names must match [A-Za-z_][A-Za-z0-9_]*.");
+    }
+  }
+
+  private void validateEnvValue(String name, String value) {
+    if (value == null) {
+      return;
+    }
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      // Newlines end a YAML scalar; other C0/C1 controls have no legitimate use in an env value
+      // and are the classic vehicle for smuggling additional Compose directives.
+      if (c == '\n' || c == '\r' || (c < 0x20 && c != '\t') || c == 0x7f) {
+        throw new PreviewException(
+            "Preview environment variable "
+                + name
+                + " contains a control character and was rejected.");
+      }
+    }
+    if (value.length() > 32_768) {
+      throw new PreviewException("Preview environment variable " + name + " is too large.");
+    }
+  }
+
+  /** Parses the generated document and rejects anything this generator did not intend to emit. */
+  @SuppressWarnings("unchecked")
+  private void assertNoInjectedDirectives(String compose) {
+    Object parsed;
+    try {
+      parsed = com.navneet.executespec.util.SafeYamlLoader.load(compose);
+    } catch (RuntimeException e) {
+      throw new PreviewException(
+          "Generated docker-compose.yml is not valid YAML; refusing to run.");
+    }
+    if (!(parsed instanceof Map<?, ?> root)) {
+      throw new PreviewException("Generated docker-compose.yml is not a mapping; refusing to run.");
+    }
+    for (Object key : root.keySet()) {
+      if (!ALLOWED_TOP_LEVEL_KEYS.contains(String.valueOf(key))) {
+        throw new PreviewException(
+            "Generated docker-compose.yml contains an unexpected top-level directive; refusing"
+                + " to run.");
+      }
+    }
+    Object services = root.get("services");
+    if (services instanceof Map<?, ?> serviceMap) {
+      for (Object svc : serviceMap.values()) {
+        if (!(svc instanceof Map<?, ?> svcDef)) {
+          continue;
+        }
+        for (Object key : svcDef.keySet()) {
+          if (!ALLOWED_SERVICE_KEYS.contains(String.valueOf(key))) {
+            throw new PreviewException(
+                "Generated docker-compose.yml contains an unexpected service directive; refusing"
+                    + " to run.");
+          }
+        }
+      }
+    }
   }
 
   /** Quote a YAML value if it contains special characters. */

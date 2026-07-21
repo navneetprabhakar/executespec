@@ -22,7 +22,7 @@ class TierLifecycleServiceTest {
   // Pure state-machine tests — validateTransition never touches repos,
   // gateway router, or feature flags. Null constructor args are safe here.
   private final TierLifecycleService svc =
-      new TierLifecycleService(null, null, null, null, null, null);
+      new TierLifecycleService(null, null, null, null, null, null, null);
 
   @Nested
   class AllowedTransitions {
@@ -117,6 +117,57 @@ class TierLifecycleServiceTest {
       assertThat(LifecycleState.fromDbValue("LISTED")).isEqualTo(LifecycleState.LISTED);
       assertThat(LifecycleState.fromDbValue("HIDDEN")).isEqualTo(LifecycleState.HIDDEN);
       assertThat(LifecycleState.fromDbValue("SUNSETTING")).isEqualTo(LifecycleState.SUNSETTING);
+    }
+  }
+
+  /**
+   * RR-352 — a SUNSETTING transition used to commit the tier state first and then no-op its side
+   * effects whenever the feature flag was off or billing deps were missing, producing a tier that
+   * reads as sunsetting while every subscription renews forever. Capability is now required BEFORE
+   * the state change.
+   */
+  @Nested
+  class SunsettingCapabilityGate {
+
+    @Test
+    void rejectsSunsetWhenSubscriberCancellationIsDisabled() {
+      assertThatThrownBy(() -> svc.requireSunsettingCapability("PRO"))
+          .isInstanceOf(ResponseStatusException.class)
+          .hasMessageContaining("billing.lifecycle.sunsetting.enabled");
+    }
+
+    @Test
+    void rejectsSunsetWhenBillingDependenciesAreUnavailable() {
+      TierLifecycleService withFlagOn =
+          new TierLifecycleService(
+              null,
+              null,
+              null,
+              org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class),
+              org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class),
+              flagProviderReturning(true),
+              null);
+
+      assertThatThrownBy(() -> withFlagOn.requireSunsettingCapability("PRO"))
+          .isInstanceOf(ResponseStatusException.class)
+          .hasMessageContaining("billing dependencies are unavailable");
+    }
+
+    @SuppressWarnings("unchecked")
+    private org.springframework.beans.factory.ObjectProvider<
+            com.navneet.executespec.config.featureflag.FeatureFlagService>
+        flagProviderReturning(boolean enabled) {
+      var flags =
+          org.mockito.Mockito.mock(
+              com.navneet.executespec.config.featureflag.FeatureFlagService.class);
+      org.mockito.Mockito.when(flags.isEnabled(TierLifecycleService.SUNSETTING_ENABLED_FLAG))
+          .thenReturn(enabled);
+      var provider =
+          (org.springframework.beans.factory.ObjectProvider<
+                  com.navneet.executespec.config.featureflag.FeatureFlagService>)
+              org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+      org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(flags);
+      return provider;
     }
   }
 }

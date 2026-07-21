@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -451,10 +452,30 @@ public class ExecutespecFolderWriter {
     return CONFIG_PREFIX + projectSlug + "/" + suffix;
   }
 
+  /**
+   * RR-525 — a bare {@code startsWith(".executespec/")} is not containment: {@code
+   * .executespec/contracts/produced/../../../.github/workflows/release.yml} passes it and lands
+   * anywhere in the repository. Callers derive these names from customer/source-controlled strings
+   * (contract names), so the writer must enforce canonical POSIX relative segments itself and
+   * re-check containment after normalization, not trust its callers.
+   */
   private void requireFolderRoot(String path) {
     if (path == null || !path.startsWith(FOLDER_ROOT)) {
       throw new IllegalArgumentException(
           "ExecutespecFolderWriter only writes paths under " + FOLDER_ROOT + "; got: " + path);
+    }
+    try {
+      SafeWorkspacePath.requireSafeRelativePosixPath(path);
+    } catch (SecurityException e) {
+      throw new IllegalArgumentException(
+          "ExecutespecFolderWriter rejected an unsafe path: " + e.getMessage());
+    }
+    // Normalize defensively: even with dot segments rejected above, prove the canonical form is
+    // still beneath the folder root before any SCM write.
+    String normalized = java.nio.file.Path.of(path).normalize().toString().replace('\\', '/');
+    if (!normalized.startsWith(FOLDER_ROOT)) {
+      throw new IllegalArgumentException(
+          "ExecutespecFolderWriter path escapes " + FOLDER_ROOT + " after normalization");
     }
   }
 

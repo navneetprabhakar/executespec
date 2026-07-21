@@ -60,6 +60,15 @@ public class PreviewSurfaceDiscovery {
   /** How many candidate files are read into memory for scoring. */
   private static final int MAX_FILES_READ = 20_000;
 
+  /**
+   * Total characters held in memory across all files read for scoring (RR-304).
+   *
+   * <p>32 MiB of characters is roughly an order of magnitude more than the largest prompt budget a
+   * render can spend, so it never truncates a realistic project, while capping what a single
+   * request can retain on a shared JVM.
+   */
+  private static final long MAX_TOTAL_READ_CHARS = 32L * 1024 * 1024;
+
   /** Hard ceiling on collected paths, so a pathological tree cannot exhaust the heap. */
   private static final int MAX_CANDIDATE_PATHS = 200_000;
 
@@ -426,14 +435,30 @@ public class PreviewSurfaceDiscovery {
     candidates.sort(Comparator.comparing(p -> p.toString().replace('\\', '/')));
 
     Map<String, String> out = new LinkedHashMap<>();
+    long totalChars = 0;
     for (Path rel : candidates) {
-      if (out.size() >= MAX_FILES_READ) {
+      if (out.size() >= MAX_FILES_READ || totalChars >= MAX_TOTAL_READ_CHARS) {
+        // RR-304: the file-count cap alone bounded nothing useful — 20,000 files at the 128 KiB
+        // per-file ceiling is roughly 2.5 GB of retained String, enough for one render request to
+        // OOM the shared JVM and take unrelated runs with it. The byte budget is the real bound;
+        // the count cap stays as a secondary limit.
+        log.info(
+            "preview-render discovery stopped at {} files / {} chars (cap reached)",
+            out.size(),
+            totalChars);
         break;
       }
       try {
-        out.put(
-            rel.toString().replace('\\', '/'),
-            Files.readString(workspace.resolve(rel), StandardCharsets.UTF_8));
+        Path abs = workspace.resolve(rel);
+        long size = Files.size(abs);
+        if (totalChars + size > MAX_TOTAL_READ_CHARS) {
+          // Skip rather than break: later candidates may still be small enough to fit, and the
+          // candidate order is deterministic, so this stays reproducible.
+          continue;
+        }
+        String body = Files.readString(abs, StandardCharsets.UTF_8);
+        totalChars += body.length();
+        out.put(rel.toString().replace('\\', '/'), body);
       } catch (IOException | RuntimeException e) {
         // Binary or unreadable file — not a UI surface. Skip without failing discovery.
         log.trace("preview-render skipped unreadable file {}", rel, e);

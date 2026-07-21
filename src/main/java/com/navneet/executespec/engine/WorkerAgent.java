@@ -150,7 +150,13 @@ public class WorkerAgent {
   @Value("${execution.continuation.parallel-read-tools-enabled:true}")
   private boolean parallelReadToolsEnabled = true;
 
-  /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
+  /**
+   * Bug #2 fix — check budget every N iterations, not just at task boundaries.
+   *
+   * <p>RR-255 (2026-07-20): retained only for the tests/consumers that reference it. The worker now
+   * evaluates the hard cap on EVERY iteration; sampling every third one let two further full
+   * provider calls land after the cap had already been crossed.
+   */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
   /**
@@ -586,9 +592,12 @@ public class WorkerAgent {
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
       }
-      if (hardCapUsd != null
-          && hardCapUsd > 0
-          && (iter == 1 || iter % BUDGET_CHECK_EVERY_N_ITERATIONS == 0)) {
+      // RR-255 (2026-07-20) — the hard cap is now evaluated on EVERY iteration, before the next
+      // provider call is issued. The previous `iter == 1 || iter % 3 == 0` sampling meant the
+      // worker could issue up to two further full provider calls after the authorized ceiling had
+      // already been crossed, and the over-cap salvage call below deliberately spent one or two
+      // more. A cap the code knowingly spends past is not a cap.
+      if (hardCapUsd != null && hardCapUsd > 0) {
         double spent = costTracker.snapshot(runId).costUsd();
         if (spent >= hardCapUsd) {
           log.warn(
@@ -599,31 +608,14 @@ public class WorkerAgent {
               String.format("%.4f", spent),
               String.format("%.4f", hardCapUsd),
               totalWriteCalls);
-          // 2026-05-08 — extend Lever B salvage to BUDGET_EXCEEDED path. Previously only
-          // ITERATION_LIMIT_EXCEEDED triggered runSalvageCall; a BUDGET_EXCEEDED with zero
-          // writes also produced an empty patch (observed Gemini sqlfluff-1733/1517 hitting
-          // $4 cap with 0 edits). One extra LLM call is ~$0.10-0.50, acceptable spend over
-          // the cap to convert "empty patch = automatic failure" into "best-guess patch =
-          // possible resolve." For BYOK runs cap is null so this branch never fires anyway.
-          if (totalWriteCalls == 0) {
-            try {
-              WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
-              if (salvage != null) {
-                // Mark salvage outcome distinct from clean BUDGET_EXCEEDED so downstream sees
-                // we DID produce output despite hitting cap. Reuses the iter-limit salvage
-                // path which returns COMPLETED on a successful write.
-                log.info(
-                    "WorkerAgent BUDGET_EXCEEDED salvage produced output run={}",
-                    req.context().runId());
-                return salvage;
-              }
-            } catch (Exception e) {
-              log.warn(
-                  "WorkerAgent BUDGET salvage failed run={}: {}",
-                  req.context().runId(),
-                  e.getMessage());
-            }
-          }
+          // RR-255 — the Lever-B salvage call that used to fire here is REMOVED. It made one (and,
+          // through forced-tool-choice fallback, potentially two) additional physical provider
+          // attempts AFTER the code had observed that spend authorization was exhausted, and the
+          // source called that "$0.10-0.50 acceptable" over-cap spend. Converting an empty patch
+          // into a best-guess patch is a quality lever, not a spending authorization; a run that
+          // previously salvaged past the cap now terminates BUDGET_EXCEEDED with whatever it has.
+          // The iteration-limit salvage path is untouched, because that path has not exhausted its
+          // dollar budget.
           recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
           // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
           // sees the budget signal directly. Previously this path called errorResult(...) which
@@ -2740,6 +2732,23 @@ public class WorkerAgent {
     return com.navneet.executespec.smoketest.BuildVerificationResult.parse(envelope).passed();
   }
 
+  /**
+   * RR-258 — does this Ok envelope carry the runner's own exit-zero verdict?
+   *
+   * <p>Deliberately three-state collapsed to false: a missing exit marker is NOT proof of success.
+   * {@code shell} and {@code runTests} embed {@code exit=N} / {@code "exit_code": N} in their
+   * content; {@code buildProject} is delegated to the stricter build parser, which also rejects the
+   * resolver's explicit no-op marker. An envelope with no readable verdict proves nothing and
+   * therefore cannot mark a terminal verified pass.
+   */
+  static boolean envelopeProvesExitZero(String toolName, String envelope) {
+    if (envelope == null || !envelope.startsWith("{\"ok\":true")) return false;
+    if (isBuildTool(toolName)) return isSuccessfulBuildEnvelope(envelope);
+    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
+    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
+    return m.find() && "0".equals(m.group(1));
+  }
+
   private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
       java.util.regex.Pattern.compile("\\bexit(?:_code)?[\"=:\\s\\\\]+(-?\\d+)");
 
@@ -3242,6 +3251,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
       List<String> requiredDeliverables,
       ExecutionContext ctx) {
     if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
+    // RR-258 — `{"ok":true}` only means the TRANSPORT succeeded. ShellTool deliberately wraps
+    // non-zero process exits in an Ok envelope so the model can read stderr, so a verifier command
+    // that FAILED looked identical to one that passed. The resulting verified-pass flag then blocks
+    // further edits and can force a text-only worker to COMPLETED — protecting a failing candidate
+    // from repair. Require the runner's own structured exit-zero verdict, not transport success.
+    if (!envelopeProvesExitZero(toolName, envelope)) return false;
     String command = commandFromArgs(argsJson);
     if (!terminalVerifierCommand(toolName, command)) return false;
     if (visibleTestsExist(ctx) && !terminalVisibleTestCommand(toolName, command)) return false;

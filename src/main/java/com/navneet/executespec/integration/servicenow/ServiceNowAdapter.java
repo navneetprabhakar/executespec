@@ -33,13 +33,16 @@ public class ServiceNowAdapter implements InboundAdapter, OutboundAdapter {
 
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
-    String signatureHeader = headers.get("x-servicenow-signature");
-    if (signatureHeader == null && config.getWebhookSecret() == null) return;
-
+    // RR-637 — fail CLOSED. The old first line let a caller that simply omitted the signature
+    // header skip verification entirely whenever no secret was configured, which meant an
+    // unauthenticated POST could submit attacker-controlled incident text as a pipeline run.
+    // "No secret configured" rejects every request; it never waives the check.
     if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) {
       throw new WebhookSignatureException(
-          "ServiceNow webhook secret not configured but signature header present");
+          "ServiceNow webhook: configure agent.integrations.servicenow.webhook-secret to enable"
+              + " inbound webhooks");
     }
+    String signatureHeader = headers.get("x-servicenow-signature");
     if (signatureHeader == null || signatureHeader.isBlank()) {
       throw new WebhookSignatureException("Missing x-servicenow-signature header");
     }

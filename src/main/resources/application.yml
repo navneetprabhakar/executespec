@@ -1056,6 +1056,8 @@ agent:
       base-url: ""
       username: ""
       password: ""
+      # RR-637 — inbound webhooks fail CLOSED while this is blank. Set it before enabling.
+      webhook-secret: ${SERVICENOW_WEBHOOK_SECRET:}
       trigger-categories:
         - "application"
         - "database"
@@ -1074,7 +1076,8 @@ agent:
       skip-approval: false
     bitbucket:
       enabled: false
-      webhook-secret: ""
+      # RR-637 — inbound webhooks fail CLOSED while this is blank. Set it before enabling.
+      webhook-secret: ${BITBUCKET_WEBHOOK_SECRET:}
       dashboard-url: http://localhost:8080
       skip-approval: false
     slack:
@@ -1130,7 +1133,7 @@ preview:
     route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
     base-url: ${PREVIEW_ENGINE_URL:http://localhost:8090}
     registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:localhost:5500}
-    api-key: ${PREVIEW_ENGINE_API_KEY:change-me-in-prod}
+    api-key: ${PREVIEW_ENGINE_API_KEY:}
     timeout-seconds: 300
 
   vm:
@@ -1185,7 +1188,7 @@ app:
       project-key: ${CONTACT_JIRA_PROJECT_KEY:SUP}
       issue-type: Task
   jwt:
-    secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
+    secret: ${JWT_SECRET:local-dev-only-insecure-jwt-secret-must-be-replaced-in-every-shared-environment}
     access-token-expiry-minutes: 360
     refresh-token-expiry-days: 7
   cors:
