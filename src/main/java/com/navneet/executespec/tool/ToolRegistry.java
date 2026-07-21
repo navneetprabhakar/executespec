@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.ai.tool.ToolCallback;
@@ -38,6 +39,14 @@ public class ToolRegistry {
 
   /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
   public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
+
+  /**
+   * RR-538 — secret-redaction + length-bound contract for model/client-visible error text. {@link
+   * ContextSanitizer} is a stateless pattern-based helper (no injected dependencies), so it is held
+   * statically rather than threaded through {@link ContextBoundToolCallback} and every {@code
+   * bind*} + test construction site. Full exception detail stays in server telemetry only.
+   */
+  static final ContextSanitizer ERROR_SANITIZER = new ContextSanitizer();
 
   private final List<Tool> allTools;
   private final ObjectMapper objectMapper;
@@ -494,15 +503,19 @@ public class ToolRegistry {
           case ToolResult.Err err -> errorEnvelope(err.kind(), err.message());
         };
       } catch (Exception unexpected) {
+        // Full throwable (message + stack) is logged to protected server telemetry only.
         log.error(
             "Tool '{}' threw unexpected exception (ctx run={} task={})",
             tool.name(),
             ctx.runId(),
             ctx.taskId(),
             unexpected);
+        // RR-538 — never hand a raw exception message to the model/SSE/local client. Provider,
+        // filesystem and process libraries routinely embed credentials, host paths, URLs, headers
+        // and response bodies in getMessage(); route it through ContextSanitizer for secret
+        // redaction and a hard length bound before it enters the worker context.
         return errorEnvelope(
-            ToolResult.ErrorKind.INTERNAL,
-            unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+            ToolResult.ErrorKind.INTERNAL, ERROR_SANITIZER.sanitizeException(unexpected));
       }
     }
 
