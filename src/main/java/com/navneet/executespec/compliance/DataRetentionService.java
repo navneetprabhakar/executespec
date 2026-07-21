@@ -82,22 +82,56 @@ public class DataRetentionService {
   }
 
   /**
-   * Soft-deletes all non-active runs belonging to the user. Active runs
-   * (PENDING/PLANNING/IN_PROGRESS) are skipped — they cannot be deleted while the pipeline is live.
+   * Soft-deletes the user's TERMINAL runs (GDPR right-to-erasure).
+   *
+   * <p>RR-090 (2026-07-21): the underlying query used to be a denylist naming only obsolete status
+   * spellings, so a live {@code QUEUED} / {@code AWAITING_APPROVAL} / {@code APPROVAL_RESUMING} /
+   * {@code WORKING} / {@code REVIEWING} run was tombstoned while its worker kept spending and
+   * writing, and {@link #hardDeleteGracedRuns()} could then delete the row seven days later. It is
+   * now a terminal-status allowlist: anything not positively proven finished is REFUSED, not
+   * guessed at.
+   *
+   * <p>This method deliberately does not cancel live runs. Cancellation is a same-JVM operation
+   * owned by the run orchestrator (it must signal the plan gate, interrupt the pipeline future and
+   * close opened PRs); reaching into it from a scheduled compliance service would be a best-effort
+   * call that could report success without stopping anything. Instead the residual count is
+   * returned and logged so erasure is visibly INCOMPLETE rather than silently partial, and the next
+   * sweep picks the runs up once they terminalise.
    *
    * @param userId user requesting erasure
-   * @return number of runs soft-deleted
+   * @return outcome carrying both the tombstoned count and the live runs erasure refused to touch
    */
   @Transactional
-  public int eraseUserData(String userId) {
-    int deleted = runRepository.softDeleteByUserId(userId, Instant.now());
-    log.info("[DataRetention] GDPR erasure: soft-deleted {} runs for user {}", deleted, userId);
+  public ErasureResult eraseUserData(String userId) {
+    int deleted =
+        runRepository.softDeleteTerminalByUserId(
+            userId, Instant.now(), PipelineRunRepository.TERMINAL_STATUSES);
+    long stillLive =
+        runRepository.countNonTerminalByUserId(userId, PipelineRunRepository.TERMINAL_STATUSES);
+    log.info(
+        "[DataRetention] GDPR erasure: soft-deleted {} terminal runs for user {}", deleted, userId);
+    if (stillLive > 0) {
+      log.warn(
+          "[DataRetention] GDPR erasure INCOMPLETE for user {}: {} run(s) are still live and were"
+              + " NOT tombstoned. They must terminalise (or be cancelled) before erasure covers"
+              + " them.",
+          userId,
+          stillLive);
+    }
     Counter.builder("executespec.data.retention.deleted_runs")
         .tag("trigger", "GDPR")
         .register(meterRegistry)
         .increment(deleted);
-    return deleted;
+    return new ErasureResult(deleted, stillLive);
   }
+
+  /**
+   * Outcome of a GDPR erasure pass.
+   *
+   * @param runsSoftDeleted terminal runs tombstoned by this pass
+   * @param liveRunsSkipped non-terminal runs erasure refused to tombstone (RR-090)
+   */
+  public record ErasureResult(int runsSoftDeleted, long liveRunsSkipped) {}
 
   private void softDeleteExpiredRuns() {
     // Iterate over every configured tier — was a hardcoded ["FREE","PRO","ENTERPRISE"] list,
@@ -139,7 +173,12 @@ public class DataRetentionService {
 
   private void hardDeleteGracedRuns() {
     Instant graceCutoff = Instant.now().minus(HARD_DELETE_GRACE_DAYS, ChronoUnit.DAYS);
-    List<PipelineRun> toHardDelete = runRepository.findSoftDeletedOlderThan(graceCutoff);
+    // RR-090: terminal-only. Hard deletion is irreversible; never fire it on a row whose status is
+    // not positively proven finished, including one tombstoned by an older build of the erasure
+    // path.
+    List<PipelineRun> toHardDelete =
+        runRepository.findSoftDeletedOlderThan(
+            graceCutoff, PipelineRunRepository.TERMINAL_STATUSES);
 
     if (!toHardDelete.isEmpty()) {
       runRepository.deleteAll(toHardDelete);

@@ -176,12 +176,19 @@ public class VendoredPathGuard {
       int vendoredFileCount = 0;
       for (String path : tracked) {
         if (isVendored(path)) {
-          vendoredFileCount++;
-          // Use the SECOND-LEVEL parent in case the vendored dir is nested (e.g.
-          // "repos/api/node_modules/foo/index.js" → root segment is "node_modules", but the
-          // actual rm path needs to be relative to the repo we're operating on, which is
-          // already the case since we're running inside repoDir).
-          vendoredRoots.add(firstVendoredSegmentOf(path));
+          // The exact vendored subtree prefix (e.g. "repos/api/node_modules"), relative to repoDir.
+          // RR-649: a null/unsafe target is refused, not widened to the first path segment.
+          String target = firstVendoredSegmentOf(path);
+          if (isSafeVendoredRemovalTarget(target)) {
+            vendoredFileCount++;
+            vendoredRoots.add(target);
+          } else {
+            log.warn(
+                "VendoredPathGuard.scrub: refusing to remove {} in {} — no unambiguous vendored"
+                    + " subtree could be derived",
+                path,
+                repoDir.getFileName());
+          }
         }
       }
       if (vendoredRoots.isEmpty()) {
@@ -207,7 +214,7 @@ public class VendoredPathGuard {
       ensureLocalIdentity(repoDir);
       for (String segment : vendoredRoots) {
         try {
-          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", segment), 60);
+          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", "--", segment), 60);
         } catch (Exception inner) {
           log.warn(
               "git rm --cached failed for {}/{}: {}",
@@ -259,21 +266,54 @@ public class VendoredPathGuard {
   }
 
   /**
-   * Like {@link #rootSegmentOf} but returns the FIRST path segment that matches a vendored dir
-   * (instead of always the first segment). Lets us scrub the right level when vendored dirs are
-   * nested under non-vendored prefixes — though for the multi-repo workspace shape we use, the
-   * vendored dir is always at the repo root, so this collapses to {@code rootSegmentOf} in
-   * practice.
+   * RR-649 (2026-07-21) — returns the exact prefix ending at the FIRST path segment that is itself
+   * a vendored directory, or {@code null} when no segment matches.
+   *
+   * <p>For {@code frontend/node_modules/pkg/index.js} this returns {@code frontend/node_modules} —
+   * NOT {@code frontend}. The previous {@link #rootSegmentOf} fallback here (and at the {@code
+   * purgeStagedVendored} call site) meant a nested vendored directory resolved to the application
+   * subtree, and the subsequent {@code git rm --cached -r} unstaged every tracked source file under
+   * it. Returning {@code null} instead of guessing is deliberate: an ambiguous removal target must
+   * be refused, never widened.
+   *
+   * <p>Matching is case-insensitive so it agrees with {@link #VENDORED_REGEX}. The prior {@code
+   * VENDORED_DIRS.contains(p)} check was case-SENSITIVE while {@code isVendored} was not, so a path
+   * like {@code Frontend/Node_Modules/x} passed the vendored test and then fell through to the
+   * root-segment fallback — the same catastrophic widening, reachable from the scrub path too.
    */
-  private String firstVendoredSegmentOf(String path) {
+  static String firstVendoredSegmentOf(String path) {
+    if (path == null || path.isBlank()) return null;
     String[] parts = path.split("/");
     StringBuilder accum = new StringBuilder();
     for (String p : parts) {
+      if (p.isEmpty()) continue;
       if (accum.length() > 0) accum.append('/');
       accum.append(p);
-      if (VENDORED_DIRS.contains(p)) return accum.toString();
+      for (String vendored : VENDORED_DIRS) {
+        if (vendored.equalsIgnoreCase(p)) return accum.toString();
+      }
     }
-    return rootSegmentOf(path); // shouldn't reach here — caller already checked isVendored
+    return null;
+  }
+
+  /**
+   * RR-649 — final sanity check before a removal target is handed to {@code git rm --cached -r}.
+   * The target must be non-blank, relative, traversal-free, and its LAST segment must itself be a
+   * vendored directory name. Anything else is refused rather than removed.
+   */
+  static boolean isSafeVendoredRemovalTarget(String target) {
+    if (target == null || target.isBlank()) return false;
+    if (target.startsWith("/") || target.startsWith("-")) return false;
+    String[] parts = target.split("/");
+    if (parts.length == 0) return false;
+    for (String p : parts) {
+      if (p.isEmpty() || ".".equals(p) || "..".equals(p)) return false;
+    }
+    String last = parts[parts.length - 1];
+    for (String vendored : VENDORED_DIRS) {
+      if (vendored.equalsIgnoreCase(last)) return true;
+    }
+    return false;
   }
 
   /**
@@ -300,7 +340,20 @@ public class VendoredPathGuard {
       List<String> staged = runGit(repoDir, List.of("diff", "--cached", "--name-only"), 10);
       Set<String> vendoredHits = new LinkedHashSet<>();
       for (String path : staged) {
-        if (isVendored(path)) vendoredHits.add(rootSegmentOf(path));
+        if (!isVendored(path)) continue;
+        // RR-649: the exact vendored subtree, never the first path segment. A null/unsafe target
+        // means we could not identify the vendored directory — leave the path staged rather than
+        // deleting a guess.
+        String target = firstVendoredSegmentOf(path);
+        if (isSafeVendoredRemovalTarget(target)) {
+          vendoredHits.add(target);
+        } else {
+          log.warn(
+              "VendoredPathGuard: refusing to unstage {} in {} — no unambiguous vendored subtree"
+                  + " could be derived",
+              path,
+              repoDir.getFileName());
+        }
       }
       if (vendoredHits.isEmpty()) return 0;
 
@@ -318,7 +371,7 @@ public class VendoredPathGuard {
       // on retries / when the path was already cleaned by augmentGitignore's own commit.
       for (String hit : vendoredHits) {
         try {
-          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", hit), 30);
+          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", "--", hit), 30);
         } catch (Exception inner) {
           log.debug("git rm --cached failed for {}: {}", hit, inner.getMessage());
         }

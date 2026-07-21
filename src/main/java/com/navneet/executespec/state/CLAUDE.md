@@ -105,3 +105,21 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - Token usage tracked per run via atomic `addTokens()` SQL update (no read-modify-write race)
 - Quota enforcement: `TierEnforcementService.assertAndIncrementRunCount(userId, credits)` uses pessimistic lock + single TX (TOCTOU fix). Multi-credit support: increments by N at plan approval (not submission). Refunds via `decrementRunCount(userId, credits)` on FAILURE.
 - Plan versioning via `savePlanVersion()` / `incrementPlanVersion()` — used by apply-suggestion flows
+
+## Erasure and heartbeat lifecycle (RR-090 / RR-071, 2026-07-21)
+
+- `PipelineRunRepository.TERMINAL_STATUSES` is the shared fail-closed terminal set
+  (`COMPLETE`/`FAILED`/`PARTIAL`/`CANCELLED`/`ABORTED`/`REJECTED`). GDPR erasure
+  (`softDeleteTerminalByUserId`, replacing `softDeleteByUserId`) and the hard-delete sweep
+  (`findSoftDeletedOlderThan`) are now `IN` ALLOWLISTS against it. The old erasure query was a
+  `NOT IN` denylist naming only the obsolete `PENDING`/`IN_PROGRESS`/`IN_PROGRESS_BATCH` spellings,
+  so four of the six live V2 states (`QUEUED`, `AWAITING_APPROVAL`, `APPROVAL_RESUMING`, `WORKING`,
+  `REVIEWING`) were unprotected — erasure tombstoned live runs and the 7-day sweep hard-deleted the
+  row while the worker was still spending. A new or unrecognised status is now REFUSED, not
+  tombstoned. `countNonTerminalByUserId` reports what erasure refused so the result is visibly
+  incomplete rather than silently partial.
+- `StateStore.updateHeartbeat` delegates to `claimExecutionOwner` instead of doing
+  `findById` → mutate → `save`. `PipelineRun` has no `@Version`, so that read-modify-write wrote
+  back every field as loaded and could revert a concurrent terminal status, gate, token/cost or
+  cancellation write. (It had no production caller; `RunOrchestrator` already used the narrow fenced
+  queries. The dead method's javadoc invited exactly the wrong reuse.)
