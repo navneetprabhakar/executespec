@@ -26,8 +26,8 @@ class CloudRunClientProcessTest {
     ProcessBuilder pb = new ProcessBuilder("sh", "-c", "sleep 30");
 
     Instant start = Instant.now();
-    CloudRunClient.GcloudResult result =
-        CloudRunClient.runGcloudSeparate(pb, Duration.ofSeconds(1));
+    CloudRunProcess.GcloudResult result =
+        CloudRunProcess.runGcloudSeparate(pb, Duration.ofSeconds(1));
     Duration elapsed = Duration.between(start, Instant.now());
 
     assertFalse(result.finished(), "deadline must fire rather than blocking on the child");
@@ -41,8 +41,8 @@ class CloudRunClientProcessTest {
     // exact shape (JSON on stdout, progress on stderr) that made the old read-then-waitFor block.
     ProcessBuilder pb = new ProcessBuilder("sh", "-c", "echo out; echo err 1>&2; sleep 30");
 
-    CloudRunClient.GcloudResult result =
-        CloudRunClient.runGcloudSeparate(pb, Duration.ofSeconds(1));
+    CloudRunProcess.GcloudResult result =
+        CloudRunProcess.runGcloudSeparate(pb, Duration.ofSeconds(1));
 
     assertFalse(result.finished());
   }
@@ -52,8 +52,8 @@ class CloudRunClientProcessTest {
     ProcessBuilder pb =
         new ProcessBuilder("sh", "-c", "echo '{\"uri\":\"x\"}'; echo progress 1>&2; exit 0");
 
-    CloudRunClient.GcloudResult result =
-        CloudRunClient.runGcloudSeparate(pb, Duration.ofSeconds(30));
+    CloudRunProcess.GcloudResult result =
+        CloudRunProcess.runGcloudSeparate(pb, Duration.ofSeconds(30));
 
     assertTrue(result.finished());
     assertEquals(0, result.exitCode());
