@@ -20,6 +20,10 @@ import lombok.extern.slf4j.Slf4j;
  * <file>}.
  *
  * <p>Same UNAVAILABLE-on-CLI-missing degradation as {@link EslintAdapter}.
+ *
+ * <p>RR-1051 — admitted by {@link LintExecutionPolicy} before execution, for the same reason as
+ * ESLint: a Checkstyle config names check classes to load, so the repository still influences what
+ * runs even though the config format is XML rather than a script.
  */
 @Component
 @Slf4j
@@ -31,9 +35,11 @@ public class CheckstyleAdapter implements LintAdapter {
   private static final Pattern ATTR_PATTERN = Pattern.compile("(\\w+)=\"([^\"]*)\"");
 
   private final LintProcessRunner runner;
+  private final LintExecutionPolicy policy;
 
-  public CheckstyleAdapter(LintProcessRunner runner) {
+  public CheckstyleAdapter(LintProcessRunner runner, LintExecutionPolicy policy) {
     this.runner = runner;
+    this.policy = policy;
   }
 
   @Override
@@ -43,18 +49,25 @@ public class CheckstyleAdapter implements LintAdapter {
 
   @Override
   public LintResult run(Path repoRoot, Path configPath, List<Path> changedFiles) {
-    List<String> argv = new ArrayList<>(List.of("checkstyle", "-f", "xml"));
-    if (configPath != null) {
-      argv.add("-c");
-      argv.add(configPath.toString());
+    LintExecutionPolicy.Admission admission =
+        policy.admit(tool(), repoRoot, configPath, changedFiles);
+    if (!admission.allowed()) {
+      return new LintResult(
+          tool(), LintResult.Status.UNAVAILABLE, List.of(), admission.denialReason());
     }
-    if (changedFiles != null && !changedFiles.isEmpty()) {
-      for (Path p : changedFiles) argv.add(p.toString());
+
+    List<String> argv = new ArrayList<>(List.of(admission.executable(), "-f", "xml"));
+    if (admission.configArgument() != null) {
+      argv.add("-c");
+      argv.add(admission.configArgument());
+    }
+    if (!admission.targetArguments().isEmpty()) {
+      argv.addAll(admission.targetArguments());
     } else {
       argv.add(".");
     }
 
-    LintProcessRunner.Result res = runner.run(repoRoot, argv, 60);
+    LintProcessRunner.Result res = runner.run(repoRoot, argv, policy.timeoutSeconds());
     if (!res.executed()) {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());
