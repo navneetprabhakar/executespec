@@ -145,12 +145,31 @@ public final class AgentSessionDtos {
       int extractedChars,
       String preview) {}
 
+  /**
+   * @param projectWriteAuthorized {@code TRUE}/{@code FALSE} when the caller resolved the actor's
+   *     project write authority before routing, {@code null} when it did not. An explicit {@code
+   *     FALSE} suppresses the confirmable cloud-run proposal so a read-only collaborator is not
+   *     shown a run card whose confirmation would be rejected. The submission gate remains the
+   *     authority in every case.
+   */
   public record InterpretIntentRequest(
       String sessionId,
       String message,
       String projectId,
       RepoContext repoContext,
-      ClientCapabilities clientCapabilities) {}
+      ClientCapabilities clientCapabilities,
+      Boolean projectWriteAuthorized) {
+
+    /** Compatibility overload for callers that have not resolved write authority. */
+    public InterpretIntentRequest(
+        String sessionId,
+        String message,
+        String projectId,
+        RepoContext repoContext,
+        ClientCapabilities clientCapabilities) {
+      this(sessionId, message, projectId, repoContext, clientCapabilities, null);
+    }
+  }
 
   /**
    * A typed action proposal.

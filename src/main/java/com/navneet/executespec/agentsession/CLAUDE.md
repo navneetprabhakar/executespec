@@ -30,13 +30,34 @@ turns separately from runs.
   `TypedAction` itself, so clients decide confirmability from structured fields rather than prose,
   and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
   The context is nullable for rows persisted before it existed; clients must treat absent context
-  as unknown, never as confirmable. `AgentIntentDecisions.decision(...)` enforces the invariant
+  as unknown, never as confirmable.
+  Write authority is part of that context: `InterpretIntentRequest.projectWriteAuthorized` carries
+  the caller's resolved project write authority into routing, and an explicit `false` returns
+  `AgentActionContext.writeScopeRequired()` with `runApiAllowed=false` so a `PROJECT_VIEWER` never
+  sees a confirmable run card whose confirmation would 403. `null` means the caller did not evaluate
+  authority; the submission gate's `assertCanWrite` remains the authority in every case. The legacy
+  `/api/spec/chat` route-decision preview does not evaluate it.
+  `AgentIntentDecisions.decision(...)` enforces the invariant
   structurally and throws when a `create_cloud_run` action is built with a blocked context, a
   disallowed Run API, or a missing/blank `projectId`. Non-run decisions must never reach
   `/api/orchestrator/turn/confirm` or produce “stored orchestrator decision is not a run route”.
 - `POST /api/orchestrator/turn` is the non-stream primary decision endpoint. It uses the same
   deterministic route/policy contract, persists `ORCHESTRATOR_DECISION`, and uses client `turnId`
   as the idempotency key.
+- The orchestrator trace records which engine actually decided. `AgentIntentService.RouteAttribution`
+  carries the deterministic branch or the exact classifier provider/model/promptId plus
+  `classifierAttempted`, and `AgentTracePayloadFactory` writes those verbatim. Do not reintroduce a
+  hardcoded `modelProvider=deterministic` / `model=none`: this trace is reconciled against
+  `run_step_usage` and `llm_usage_attempt_intent`, so a false attribution contradicts the ledger.
+- Streaming turns route, guard and persist `AgentStreamTurnSupport.routedUserText(request)` — the
+  last user entry of the conversation the provider will execute — not `request.message()`, which
+  the runner discards whenever `conversation` is non-empty.
+- The deterministic run-id grammar accepts only a canonical UUID. A bare hex token is not a run id:
+  commit SHAs, hex-looking words and long digit strings used to produce credit-charging
+  approve/cancel confirmation cards for the wrong target.
+- The action catalog must resolve every action type a router can emit (including `cancel_run`), and
+  its tier ladder mirrors `TierEnforcementService.TIER_RANK` — PRO_PLUS and BYOK are paid tiers, and
+  an unrecognised tier throws instead of silently degrading to FREE.
 - `agent_usage_ledger` is the future meter for open-ended CLI/VS Code conversation usage. Run
   credits and refunds remain owned by the existing run approval path. Streaming chat writes usage
   here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
@@ -168,6 +189,13 @@ turns separately from runs.
   `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
   and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale
   child releases its reserved descendant budget and lets the parent request a fresh bounded child.
+  Liveness is a lease, not an assumption: `SubagentExecutionService` renews the child heartbeat
+  every 30s for the whole execution (turn admission alone does not cover a long model round), and
+  `AgentSessionStartupRecovery` only cancels a child whose lease has been unrenewed for 300s.
+  **Known scope limit:** that sweep reads the whole `agent_session` table and has no owner/instance
+  identity to fence on, so it cannot prove a candidate belongs to the booting JVM. A child whose
+  owner is alive but wedged past the window is still cancelled; true node fencing needs a durable
+  owner id plus lease token, which the current schema does not carry.
 
 ## Key Files
 

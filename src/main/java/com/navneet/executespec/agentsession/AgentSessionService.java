@@ -106,7 +106,8 @@ public class AgentSessionService {
         actionLifecycleService.plan(
             session,
             req,
-            capabilities(user, AgentText.firstNonBlank(req.surface(), session.getClientSurface())));
+            capabilities(user, AgentText.firstNonBlank(req.surface(), session.getClientSurface())),
+            user);
     return new ActionPlanResponse(
         planned.actionId(),
         planned.sessionId(),

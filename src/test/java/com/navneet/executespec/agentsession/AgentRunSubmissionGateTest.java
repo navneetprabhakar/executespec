@@ -186,6 +186,34 @@ class AgentRunSubmissionGateTest {
   }
 
   @Test
+  void aPreSubmitValidationFailureReleasesTheIdempotencyClaim() {
+    // RR-1579: credit exhaustion, a disallowed model or a missing BYOK key used to leave the
+    // durable claim held with no run id, so the retry after fixing the problem was rejected as a
+    // duplicate submission until the lease elapsed.
+    var claim = RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L);
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(claim);
+    org.mockito.Mockito.doThrow(
+            new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.PAYMENT_REQUIRED, "AI credits exhausted"))
+        .when(managedAiUsageService)
+        .assertCanStartRun(any(), anyBoolean());
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                gate.submitConfirmed(
+                    session(),
+                    turn("Implement OAuth login"),
+                    decision("CODE_RUN_REQUIRED", true),
+                    request(true),
+                    user()))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+    verify(runIdempotencyService).failFinal(eq(claim), anyString());
+    verify(runIdempotencyService, org.mockito.Mockito.never()).complete(any(), anyString());
+  }
+
+  @Test
   void confirmationInheritsSessionProviderAndModelWhenClientsDoNotEchoThem() {
     when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
         .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));

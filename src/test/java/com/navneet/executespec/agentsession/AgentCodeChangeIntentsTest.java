@@ -115,6 +115,52 @@ class AgentCodeChangeIntentsTest {
         .isEmpty();
   }
 
+  @Test
+  void aReadOnlyCollaboratorGetsNoConfirmableRunCard() {
+    var decision =
+        AgentCodeChangeIntents.decide(
+                "implement retry logic in the auth client",
+                "implement retry logic in the auth client",
+                new InterpretIntentRequest(
+                    "s1",
+                    "implement retry logic in the auth client",
+                    "project-1",
+                    null,
+                    null,
+                    Boolean.FALSE),
+                null)
+            .orElseThrow();
+
+    assertThat(decision.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
+    assertThat(decision.proposedAction()).isNull();
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+    assertThat(decision.actionContext().confirmable()).isFalse();
+    assertThat(decision.actionContext().blockingReasons())
+        .containsExactly(
+            com.navneet.executespec.agentsession.dto.AgentActionContext.REASON_MISSING_WRITE_SCOPE);
+  }
+
+  @Test
+  void aProjectWriterStillGetsTheConfirmableCloudRunProposal() {
+    var decision =
+        AgentCodeChangeIntents.decide(
+                "implement retry logic in the auth client",
+                "implement retry logic in the auth client",
+                new InterpretIntentRequest(
+                    "s1",
+                    "implement retry logic in the auth client",
+                    "project-1",
+                    null,
+                    null,
+                    Boolean.TRUE),
+                null)
+            .orElseThrow();
+
+    assertThat(decision.route()).isEqualTo("CODE_RUN_REQUIRED");
+    assertThat(decision.proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(decision.actionContext().confirmable()).isTrue();
+  }
+
   private static com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision
       decide(String message, String projectId, ClientCapabilities caps) {
     return AgentCodeChangeIntents.decide(

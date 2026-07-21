@@ -16,6 +16,8 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntent
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
@@ -29,18 +31,24 @@ class AgentActionLifecycleService {
   private final AgentIntentService intentService;
   private final AgentEventRecorder eventRecorder;
   private final AgentSessionRepository sessionRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   PlannedAction plan(
-      AgentSession session, ActionPlanRequest request, List<CapabilityTool> capabilities) {
+      AgentSession session,
+      ActionPlanRequest request,
+      List<CapabilityTool> capabilities,
+      AppUserDetails user) {
     ActionPlanRequest req =
         request == null ? new ActionPlanRequest("", null, null, null, null) : request;
+    String projectId = AgentText.firstNonBlank(req.projectId(), session.getProjectId());
     InterpretIntentRequest intentRequest =
         new InterpretIntentRequest(
             session.getId(),
             req.message(),
-            AgentText.firstNonBlank(req.projectId(), session.getProjectId()),
+            projectId,
             req.repoContext(),
-            req.clientCapabilities());
+            req.clientCapabilities(),
+            AgentWriteAuthority.resolve(projectAccessGuard, projectId, user));
     OrchestratorDecision orchestratorDecision =
         intentService.decide(
             intentRequest, session.getDefaultProvider(), session.getDefaultModel());

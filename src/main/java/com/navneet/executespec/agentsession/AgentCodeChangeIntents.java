@@ -65,6 +65,22 @@ final class AgentCodeChangeIntents {
           "Missing project/repo context blocks run submission and confirmation.",
           AgentActionContext.requiresProjectSelection());
     }
+    if (Boolean.FALSE.equals(request.projectWriteAuthorized())) {
+      // The caller can read this project but cannot submit runs against it. Emitting a confirmable
+      // card here would produce a button whose confirmation is rejected by the submission gate.
+      return decision(
+          "IMPLEMENTATION_PROPOSAL",
+          0.8,
+          "code_mutation_missing_write_scope",
+          false,
+          "I can describe the change, but you have read-only access to this project, so I cannot"
+              + " propose a run against it. No run has been proposed.",
+          null,
+          false,
+          false,
+          "Caller lacks project write authority; run submission and confirmation are blocked.",
+          AgentActionContext.writeScopeRequired());
+    }
     Map<String, Object> args = Map.of("spec", message, "projectId", request.projectId());
     AgentActionContext context = AgentActionContext.ready();
     String prompt =

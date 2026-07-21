@@ -148,44 +148,50 @@ public class AgentRunSubmissionGate {
           "This confirmation is already being submitted. Reload the session before retrying.");
     }
 
-    inputSanitizer.scan(spec);
-    if (featureFlagService.isEnabled("submissions.paused")) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Run submissions are temporarily paused for maintenance. Please try again later.");
-    }
-
-    String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
-    String modelName =
-        AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
-    modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
-    String lowStartTier =
-        request == null
-            ? null
-            : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
-    // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
-    managedAiUsageService.assertCanStartRun(
-        user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
-    tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
-    apiKeyResolver.validateKeyAvailability(user.getUser().getId());
-
-    String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
-    String modelProvider =
-        explicitModel == null ? null : modelAccessService.providerForModel(explicitModel);
-    String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
-    String selectedProvider =
-        AgentText.firstNonBlank(providerOverride, modelProvider, sessionProvider);
-    String effectiveProvider =
-        selectedProvider != null
-            ? (providerOverride != null || modelProvider != null
-                ? aiProviderPreferenceService.updatePreferredProvider(user, selectedProvider)
-                : selectedProvider)
-            : aiProviderPreferenceService.preferredProvider(user);
-    modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
-    String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
-
+    // Everything from here to submitRun is inside the claim's failure handling. A throw from the
+    // validation band used to leave the durable claim held with no run id, so the very next retry
+    // -- after the user topped up credits or fixed their key -- was rejected as a duplicate
+    // submission until the lease elapsed.
     PipelineRun run;
     try {
+      inputSanitizer.scan(spec);
+      if (featureFlagService.isEnabled("submissions.paused")) {
+        throw new ResponseStatusException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "Run submissions are temporarily paused for maintenance. Please try again later.");
+      }
+
+      String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
+      String modelName =
+          AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
+      modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
+      String lowStartTier =
+          request == null
+              ? null
+              : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
+      // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
+      managedAiUsageService.assertCanStartRun(
+          user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
+      tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
+      apiKeyResolver.validateKeyAvailability(user.getUser().getId());
+
+      String providerOverride =
+          request == null ? null : AgentText.blankToNull(request.aiProvider());
+      String modelProvider =
+          explicitModel == null ? null : modelAccessService.providerForModel(explicitModel);
+      String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
+      String selectedProvider =
+          AgentText.firstNonBlank(providerOverride, modelProvider, sessionProvider);
+      String effectiveProvider =
+          selectedProvider != null
+              ? (providerOverride != null || modelProvider != null
+                  ? aiProviderPreferenceService.updatePreferredProvider(user, selectedProvider)
+                  : selectedProvider)
+              : aiProviderPreferenceService.preferredProvider(user);
+      modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
+      String executionMode =
+          normalizeExecutionMode(request == null ? null : request.executionMode());
+
       run =
           runOrchestrator.submitRun(
               spec,

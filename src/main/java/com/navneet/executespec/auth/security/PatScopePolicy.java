@@ -29,6 +29,13 @@ public final class PatScopePolicy {
   public static final String TOKENS_MANAGE = "tokens:manage";
   public static final String ADMIN = "admin";
 
+  /**
+   * Authority to mutate files on the caller's machine through the agent-session writer seam.
+   * Deliberately excluded from {@link #CLIENT_DEFAULT_SCOPES}: a chat-capable token must not also
+   * be a local-filesystem writer.
+   */
+  public static final String LOCAL_WRITE = "local:write";
+
   public static final List<String> CLIENT_DEFAULT_SCOPES =
       List.of(API_READ, RUNS_WRITE, PROJECTS_WRITE, AGENT_WRITE, SETTINGS_WRITE);
 
@@ -43,6 +50,7 @@ public final class PatScopePolicy {
           CREDENTIALS_MANAGE,
           BILLING_WRITE,
           TOKENS_MANAGE,
+          LOCAL_WRITE,
           ADMIN);
 
   private PatScopePolicy() {}
@@ -71,13 +79,48 @@ public final class PatScopePolicy {
   public static boolean allows(String encodedScopes, String method, String requestUri) {
     Set<String> scopes = parse(encodedScopes);
     if (scopes.contains(FULL)) return true;
-    String required = requiredScope(method, requestUri);
-    return required != null && scopes.contains(required);
+    Set<String> required = requiredScopes(method, requestUri);
+    return !required.isEmpty() && scopes.containsAll(required);
   }
 
-  static String requiredScope(String method, String requestUri) {
+  /**
+   * The complete capability set a token must hold for this route. A route that crosses a boundary —
+   * conversation into billable run creation, or conversation into local file mutation — requires
+   * the union of both sides, so an {@code agent:write}-only token cannot spend or write.
+   *
+   * <p>An empty set means "unknown route": {@link #allows} fails closed on it.
+   */
+  static Set<String> requiredScopes(String method, String requestUri) {
     String verb = method == null ? "" : method.toUpperCase(Locale.ROOT);
     String path = requestUri == null ? "" : requestUri;
+    String normalized = normalizePath(path);
+    // Boundary-crossing agent routes are decided before the generic /api/agent/ prefix rule below,
+    // which would otherwise classify a spend or a local file write as plain conversation.
+    if (normalized.equals("/api/orchestrator/turn/confirm")) {
+      return Set.of(AGENT_WRITE, RUNS_WRITE);
+    }
+    if (isWriterRoute(normalized)) {
+      return Set.of(AGENT_WRITE, LOCAL_WRITE);
+    }
+    String required = requiredScope(verb, path);
+    return required == null ? Set.of() : Set.of(required);
+  }
+
+  private static String normalizePath(String path) {
+    if (path.length() > 1 && path.endsWith("/")) {
+      return path.substring(0, path.length() - 1);
+    }
+    return path;
+  }
+
+  private static boolean isWriterRoute(String path) {
+    if (!path.startsWith("/api/agent/sessions/")) return false;
+    String rest = path.substring("/api/agent/sessions/".length());
+    int slash = rest.indexOf('/');
+    return slash >= 0 && rest.startsWith("writer/", slash + 1);
+  }
+
+  private static String requiredScope(String verb, String path) {
     // Privileged namespaces are capability-gated for both reads and writes. Do this before the
     // generic read rule or api:read would unintentionally become operator/token-admin access.
     if (path.startsWith("/api/admin/") || path.startsWith("/api/v2/test/")) return ADMIN;

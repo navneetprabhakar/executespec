@@ -465,6 +465,28 @@ class SubagentProtocolServiceTest {
   }
 
   @Test
+  void midTurnHeartbeatRenewsALiveLeaseAndRefusesATerminalChild() {
+    AgentSession running = parent("child", "RUNNING");
+    running.setUpdatedAt(Instant.now().minusSeconds(600));
+    when(sessions.findById("child")).thenReturn(Optional.of(running));
+
+    Instant before = Instant.now();
+    assertThat(service.heartbeat("child", "user", "org")).isTrue();
+    assertThat(running.getUpdatedAt()).isAfterOrEqualTo(before);
+    assertThat(running.getStatus()).isEqualTo("RUNNING");
+    verify(sessions).save(running);
+
+    AgentSession cancelled = parent("gone", "CANCELLED");
+    Instant untouched = Instant.now().minusSeconds(600);
+    cancelled.setUpdatedAt(untouched);
+    when(sessions.findById("gone")).thenReturn(Optional.of(cancelled));
+
+    assertThat(service.heartbeat("gone", "user", "org")).isFalse();
+    assertThat(cancelled.getUpdatedAt()).isEqualTo(untouched);
+    verify(sessions, org.mockito.Mockito.never()).save(cancelled);
+  }
+
+  @Test
   void verifierCompletionRequiresEvidenceAndPersistsHotHandoff() throws Exception {
     AgentSession child = parent("child", "RUNNING");
     var metadata =
