@@ -63,7 +63,10 @@ public class DeploymentController {
   public ResponseEntity<DeploymentSummary> deploy(
       @RequestBody DeployRequest request, @AuthenticationPrincipal AppUserDetails userDetails) {
     requireDeploymentCreationEnabled();
-    guard.requireRunAccess(request.runId(), userDetails);
+    // RR-571: creating paid infrastructure for a run is a mutation of that run's resources, so it
+    // requires run WRITE authority. Read access is deliberately broader (same-org developers,
+    // billing admins, project viewers, external project members) and must not authorize a deploy.
+    guard.requireRunWriteAccess(request.runId(), userDetails);
     // [F-31] (audit Sprint 2, 2026-04-30) — server-side tier gate.
     // Was: only `RunAccessGuard.requireRunAccess` ran, which only
     // checks run ownership. With `freeUserPermissions` returning
@@ -149,7 +152,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.deleteDeployment(id);
       return ResponseEntity.noContent().build();
@@ -168,7 +171,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.rollback(id);
       return ResponseEntity.ok().build();
@@ -207,7 +210,9 @@ public class DeploymentController {
   public ResponseEntity<?> analyze(
       @RequestParam String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     requireDeploymentCreationEnabled();
-    guard.requireRunAccess(runId, userDetails);
+    // RR-571: analyse restores the run workspace from GCS onto local disk before inspecting it,
+    // so it is a state-changing precondition of deploy, not a pure read.
+    guard.requireRunWriteAccess(runId, userDetails);
 
     PipelineRun run =
         stateStore
@@ -256,7 +261,7 @@ public class DeploymentController {
       @RequestBody DeployConfirmRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     requireDeploymentCreationEnabled();
-    guard.requireRunAccess(request.runId(), userDetails);
+    guard.requireRunWriteAccess(request.runId(), userDetails);
     String userId = userDetails.getUser().getId();
 
     try {
@@ -309,7 +314,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.rollback(id, userDetails.getUser().getId());
@@ -336,7 +341,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.destroy(id, userDetails.getUser().getId());

@@ -168,7 +168,7 @@ app:
     smtp:
       password: ${SMTP_PASSWORD:}
   jwt:
-    secret: ${JWT_SECRET:executespec-prod-secret-MUST-BE-OVERRIDDEN-via-env-var}
+    secret: ${JWT_SECRET:}
   cors:
     # Plan 1 (this-week #5): pre-emptive Phase-2 surface allow-list. Both
     # subdomains are listed by default so the eventual frontend split

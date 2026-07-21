@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -274,9 +275,15 @@ public class WorkspaceFileService {
    * "added" diff instead of an opaque error.
    */
   public FileDiff readFileDiff(String runId, String relativePath) throws IOException {
-    if (relativePath.contains("..")) {
-      throw new SecurityException("Path traversal not allowed: " + relativePath);
+    // RR-859 — the diff path previously did only a substring "..", check and never consulted the
+    // sensitive-path policy, so a credential file deleted from the head could still be served as
+    // FileDiff.base straight out of `git show <baseSha>:<path>`.
+    if (relativePath == null || relativePath.isBlank()) {
+      throw new NoSuchFileException(String.valueOf(relativePath));
     }
+    // Exact normalized components via the shared helper, not a `contains("..")` substring test.
+    SafeWorkspacePath.requireSafeRelativePosixPath(relativePath);
+    assertModelSafePath(relativePath);
 
     Path root = workspaceRoot(runId);
     if (!Files.isDirectory(root)) {

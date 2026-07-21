@@ -266,6 +266,25 @@ public class SideEffectExecutor {
               + " on "
               + repoFullName);
     }
+    // RR-146 — a compensation enqueued from a stale belief must not delete live review material.
+    // Re-read the remote at execution time: if any open pull request references this head, the
+    // branch is NOT an orphan and the compensation is retired as a no-op.
+    var openPr = gitHubRepoService.findOpenPullRequestForHead(repoFullName, branch, pat);
+    if (openPr.present()) {
+      log.warn(
+          "[SideEffectExecutor] COMPENSATE skipped: branch {} on {} backs open PR {} (run {})",
+          branch,
+          repoFullName,
+          openPr.prNumber(),
+          runId);
+      return "BRANCH_RETAINED_OPEN_PR:" + repoFullName + ":" + branch;
+    }
+    if (!openPr.known()) {
+      // GitHub did not answer. Deleting on an unverified assumption is exactly the failure mode
+      // this guard exists to prevent — retry later instead.
+      throw new RuntimeException(
+          "Cannot verify pull-request state for " + repoFullName + " branch " + branch);
+    }
     boolean ok = gitHubRepoService.deleteBranch(repoFullName, branch, pat);
     if (ok) {
       log.info(

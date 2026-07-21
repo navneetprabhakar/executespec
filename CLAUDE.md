@@ -93,6 +93,23 @@ owner. Read visibility alone never authorizes SCM-side or shared-metadata mutati
 **Shared-profile crypto correction (2026-07-19):** `application-dev.yml` now joins prod and
 benchmark with `require-encryption: true`; every remote/shared profile refuses plaintext fallback.
 
+**Framework path containment (2026-07-21):** `security/SafeWorkspacePath` is the shared
+containment boundary for framework-owned filesystem access into customer-controlled trees, applying
+the same rules the agent tool sandbox already used (`tool/PathSafety`,
+`deployment/WorkspaceFileService`): relative-only, no dot/empty segments, canonical-root
+containment, and no symbolic link in any existing component. It is called by run-context metadata
+writes (`integration/RunContextComposer`), worker checkpoint write/read/delete AND the destructive
+run-end cleanup (`context/ContextStore`), the context scanner/agent/evidence-bundle/run-journal
+reads and writes under `.agent-context` (`context/*`), and the Code Review workspace sampler
+(`codereview/CodeReviewService`, which additionally opens candidates with `NOFOLLOW_LINKS`).
+`folder/ExecutespecFolderWriter` now enforces canonical POSIX relative segments — a `.executespec/`
+prefix alone is not containment — and contract refresh derives a bounded filename slug rather than
+interpolating a customer-derived contract name. Generated test class names must be bare Java
+identifiers before they become filenames (`testgen/TestWorkerAgent`, validated at plan persistence
+in `TestPlannerAgent`). Failures are refusals, not redirects. This covers the server-side framework
+paths; agent tool calls keep their own boundary, and the CLI/VS Code client repository has its own
+equivalent gaps tracked separately.
+
 `SensitiveWorkspacePathPolicy` is the pre-model credential-file boundary for worker tools. Direct
 reads and search hits exclude `.env`, credential stores, private keys and keystores while allowing
 `.env.example`/sample/template contracts; host-shell validation blocks explicit references to the
@@ -384,7 +401,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                                                                                                                                                        |
 | POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                                                                                                                                                     |
 | GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                                                                                                                                                    |
-| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning/call fields and `schemaVersion=1`.                                                                                                                                                                                    |
+| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning/call fields and `schemaVersion=1`. Per-attempt `stepCalls[]` detail is ORG_ADMIN/SUPER_ADMIN-only: lower-privileged callers get `stepCallsIncluded=false` + `stepCallsRestrictedReason` + `stepCallsTotal` so the UI can say "withheld", not "none" (RR-1552). |
 | POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                                                                                                                                                     |
 | POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                                                                                                                                               |
 | POST   | `/api/repos/{repoId}/webhook`         | Install pull_request webhook with caller's PAT.                                                                                                                                                                                                                                             |
@@ -580,7 +597,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V305; 306 source files; applied V-files immutable)                                                                                                                                                                                     |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V309; 310 source files; applied V-files immutable)                                                                                                                                                                                     |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -738,16 +755,87 @@ managed-AI FREE-tier locks is systematic (every FREE managed call is forced to
 `deepseek-v4-flash-native`), so the requested/served divergence there is by design and high-volume,
 not a rare tail.
 
-**Current correction (2026-07-19):** source migration head is V305; the next allocatable number is V306. V300 adds durable idempotent
+**Spend-quota correction (2026-07-20, RR-186/225/226/255/321/322/392/557/825):** provider spend is
+now bounded by controls that actually stop. `ManagedAiRoutingPolicy.recomputeState` treats the
+configured raw-COGS hard stop as an INDEPENDENT tighten-only gate, so a managed tier reaches
+EXHAUSTED on EITHER its credit grant or its raw ceiling (a credit top-up lifts only the former).
+`ManagedAiTierResolver` no longer raises a user's managed-AI billing tier from an external host
+project's tier, so a scoped collaboration entitlement cannot grant uncapped platform-key spend in
+the collaborator's own org. `cost/CostCapValues` is the single validated hard-cost-cap type; NaN /
+±Infinity / out-of-band values are rejected at `StateStore.setUserCostCap` and at the agent
+confirmation gate, closing the `POST /api/orchestrator/turn/confirm` path that could disable the
+worker ceiling. `engine/WorkerAgent` evaluates the hard cap on EVERY iteration and no longer makes
+the deliberate over-cap Lever-B salvage call. `agent/ProviderDispatchAuthorization` is now the real
+production boundary: `LlmRouter` and `project/rag/EmbeddingService` both call it instead of the
+router re-implementing the kill switch inline and the embedding transport having none.
+`executioncontext/LlmExecutionBudgetGate` (V316 `llm_execution_context.reserved_provider_calls`)
+evaluates every budget dimension under a pessimistic row lock and commits a provider-call
+reservation before transport, making `maxProviderCalls` a hard ceiling under concurrency; token and
+cost ceilings are serialized but still reconciled after the fact, not reserved. The dispatch guard
+also fences a stale worker whose lease has expired or whose declared attempt generation has been
+superseded. `SubagentProtocolService` reserves against the ROOT session's whole-tree budget rather
+than the immediate parent's, so nesting can no longer multiply the advertised 48-turn/$8 ceiling.
+`UsageTrackingService.reserveWithinLimits` adds an atomic admit-and-increment primitive; the legacy
+`assertWithinLimits` read remains but has no production caller (RUNS admission is managed-AI
+credits).
+
+**Current correction (2026-07-21):** source migration head is **V309** (310 source files). V300 adds durable idempotent
 failed-run quota compensation; V301 snapshots the human project/org/global role on immutable LLM attempt
 intents so later membership edits cannot rewrite historical usage exports. V302 adds the preview-render
 bundle tables for the flag-gated `previewrender/` prototype and is treated as permanently occupied even
 if that prototype is later discarded. V303 adds durable run-submission idempotency; V304 adds
-benchmark per-attempt route attribution. The older V299, V301 and V302 statements above describe
-prior source tuples.
+benchmark per-attempt route attribution; V305 adds `agent_task` effective-route columns; V306 adds
+preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
+`contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
+valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped
+composite `(run_id, file_path)` identity (RR-1544 — the prior key let one run's lock collide with
+another's). The older V299, V301 and V302 statements above describe prior source tuples.
+
+**V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
+tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from
+that range; the next free number outside it is V318. **V320** is the integrations lane of the same
+wave: it adds explicit `integration_run.org_id` / `created_by_user_id` ownership columns so
+`GET /api/integrations/runs` can be scoped to the caller's org (RR-339) and so an interactive
+trigger records the actor that caused it (RR-340). Legacy rows keep a NULL `org_id` and are visible
+only to SUPER_ADMIN.
+
+**Inbound integration webhooks fail closed (RR-637, 2026-07-21).** Bitbucket and ServiceNow
+previously returned successfully from `verifySignature` when no webhook secret was configured —
+"no secret" was treated as "skip verification", so any network caller could submit attacker-authored
+PR/incident text as a pipeline run under the configured runner identity. All four inbound adapters
+(Jira, Confluence, PagerDuty, Bitbucket, ServiceNow) now reject every request when their
+`agent.integrations.<source>.webhook-secret` is missing or blank. **Behaviour change:** any live
+Bitbucket/ServiceNow integration running without a configured secret stops working until the secret
+is set. Manual Jira/Confluence triggers additionally require ORG_ADMIN, run under the caller's own
+user/org rather than the global `run-on-behalf-of-user-id` runner, and always stop at the plan gate
+regardless of the adapter's `skip-approval` setting.
 SWE-bench and ProgramBench terminal capture now dispatch through the dedicated virtual-thread
 benchmark-capture executor instead of self-invoking ineffective `@Async` methods; capture restart
 ownership remains open.
+
+**Scoring-verification honesty pass (2026-07-21, V317).** Six places where the product claimed
+something was verified when it was not are corrected. (1) The BUILD-mode `WorkspaceTestRunner` now
+treats the runner's process exit code as outranking the parsed summary: a suite printing "all
+passed" while exiting non-zero (coverage threshold, plugin/compilation error, package failure,
+teardown error) is discarded as unproven instead of published as green (RR-283). (2) Surefire/Gradle
+report directories are reset before launch and only reports postdating the launch are admitted, so a
+command that dies before writing any report cannot have the previous attempt's green XML scored as
+its own (RR-284). (3) `V317 validation_report.test_execution_verified` persists that
+freshness/provenance token three-valued, and the evidence ledger restores `DETERMINISTIC`/HIGH for
+the `tests` and count-derived `executable-verification` rows only on TRUE — `null` remains unproven,
+never proven-false (RR-1660, completing RR-1646). (4) `ReviewerAgent` now models build and test
+evidence for ONE final workspace generation: the fix-tests pass is followed by a rebuild and a test
+rerun whose results are persisted on `ReviewerResult`, and red-or-unprovable concrete tests
+tighten the verdict to `UNRESOLVED_ISSUES` (RR-273). (5) `RunChangeEvidenceService` no longer uses a
+repository's root commit as a run baseline unless the history is a single commit (RR-287). (6) An
+absent final validation report is `UNAVAILABLE`, not a pass: `PostReviewQualityPolicy` stops
+returning "not failed" for a null report (RR-826). `SequentialExecutor` also stops promoting a
+twice-failed build smoke with zero worker writes to SUCCESS/COMPLETE — it terminalises `PARTIAL`,
+because "delivered nothing and verification is red" was being read as "environmental" (RR-262), and
+`WorkerAgent`'s terminal verified-pass now requires a structured exit-zero verdict rather than
+`{"ok":true}` transport success, which `ShellTool` returns for failing commands by design (RR-258).
+**Expect verified scores to move DOWN, never up, apart from proven-test runs whose ledger label
+recovers.**
 
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 

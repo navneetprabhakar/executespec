@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
  * unavailable result, never as a completed run.
  */
 @Slf4j
-final class BoundedProcess {
+public final class BoundedProcess {
 
   /** Hard cap on captured output so a runaway child cannot exhaust the heap. */
   private static final int MAX_OUTPUT_CHARS = 1_000_000;
@@ -35,7 +35,7 @@ final class BoundedProcess {
    *
    * @return the exit code, captured output, and whether the child exited before the deadline
    */
-  static Outcome run(ProcessBuilder pb, Duration timeout) throws Exception {
+  public static Outcome run(ProcessBuilder pb, Duration timeout) throws Exception {
     Process process = pb.start();
     StringBuilder captured = new StringBuilder();
     Thread drain =
@@ -97,5 +97,5 @@ final class BoundedProcess {
    * @param exitCode child exit status, or -1 when {@code finished} is false
    * @param output combined stdout/stderr, capped at {@value #MAX_OUTPUT_CHARS} characters
    */
-  record Outcome(boolean finished, int exitCode, String output) {}
+  public record Outcome(boolean finished, int exitCode, String output) {}
 }

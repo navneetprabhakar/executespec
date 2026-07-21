@@ -300,6 +300,9 @@ public class ValidationReportService {
               .finalBuildPassed(finalBuildPassed)
               .testsPassed(ts != null ? testsPassedCount : null)
               .testsTotal(ts != null ? testsTotalCount : null)
+              // RR-1660 — carry the producer's execution-provenance token, three-valued. A summary
+              // with no signal stays null (unproven), never false.
+              .testExecutionVerified(ts == null ? null : ts.getExecutionVerified())
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
@@ -483,6 +486,11 @@ public class ValidationReportService {
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
+    // RR-1660 — the merged population is only as proven as its weakest contributor: the incoming
+    // summary must prove itself AND the persisted baseline it is being combined with must already
+    // have been proven. Anything else keeps the row unproven.
+    report.setTestExecutionVerified(
+        mergedExecutionProvenance(report.getTestExecutionVerified(), baseline, summary));
     ExecutableVerificationEvidence executableVerification =
         executableVerification(
             report.getFinalBuildPassed(),
@@ -562,6 +570,27 @@ public class ValidationReportService {
    * rescores merge against a stable anchor instead of stacking increments onto themselves.
    */
   private record TestPopulationBaseline(int total, int passed) {}
+
+  /**
+   * RR-1660 — provenance of a MERGED test population.
+   *
+   * <p>{@code rescoreAfterConcreteTests} sums a persisted baseline with an incoming summary, so the
+   * combined counts can only be labelled proven when BOTH contributors were proven. A baseline that
+   * contributes no tests is not a contributor and cannot dilute the incoming proof.
+   *
+   * <p>Three-valued throughout: {@code null} means unproven, never proven-false.
+   */
+  private static Boolean mergedExecutionProvenance(
+      Boolean persisted, TestPopulationBaseline baseline, TestExecutionSummary incoming) {
+    boolean incomingProven = incoming != null && incoming.isExecutionProven();
+    if (!incomingProven) {
+      return incoming == null ? persisted : incoming.getExecutionVerified();
+    }
+    if (baseline.total() == 0) {
+      return Boolean.TRUE;
+    }
+    return Boolean.TRUE.equals(persisted) ? Boolean.TRUE : persisted;
+  }
 
   private TestPopulationBaseline testPopulationBaseline(ValidationReport report) {
     String json = report.getExecutableEvidenceJson();

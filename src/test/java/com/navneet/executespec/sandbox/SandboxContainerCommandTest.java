@@ -19,10 +19,11 @@ import org.junit.jupiter.api.Test;
 class SandboxContainerCommandTest {
 
   private static final Path ROOT = Path.of("/var/lib/executespec/sandboxes");
+  private static final String SANDBOX_ID = "s1";
 
   @Test
   void strictProfileAppliesEveryDeclaredHardeningFlag() {
-    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT);
+    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID);
     String joined = String.join(" ", argv);
 
     assertThat(argv).startsWith("docker", "run", "--detach");
@@ -39,7 +40,8 @@ class SandboxContainerCommandTest {
 
   @Test
   void memorySwapIsPinnedToMemorySoSwapCannotDefeatTheCap() {
-    String joined = String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT));
+    String joined =
+        String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID));
     assertThat(joined).contains("--memory 1073741824b");
     assertThat(joined).contains("--memory-swap 1073741824b");
   }
@@ -52,7 +54,8 @@ class SandboxContainerCommandTest {
             specWithMount(
                 new SandboxRuntimeSpec.WritableMount(
                     "/var/lib/executespec/sandboxes/s1/work", "/workspace")),
-            ROOT);
+            ROOT,
+            SANDBOX_ID);
     String joined = String.join(" ", argv);
 
     assertThat(argv).contains("--read-only");
@@ -73,13 +76,18 @@ class SandboxContainerCommandTest {
             "/root/.aws",
             "/Users/someone/.ssh",
             "/var/lib/executespec/other-tenant",
+            // RR-821 — these two are INSIDE the configured global root and were previously
+            // admitted: the root that holds every sandbox, and a sibling tenant's workspace.
+            "/var/lib/executespec/sandboxes",
+            "/var/lib/executespec/sandboxes/other-tenant/work",
             "/")) {
       assertThatThrownBy(
               () ->
                   SandboxContainerCommand.create(
                       "es-sbx-1",
                       specWithMount(new SandboxRuntimeSpec.WritableMount(outside, "/mnt")),
-                      ROOT))
+                      ROOT,
+                      SANDBOX_ID))
           .as("host path %s must be refused", outside)
           .isInstanceOf(IllegalArgumentException.class);
     }
@@ -94,7 +102,8 @@ class SandboxContainerCommandTest {
                     specWithMount(
                         new SandboxRuntimeSpec.WritableMount(
                             "/var/lib/executespec/sandboxes/../../../etc", "/mnt")),
-                    ROOT))
+                    ROOT,
+                    SANDBOX_ID))
         .isInstanceOf(IllegalArgumentException.class);
 
     assertThatThrownBy(
@@ -102,7 +111,8 @@ class SandboxContainerCommandTest {
                 SandboxContainerCommand.create(
                     "es-sbx-1",
                     specWithMount(new SandboxRuntimeSpec.WritableMount("relative/path", "/mnt")),
-                    ROOT))
+                    ROOT,
+                    SANDBOX_ID))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -110,7 +120,7 @@ class SandboxContainerCommandTest {
   void containerNamesThatCouldCarryArgumentsAreRefused() {
     for (String unsafe :
         List.of("es sbx", "-es-sbx", "es;rm -rf /", "es$(id)", "", "a".repeat(70))) {
-      assertThatThrownBy(() -> SandboxContainerCommand.create(unsafe, spec(), ROOT))
+      assertThatThrownBy(() -> SandboxContainerCommand.create(unsafe, spec(), ROOT, SANDBOX_ID))
           .as("container name %s", unsafe)
           .isInstanceOf(IllegalArgumentException.class);
     }
@@ -118,7 +128,7 @@ class SandboxContainerCommandTest {
 
   @Test
   void commandIsAnArgumentVectorNotAShellString() {
-    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT);
+    List<String> argv = SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID);
     assertThat(argv).doesNotContain("sh", "-c", "/bin/sh", "bash");
   }
 
@@ -131,7 +141,8 @@ class SandboxContainerCommandTest {
   @Test
   void wallClockCeilingIsExposedBecauseNoContainerFlagExpressesIt() {
     assertThat(SandboxContainerCommand.limitsExceededTimeout(spec())).isEqualTo(900L);
-    assertThat(String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT)))
+    assertThat(
+            String.join(" ", SandboxContainerCommand.create("es-sbx-1", spec(), ROOT, SANDBOX_ID)))
         .endsWith("sleep 900");
   }
 

@@ -20,6 +20,27 @@ public class DevDockerfileGenerator {
 
   private static final ObjectMapper mapper = new ObjectMapper();
 
+  private final PreviewProperties previewProperties;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public DevDockerfileGenerator(PreviewProperties previewProperties) {
+    this.previewProperties = previewProperties;
+  }
+
+  /** Test-only: defaults, i.e. interactive surfaces disabled. */
+  DevDockerfileGenerator() {
+    this(new PreviewProperties());
+  }
+
+  /**
+   * Whether the CLI terminal preview accepts keyboard input (RR-391). Default OFF: {@code ttyd
+   * --writable} on an unauthenticated URL is an anonymous interactive shell into the generated
+   * program.
+   */
+  private String ttydWritableArg() {
+    return previewProperties.getInteractive().isWritableTerminalEnabled() ? "\"--writable\", " : "";
+  }
+
   /** Captures the layout of a full-stack project with separate frontend/backend subdirectories. */
   record FullStackLayout(
       String frontendDir,
@@ -1121,28 +1142,83 @@ public class DevDockerfileGenerator {
     return sb.toString();
   }
 
-  /** Returns .dockerignore content. */
+  /**
+   * Returns .dockerignore content for the generated build context.
+   *
+   * <p>RR-384: generated images use {@code COPY . .}, so every path not excluded here is baked into
+   * a layer that anyone with registry or runtime access can extract — regardless of whether the
+   * application routes it. The list therefore covers three families beyond ordinary build noise:
+   * ExecuteSpec's own control directories ({@code .agent-context}, {@code .executespec}), package
+   * manager credential files ({@code .npmrc}, {@code .pypirc}, …), and key/certificate material.
+   *
+   * <p><b>Not closed here:</b> this is still a deny-list over the customer's tree, not an
+   * allowlisted staged context. A repository secret under an unrecognised name is still copied. It
+   * also overwrites any {@code .dockerignore} the customer authored.
+   */
   public String dockerIgnore() {
     return """
            .git
+           .gitignore
            node_modules
            target
            build
            dist
            .idea
+           .vscode
            *.log
            .dockerignore
            Dockerfile
+
+           # ExecuteSpec control directories — planner/spec context, never product source
+           .agent-context
+           .executespec
+
+           # Environment / configuration secrets
            .env
            .env.*
            .env.local
            .env.production
            credentials.json
            service-account.json
+           service_account.json
            key.json
            keyfile.json
            secrets.yml
            secrets.yaml
+           secrets.json
+
+           # Package manager + registry credentials
+           .npmrc
+           .yarnrc
+           .yarnrc.yml
+           .pypirc
+           .netrc
+           _netrc
+           pip.conf
+           .docker/config.json
+           .m2/settings.xml
+
+           # Cloud and CI credentials
+           .aws
+           .gcloud
+           .config/gcloud
+           .azure
+           .kube
+           gha-creds-*.json
+
+           # Keys, certificates, keystores
+           .ssh
+           id_rsa
+           id_rsa.*
+           id_ed25519
+           id_ed25519.*
+           *.pem
+           *.key
+           *.p12
+           *.pfx
+           *.jks
+           *.keystore
+           *.der
            """;
   }
 
@@ -2269,7 +2345,18 @@ public class DevDockerfileGenerator {
   /** Generate Dockerfile content for the given project type and preview mode. */
   public String generate(PreviewProjectType type, Path workspace, PreviewMode mode) {
     if (mode == PreviewMode.CLI_TERMINAL) return cliDockerfile(type, workspace);
-    if (mode == PreviewMode.MCP_INSPECTOR) return mcpDockerfile(type, workspace);
+    if (mode == PreviewMode.MCP_INSPECTOR) {
+      // RR-391: the Inspector can invoke the generated server's tools with no authentication, and
+      // a preview URL is not an authenticated channel. Opt-in only; otherwise serve the ordinary
+      // web preview, which does not expose a tool-invocation surface.
+      if (!previewProperties.getInteractive().isMcpInspectorEnabled()) {
+        log.info(
+            "MCP Inspector preview is disabled (preview.interactive.mcp-inspector-enabled=false);"
+                + " falling back to web preview");
+        return generate(type, workspace);
+      }
+      return mcpDockerfile(type, workspace);
+    }
     return generate(type, workspace); // existing WEB behaviour
   }
 
@@ -2300,7 +2387,9 @@ public class DevDockerfileGenerator {
         + """
           COPY . .
           EXPOSE 8080
-          CMD ["ttyd", "--port", "8080", "--writable", "node", \""""
+          CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"node\", \""
         + entryFile
         + "\"]\n";
   }
@@ -2334,7 +2423,9 @@ RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
 COPY . .
 RUN javac *.java 2>/dev/null || true
 EXPOSE 8080
-CMD ["ttyd", "--port", "8080", "--writable", "java", \""""
+CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"java\", \""
         + mainClass
         + "\"]\n";
   }
@@ -2363,17 +2454,21 @@ COPY requirements.txt* pyproject.toml* ./
         + """
           COPY . .
           EXPOSE 8080
-          CMD ["ttyd", "--port", "8080", "--writable", "python", \""""
+          CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"python\", \""
         + entryFile
         + "\"]\n";
   }
 
   private String cliGoDockerfile() {
-    return PreviewStandaloneDockerfiles.cliGo();
+    return PreviewStandaloneDockerfiles.cliGo(
+        previewProperties.getInteractive().isWritableTerminalEnabled());
   }
 
   private String cliRustDockerfile() {
-    return PreviewStandaloneDockerfiles.cliRust();
+    return PreviewStandaloneDockerfiles.cliRust(
+        previewProperties.getInteractive().isWritableTerminalEnabled());
   }
 
   private String mcpDockerfile(PreviewProjectType type, Path workspace) {

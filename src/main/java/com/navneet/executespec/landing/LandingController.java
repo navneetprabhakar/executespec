@@ -20,15 +20,20 @@ import lombok.RequiredArgsConstructor;
 /**
  * Selling-point endpoints for the public marketing surface.
  *
- * <p>Three routes, all read-only, all anonymized, all permitted without auth via {@link
- * com.navneet.executespec.auth.security.SecurityConfig}:
+ * <p>Three routes, all read-only, all permitted without auth via {@link
+ * com.navneet.executespec.auth.security.SecurityConfig}. They publish aggregate counters and
+ * per-run metrics (score, file count, duration, whether a PR opened) plus letter-substituted
+ * project labels. They deliberately publish <strong>no customer specification text</strong> — see
+ * {@link #redactedSpecLabel()} for why the previous "anonymized" claim did not hold:
  *
  * <ul>
  *   <li>{@code GET /api/v3/landing/stats} — counter pair (specs this week + verified-score
  *       percent). Drives the hero proof number.
- *   <li>{@code GET /api/v3/landing/sample-runs} — gallery of 6 recent successful runs (anonymized
- *       spec text + verified score + duration). Drives the "see what we built" proof block.
- *   <li>{@code GET /api/v3/public/exec-snapshot} — the full /exec page, anonymized. Drives the
+ *   <li>{@code GET /api/v3/landing/sample-runs} — gallery of 6 recent successful runs (verified
+ *       score + file count + duration; {@code spec} is always empty). Drives the "see what we
+ *       built" proof block.
+ *   <li>{@code GET /api/v3/public/exec-snapshot} — the full /exec page: totals, spend by
+ *       letter-labelled project, and top wins by score ({@code spec} always empty). Drives the
  *       public share-link route for PgM/CFO persona ("Watch this team's last 30 days").
  * </ul>
  *
@@ -43,8 +48,6 @@ import lombok.RequiredArgsConstructor;
 public class LandingController {
 
   private static final int GALLERY_LIMIT = 6;
-  private static final int SPEC_TRUNCATION = 90;
-  private static final int EXEC_SPEC_TRUNCATION = 80;
   private static final int EXEC_WINDOW_DAYS = 30;
   private static final DateTimeFormatter WHEN_FMT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(java.time.ZoneOffset.UTC);
@@ -67,7 +70,7 @@ public class LandingController {
         rows.stream()
             .map(
                 r -> {
-                  String spec = truncate((String) r[0], SPEC_TRUNCATION);
+                  String spec = redactedSpecLabel();
                   Integer score = toInt(r[1]);
                   Integer files = toInt(r[2]);
                   Long durationMs = computeDurationMs(r[3], r[4]);
@@ -121,10 +124,7 @@ public class LandingController {
             .map(
                 row ->
                     new ExecSnapshot.TopWin(
-                        truncate((String) row[0], EXEC_SPEC_TRUNCATION),
-                        toInt(row[1]),
-                        toDouble(row[2]),
-                        formatWhen(row[3])))
+                        redactedSpecLabel(), toInt(row[1]), toDouble(row[2]), formatWhen(row[3])))
             .toList();
 
     return ResponseEntity.ok(
@@ -140,43 +140,25 @@ public class LandingController {
   }
 
   /**
-   * Sanitize a raw user-submitted spec into a single line of plain text safe for the public
-   * landing/exec-snapshot surface, then truncate.
+   * Public marketing surfaces publish NO customer specification text (RR-669/RR-1662 family).
    *
-   * <p>The 2026-05-11 audit found {@code topWins[].spec} entries on {@code
-   * /api/v3/public/exec-snapshot} leaking raw markdown ({@code "** **Project:** Single-Player 3D
-   * Race Game ..."}) — the previous {@link #truncate(String, int)} helper only collapsed
-   * whitespace. We now strip the common markdown noise (heading markers, bold/italic stars +
-   * underscores, inline code backticks, list bullets, blockquote arrows) before the whitespace
-   * collapse, so prospects see "Project: Single-Player 3D Race Game …" instead of leaked stars.
-   * Functional shape (single-line truncated string) unchanged; this strictly reduces the surface
-   * area, never widens it.
+   * <p>These three routes are unauthenticated and were documented as "anonymized", but anonymity
+   * was implemented as Markdown-stripping plus truncation to 80-90 characters. That makes a leak
+   * smaller, not anonymous: the opening line of a real specification routinely carries the product
+   * name, the customer's company, a ticket id, an incident description, a repository URL or an
+   * email address — and occasionally a pasted credential. No consent was ever recorded, and every
+   * successful private run was eligible purely by having a high score.
+   *
+   * <p>The correct surface is an explicitly opted-in, separately curated showcase with a review
+   * lifecycle and an immutable redacted copy, defaulting every tenant to excluded. Until that
+   * exists, these endpoints publish a neutral placeholder. The DTO shape is deliberately unchanged
+   * so the marketing page keeps rendering; it will simply show no spec prose.
+   *
+   * <p>Do not "improve" this by sanitising the customer string harder. Redaction of free-form human
+   * prose is not a solvable filtering problem, which is why the previous attempt failed.
    */
-  private static String truncate(String s, int max) {
-    if (s == null) return "";
-    String cleaned =
-        s
-            // Heading markers at line start (e.g. "## " / "### ")
-            .replaceAll("(?m)^#{1,6}\\s+", "")
-            // List bullets at line start (* / - / +)
-            .replaceAll("(?m)^\\s*[*\\-+]\\s+", "")
-            // Numbered list bullets at line start (1. / 2) / etc.)
-            .replaceAll("(?m)^\\s*\\d+[.)]\\s+", "")
-            // Blockquote markers
-            .replaceAll("(?m)^>\\s+", "")
-            // Bold (**…**) — drop just the markers
-            .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
-            // Italic (*…* or _…_) — drop just the markers
-            .replaceAll("(?<!\\w)\\*([^*\\n]+)\\*(?!\\w)", "$1")
-            .replaceAll("(?<!\\w)_([^_\\n]+)_(?!\\w)", "$1")
-            // Inline code backticks
-            .replace("`", "")
-            // Stray markdown stars left after the above (e.g. orphan "**")
-            .replace("**", "")
-            // Trailing/leading whitespace runs + newlines → single space
-            .replaceAll("\\s+", " ")
-            .trim();
-    return cleaned.length() <= max ? cleaned : cleaned.substring(0, max - 1) + "…";
+  private static String redactedSpecLabel() {
+    return "";
   }
 
   private static Integer toInt(Object o) {

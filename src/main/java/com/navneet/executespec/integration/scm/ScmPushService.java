@@ -265,6 +265,48 @@ public class ScmPushService {
     }
   }
 
+  /**
+   * RR-900 — the run's repository mode, parsed exactly. The previous code compared the raw string
+   * against {@code "EXISTING"} and sent EVERY other value — {@code null}, {@code "NONE"}, a typo, a
+   * crafted value — down the direct-publication branch, which force-pushes the remote default
+   * branch. A mode that is not understood must never resolve to the most destructive operation.
+   */
+  enum RepoMode {
+    /** Publish into a repository ExecuteSpec creates for this run. */
+    NEW,
+    /** Publish as a branch + pull request against a repository the customer already owns. */
+    EXISTING,
+    /** No repository is attached to this run; publication is not defined. */
+    NONE;
+
+    /**
+     * @return the parsed mode, or empty when the value is absent/blank (caller decides the safe
+     *     default) — an unrecognised NON-blank value throws so it can never be defaulted.
+     */
+    static java.util.Optional<RepoMode> parse(String raw) {
+      if (raw == null || raw.isBlank()) return java.util.Optional.empty();
+      try {
+        return java.util.Optional.of(RepoMode.valueOf(raw.trim().toUpperCase(Locale.ROOT)));
+      } catch (IllegalArgumentException unknown) {
+        throw new UnknownRepoModeException(raw);
+      }
+    }
+  }
+
+  /** Raised when a run carries a repository mode this release does not understand. */
+  static final class UnknownRepoModeException extends RuntimeException {
+    UnknownRepoModeException(String raw) {
+      super("Unsupported repository mode");
+      this.raw = raw;
+    }
+
+    private final String raw;
+
+    String raw() {
+      return raw;
+    }
+  }
+
   private PushResult pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
     // Pilot v3.0 — multi-repo runs: push each cloned subdirectory as its own
     // branch + PR. Falls through to the single-repo path if no project repos
@@ -278,10 +320,25 @@ public class ScmPushService {
       return pushMultiRepo(run, pat);
     }
 
-    String repoMode = run.getRepoMode();
+    RepoMode repoMode;
+    try {
+      // Absent/blank is the legacy shape and stays permitted, but it resolves to the SAFE mode
+      // (branch + PR), never to direct publication onto the default branch.
+      repoMode = RepoMode.parse(run.getRepoMode()).orElse(RepoMode.EXISTING);
+    } catch (UnknownRepoModeException unknown) {
+      log.warn(
+          "[{}] SCM publication refused — unsupported repository mode {}",
+          run.getRunId(),
+          unknown.raw());
+      return PushResult.failed(
+          "Unsupported repository mode on run — publication refused", "GITHUB");
+    }
+    if (repoMode == RepoMode.NONE) {
+      return PushResult.noConfiguration("GITHUB", "Run has no attached repository");
+    }
     String repoUrl = run.getRepoUrl();
 
-    if (!StringUtils.hasText(repoUrl) && !"NEW".equals(repoMode))
+    if (!StringUtils.hasText(repoUrl) && repoMode != RepoMode.NEW)
       return PushResult.noConfiguration("GITHUB", "GitHub repository is not configured");
 
     String pat = resolvePat(run, user);
@@ -303,10 +360,15 @@ public class ScmPushService {
     }
 
     String remote = repoUrl;
-    if ("NEW".equals(repoMode) && (repoUrl == null || repoUrl.isBlank())) {
+    // RR-900 — direct publication force-pushes the default branch, so it is permitted ONLY for a
+    // repository this invocation just created (and which is therefore empty). A NEW-mode run
+    // pointed at a pre-existing repository falls through to the branch + PR path.
+    boolean createdThisInvocation = false;
+    if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
       log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
       remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
       if (remote != null) {
+        createdThisInvocation = true;
         PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
         freshRun.setRepoUrl(remote);
         stateStore.save(freshRun);
@@ -322,7 +384,7 @@ public class ScmPushService {
 
     log.info("Pushing workspace to GitHub: {}", remote);
 
-    if ("EXISTING".equals(repoMode)) {
+    if (!createdThisInvocation) {
       // Pilot R5 — project settings may override branch naming / target branch / reviewers.
       Project project =
           run.getProjectId() != null
@@ -340,10 +402,13 @@ public class ScmPushService {
               : gitHubRepoService.getDefaultBranch(remote, pat);
       String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
       String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
-      String prUrl =
-          gitHubRepoService.createPullRequest(
+      // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
+      // authorize deleting the branch we just pushed.
+      GitHubRepoService.PullRequestCreation creation =
+          gitHubRepoService.createPullRequestDetailed(
               remote, branchName, targetBranch, prTitle, prBody, pat);
-      if (prUrl != null) {
+      String prUrl = creation.prUrl();
+      if (creation.prExists() && prUrl != null) {
         PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
         freshRun.setGithubPrUrl(prUrl);
         freshRun.setScmPrUrl(prUrl);
@@ -372,11 +437,26 @@ public class ScmPushService {
           }
         }
         gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
-        return PushResult.pushed("GITHUB", prUrl, "GitHub pull request created");
+        return PushResult.pushed(
+            "GITHUB",
+            prUrl,
+            creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
+                ? "Existing GitHub pull request updated"
+                : "GitHub pull request created");
+      } else if (creation.prExists()) {
+        // ALREADY_EXISTS but the discovery lookup could not be answered. A pull request is open on
+        // this branch, so cleanup is forbidden; we simply cannot report its URL.
+        log.info(
+            "[{}] Pull request already exists for branch {} — URL unresolved, no cleanup enqueued",
+            run.getRunId(),
+            branchName);
+        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+        return PushResult.pushed("GITHUB", "", "Branch pushed to an existing GitHub pull request");
       } else {
-        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation failed: it's now an
-        // orphan. Enqueue the saga compensation to delete it (PAT resolved from the run owner at
-        // execution time — not stored in the payload).
+        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation definitively failed: it's
+        // now an orphan. Enqueue the saga compensation to delete it (PAT resolved from the run
+        // owner at execution time — not stored in the payload). RR-146: reached only for a typed
+        // FAILED outcome, never for "a pull request already exists".
         enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
         gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
         return PushResult.failed("GitHub branch pushed but pull request creation failed", "GITHUB");
@@ -569,13 +649,24 @@ public class ScmPushService {
           (project != null && StringUtils.hasText(project.getTargetBranch()))
               ? project.getTargetBranch()
               : (repo.getDefaultBranch() != null ? repo.getDefaultBranch() : "main");
-      String prUrl =
-          gitHubRepoService.createPullRequest(
+      GitHubRepoService.PullRequestCreation creation =
+          gitHubRepoService.createPullRequestDetailed(
               remote, branchName, targetBranch, prTitle, prBodyBase, pat);
-      if (prUrl == null) {
+      if (creation.failed()) {
         // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
+        // RR-146: only a typed FAILED outcome reaches here; "a pull request already exists" does
+        // not, because that branch is live review material.
         enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
         failed++;
+        continue;
+      }
+      String prUrl = creation.prUrl();
+      if (prUrl == null) {
+        log.info(
+            "[{}] Pull request already exists for {} branch {} — URL unresolved",
+            run.getRunId(),
+            repo.getGithubRepoFullName(),
+            branchName);
         continue;
       }
 

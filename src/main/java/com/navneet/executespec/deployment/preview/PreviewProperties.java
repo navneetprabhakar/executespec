@@ -45,6 +45,8 @@ public class PreviewProperties {
 
   private CleanupConfig cleanup = new CleanupConfig();
 
+  private InteractiveConfig interactive = new InteractiveConfig();
+
   /**
    * Route previews through the external preview-engine service instead of running docker-compose
    * locally. When ON + eligible, main app builds the image, pushes to {@link
@@ -80,6 +82,28 @@ public class PreviewProperties {
      * destroy customer previews; TTL cleanup remains authoritative.
      */
     private boolean teardownOnShutdown = false;
+  }
+
+  /**
+   * Interactive preview surfaces (RR-391).
+   *
+   * <p>A preview URL is a bearer capability with no application authentication behind it. That is
+   * acceptable for a passive page and not acceptable for a surface that accepts input and executes
+   * it, so both interactive modes are opt-in and default OFF.
+   */
+  @Data
+  public static class InteractiveConfig {
+    /**
+     * Run the CLI terminal preview with {@code ttyd --writable}, i.e. anyone holding the preview
+     * URL can type into the generated program's stdin. OFF: the terminal streams output only.
+     */
+    private boolean writableTerminalEnabled = false;
+
+    /**
+     * Serve generated MCP servers through the MCP Inspector, which can invoke the server's tools
+     * with no authentication. OFF: the project falls back to the ordinary web preview.
+     */
+    private boolean mcpInspectorEnabled = false;
   }
 
   @Data

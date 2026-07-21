@@ -42,7 +42,10 @@ class ContextEvidenceBundleWriterTest {
     var writer = new ContextEvidenceBundleWriter(new ObjectMapper());
     Path written = writer.write(tempDir, input, "run-1");
 
-    assertThat(written).isEqualTo(contextDir.resolve(ContextEvidenceBundleWriter.FILE_NAME));
+    // The writer now resolves through the shared containment guard, so the returned path is the
+    // canonical (real) one; compare canonically rather than lexically.
+    assertThat(written.toRealPath())
+        .isEqualTo(contextDir.resolve(ContextEvidenceBundleWriter.FILE_NAME).toRealPath());
     var bundle = writer.readCurrent(tempDir, "run-1").orElseThrow();
     assertThat(bundle.path("schemaVersion").asInt()).isEqualTo(1);
     assertThat(bundle.path("evidence").path("newPackages")).hasSize(1);
