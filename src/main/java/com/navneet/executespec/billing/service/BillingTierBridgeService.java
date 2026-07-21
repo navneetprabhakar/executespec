@@ -96,10 +96,10 @@ public class BillingTierBridgeService {
   static String authTierFor(String planTier) {
     String normalized = planTier == null ? "" : planTier.trim().toUpperCase();
     return switch (normalized) {
-      // Retired/legacy plan-tier spellings that still map onto a live auth tier.
+        // Retired/legacy plan-tier spellings that still map onto a live auth tier.
       case "STARTER", "FREE" -> "FREE";
       case "MAX" -> "TEAM";
-      // V253 canonical ladder.
+        // V253 canonical ladder.
       case "PRO" -> "PRO";
       case "PRO_PLUS" -> "PRO_PLUS";
       case "BYOK" -> "BYOK";

@@ -509,7 +509,8 @@ public class GitTool {
    *
    * @param relativePaths workspace-relative paths; must be non-empty, relative, and traversal-free
    */
-  public CommitOutcome commitPaths(String runId, String message, java.util.List<String> relativePaths) {
+  public CommitOutcome commitPaths(
+      String runId, String message, java.util.List<String> relativePaths) {
     if (relativePaths == null || relativePaths.isEmpty()) {
       return CommitOutcome.failed("no paths supplied");
     }
@@ -526,7 +527,8 @@ public class GitTool {
 
     synchronized (WORKSPACE_GIT_LOCKS.computeIfAbsent(runId, k -> new Object())) {
       try {
-        java.util.List<String> add = new java.util.ArrayList<>(java.util.List.of("git", "add", "--"));
+        java.util.List<String> add =
+            new java.util.ArrayList<>(java.util.List.of("git", "add", "--"));
         add.addAll(relativePaths);
         Process addProc =
             new ProcessBuilder(add).directory(workDir.toFile()).redirectErrorStream(true).start();
@@ -549,9 +551,13 @@ public class GitTool {
             new java.util.ArrayList<>(java.util.List.of("git", "commit", "-m", message, "--"));
         commit.addAll(relativePaths);
         Process commitProc =
-            new ProcessBuilder(commit).directory(workDir.toFile()).redirectErrorStream(true).start();
+            new ProcessBuilder(commit)
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .start();
         String commitOut = new String(commitProc.getInputStream().readAllBytes());
-        if (commitProc.waitFor() != 0) return CommitOutcome.failed("git commit failed: " + commitOut);
+        if (commitProc.waitFor() != 0)
+          return CommitOutcome.failed("git commit failed: " + commitOut);
 
         Process revParse =
             new ProcessBuilder("git", "rev-parse", "HEAD")

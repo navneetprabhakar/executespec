@@ -172,8 +172,8 @@ public class PlanSeederService {
 
   /**
    * RR-418 — the runtime only ever recognised {@code ANNUAL}, but every annual migration inserted
-   * {@code YEARLY}, so annual plans were seeded as MONTHLY Razorpay plans. V310 forward-migrates the
-   * stored rows; this alias keeps the seeder correct for any row that predates or bypasses it.
+   * {@code YEARLY}, so annual plans were seeded as MONTHLY Razorpay plans. V310 forward-migrates
+   * the stored rows; this alias keeps the seeder correct for any row that predates or bypasses it.
    */
   static boolean annualPeriod(String period) {
     String normalized = period == null ? "" : period.trim().toUpperCase();
