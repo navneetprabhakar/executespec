@@ -67,7 +67,27 @@ public class DockerExecutor {
     }
   }
 
-  /** Run a container in detached mode with resource limits. Returns the container ID. */
+  /**
+   * Run a container in detached mode with resource limits. Returns the container ID.
+   *
+   * <p>RR-157: the direct Docker path used to pass only CPU/memory/port, so previewed customer code
+   * ran with the full default capability set and no PID ceiling — materially weaker than the
+   * Compose path next to it. The flags below bring the two paths to the same floor:
+   *
+   * <ul>
+   *   <li>{@code --cap-drop ALL} and {@code --security-opt no-new-privileges} — no ambient
+   *       capabilities, no setuid escalation inside the container.
+   *   <li>{@code --pids-limit} — a fork bomb exhausts its own container, not the host.
+   *   <li>{@code --add-host} entries pinning the cloud metadata names to loopback, matching {@code
+   *       ComposeFileGenerator}.
+   * </ul>
+   *
+   * <p><b>Not closed here:</b> the container still has ordinary bridge-network egress. Metadata
+   * <em>names</em> are redirected, but the link-local address is reachable by IP from inside a
+   * container on a bridge network, and reaching internal services is unaffected. Deny-by-default
+   * egress requires a network policy or a separate preview VM/worker boundary and is not something
+   * a {@code docker run} flag can supply.
+   */
   public String run(
       String imageTag,
       String containerName,
@@ -85,6 +105,16 @@ public class DockerExecutor {
                 containerName,
                 "--cpus=" + cpuLimit,
                 "--memory=" + memoryLimit,
+                "--pids-limit",
+                "512",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--add-host",
+                "metadata.google.internal:127.0.0.1",
+                "--add-host",
+                "metadata:127.0.0.1",
                 "-p",
                 hostPort + ":" + containerPort,
                 imageTag),
