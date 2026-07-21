@@ -1,21 +1,16 @@
 package com.navneet.executespec.deployment;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -136,7 +131,8 @@ public class CloudRunClient {
     // polluted by gcloud's progress text on stderr) with the deadline started BEFORE the reads.
     // Reading stdout to EOF on the calling thread first let a hung gcloud that kept its pipe open
     // defeat the 10-minute timeout entirely.
-    GcloudResult res = runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+    CloudRunProcess.GcloudResult res =
+        CloudRunProcess.runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
     if (!res.finished()) {
       throw new IOException("Cloud Run deploy timed out after 10 minutes");
     }
@@ -272,7 +268,8 @@ public class CloudRunClient {
       // RR-999: drain stdout and stderr on separate threads (gcloud writes progress text to stderr
       // even with --format=json --quiet, so they must stay apart) with the deadline started BEFORE
       // the reads. The old shape read stdout to EOF first, so a hung gcloud could never time out.
-      GcloudResult res = runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+      CloudRunProcess.GcloudResult res =
+          CloudRunProcess.runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
       if (!res.finished()) {
         throw new IOException("Cloud Run preview deploy timed out after 10 minutes");
       }
@@ -357,7 +354,7 @@ public class CloudRunClient {
                   props.gcpRegion(),
                   "--quiet")
               .redirectErrorStream(true);
-      BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(2));
+      BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(2));
       if (!outcome.finished()) {
         log.warn("Setting public access timed out for {}", serviceName);
         return false;
@@ -414,7 +411,7 @@ public class CloudRunClient {
                 "--quiet")
             .redirectErrorStream(true);
 
-    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(5));
+    BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(5));
     if (!outcome.finished()) {
       throw new IOException("Rollback timed out after 5 minutes for " + serviceName);
     }
@@ -498,7 +495,7 @@ public class CloudRunClient {
 
   private void exec(String... cmd) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
-    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofMinutes(5));
+    BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(5));
     if (!outcome.finished()) {
       throw new IOException("Command timed out after 5 minutes: " + String.join(" ", cmd));
     }
@@ -510,88 +507,6 @@ public class CloudRunClient {
               + String.join(" ", cmd)
               + "\n"
               + outcome.output());
-    }
-  }
-
-  /**
-   * RR-999: run a gcloud command whose stderr is folded into stdout (combined output is fine) under
-   * a reachable wall-clock deadline via {@link BoundedProcess}. {@code pb} must already have {@code
-   * redirectErrorStream(true)}.
-   */
-  private static BoundedProcess.Outcome runBounded(ProcessBuilder pb, Duration timeout)
-      throws IOException {
-    try {
-      return BoundedProcess.run(pb, timeout);
-    } catch (IOException e) {
-      throw e;
-    } catch (Exception e) {
-      throw new IOException(e.getMessage(), e);
-    }
-  }
-
-  /** stdout and stderr kept apart, both bounded, for the JSON-parsing deploy paths (RR-999). */
-  /** Package-private for the hung-child regression test. */
-  record GcloudResult(boolean finished, int exitCode, String stdout, String stderr) {}
-
-  /** Per-stream capture ceiling so a runaway gcloud cannot exhaust the heap. */
-  private static final int MAX_GCLOUD_STREAM_CHARS = 1_000_000;
-
-  /**
-   * RR-999: drain stdout and stderr on separate virtual threads (so the JSON on stdout stays clean
-   * of gcloud's progress text on stderr) with the deadline started BEFORE the reads. The whole
-   * process tree is destroyed on expiry. Reading either stream to EOF on the calling thread first —
-   * the shape this replaces — made the timeout unreachable for a child that keeps its pipe open.
-   */
-  static GcloudResult runGcloudSeparate(ProcessBuilder pb, Duration timeout)
-      throws IOException, InterruptedException {
-    Process process = pb.start();
-    StringBuilder out = new StringBuilder();
-    StringBuilder err = new StringBuilder();
-    Thread outDrain = startDrain(process.getInputStream(), out, "cloudrun-out");
-    Thread errDrain = startDrain(process.getErrorStream(), err, "cloudrun-err");
-
-    boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-    if (!finished) {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
-      process.destroyForcibly();
-      process.waitFor(5, TimeUnit.SECONDS);
-    }
-    joinDrain(outDrain);
-    joinDrain(errDrain);
-    return new GcloudResult(
-        finished,
-        finished ? process.exitValue() : -1,
-        out.toString().trim(),
-        err.toString().trim());
-  }
-
-  private static Thread startDrain(InputStream stream, StringBuilder sink, String name) {
-    return Thread.ofVirtual()
-        .name(name)
-        .start(
-            () -> {
-              try (BufferedReader reader =
-                  new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                  synchronized (sink) {
-                    if (sink.length() + line.length() + 1 <= MAX_GCLOUD_STREAM_CHARS) {
-                      sink.append(line).append('\n');
-                    }
-                    // Keep draining past the cap so the child is never blocked on a full pipe.
-                  }
-                }
-              } catch (Exception ended) {
-                log.debug("gcloud stream drain ended: {}", ended.getMessage());
-              }
-            });
-  }
-
-  private static void joinDrain(Thread drain) {
-    try {
-      drain.join(Duration.ofSeconds(5));
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
     }
   }
 
