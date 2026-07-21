@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.dto.AdminInviteRequest;
 import com.navneet.executespec.auth.dto.OrgDto;
@@ -57,6 +56,7 @@ public class SuperAdminController {
   private final com.navneet.executespec.report.VerifiedScoreBackfillService
       verifiedScoreBackfillService;
   private final AdminUserMutationService adminUserMutationService;
+  private final AdminUserQueryService adminUserQueryService;
   private final com.navneet.executespec.billing.service.TopupPackageAdminService
       topupPackageAdminService;
   private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
@@ -281,19 +281,10 @@ public class SuperAdminController {
   }
 
   @GetMapping("/users")
-  public ResponseEntity<List<UserDto>> listUsers() {
-    List<UserDto> users =
-        userRepo.findAllActive().stream()
-            .map(
-                u -> {
-                  var member =
-                      u.getOrgId() != null
-                          ? orgMemberRepo.findByOrgIdAndUserId(u.getOrgId(), u.getId()).orElse(null)
-                          : null;
-                  return UserDto.from(u, member);
-                })
-            .collect(Collectors.toList());
-    return ResponseEntity.ok(users);
+  public ResponseEntity<List<UserDto>> listUsers(
+      @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
+    // RR-012: batched org-membership lookup + optional bounded page (see AdminUserQueryService).
+    return ResponseEntity.ok(adminUserQueryService.listUsers(page, size));
   }
 
   @GetMapping("/users/{id}")

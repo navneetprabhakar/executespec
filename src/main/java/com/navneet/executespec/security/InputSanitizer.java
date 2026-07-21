@@ -3,7 +3,9 @@ package com.navneet.executespec.security;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -107,6 +109,19 @@ public class InputSanitizer {
   /** Maximum times a 50-char substring can repeat (token-stuffing defense). */
   private static final int MAX_REPETITIONS = 20;
 
+  /** Width of the repetition-scan window (RR-038 / historical token-stuffing check). */
+  private static final int REPETITION_CHUNK = 50;
+
+  /**
+   * RR-038 — absolute character budget for the repetition scan. LOW guardrail applies no payload
+   * cap, so the previous O(n^2) {@code indexOf} sweep could pin an ingress-thread CPU on a large
+   * request. Capping the scanned prefix bounds the work; the linear frequency algorithm below also
+   * removes the quadratic blowup. Real token-stuffing repeats far more than {@link
+   * #MAX_REPETITIONS} times inside this prefix, so normal-sized inputs keep the same detection
+   * verdict.
+   */
+  private static final int REPETITION_SCAN_CHAR_BUDGET = 256 * 1024;
+
   /**
    * Scans the user request for malicious content using the guardrail level resolved from the {@code
    * security.guardrail_level} feature flag. Equivalent to {@code scan(userRequest,
@@ -189,21 +204,22 @@ public class InputSanitizer {
           HttpStatus.BAD_REQUEST, "Request contains too many non-printable characters.");
     }
 
-    // Repetition check — detects token-stuffing attacks
+    // Repetition check — detects token-stuffing attacks.
+    // RR-038: the previous version walked each 50-char chunk and re-scanned the WHOLE request with
+    // indexOf, making the scan O(n^2) with no upper bound at LOW guardrail — a large request could
+    // pin an ingress-thread CPU before any LLM work. Replaced with a linear frequency count over
+    // fixed 50-char blocks under a fixed character budget: same block-repetition verdict for
+    // normal-sized inputs, but O(min(n, budget)) work and bounded heap for the pathological case.
     if (userRequest.length() >= 1000) {
-      for (int i = 0; i <= userRequest.length() - 50; i += 50) {
-        String chunk = userRequest.substring(i, i + 50);
-        int count = 0;
-        int idx = 0;
-        while ((idx = userRequest.indexOf(chunk, idx)) != -1) {
-          count++;
-          idx += 50;
-          if (count > MAX_REPETITIONS) {
-            log.warn(
-                "INPUT BLOCKED (repetition attack): chunk repeated {}+ times", MAX_REPETITIONS);
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST, "Request contains suspicious repetitive content.");
-          }
+      int scanLimit = Math.min(userRequest.length(), REPETITION_SCAN_CHAR_BUDGET);
+      Map<String, Integer> blockCounts = new HashMap<>();
+      for (int i = 0; i + REPETITION_CHUNK <= scanLimit; i += REPETITION_CHUNK) {
+        String chunk = userRequest.substring(i, i + REPETITION_CHUNK);
+        int count = blockCounts.merge(chunk, 1, Integer::sum);
+        if (count > MAX_REPETITIONS) {
+          log.warn("INPUT BLOCKED (repetition attack): chunk repeated {}+ times", MAX_REPETITIONS);
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST, "Request contains suspicious repetitive content.");
         }
       }
     }

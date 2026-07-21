@@ -1,6 +1,8 @@
 package com.navneet.executespec.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +14,7 @@ import com.navneet.executespec.auth.repository.ActivityAuditRepository;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Pageable;
 
 /**
  * RR-208 — pins the versioned canonical hash-chain encoding and its backward-compatible
@@ -128,7 +131,9 @@ class ActivityAuditHashCanonicalizationTest {
 
   private static ActivityAuditService serviceWith(List<ActivityAudit> rows) {
     ActivityAuditRepository repo = mock(ActivityAuditRepository.class);
-    when(repo.findChainOrdered()).thenReturn(rows);
+    // RR-209: verifyChain now walks the chain via a keyset page instead of one findChainOrdered().
+    when(repo.countChained()).thenReturn((long) rows.size());
+    when(repo.findChainOrderedAfter(anyLong(), any(Pageable.class))).thenReturn(rows);
     return new ActivityAuditService(repo, mock(AppUserRepository.class));
   }
 }
