@@ -23,12 +23,11 @@ class FlywayMigrationInventoryTest {
     List<MigrationFile> migrations = readMigrations();
 
     // V119 is an applied historical migration and must remain on the classpath.
-    // V60_1 is fractional, so V1..V309 plus V317 contains 311 migration files.
-    // (Phase 5 bumped this for V307__run_sandbox_lifecycle; the audit remediation added
-    // V308__contract_version_inline_content_text and V309__file_lock_run_scoped_identity, and the
-    // scoring-verification lane added V317__validation_report_test_execution_provenance.)
-    assertThat(migrations).hasSize(311);
-    assertThat(migrations.getLast().version()).isEqualTo("317");
+    // V60_1 is fractional. V1..V309 is 310 files; the audit-remediation fix wave added six more
+    // (V310 billing, V315 execution-gate, V316 provider-call reservation, V317 test-execution
+    // provenance, V320 integration ownership, V323 run publication policy) for 316.
+    assertThat(migrations).hasSize(316);
+    assertThat(migrations.getLast().version()).isEqualTo("323");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -36,10 +35,20 @@ class FlywayMigrationInventoryTest {
 
     assertThat(migrations.stream().filter(MigrationFile::fractional).map(MigrationFile::version))
         .containsExactly("60_1");
-    // V310..V316 are reserved by parallel audit-remediation lanes that have not merged yet. The
-    // gap is expected and temporary; it must be empty again once those lanes land, so this stays
-    // an exact assertion rather than a relaxed one.
-    assertThat(majorGaps(migrations)).containsExactly("V309->V317");
+    // Deliberate, permanent gaps. The audit-remediation fix wave ran twelve parallel lanes, each
+    // pre-assigned one migration number so two lanes could not claim the same one. Eight lanes
+    // turned out not to need theirs (V311-V314, V318-V319, V321-V322) — several found the fix
+    // needed no schema change at all, which is a better outcome than a migration written to
+    // justify a reservation.
+    //
+    // The numbers are NOT renumbered to close the gaps: these files may already be applied in a
+    // local or dev database, and renaming an applied migration orphans it in
+    // flyway_schema_history. Flyway does not require contiguous versions.
+    //
+    // This stays an EXACT assertion so a genuinely missing file still fails. Adding a new entry
+    // here must mean "a number was reserved and deliberately not used", never "a migration went
+    // missing".
+    assertThat(majorGaps(migrations)).containsExactly("V310->V315", "V317->V320", "V320->V323");
   }
 
   @Test
