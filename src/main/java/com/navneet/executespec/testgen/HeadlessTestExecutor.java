@@ -1,16 +1,16 @@
 package com.navneet.executespec.testgen;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.testgen.model.TestPlan;
+import com.navneet.executespec.testgen.model.TestPlanStatus;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
@@ -28,20 +28,27 @@ import lombok.extern.slf4j.Slf4j;
  * — no live preview required. Only unit tests execute (integration tests that call {@code
  * -Dapp.base-url} are skipped via {@code -DskipITs=true}).
  *
- * <p>Uses the same surefire report parsing as {@link TestExecutionService}. Replaces the
- * empty-event hack in {@link TestPreviewCoordinator} for batch runs.
+ * <p>Shares the attempt-provenance contract of {@link TestExecutionService} (RR-1582 / RR-1583 /
+ * RR-1587): reports are reset before launch, the container runs under a timeout that can fire, the
+ * exit status must mean "tests ran", every parsed report must postdate the launch, and the plan's
+ * V277 workspace fingerprint must still match. Otherwise an explicitly unavailable summary is
+ * returned instead of a pass count.
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class HeadlessTestExecutor {
 
-  private static final int EXECUTION_TIMEOUT_SECONDS = 300; // 5 minutes
+  private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(300); // 5 minutes
+
+  /** See {@link TestExecutionService}: 0 = all passed, 1 = Surefire ran and some failed. */
+  private static final List<Integer> TESTS_RAN_EXIT_CODES = List.of(0, 1);
 
   private final TestPlanRepository testPlanRepository;
   private final TestResultRepository testResultRepository;
   private final SurefireReportParser surefireReportParser;
   private final SseBroadcaster broadcaster;
+  private final TestGenerationAdmissionService admissionService;
 
   /**
    * Execute unit tests for a batch run without a live preview.
@@ -51,7 +58,11 @@ public class HeadlessTestExecutor {
    * @return execution summary (never null)
    */
   public TestExecutionSummary execute(String runId, Long testPlanId) {
-    log.info("[HeadlessTestExec] Starting headless test execution for run {}", runId);
+    String executionId = UUID.randomUUID().toString();
+    log.info(
+        "[HeadlessTestExec] Starting headless test execution for run {} (execution {})",
+        runId,
+        executionId);
     broadcaster.emit(
         runId,
         RunEvent.log(
@@ -60,16 +71,40 @@ public class HeadlessTestExecutor {
     Path testProjectDir = Path.of("workspace-test", runId);
     Path absTestDir = testProjectDir.toAbsolutePath();
 
-    var plan = testPlanRepository.findById(testPlanId).orElse(null);
+    TestPlan plan = testPlanRepository.findById(testPlanId).orElse(null);
+
+    // RR-1583 — refuse to score a plan against a workspace it was not generated from.
+    String plannedFingerprint = plan != null ? plan.getWorkspaceFingerprint() : null;
+    String preFingerprint = admissionService.currentWorkspaceFingerprint(runId);
+    String bindingProblem =
+        TestExecutionProvenance.fingerprintMismatch(plannedFingerprint, preFingerprint);
+    if (bindingProblem != null) {
+      return terminate(runId, plan, TestPlanStatus.STALE, executionId, bindingProblem);
+    }
 
     Instant start = Instant.now();
     try {
+      // RR-1582 — clear any report left behind by an earlier attempt before launching this one.
+      Path reportsDir = testProjectDir.resolve("target/surefire-reports");
+      if (!TestExecutionProvenance.clearReports(reportsDir)) {
+        return terminate(
+            runId,
+            plan,
+            TestPlanStatus.FAILED,
+            executionId,
+            "surefire report directory could not be reset before execution");
+      }
+      Instant freshnessFloor = start.minusSeconds(2);
+      String containerName = TestExecutionProvenance.containerName("es-test-headless", executionId);
+
       // Docker container with no network access — unit tests only, no live app required
       ProcessBuilder pb =
           new ProcessBuilder(
               "docker",
               "run",
               "--rm",
+              "--name",
+              containerName,
               "--network=none",
               "--memory=2g",
               "--cpus=2",
@@ -97,22 +132,44 @@ public class HeadlessTestExecutor {
               "1C");
       pb.redirectErrorStream(true);
 
-      Process process = pb.start();
-      String output;
-      try (BufferedReader reader =
-          new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-        output = reader.lines().collect(Collectors.joining("\n"));
-      }
-
-      boolean finished = process.waitFor(EXECUTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, EXECUTION_TIMEOUT);
+      if (!outcome.finished()) {
+        TestExecutionProvenance.killContainer(containerName);
         log.warn("[HeadlessTestExec] Timed out for run {} — destroying container", runId);
+        return terminate(
+            runId,
+            plan,
+            TestPlanStatus.FAILED,
+            executionId,
+            "test execution exceeded " + EXECUTION_TIMEOUT.toSeconds() + "s and was destroyed");
+      }
+      if (!TESTS_RAN_EXIT_CODES.contains(outcome.exitCode())) {
+        return terminate(
+            runId,
+            plan,
+            TestPlanStatus.FAILED,
+            executionId,
+            "test runner exited " + outcome.exitCode() + " without running tests");
       }
 
-      // Parse surefire reports
-      Path reportsDir = testProjectDir.resolve("target/surefire-reports");
-      List<TestResult> results = surefireReportParser.parse(reportsDir, testPlanId);
+      SurefireReportParser.ReportAdmission admission =
+          surefireReportParser.admit(reportsDir, freshnessFloor);
+      if (!admission.admitted()) {
+        return terminate(runId, plan, TestPlanStatus.FAILED, executionId, admission.reason());
+      }
+      List<Path> attemptReports =
+          TestExecutionProvenance.isolateAttempt(
+              testProjectDir, executionId, admission.reportFiles());
+
+      List<TestResult> results = surefireReportParser.parse(attemptReports, testPlanId);
+
+      String postFingerprint = admissionService.currentWorkspaceFingerprint(runId);
+      String drift =
+          TestExecutionProvenance.fingerprintMismatch(plannedFingerprint, postFingerprint);
+      if (drift != null) {
+        return terminate(runId, plan, TestPlanStatus.STALE, executionId, drift);
+      }
+
       testResultRepository.saveAll(results);
 
       long durationMs = java.time.Duration.between(start, Instant.now()).toMillis();
@@ -127,15 +184,16 @@ public class HeadlessTestExecutor {
           (int) results.stream().filter(r -> r.getStatus() == TestResultStatus.ERROR).count();
 
       if (plan != null) {
-        plan.setStatus(com.navneet.executespec.testgen.model.TestPlanStatus.COMPLETED);
+        plan.setStatus(TestPlanStatus.COMPLETED);
         testPlanRepository.save(plan);
       }
 
       log.info(
-          "[HeadlessTestExec] Complete for run {}: {}/{} passed (headless)",
+          "[HeadlessTestExec] Complete for run {}: {}/{} passed (headless, execution {})",
           runId,
           passed,
-          results.size());
+          results.size(),
+          executionId);
       broadcaster.emit(
           runId,
           RunEvent.log(
@@ -150,19 +208,30 @@ public class HeadlessTestExecutor {
           .skipped(skipped)
           .errors(errors)
           .executionDurationMs(durationMs)
+          .executionVerified(Boolean.TRUE)
+          .executionId(executionId)
           .build();
 
     } catch (Exception e) {
       log.error("[HeadlessTestExec] Failed for run {}: {}", runId, e.getMessage(), e);
-      if (plan != null) {
-        plan.setStatus(com.navneet.executespec.testgen.model.TestPlanStatus.FAILED);
-        testPlanRepository.save(plan);
-      }
-      broadcaster.emit(
+      return terminate(
           runId,
-          RunEvent.log(
-              runId, null, "[TestExec] Headless test execution failed: " + e.getMessage()));
-      return TestExecutionSummary.empty();
+          plan,
+          TestPlanStatus.FAILED,
+          executionId,
+          "headless test execution failed: " + e.getMessage());
     }
+  }
+
+  private TestExecutionSummary terminate(
+      String runId, TestPlan plan, TestPlanStatus status, String executionId, String reason) {
+    if (plan != null) {
+      plan.setStatus(status);
+      testPlanRepository.save(plan);
+    }
+    log.warn("[HeadlessTestExec] No verified test evidence for run {}: {}", runId, reason);
+    broadcaster.emit(
+        runId, RunEvent.log(runId, null, "[TestExec] Test evidence unavailable — " + reason));
+    return TestExecutionSummary.unavailable(executionId, reason);
   }
 }
