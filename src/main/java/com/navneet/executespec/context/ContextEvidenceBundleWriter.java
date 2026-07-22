@@ -45,6 +45,17 @@ public class ContextEvidenceBundleWriter {
   static final int MAX_LIST_ITEMS = 200;
   static final int MAX_ITEM_CHARS = 1_000;
 
+  // RR-1268: strict budgets on the dirty-state fingerprint. The prior implementation called
+  // Files.readAllBytes per changed/untracked file with no per-file, aggregate, count or deadline
+  // bound, so a multi-GB file or a very large dirty tree could exhaust heap/I/O. When any budget
+  // trips the fingerprint is marked INCOMPLETE and the bundle fails authority on read rather than
+  // silently downgrading to a HEAD-only guarantee.
+  static final int MAX_STATE_FILES = 5_000;
+  static final long MAX_STATE_AGGREGATE_BYTES = 256L * 1024 * 1024;
+  static final long MAX_STATE_FILE_BYTES = 32L * 1024 * 1024;
+  static final long MAX_STATE_DEADLINE_MILLIS = 30_000L;
+  private static final int STATE_READ_BUFFER = 64 * 1024;
+
   private final ObjectMapper objectMapper;
   private final ContextEvidenceAssembler evidenceAssembler;
 
@@ -84,8 +95,14 @@ public class ContextEvidenceBundleWriter {
     sources.put("decisionsSha256", sha256(readSource(contextDir.resolve("decisions.md"))));
     String repoHeadSha = resolveRepoHeadSha(projectPath);
     if (repoHeadSha != null) sources.put("repoHeadSha", repoHeadSha);
-    String repoStateSha = resolveRepoStateSha(projectPath);
-    if (repoStateSha != null) sources.put("repoStateSha256", repoStateSha);
+    RepoStateFingerprint repoState = resolveRepoState(projectPath);
+    if (repoState != null) {
+      sources.put("repoStateSha256", repoState.sha());
+      // RR-1268: an incomplete fingerprint (a read budget tripped) must fail authority on read, not
+      // silently downgrade to a HEAD-only guarantee. Absent flag = legacy bundle = treated
+      // complete.
+      if (!repoState.complete()) sources.put("repoStateComplete", false);
+    }
 
     ObjectNode evidence = root.putObject("evidence");
     ContextEvidenceAssembler.Selection selected = evidenceAssembler.select(input);
@@ -162,8 +179,15 @@ public class ContextEvidenceBundleWriter {
       }
       String recordedState = sources.path("repoStateSha256").asText("");
       if (!recordedState.isBlank()) {
-        String currentState = resolveRepoStateSha(projectPath);
-        if (currentState == null || !recordedState.equals(currentState)) return Optional.empty();
+        // RR-1268: a bundle whose dirty-state fingerprint was recorded INCOMPLETE cannot be trusted
+        // for reuse — a partially fingerprinted tree may have changed in the unhashed remainder.
+        if (!sources.path("repoStateComplete").asBoolean(true)) return Optional.empty();
+        RepoStateFingerprint currentState = resolveRepoState(projectPath);
+        if (currentState == null
+            || !currentState.complete()
+            || !recordedState.equals(currentState.sha())) {
+          return Optional.empty();
+        }
       }
       return Optional.of(root);
     } catch (Exception e) {
@@ -225,8 +249,24 @@ public class ContextEvidenceBundleWriter {
    * in-progress edit, which is precisely the state in which a continuation handoff is most likely
    * to be stale. The generated evidence sidecar is excluded so reading a bundle does not invalidate
    * itself; file bytes are included for changed and untracked paths.
+   *
+   * <p>RR-1268: file bytes are streamed through the digest (never loaded whole into heap) under a
+   * per-file, aggregate, count and wall-clock budget, and symlinked entries are hashed by metadata
+   * only (never followed). If any budget trips the fingerprint is INCOMPLETE — see {@link
+   * #resolveRepoState}. Callers should record the completeness flag so a partially fingerprinted
+   * dirty tree fails authority instead of silently degrading to a HEAD-only guarantee.
    */
   static String resolveRepoStateSha(Path projectPath) {
+    RepoStateFingerprint fp = resolveRepoState(projectPath);
+    return fp == null ? null : fp.sha();
+  }
+
+  /**
+   * RR-1268: bounded, streamed dirty-state fingerprint. Returns {@code null} only when the state
+   * cannot be observed at all (non-git / open failure); otherwise returns a fingerprint whose
+   * {@code complete} flag is false when any read budget tripped or a file could not be read.
+   */
+  static RepoStateFingerprint resolveRepoState(Path projectPath) {
     if (projectPath == null) return null;
     try (Git git = Git.open(projectPath.toFile())) {
       org.eclipse.jgit.api.Status status = git.status().call();
@@ -240,26 +280,74 @@ public class ContextEvidenceBundleWriter {
       addStatus(states, "untracked", status.getUntracked());
       addStatus(states, "untrackedFolder", status.getUntrackedFolders());
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      boolean complete = true;
+      int fileCount = 0;
+      long aggregateBytes = 0L;
+      long deadline = System.currentTimeMillis() + MAX_STATE_DEADLINE_MILLIS;
       for (Map.Entry<String, String> entry : states.entrySet()) {
         String relative = entry.getKey();
         if (relative.equals(".agent-context/" + FILE_NAME)
             || relative.startsWith(".agent-context/" + FILE_NAME + ".tmp-")) {
           continue;
         }
+        // Path + status are always folded in, so a changed/added/removed path is detected even once
+        // the byte budget is exhausted.
         digest.update((entry.getValue() + "\0" + relative + "\0").getBytes(StandardCharsets.UTF_8));
         // `relative` comes from JGit status over a customer repository; a symlinked entry would
         // otherwise be read through into the fingerprint.
         Path file = projectPath.resolve(relative);
         if (!SafeWorkspacePath.isWithin(projectPath, file)) continue;
-        if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-          digest.update(Files.readAllBytes(file));
+        if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+        if (System.currentTimeMillis() > deadline
+            || fileCount >= MAX_STATE_FILES
+            || aggregateBytes >= MAX_STATE_AGGREGATE_BYTES) {
+          complete = false;
+          break;
+        }
+        fileCount++;
+        long remaining = MAX_STATE_AGGREGATE_BYTES - aggregateBytes;
+        long fileCap = Math.min(MAX_STATE_FILE_BYTES, remaining);
+        long read = streamInto(digest, file, fileCap);
+        if (read < 0) {
+          // The file could not be read (deleted mid-scan, permission, I/O). Mark incomplete rather
+          // than treating an unreadable dirty file as absent.
+          complete = false;
+          continue;
+        }
+        aggregateBytes += read;
+        if (read == fileCap && Files.size(file) > read) {
+          complete = false;
         }
       }
-      return hex(digest.digest());
+      return new RepoStateFingerprint(hex(digest.digest()), complete);
     } catch (Exception e) {
       return null;
     }
   }
+
+  /**
+   * Streams up to {@code cap} bytes of {@code file} through {@code digest} using a fixed buffer.
+   * Returns the number of bytes hashed, or {@code -1} if the file could not be read.
+   */
+  private static long streamInto(MessageDigest digest, Path file, long cap) {
+    long total = 0L;
+    try (java.io.InputStream in = Files.newInputStream(file)) {
+      byte[] buffer = new byte[STATE_READ_BUFFER];
+      while (total < cap) {
+        int want = (int) Math.min(buffer.length, cap - total);
+        int n = in.read(buffer, 0, want);
+        if (n < 0) break;
+        digest.update(buffer, 0, n);
+        total += n;
+      }
+      return total;
+    } catch (IOException e) {
+      return -1L;
+    }
+  }
+
+  /** RR-1268: a dirty-state fingerprint plus whether every changed file was fully hashed. */
+  record RepoStateFingerprint(String sha, boolean complete) {}
 
   private static void addStatus(
       Map<String, String> states, String label, java.util.Set<String> paths) {
