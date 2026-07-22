@@ -4131,6 +4131,9 @@
   background: var(--ide-border);
   border-radius: 999px;
   overflow: hidden;
+  /* RR-1492 — flex row so the succeeded fill and the failed/blocked segment sit
+     side by side instead of stacking (block spans in an overflow:hidden bar). */
+  display: flex;
 }
 .agent-runcard-bar span {
   display: block;
@@ -4138,10 +4141,15 @@
   background: var(--ide-blue);
   transition: width 0.4s ease;
 }
+/* RR-1492 — failed/blocked tasks shown as a distinct trailing segment. Placed
+   after the terminal overrides so it keeps its own colour on a PARTIAL run. */
 .agent-runcard.done .agent-runcard-bar span {
   background: var(--ide-green);
 }
 .agent-runcard.failed .agent-runcard-bar span {
+  background: var(--ide-red);
+}
+.agent-runcard-bar span.agent-runcard-bar-failed {
   background: var(--ide-red);
 }
 .agent-runcard-actions {

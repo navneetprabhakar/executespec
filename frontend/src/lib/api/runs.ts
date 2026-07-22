@@ -326,7 +326,11 @@ export const getRunPrs = (runId: string) =>
 export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   if (!user) return true; // anonymous → treat as FREE-equivalent
   const tier = user.tier;
-  if (tier === 'ENTERPRISE' || tier === 'TEAM') return false;
+  // RR-1338 — BYOK is an own-keys tier (keySourceMode=OWN_KEYS) and, like
+  // TEAM/ENTERPRISE, is exempt from the platform cost cap on the server. It was
+  // previously falling through to the `return true` default and being shown the
+  // cap input it should never see.
+  if (tier === 'ENTERPRISE' || tier === 'TEAM' || tier === 'BYOK') return false;
   const hasByok = !!(
     user.hasOpenAiKey ||
     user.hasAnthropicKey ||
@@ -334,6 +338,8 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
     user.hasDeepSeekKey ||
     user.hasFireworksKey
   );
-  if (tier === 'PRO') return !hasByok;
+  // PRO_PLUS is a managed-credit tier (HYBRID/SYSTEM keys stay capped); it and
+  // PRO keep the platform cost cap unless the user has attached their own keys.
+  if (tier === 'PRO' || tier === 'PRO_PLUS') return !hasByok;
   return true; // FREE
 }

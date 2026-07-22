@@ -130,9 +130,16 @@ export function ProjectTabs({projectId}: {projectId: string}) {
       if (cancelled) return;
       if (proj.status === 'fulfilled') setProjectName(proj.value.name || null);
       const d = dash.status === 'fulfilled' ? dash.value : null;
-      const repoArr = repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value : [];
-      const memberArr =
-        members.status === 'fulfilled' && Array.isArray(members.value) ? members.value : [];
+      // RR-753 — a rejected repo/member read must stay UNKNOWN (undefined → no
+      // badge), not collapse to a confident `0`. Zeroing during an outage or a
+      // 403 tells the user there are no repositories/members when we simply
+      // could not read them, inviting duplicate setup or wrong access calls.
+      const repoCount =
+        repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value.length : undefined;
+      const memberCount =
+        members.status === 'fulfilled' && Array.isArray(members.value)
+          ? members.value.length
+          : undefined;
       const totalRuns = d
         ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0)
         : undefined;
@@ -142,10 +149,10 @@ export function ProjectTabs({projectId}: {projectId: string}) {
           : undefined;
       const safe = (n?: number) => (typeof n === 'number' && n >= 0 ? n : undefined);
       setCounts({
-        repos: safe(repoArr.length),
+        repos: safe(repoCount),
         runs: safe(totalRuns),
         code: safe(debtTotal),
-        members: safe(memberArr.length),
+        members: safe(memberCount),
       });
     });
     return () => {
@@ -275,10 +282,25 @@ export function IdeProjectPulse() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const {projectId = ''} = useParams();
   const [dash, setDash] = useState<Dash | null>(null);
+  const [dashFailure, setDashFailure] = useState<LoadFailure | null>(null);
   const [health, setHealth] = useState<Array<Record<string, unknown>>>([]);
   const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
   const [recentFailure, setRecentFailure] = useState<LoadFailure | null>(null);
   const [healthFailure, setHealthFailure] = useState<LoadFailure | null>(null);
+
+  // RR-752 — a failed dashboard read must not masquerade as an empty-but-valid
+  // dashboard (`setDash({})`), which renders blank metrics and no open-PR
+  // section as though the server answered. Keep it as a retryable failure.
+  const loadDash = useCallback(() => {
+    if (!projectId) return;
+    api
+      .getProjectDashboard(projectId)
+      .then((d) => {
+        setDash(d as unknown as Dash);
+        setDashFailure(null);
+      })
+      .catch((e: unknown) => setDashFailure(toLoadFailure(e)));
+  }, [projectId]);
 
   // RL-2026-05-052 (#9): refresh recent runs via a callback so we can poll while a
   // run is live — the pulse fetched once on mount, so live project runs never updated.
@@ -296,10 +318,7 @@ export function IdeProjectPulse() {
 
   useEffect(() => {
     if (!projectId) return;
-    api
-      .getProjectDashboard(projectId)
-      .then((d) => setDash(d as unknown as Dash))
-      .catch(() => setDash({}));
+    loadDash();
     api
       .getWorkspaceHealth(projectId)
       .then((h) => {
@@ -310,7 +329,7 @@ export function IdeProjectPulse() {
       // D4: an empty health list renders as "No linked repos."
       .catch((e: unknown) => setHealthFailure(toLoadFailure(e)));
     refreshRuns();
-  }, [projectId, refreshRuns]);
+  }, [projectId, refreshRuns, loadDash]);
 
   // Live tracking (#9): poll recent runs every 12s while any is non-terminal
   // (skipped when the tab is hidden); stops once all runs are terminal.
@@ -370,7 +389,9 @@ export function IdeProjectPulse() {
           ＋ Start work in this project
         </Link>
       </div>
-      {!dash ? (
+      {dashFailure ? (
+        <LoadError failure={dashFailure} what='project overview' onRetry={loadDash} />
+      ) : !dash ? (
         <IdeLoader label='Loading pulse…' />
       ) : (
         <>
@@ -745,7 +766,19 @@ function RunDetailPanel({
   );
 }
 
+// RR-1484 — React Router reuses one <IdeProjectRuns /> element across
+// /projects/A/runs and /projects/B/runs, so project-scoped state (selected run,
+// PR list, report) leaked from project A into project B's route. Keying the
+// inner component by projectId forces a clean remount on project change, which
+// resets every project-scoped slice at once instead of relying on each effect's
+// dependency array (several of which — e.g. the `prs === null` guard and the
+// selection effect keyed only on `[selectedRunId]` — did not refetch on change).
 export function IdeProjectRuns() {
+  const {projectId = ''} = useParams();
+  return <IdeProjectRunsInner key={projectId} />;
+}
+
+function IdeProjectRunsInner() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<Sub>('runs');
@@ -767,6 +800,11 @@ export function IdeProjectRuns() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<api.RunDetail | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
+  // RR-751 — a rejected getRun() left selectedRun=null, which the split pane
+  // rendered as a permanent "Loading run…" spinner. Track the failure so the
+  // pane can offer a diagnosis + retry instead of spinning forever.
+  const [selectedRunFailure, setSelectedRunFailure] = useState<LoadFailure | null>(null);
+  const [selectedRunNonce, setSelectedRunNonce] = useState(0);
 
   useEffect(() => {
     if (!projectId) return;
@@ -829,22 +867,31 @@ export function IdeProjectRuns() {
     if (!selectedRunId) {
       setSelectedRun(null);
       setReport(null);
+      setSelectedRunFailure(null);
       return;
     }
     let cancelled = false;
     setSelectedRun(null);
     setReport(null);
+    setSelectedRunFailure(null);
     Promise.allSettled([api.getRun(selectedRunId), api.getValidationReport(selectedRunId)]).then(
       ([r, vr]) => {
         if (cancelled) return;
-        if (r.status === 'fulfilled') setSelectedRun(r.value);
+        if (r.status === 'fulfilled') {
+          setSelectedRun(r.value);
+        } else {
+          // RR-751 — the run detail is the primary content; a failed read is a
+          // real failure, not a missing run. (A missing/ungenerated report is a
+          // legitimate absence and is handled by RunDetailPanel.)
+          setSelectedRunFailure(toLoadFailure(r.reason));
+        }
         if (vr.status === 'fulfilled') setReport(vr.value);
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, selectedRunNonce]);
 
   async function refreshPrs() {
     if (!projectId) return;
@@ -1059,6 +1106,12 @@ export function IdeProjectRuns() {
                   <div className='ide-empty'>
                     Pick a run on the left to see its score, tasks, and PR.
                   </div>
+                ) : selectedRunFailure ? (
+                  <LoadError
+                    failure={selectedRunFailure}
+                    what='run details'
+                    onRetry={() => setSelectedRunNonce((n) => n + 1)}
+                  />
                 ) : !selectedRun ? (
                   <IdeLoader label='Loading run…' />
                 ) : (

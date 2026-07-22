@@ -307,6 +307,9 @@ describe('agentState', () => {
     expect(runOpenPath('r1', 'WORKING')).toBe('/live/r1');
     expect(runOpenPath('r1', 'COMPLETE')).toBe('/result/r1');
 
+    // RR-1492 — done is the settled cursor (COMPLETE+PARTIAL+FAILED = 3), but the
+    // bar percentage counts only genuinely succeeded tasks (COMPLETE = 1 of 4 = 25%),
+    // and failed/blocked are surfaced separately rather than as progress.
     expect(
       runProgress([
         {status: 'COMPLETE', title: 'a'},
@@ -314,8 +317,35 @@ describe('agentState', () => {
         {status: 'FAILED', title: 'c'},
         {status: 'WORKING', title: 'd'},
       ]),
-    ).toEqual({done: 3, total: 4, pct: 75, current: 'd'});
-    expect(runProgress([])).toEqual({done: 0, total: 0, pct: 0, current: null});
+    ).toEqual({done: 3, succeeded: 1, failed: 1, total: 4, pct: 25, current: 'd'});
+    expect(runProgress([])).toEqual({
+      done: 0,
+      succeeded: 0,
+      failed: 0,
+      total: 0,
+      pct: 0,
+      current: null,
+    });
+  });
+
+  it('RR-1492 — progress never reports a terminal PARTIAL run as fully done', () => {
+    // 3 of 8 failed, 5 succeeded → an honest 62%, not 100%.
+    const partial = runProgress([
+      ...Array.from({length: 5}, (_, i) => ({status: 'COMPLETE', title: `ok${i}`})),
+      ...Array.from({length: 3}, (_, i) => ({status: 'FAILED', title: `bad${i}`})),
+    ]);
+    expect(partial).toMatchObject({succeeded: 5, failed: 3, total: 8, pct: 63, current: null});
+    expect(partial.pct).toBeLessThan(100);
+
+    // An all-blocked run overstated progress before; now it is 0%.
+    const blocked = runProgress([
+      {status: 'BLOCKED', title: 'x'},
+      {status: 'BLOCKED', title: 'y'},
+    ]);
+    expect(blocked).toMatchObject({succeeded: 0, failed: 2, pct: 0});
+
+    // A clean COMPLETE run is naturally 100% without any terminal override.
+    expect(runProgress([{status: 'COMPLETE', title: 'a'}]).pct).toBe(100);
   });
 
   it('clears errors without wiping non-error state', () => {

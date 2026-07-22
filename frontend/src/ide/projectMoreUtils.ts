@@ -87,18 +87,46 @@ export function isExternalProjectMember(
   return member.external === true;
 }
 
-export function canManageProjectSharing(input: {
+export type ProjectAuthorityInput = {
   globalRole?: string | null;
   orgRole?: string | null;
   projectRole?: string | null;
   hasProjectMembership?: boolean;
-}): boolean {
+};
+
+/**
+ * RR-1507 — membership administration (add/remove members, resend/revoke org
+ * invites). The server's add/remove path is `ProjectService.requireProjectAdmin`,
+ * which admits only SUPER_ADMIN, host-org ORG_ADMIN, or a `PROJECT_ADMIN`
+ * membership. A `PROJECT_DEVELOPER` is NOT admitted, so the UI must not present
+ * a fully enabled member-admin surface that returns 403 after every confirm.
+ */
+export function canManageMembership(input: ProjectAuthorityInput): boolean {
   if (input.globalRole === 'SUPER_ADMIN') return true;
-  if (input.projectRole === 'PROJECT_ADMIN' || input.projectRole === 'PROJECT_DEVELOPER') {
-    return true;
-  }
+  if (input.projectRole === 'PROJECT_ADMIN') return true;
   if (input.hasProjectMembership) return false;
   return input.orgRole === 'ORG_ADMIN';
+}
+
+/**
+ * RR-1507 — share-link management. The server's share-link guard is
+ * `isProjectWriter`, which additionally admits `PROJECT_DEVELOPER`. This is a
+ * genuinely wider authority than membership management, so it is a separate
+ * predicate rather than one boolean covering both.
+ */
+export function canManageShareLinks(input: ProjectAuthorityInput): boolean {
+  if (canManageMembership(input)) return true;
+  return input.projectRole === 'PROJECT_DEVELOPER';
+}
+
+/**
+ * @deprecated RR-1507 — this single predicate conflated two different server
+ * guards (membership vs share-links). Retained as an alias for the wider
+ * share-link authority; call sites should choose `canManageMembership` or
+ * `canManageShareLinks` explicitly.
+ */
+export function canManageProjectSharing(input: ProjectAuthorityInput): boolean {
+  return canManageShareLinks(input);
 }
 
 export function availableOrgMembers(

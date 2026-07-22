@@ -940,6 +940,12 @@ export function IdeOrgSettings() {
   const canEdit = isSuperAdmin || user?.orgRole === 'ORG_ADMIN';
   const [org, setOrg] = useState<api.OrgDto | null>(null);
   const [orgLoaded, setOrgLoaded] = useState(false);
+  // RR-740 — a failed getMyOrg() must not read as "no organization" (which shows
+  // the org-creation path over an unknown tenant). RR-741 — a failed member read
+  // must not read as an empty org.
+  const [orgFailure, setOrgFailure] = useState<LoadFailure | null>(null);
+  const [membersFailure, setMembersFailure] = useState<LoadFailure | null>(null);
+  const [bootNonce, setBootNonce] = useState(0);
   const [sso, setSso] = useState<api.SsoConfig | null>(null);
   const [name, setName] = useState('');
   const [domains, setDomains] = useState('');
@@ -999,9 +1005,13 @@ export function IdeOrgSettings() {
     ]).then(([o, s, m, managed, mem]) => {
       if (o.status === 'fulfilled') {
         setOrg(o.value);
+        setOrgFailure(null);
         setName(o.value.name || '');
         setDomains((o.value as unknown as {domains?: string[]}).domains?.join(', ') || '');
         setSeats(o.value.seatCount ?? 1);
+      } else {
+        // RR-740 — a rejected org read is a failure, not an absence of an org.
+        setOrgFailure(toLoadFailure(o.reason));
       }
       if (s.status === 'fulfilled') {
         setSso(s.value);
@@ -1015,11 +1025,17 @@ export function IdeOrgSettings() {
         setMatrixOverrides(m.value.overrides || {});
       }
       if (managed.status === 'fulfilled' && managed.value) setManagedAiPolicy(managed.value);
-      if (mem.status === 'fulfilled') setMembers(mem.value);
-      else setMembers([]);
+      if (mem.status === 'fulfilled') {
+        setMembers(mem.value);
+        setMembersFailure(null);
+      } else {
+        // RR-741 — a rejected member read stays UNKNOWN, not an empty org.
+        setMembers(null);
+        setMembersFailure(toLoadFailure(mem.reason));
+      }
       setOrgLoaded(true);
     });
-  }, []);
+  }, [bootNonce]);
 
   async function saveMatrix() {
     setMatrixBusy(true);
@@ -1182,6 +1198,23 @@ export function IdeOrgSettings() {
   }
 
   if (!orgLoaded) return <IdeLoader label='Loading org…' />;
+  if (orgFailure) {
+    // RR-740 — the org could not be read. Do NOT offer to create one over an
+    // unknown tenant; show a retryable failure instead.
+    return (
+      <div className='ide-pane' style={{maxWidth: 820}}>
+        <h1 className='ide-h1'>Org settings</h1>
+        <LoadError
+          failure={orgFailure}
+          what='organization settings'
+          onRetry={() => {
+            setOrgLoaded(false);
+            setBootNonce((n) => n + 1);
+          }}
+        />
+      </div>
+    );
+  }
   if (!org) {
     return (
       <div className='ide-pane' style={{maxWidth: 820}}>
@@ -1745,7 +1778,17 @@ export function IdeOrgSettings() {
         </Link>
         .
       </InfoCard>
-      {members === null ? (
+      {membersFailure ? (
+        // RR-741 — a failed member read is not proof of an empty org.
+        <LoadError
+          failure={membersFailure}
+          what='members'
+          onRetry={() => {
+            setOrgLoaded(false);
+            setBootNonce((n) => n + 1);
+          }}
+        />
+      ) : members === null ? (
         <IdeLoader label='Loading members…' />
       ) : members.length === 0 ? (
         <div className='ide-empty'>No members found.</div>
