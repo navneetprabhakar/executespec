@@ -675,4 +675,75 @@ class BenchmarkTrackingServiceTest {
     assertThat(taskStore.get(0).getOutcome()).isEqualTo("TIMEOUT");
     assertThat(taskStore.get(0).getReason()).contains("container timed out");
   }
+
+  // RR-1355 — an out-of-band reward is clamped to the binary resolved flag {0,1}; a negative cost
+  // is
+  // rejected outright so a faulty/compromised harness cannot poison headline metrics.
+  @Test
+  void rewardIsClampedToBinaryAndNegativeCostIsRejected() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 2, null, "u1");
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "django__django-1",
+        1,
+        7, // impossible reward > 1
+        "es-1",
+        new BigDecimal("0.010000"),
+        0L,
+        0L,
+        null,
+        null);
+    assertThat(taskStore.getFirst().getReward()).isEqualTo(1);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                service.ingest(
+                    run.getId(),
+                    "TASK_SCORED",
+                    "django__django-2",
+                    1,
+                    1,
+                    "es-2",
+                    new BigDecimal("-5.000000"),
+                    0L,
+                    0L,
+                    null,
+                    null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  // RR-1595 — reconcile now separately reports attempts that carry no esRunId versus attempts
+  // linked
+  // to a run with no canonical usage rows, so "nothing to fix" is distinguishable from "nothing
+  // could be fixed because attempts were never linked".
+  @Test
+  void reconcileCountsUnlinkedAndNoLedgerAttemptsSeparately() {
+    BenchmarkRun run =
+        service.start(
+            "SWE_BENCH", "swebench-lite", "deepseek", "deepseek-v4-pro-native", 1, 2, null, "u1");
+    service.ingest(
+        run.getId(), "TASK_SCORED", "t-unlinked", 1, 1, null, BigDecimal.ZERO, 0L, 0L, null, null);
+    service.ingest(
+        run.getId(),
+        "TASK_SCORED",
+        "t-noledger",
+        1,
+        1,
+        "es-empty",
+        BigDecimal.ZERO,
+        0L,
+        0L,
+        null,
+        null);
+    when(usage.findByRunIdOrderByCreatedAtAsc("es-empty")).thenReturn(List.of());
+
+    BenchmarkTrackingService.UsageReconciliation r = service.reconcileUsage(run.getId());
+
+    assertThat(r.updatedTasks()).isZero();
+    assertThat(r.unlinkedAttempts()).isEqualTo(1);
+    assertThat(r.attemptsWithNoLedgerRows()).isEqualTo(1);
+  }
 }

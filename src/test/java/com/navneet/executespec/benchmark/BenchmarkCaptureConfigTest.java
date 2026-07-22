@@ -13,7 +13,7 @@ class BenchmarkCaptureConfigTest {
 
   @Test
   void dispatchesCaptureOffTheSubmissionThread() throws Exception {
-    var executor = new BenchmarkCaptureConfig().benchmarkCaptureExecutor();
+    var executor = new BenchmarkCaptureConfig().benchmarkCaptureExecutor(8);
     var taskThread = new AtomicReference<Thread>();
     var completed = new CountDownLatch(1);
     Thread caller = Thread.currentThread();
