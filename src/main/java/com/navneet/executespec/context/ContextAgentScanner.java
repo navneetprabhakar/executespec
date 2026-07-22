@@ -22,6 +22,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ContextAgentScanner {
 
+  /**
+   * RR-1256 — cap the number of discovered package/class candidates so a large or hostile
+   * repository cannot drive unbounded heap/CPU on every run completion.
+   */
+  private static final int MAX_DISCOVERY_ENTRIES = 5_000;
+
+  /** RR-1256 — bound the walk depth so a pathologically deep tree cannot stall discovery. */
+  private static final int MAX_WALK_DEPTH = 64;
+
+  /** RR-1256 — only the tail of an ever-growing decisions journal is loaded before selection. */
+  private static final int MAX_DECISIONS_TAIL_CHARS = 64_000;
+
   public ContextAgentInput scan(
       PipelineRun run,
       List<WorkerReport> workerReports,
@@ -30,13 +42,13 @@ public class ContextAgentScanner {
       throws IOException {
     String currentDoc = readContextDoc(projectPath);
 
-    String diffSummary = buildGitDiffSummary(projectPath, run);
+    GitDiff diff = buildGitDiff(projectPath, run);
     List<String> workerSummaries = summariseWorkerReports(workerReports);
     String reviewerSummary = summariseReviewReport(reviewReport);
     String decisions = readRecentDecisions(projectPath);
     return new ContextAgentInput(
         currentDoc,
-        diffSummary,
+        diff.summary(),
         detectNewPackages(projectPath, currentDoc),
         detectNewFiles(projectPath, currentDoc),
         workerSummaries,
@@ -45,49 +57,75 @@ public class ContextAgentScanner {
         run.getRunId(),
         run.getUserRequest(),
         "", // Context Agent does not infer a hypothesis; preserve an explicit empty value.
-        changedFiles(diffSummary),
+        diff.changedFiles(),
         failures(workerSummaries, reviewerSummary),
         decisionSections(decisions));
   }
 
-  private String buildGitDiffSummary(Path projectPath, PipelineRun run) {
+  /** Display summary plus the typed changed-file list derived from the same JGit diff entries. */
+  private record GitDiff(String summary, List<String> changedFiles) {}
+
+  /**
+   * RR-1255 — derive the structured changed-file list from the typed {@link
+   * org.eclipse.jgit.diff.DiffEntry} entries directly, mapping every {@code ChangeType}, instead of
+   * re-parsing the human display string. The display emitted full enum names (ADD/MODIFY/DELETE/
+   * RENAME/COPY) while the old parser accepted only lines starting {@code "A "}/{@code "M "}/{@code
+   * "D "}, so changedFiles was always empty and handoff/reload consumers received no file list.
+   */
+  private GitDiff buildGitDiff(Path projectPath, PipelineRun run) {
     try (var git = org.eclipse.jgit.api.Git.open(projectPath.toFile())) {
       List<String> lines = new ArrayList<>();
       lines.add("Files changed in run " + run.getRunId() + ":");
-      git.diff()
-          .call()
-          .forEach(
-              entry -> lines.add("  " + entry.getChangeType().name() + " " + entry.getNewPath()));
-      return String.join("\n", lines);
+      List<String> changed = new ArrayList<>();
+      for (var entry : git.diff().call()) {
+        var type = entry.getChangeType();
+        String path = changedPath(entry);
+        lines.add("  " + type.name() + " " + path);
+        if (path != null && !path.isBlank() && !"/dev/null".equals(path)) changed.add(path);
+      }
+      return new GitDiff(String.join("\n", lines), changed.stream().distinct().toList());
     } catch (Exception e) {
       log.warn("Could not build git diff for run {}: {}", run.getRunId(), e.getMessage());
-      return "Git diff unavailable";
+      return new GitDiff("Git diff unavailable", List.of());
     }
+  }
+
+  private static String changedPath(org.eclipse.jgit.diff.DiffEntry entry) {
+    return switch (entry.getChangeType()) {
+      case DELETE -> entry.getOldPath();
+      default -> entry.getNewPath();
+    };
   }
 
   private List<String> detectNewPackages(Path projectPath, String currentDoc) throws IOException {
     Path srcPath = projectPath.resolve("src/main/java");
     if (!Files.exists(srcPath)) return List.of();
 
-    return Files.walk(srcPath)
-        .filter(Files::isDirectory)
-        .map(p -> srcPath.relativize(p).toString().replace("/", "."))
-        .filter(pkg -> !pkg.isEmpty() && !currentDoc.contains(pkg))
-        .sorted()
-        .collect(Collectors.toList());
+    // RR-1256 — close the walk stream (try-with-resources) and bound depth + count.
+    try (var walk = Files.walk(srcPath, MAX_WALK_DEPTH)) {
+      return walk.filter(Files::isDirectory)
+          .map(p -> srcPath.relativize(p).toString().replace("/", "."))
+          .filter(pkg -> !pkg.isEmpty() && !currentDoc.contains(pkg))
+          .sorted()
+          .limit(MAX_DISCOVERY_ENTRIES)
+          .collect(Collectors.toList());
+    }
   }
 
   private List<String> detectNewFiles(Path projectPath, String currentDoc) throws IOException {
     Path srcPath = projectPath.resolve("src/main/java");
     if (!Files.exists(srcPath)) return List.of();
 
-    return Files.walk(srcPath)
-        .filter(Files::isRegularFile)
-        .filter(p -> p.toString().endsWith(".java"))
-        .map(p -> p.getFileName().toString().replace(".java", ""))
-        .filter(name -> !currentDoc.contains(name))
-        .sorted()
-        .collect(Collectors.toList());
+    // RR-1256 — close the walk stream (try-with-resources) and bound depth + count.
+    try (var walk = Files.walk(srcPath, MAX_WALK_DEPTH)) {
+      return walk.filter(Files::isRegularFile)
+          .filter(p -> p.toString().endsWith(".java"))
+          .map(p -> p.getFileName().toString().replace(".java", ""))
+          .filter(name -> !currentDoc.contains(name))
+          .sorted()
+          .limit(MAX_DISCOVERY_ENTRIES)
+          .collect(Collectors.toList());
+    }
   }
 
   private List<String> summariseWorkerReports(List<WorkerReport> reports) {
@@ -143,21 +181,14 @@ public class ContextAgentScanner {
   private String readRecentDecisions(Path projectPath) throws IOException {
     String content = readGuarded(projectPath, ".agent-context/decisions.md");
     if (content.isEmpty()) return "No decisions recorded yet";
+    // RR-1256 — the journal grows without bound; only the tail can hold the recent decisions we
+    // keep, so cap the bytes considered before splitting to avoid unbounded heap on every run.
+    if (content.length() > MAX_DECISIONS_TAIL_CHARS) {
+      content = content.substring(content.length() - MAX_DECISIONS_TAIL_CHARS);
+    }
     String[] sections = content.split("(?=## )");
     int from = Math.max(0, sections.length - 5);
     return String.join("", Arrays.copyOfRange(sections, from, sections.length));
-  }
-
-  private List<String> changedFiles(String diffSummary) {
-    if (diffSummary == null || diffSummary.isBlank()) return List.of();
-    return diffSummary
-        .lines()
-        .map(String::strip)
-        .filter(line -> line.startsWith("A ") || line.startsWith("M ") || line.startsWith("D "))
-        .map(line -> line.substring(2).strip())
-        .filter(value -> !value.isBlank())
-        .distinct()
-        .toList();
   }
 
   private List<String> failures(List<String> workerSummaries, String reviewerSummary) {

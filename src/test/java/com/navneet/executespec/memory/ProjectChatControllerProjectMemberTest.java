@@ -161,6 +161,34 @@ class ProjectChatControllerProjectMemberTest {
     verify(chatService).send("project-1", "host-org", principal, "hello", null);
   }
 
+  /**
+   * RR-593 — a SUPER_ADMIN operator from a different org with no ProjectMember row must reach the
+   * chat surface. The bypass is now evaluated before the tenant-membership gate that used to 403.
+   */
+  @Test
+  void historyAllowsCrossOrgSuperAdminWithoutMembership() {
+    Project project = hostEnterpriseProject();
+    AppUser operator =
+        AppUser.builder()
+            .id("operator")
+            .email("op@example.com")
+            .globalRole("SUPER_ADMIN")
+            .tier("FREE")
+            .status("ACTIVE")
+            .orgId("operator-org")
+            .build();
+
+    when(projectRepo.findById("project-1")).thenReturn(Optional.of(project));
+    when(projectMemberRepo.existsByProjectIdAndUserId("project-1", "operator")).thenReturn(false);
+    AppUserDetails principal = new AppUserDetails(operator, null);
+    when(chatService.history("project-1", principal)).thenReturn(java.util.List.of());
+
+    var response = controller.history(principal, "project-1");
+
+    assertEquals(HttpStatus.OK, response.getStatusCode());
+    verify(chatService).history("project-1", principal);
+  }
+
   private static AppUser invitedFreeUser() {
     return AppUser.builder()
         .id("invitee")

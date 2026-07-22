@@ -10,6 +10,7 @@ import com.navneet.executespec.router.ModelRegistry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -24,6 +25,26 @@ class ContextPlannerTest {
   @BeforeEach
   void setUp() {
     planner = new ContextPlanner(models);
+  }
+
+  /**
+   * RR-1015 — a large tool response's payload lives in {@code responseData}, which {@code
+   * getText()} does not expose. The estimate must count it structurally and in full, not cap it at
+   * the old 16k-char toString ceiling that undercounted a 60KB result to ~4k tokens.
+   */
+  @Test
+  void toolResponsePayloadIsCountedStructurallyNotCappedAt16k() {
+    String bigPayload = "y".repeat(60_000); // ~60KB tool result
+    ToolResponseMessage toolResponse =
+        ToolResponseMessage.builder()
+            .responses(
+                List.of(new ToolResponseMessage.ToolResponse("call-1", "readFile", bigPayload)))
+            .build();
+
+    long tokens = ContextPlanner.estimateInputTokens(List.of(toolResponse), List.of());
+
+    // 60_000 chars / 4 chars-per-token ≈ 15_000 tokens; the old 16k-char cap yielded ≈ 4_000.
+    assertThat(tokens).isGreaterThan(12_000L);
   }
 
   @Test
