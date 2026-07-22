@@ -18,4 +18,25 @@ class SensitiveWorkspacePathPolicyTest {
     assertThat(SensitiveWorkspacePathPolicy.isSensitive("credentials.example.json")).isFalse();
     assertThat(SensitiveWorkspacePathPolicy.isSensitive("src/Credentials.java")).isFalse();
   }
+
+  // RR-083 (2026-07-22, P1) — common credential stores the original small list omitted.
+  @Test
+  void blocksCommonCredentialStoresAndDirectoryAwarePaths() {
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("home/dev/.aws/credentials")).isTrue();
+    assertThat(
+            SensitiveWorkspacePathPolicy.isSensitive(
+                "home/dev/.config/gcloud/application_default_credentials.json"))
+        .isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("home/dev/.kube/config")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("infra/terraform.tfstate")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("infra/terraform.tfstate.backup")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive(".vault-token")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("home/dev/.pgpass")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("deploy/secrets.yaml")).isTrue();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("k8s/secret.yml")).isTrue();
+
+    // A bare 'config' file that is NOT under a credential directory stays allowed.
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("app/config")).isFalse();
+    assertThat(SensitiveWorkspacePathPolicy.isSensitive("infra/variables.tf")).isFalse();
+  }
 }

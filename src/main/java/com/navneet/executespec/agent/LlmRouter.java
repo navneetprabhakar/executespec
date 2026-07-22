@@ -23,6 +23,7 @@ import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.OpenRouterModelMapper;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -123,6 +124,13 @@ public class LlmRouter {
    * the rule, and it is injected here.
    */
   private final ProviderDispatchAuthorization providerDispatchAuthorization;
+
+  /**
+   * RR-044 (2026-07-22, P1) — provider exceptions can echo request headers/bodies (including API
+   * keys and customer content). Every raw {@code e.getMessage()} that reaches a log line is routed
+   * through the shared redactor so credentials cannot enter application logs or telemetry.
+   */
+  private final ContextSanitizer contextSanitizer;
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
@@ -668,7 +676,7 @@ public class LlmRouter {
             elapsed,
             attempt,
             TRANSIENT_RETRY_MAX_ATTEMPTS,
-            e.getMessage());
+            contextSanitizer.sanitizeException(e));
         lastError = e;
         if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
           long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
@@ -919,7 +927,7 @@ public class LlmRouter {
           request.model(),
           altProvider,
           altModel,
-          primaryError.getMessage());
+          contextSanitizer.sanitizeException(primaryError));
       String runId = request.context().runId();
       broadcaster.emit(
           runId,
@@ -965,7 +973,9 @@ public class LlmRouter {
         return dispatchWithRetry(altRequest, tools, altKey, altSource, keys);
       } catch (RuntimeException altError) {
         log.warn(
-            "LlmRouter failover target {} also failed: {}", altProvider, altError.getMessage());
+            "LlmRouter failover target {} also failed: {}",
+            altProvider,
+            contextSanitizer.sanitizeException(altError));
         // try the next alternate
       }
     }
