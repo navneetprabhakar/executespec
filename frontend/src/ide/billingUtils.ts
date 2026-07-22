@@ -154,6 +154,39 @@ export function billingUsageSummary(
   };
 }
 
+/**
+ * RR-359 — the billing page was casting `PaymentAuditEntry` rows (minor units in `amountMinor`,
+ * provider in `gatewayProvider`, lifecycle in `eventType`) straight to `PaymentRowLite`, whose
+ * formatter reads `amount`/`gateway`/`status`/`paidAt`. Every real payment therefore rendered as
+ * amount `—`, gateway blank and Pending — paid invoices shown as unpaid. This adapter maps the
+ * audit row to the display shape ONCE: minor→major units, provider→gateway, and a captured/paid
+ * lifecycle event to a `paidAt` so the invoice reads Paid.
+ */
+const PAID_EVENT_MARKERS = ['captur', 'paid', 'success', 'charg', 'activat', 'complet', 'renew'];
+
+export function paymentAuditToRow(e: {
+  id?: string | number;
+  amountMinor?: number | null;
+  currency?: string | null;
+  gatewayProvider?: string | null;
+  gatewayPaymentId?: string | null;
+  eventType?: string | null;
+  createdAt?: string;
+}): PaymentRowLite {
+  const event = (e.eventType || '').toLowerCase();
+  const isPaid = PAID_EVENT_MARKERS.some((m) => event.includes(m));
+  return {
+    id: e.id,
+    invoiceNumber: e.gatewayPaymentId ?? undefined,
+    amount: e.amountMinor != null ? e.amountMinor / 100 : undefined,
+    currency: e.currency ?? undefined,
+    gateway: e.gatewayProvider ?? undefined,
+    status: e.eventType ?? undefined,
+    createdAt: e.createdAt,
+    paidAt: isPaid ? e.createdAt : undefined,
+  };
+}
+
 export function invoiceDisplay(row: PaymentRowLite): InvoiceDisplay {
   const number = row.invoiceNumber || row.number || (row.id != null ? `INV-${row.id}` : 'INV-—');
   const amount = row.amount != null ? `${row.currency || 'USD'} ${row.amount.toFixed(2)}` : '—';

@@ -24,7 +24,7 @@ import {streamWebAgentChatReply} from '@/ide/agentChatStream';
 import {costReconciliation, phaseCostRows, stepCallsView} from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
-import {useAuthStore, selectIsSuperAdmin, selectNormalizedTier} from '@/stores/useAuthStore';
+import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
   IdeCodeViewer,
@@ -93,7 +93,6 @@ export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
-  const viewerTier = useAuthStore(selectNormalizedTier);
   const providerReadiness = useProviderReadiness();
   const runId = params.runId || params.runShort || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
@@ -1087,14 +1086,11 @@ export default function IdeRunResult() {
                   Execution details
                 </div>
                 <Kv k='Status' v={run?.status ?? '—'} />
-                <Kv
-                  k='Provider'
-                  v={
-                    viewerTier === 'FREE'
-                      ? 'deepseek (managed tier lock)'
-                      : (run?.aiProvider || '—').toLowerCase()
-                  }
-                />
+                {/* RR-761 — always render the run's PERSISTED provider/model. The viewer's current
+                    FREE tier lock is prospective policy, not what a historical run used (it may
+                    predate the lock, or have run under another tier / explicit route / failover).
+                    Overwriting the recorded route with today's tier corrupts audit + debug evidence. */}
+                <Kv k='Provider' v={(run?.aiProvider || '—').toLowerCase()} />
                 <Kv
                   k='Requested route'
                   v={
@@ -1115,7 +1111,7 @@ export default function IdeRunResult() {
                   k='Worker'
                   v={
                     <span className='ide-mono' style={{fontSize: 11}}>
-                      {viewerTier === 'FREE' ? 'deepseek-v4-flash-native' : run?.workerModel || '—'}
+                      {run?.workerModel || '—'}
                     </span>
                   }
                 />

@@ -248,11 +248,23 @@ export const updateRunProject = (runId: string, projectId: string | null) =>
     body: JSON.stringify({projectId: projectId ?? ''}),
   });
 
+/**
+ * RR-947 — a report read must distinguish genuine ABSENCE (the run has no report yet) from a
+ * FAILURE (401/403/429/5xx/network/parse). Swallowing every error as `null` made the UI render an
+ * authorization/outage/parse failure as "no evidence", hid retry, and let a transient share-service
+ * outage masquerade as an expired/revoked link. Only a typed 404/410 is treated as absence; every
+ * other error propagates so the caller's `.catch(toLoadFailure)` can show a real, retryable state.
+ */
+function isTypedAbsence(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 404 || e.status === 410);
+}
+
 export const getValidationReport = async (runId: string): Promise<ValidationReportData | null> => {
   try {
     return await req<ValidationReportData>(`/runs/${runId}/report`);
-  } catch {
-    return null;
+  } catch (e) {
+    if (isTypedAbsence(e)) return null;
+    throw e;
   }
 };
 
@@ -269,20 +281,25 @@ export const retryValidationReport = (runId: string) =>
   req<void>(`/runs/${runId}/retry-validation`, {method: 'POST'});
 
 export const getSharedReport = async (shareToken: string): Promise<SharedReportData | null> => {
-  try {
-    const res = await fetch(`${BASE}/reports/shared/${shareToken}`);
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+  // RR-947 — return null only for the typed 404/410 absence contract; every other status/network
+  // failure throws so `SharedPage` shows the real error instead of a false "expired or revoked".
+  const res = await fetch(`${BASE}/reports/shared/${shareToken}`).catch((e) => {
+    throw new ApiError(0, e instanceof Error ? e.message : "Can't reach the server.");
+  });
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
+  return res.json();
 };
 
 export const getTestReport = async (runId: string): Promise<TestReportData | null> => {
   try {
     return await req<TestReportData>(`/runs/${runId}/test-report`);
-  } catch {
-    return null;
+  } catch (e) {
+    if (isTypedAbsence(e)) return null;
+    throw e;
   }
 };
 

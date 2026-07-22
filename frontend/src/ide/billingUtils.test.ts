@@ -5,11 +5,54 @@ import {
   invoiceDisplay,
   managedKind,
   money,
+  paymentAuditToRow,
   planCardsFrom,
   planMoney,
 } from './billingUtils';
 import type * as api from '@/lib/api';
 import type {BillingPlan} from '@/lib/api/billing';
+
+describe('RR-359 — payment audit rows map to invoice display', () => {
+  it('converts minor units, provider and captured event into a Paid invoice, not amount — / Pending', () => {
+    const row = paymentAuditToRow({
+      id: 'p1',
+      amountMinor: 42500,
+      currency: 'INR',
+      gatewayProvider: 'razorpay',
+      gatewayPaymentId: 'pay_abc',
+      eventType: 'PAYMENT_CAPTURED',
+      createdAt: '2026-07-01T00:00:00Z',
+    });
+    expect(row.amount).toBe(425);
+    expect(row.gateway).toBe('razorpay');
+    expect(row.paidAt).toBe('2026-07-01T00:00:00Z');
+    const display = invoiceDisplay(row);
+    expect(display.amount).toBe('INR 425.00');
+    expect(display.paid).toBe(true);
+    expect(display.number).toBe('pay_abc');
+  });
+
+  it('leaves a non-captured lifecycle event unpaid but still shows the real amount', () => {
+    const row = paymentAuditToRow({
+      id: 'p2',
+      amountMinor: 2000,
+      currency: 'USD',
+      gatewayProvider: 'stripe',
+      eventType: 'PAYMENT_FAILED',
+      createdAt: '2026-07-02T00:00:00Z',
+    });
+    expect(row.amount).toBe(20);
+    expect(row.paidAt).toBeUndefined();
+    expect(invoiceDisplay(row).paid).toBe(false);
+    expect(invoiceDisplay(row).amount).toBe('USD 20.00');
+  });
+
+  it('renders a null amount as — rather than crashing', () => {
+    const row = paymentAuditToRow({id: 'p3', amountMinor: null, eventType: 'SUBSCRIPTION_CREATED'});
+    expect(row.amount).toBeUndefined();
+    expect(invoiceDisplay(row).amount).toBe('—');
+  });
+});
 
 describe('billingUtils', () => {
   it('formats dashboard and plan money values', () => {
