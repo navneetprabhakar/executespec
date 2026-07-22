@@ -96,7 +96,8 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
               public ExecutionOrchestrator getObject() {
                 return selfHolder[0];
               }
-            });
+            },
+            new com.navneet.executespec.integration.PipelineExecutorPool());
     selfHolder[0] = orchestrator;
   }
 

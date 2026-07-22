@@ -129,6 +129,19 @@ public class ValidationReportService {
    * Main entry point — called after ReviewerAgent completes, before MergeGate. Non-blocking on
    * failure: catches all exceptions and returns Optional.empty().
    */
+  /**
+   * RR-295 — reuse the existing report's primary key so persistence is an atomic PK upsert (JPA
+   * merge) rather than a destructive delete-then-save. The prior {@code delete} opened a window in
+   * which a save/serialization/DB failure erased the only durable validation report, share data and
+   * score. Overwriting in place leaves the previous good row untouched when the new save fails.
+   */
+  String resolveReportId(String runId) {
+    return repository
+        .findByRunId(runId)
+        .map(ValidationReport::getId)
+        .orElseGet(() -> UUID.randomUUID().toString());
+  }
+
   public Optional<ValidationReport> generateAndPersist(String runId, ReportInput input) {
     long startTime = System.currentTimeMillis();
 
@@ -275,7 +288,7 @@ public class ValidationReportService {
       // 4. Build and persist entity
       var report =
           ValidationReport.builder()
-              .id(UUID.randomUUID().toString())
+              .id(resolveReportId(runId))
               .runId(runId)
               .filesGenerated(filesGenerated)
               .languages(String.join(",", languages))
@@ -332,8 +345,7 @@ public class ValidationReportService {
         log.warn("Failed to accumulate report tokens to run {}: {}", runId, tokenEx.getMessage());
       }
 
-      // Delete any existing report for this run (rework edge case)
-      repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
+      // RR-295 — atomic PK upsert (see the id-reuse note above); no destructive pre-delete.
       var saved = repository.save(report);
       List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
       GoalDonenessDecision runGoalDecision =

@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
@@ -26,9 +29,12 @@ import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -81,6 +87,12 @@ public class ExecutionOrchestrator {
    */
   private final org.springframework.beans.factory.ObjectProvider<ExecutionOrchestrator> self;
 
+  /** RR-527 — used for the transaction-scoped advisory lock in {@link #admitAndCreateExecution}. */
+  @PersistenceContext private EntityManager em;
+
+  /** RR-348 — bounded, context-propagating executor for per-layer solution dispatch. */
+  private final com.navneet.executespec.integration.PipelineExecutorPool executorPool;
+
   /**
    * V188 (2026-05-13) — toggle for the unified V2-dispatch path. When true (default), V3 launches
    * dispatch a single V2 run rather than fanning out per-{@link ExecutionSolution}. The legacy
@@ -98,8 +110,11 @@ public class ExecutionOrchestrator {
       java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
 
   /** RR-349 / RR-350 / RR-351 — launch states from which no further work may start. */
+  // RR-345 — PARTIAL is a first-class terminal launch status. A V2 PARTIAL carries a concrete
+  // failure reason (FINAL_BUILD_FAILED, TESTS_FAILED:N_OF_M, REVIEWER_UNRESOLVED, ...) and must be
+  // terminal here so it is neither re-executed/resumed nor overwritten by applyTerminalStatus.
   private static final java.util.Set<String> LAUNCH_TERMINAL =
-      java.util.Set.of("COMPLETE", "FAILED", "CANCELLED", "ABORTED");
+      java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
 
   /**
    * RR-905 — a launch whose row was written more recently than this is presumed live and is not a
@@ -253,6 +268,55 @@ public class ExecutionOrchestrator {
                     .findById(pipelineRunId)
                     .filter(v2 -> V2_TERMINAL.contains(v2.getStatus()))
                     .ifPresent(v2 -> mirrorV2Terminal(er.getId(), v2)));
+  }
+
+  /**
+   * RR-527 — atomic single-active-execution admission. The controller previously read {@code
+   * findActiveByProjectId} and then, in a separate step, called {@link #createExecution}, so two
+   * concurrent requests (a double-click or parallel clients) could both observe no active row and
+   * both create an execution for the same project — each then analysing, spending, opening gates
+   * and mutating overlapping repos, defeating the explicit single-active-run contract.
+   *
+   * <p>Serialize admission per project with a transaction-scoped PostgreSQL advisory lock (the same
+   * idiom {@code ActivityAuditService} uses): the lock releases at commit, the re-check runs while
+   * it is held, and the create + persist happen in the same transaction, so a concurrent admission
+   * blocks until the winner commits and then observes the winner's active row and is rejected with
+   * a 409.
+   */
+  @Transactional
+  public ExecutionRun admitAndCreateExecution(
+      Project project, AppUser user, CreateExecutionRequest req) {
+    em.createNativeQuery(
+            "SELECT pg_advisory_xact_lock(hashtext('executespec')," + " hashtext(:key))")
+        .setParameter("key", "exec_admission:" + project.getId())
+        .getSingleResult();
+
+    var activeRuns = runRepo.findActiveByProjectId(project.getId());
+    if (!activeRuns.isEmpty()) {
+      ExecutionRun active = activeRuns.get(0);
+      String status = active.getStatus() == null ? "" : active.getStatus().toUpperCase();
+      String reason =
+          switch (status) {
+            case "PAUSED" ->
+                "Previous execution is paused awaiting a user decision on a failed solution. "
+                    + "Resolve it (retry / skip / fix manually) or abort it to start a new one.";
+            case "AWAITING_APPROVAL", "ARCH_REVIEW" ->
+                "Previous execution is waiting for your approval ("
+                    + status
+                    + "). Approve it or abort it to start a new one.";
+            case "EXECUTING", "PLANNING", "ANALYSING", "SETUP" ->
+                "Previous execution is still running (status="
+                    + status
+                    + "). Wait for it to finish or abort it to start a new one.";
+            default ->
+                "Previous execution has not finished or been cancelled (status="
+                    + status
+                    + "). Finish it or abort it to start a new one.";
+          };
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, reason + " [execution id: " + active.getId() + "]");
+    }
+    return createExecution(project, user, req);
   }
 
   public ExecutionRun createExecution(Project project, AppUser user, CreateExecutionRequest req) {
@@ -702,15 +766,29 @@ public class ExecutionOrchestrator {
 
   /**
    * V188 (2026-05-13) — map V2 terminal status to V3 ExecutionRun status + bubble token / cost
-   * totals up. PARTIAL collapses to COMPLETE on the V3 surface because the PR is still raised and
-   * the customer can review it; the per-Solution skip/retry granularity that used to live at V3 is
-   * moot in the unified architecture (the V2 task list + reviewer issues carry the same signal).
+   * totals up. RR-345 — PARTIAL is preserved as a first-class terminal status (it is NOT collapsed
+   * to COMPLETE) and its V2 status/failure reason is always propagated, so failed tests / red final
+   * builds / unresolved reviewer issues stay visible on the execution dashboard instead of reading
+   * as a clean pass.
+   *
+   * <p>Package-private for unit-test access (RR-345 mirror behaviour).
    */
-  private void mirrorV2Terminal(
+  void mirrorV2Terminal(
       String executionRunId, com.navneet.executespec.state.entity.PipelineRun v2Run) {
     String v3Status =
         switch (v2Run.getStatus()) {
-          case "COMPLETE", "PARTIAL" -> "COMPLETE";
+          case "COMPLETE" -> "COMPLETE";
+            // RR-345 — a V2 PARTIAL is NOT a clean COMPLETE. Collapsing it presented failed tests,
+            // red final builds and unresolved reviewer issues as a passing product result and,
+            // because
+            // the derived status then read "clean", it also suppressed the V2 status/failure
+            // reason.
+            // Preserve PARTIAL as a first-class terminal status and always surface its reason
+            // (below).
+            // PR availability is carried separately by the solution/PR rows and is never inferred
+            // as
+            // implementation quality.
+          case "PARTIAL" -> "PARTIAL";
           case "CANCELLED", "ABORTED" -> "ABORTED";
           default -> "FAILED";
         };
@@ -739,8 +817,11 @@ public class ExecutionOrchestrator {
     // raced our poll). The aggregator handles both unified (single linked pipeline_run) and any
     // legacy attempt history on this execution row.
     costAggregator.recomputeAndPersist(executionRunId);
+    // RR-345 — PARTIAL is terminal-with-a-PR: it reaches the same completion event as COMPLETE so
+    // the frontend stops polling, but the ExecutionRun.status (PARTIAL) + failureReason carry the
+    // honest nuance rather than the event masking it.
     String eventType =
-        "COMPLETE".equals(v3Status)
+        ("COMPLETE".equals(v3Status) || "PARTIAL".equals(v3Status))
             ? ExecutionEventTypes.EXEC_COMPLETE
             : "FAILED".equals(v3Status)
                 ? ExecutionEventTypes.EXEC_FAILED
@@ -953,23 +1034,51 @@ public class ExecutionOrchestrator {
       return;
     }
 
-    for (List<ExecutionSolution> layer : layers) {
-      List<CompletableFuture<Void>> futures = new ArrayList<>();
-      for (ExecutionSolution s : layer) {
-        // Re-read to catch status changes (RETRY / SKIP decisions):
-        ExecutionSolution fresh = solutionRepo.findById(s.getId()).orElse(s);
-        if (!"QUEUED".equals(fresh.getStatus())) continue;
-        futures.add(
-            CompletableFuture.runAsync(() -> solutionExecService.executeSolution(fresh, run)));
-      }
-      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    // RR-348 — dispatch each dependency layer on the bounded pipeline executor (per-org/run limits,
+    // no starvation of the JVM common pool by wide layers) with traceId/tenant context propagated
+    // across the thread boundary, and always settle the launch terminally. Previously a child
+    // exception propagated out of the un-caught allOf().join(), so an @Async method with no advice
+    // to catch it simply died — leaving the launch pinned in EXECUTING forever with no PR/terminal
+    // handling. Catch it here and mark the launch FAILED.
+    var contextSnapshot =
+        io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll();
+    try {
+      for (List<ExecutionSolution> layer : layers) {
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (ExecutionSolution s : layer) {
+          // Re-read to catch status changes (RETRY / SKIP decisions):
+          ExecutionSolution fresh = solutionRepo.findById(s.getId()).orElse(s);
+          if (!"QUEUED".equals(fresh.getStatus())) continue;
+          futures.add(
+              CompletableFuture.runAsync(
+                  contextSnapshot.wrap(() -> solutionExecService.executeSolution(fresh, run)),
+                  executorPool.executor()));
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-      // If something paused the run during this layer, bail out —
-      // resumption happens via SolutionExecutionService.processDecision.
-      ExecutionRun latest = runRepo.findById(executionRunId).orElse(run);
-      if ("PAUSED".equals(latest.getStatus()) || "ABORTED".equals(latest.getStatus())) {
-        return;
+        // If something paused the run during this layer, bail out —
+        // resumption happens via SolutionExecutionService.processDecision.
+        ExecutionRun latest = runRepo.findById(executionRunId).orElse(run);
+        if ("PAUSED".equals(latest.getStatus()) || "ABORTED".equals(latest.getStatus())) {
+          return;
+        }
       }
+    } catch (RuntimeException layerError) {
+      log.error(
+          "executeApprovedPlan: layer dispatch for exec {} failed unexpectedly; settling FAILED",
+          executionRunId,
+          layerError);
+      runCas.casUpdate(
+          executionRunId,
+          r -> {
+            if (!LAUNCH_TERMINAL.contains(r.getStatus())) {
+              r.setStatus("FAILED");
+              r.setFailureReason(
+                  "Execution dispatch failed: " + truncate(safeMessage(layerError), 3900));
+            }
+          });
+      emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
+      return;
     }
 
     // All layers complete → open final PRs per repo (skip for follow-up
