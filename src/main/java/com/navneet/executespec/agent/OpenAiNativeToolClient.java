@@ -326,6 +326,14 @@ public class OpenAiNativeToolClient {
     if (!choices.isArray()) {
       throw new IllegalStateException("OpenAI response missing required choices array");
     }
+    // RR-1083 — a 2xx body with an EMPTY choices array is a malformed provider/gateway response,
+    // not a successful zero-content completion. Previously it parsed into a ChatResponse with no
+    // generations, which LlmRouter recorded as a paid SUCCESS (metering managed credits and caps)
+    // while terminating the agent with nothing usable. Fail closed with a typed protocol failure so
+    // the router retries/fails over instead of projecting a bogus success.
+    if (choices.isEmpty()) {
+      throw new IllegalStateException("OpenAI response returned an empty choices array");
+    }
     for (JsonNode choice : choices) {
       JsonNode message = choice.path("message");
       String content = message.path("content").isNull() ? "" : message.path("content").asText("");
@@ -334,10 +342,28 @@ public class OpenAiNativeToolClient {
       JsonNode tcs = message.path("tool_calls");
       if (tcs.isArray()) {
         for (JsonNode tc : tcs) {
+          // RR-1082 — synthesize a stable tool-call id EXACTLY ONCE, here in response
+          // normalization, when the provider/gateway omits it. Previously an empty id survived into
+          // the parsed ToolCall; the request serializer (appendMessage) then minted a fresh RANDOM
+          // assistant id while WorkerAgent independently minted a DIFFERENT result id, so the next
+          // request carried a mismatched assistant tool_call / tool result pairing and 400'd on
+          // strict gateways. Minting the id once at the single normalization boundary means the
+          // same
+          // id flows to dispatch, the tool result, and any replay.
           String id = tc.path("id").asText("");
+          if (id.isBlank()) {
+            id = "call_" + java.util.UUID.randomUUID().toString().replace("-", "");
+          }
           String type = tc.path("type").asText("function");
           JsonNode fn = tc.path("function");
           String name = fn.path("name").asText("");
+          // RR-1083 — a tool_calls entry with no function name is malformed and cannot be
+          // dispatched. Fail closed with a typed protocol failure rather than parsing it into an
+          // un-dispatchable call that LlmRouter would still record as a paid SUCCESS.
+          if (name.isBlank()) {
+            throw new IllegalStateException(
+                "OpenAI response contained a tool call with no function name");
+          }
           String arguments = fn.path("arguments").asText("{}");
           toolCalls.add(new AssistantMessage.ToolCall(id, type, name, arguments));
         }
