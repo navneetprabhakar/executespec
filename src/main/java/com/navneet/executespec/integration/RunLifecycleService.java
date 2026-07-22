@@ -899,13 +899,34 @@ public class RunLifecycleService {
       }
 
       persistenceWriter.updateStatus(runId, "REVIEWING");
+      // RR-484 — the reviewer is the final authority check and must run on the reviewer's canonical
+      // route, not the worker model. `model` above is the WORKER route (requestedModel when pinned,
+      // else workerModel); passing it to the reviewer let a cheap/incompatible worker model perform
+      // the review after a crash. Resolve the reviewer through the same policy an uninterrupted run
+      // uses; RunModelOverrides is already bound (org overrides + exact pin) so a pinned route is
+      // still honoured. Fail closed to the worker model only if resolution is impossible.
+      String reviewerModel = model;
+      try {
+        com.navneet.executespec.router.LlmProvider reviewerProviderEnum =
+            com.navneet.executespec.router.LlmProvider.valueOf(upperProvider);
+        reviewerModel =
+            modelResolver
+                .resolve("ReviewerAgent", reviewerProviderEnum, AgentTier.PLANNING)
+                .getModel();
+      } catch (Exception reviewerRouteEx) {
+        log.warn(
+            "resume run={} reviewer route resolution failed ({}); using worker model {}",
+            runId,
+            reviewerRouteEx.getMessage(),
+            model);
+      }
       ReviewerResult reviewResult = null;
       try {
         reviewResult =
             reviewer.review(
                 ReviewerRequest.builder()
                     .provider(provider)
-                    .model(model)
+                    .model(reviewerModel)
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
@@ -972,17 +993,15 @@ public class RunLifecycleService {
       Instant startedAt,
       String upperProvider,
       String model) {
+    // RR-482 — a REVIEWING-phase crash resume skips the executor, leaving execResult null.
+    // Replacing
+    // null with a synthetic ALL_SUCCESS/0-tasks result let a run whose worker tasks had actually
+    // failed/partial before the crash be finalized COMPLETE on the reviewer alone, contradicting
+    // the
+    // durable task rows. Reconstruct the real aggregate from the persisted task evidence instead;
+    // that helper fails closed (no rows / only failures / only skipped ⇒ FAILED).
     ExecutionResult effectiveExec =
-        execResult == null
-            ? ExecutionResult.builder()
-                .overall(ExecutionResult.Overall.ALL_SUCCESS)
-                .tasksExecuted(0)
-                .tasksSuccessful(0)
-                .tasksWithWarning(0)
-                .tasksFailed(0)
-                .totalLatencyMs(0L)
-                .build()
-            : execResult;
+        execResult == null ? persistenceWriter.reconstructExecResultFromTasks(runId) : execResult;
     var terminal = RunOrchestrator.resolveTerminalStatus(effectiveExec, reviewResult);
     if (RunOrchestrator.validationReportProvenanceFailed(validationReport)) {
       terminal = new RunOrchestrator.StatusAndReason("FAILED", "VALIDATION_EVIDENCE_FAILED");
@@ -1623,6 +1642,11 @@ public class RunLifecycleService {
             } catch (Exception ignored) {
               // give up — operator can hit the endpoint again
             }
+          } finally {
+            // RR-486 — backstop: pool threads are reused, so an uncleared bound route (e.g. an
+            // unchecked throw before runReReviewBlocking's own clear) must not leak an exact pin
+            // onto the next task that runs on this thread.
+            RunModelOverrides.clear();
           }
         });
   }
@@ -1638,18 +1662,41 @@ public class RunLifecycleService {
       log.warn("RunOrchestrator reReview: run {} disappeared mid-flight", runId);
       return;
     }
-    LlmProvider provider;
-    try {
-      provider =
-          LlmProvider.valueOf(
-              (run.getAiProvider() == null ? "openai" : run.getAiProvider()).toUpperCase());
-    } catch (IllegalArgumentException e) {
-      provider = LlmProvider.OPENAI;
+    // RR-486 — reconstruct the run's immutable routing authority instead of silently defaulting to
+    // OpenAI, and bind org overrides + the exact pin so the refreshed reviewer spends the SAME
+    // provider/model the customer authorized. A pinned run resolves its provider from the pinned
+    // requestedProvider; otherwise from aiProvider. A null/unknown provider is fail-closed (throws,
+    // caught by reReview() → PARTIAL/RE_REVIEW_FAILED) rather than rerouted to a provider the run
+    // never selected. bindRunModelOverrides additionally throws if a persisted pin is incomplete or
+    // no longer dispatchable. RunModelOverrides is cleared in the finally below.
+    bindRunModelOverrides(run);
+    String providerSource =
+        run.isRoutePinned() && run.getRequestedProvider() != null
+            ? run.getRequestedProvider()
+            : run.getAiProvider();
+    if (providerSource == null || providerSource.isBlank()) {
+      RunModelOverrides.clear();
+      throw new IllegalStateException(
+          "re-review cannot resolve the run's authorized provider (none persisted) for " + runId);
     }
-    ResolvedModel reviewerModel =
-        modelResolver.resolve("ReviewerAgent", provider, AgentTier.PLANNING);
-
-    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    final LlmProvider provider;
+    try {
+      provider = LlmProvider.valueOf(providerSource.toUpperCase());
+    } catch (IllegalArgumentException e) {
+      RunModelOverrides.clear();
+      throw new IllegalStateException(
+          "re-review provider not recognised: " + providerSource + " for run " + runId, e);
+    }
+    ResolvedModel reviewerModel;
+    Path workspace;
+    try {
+      // modelResolver honours the just-bound RunModelOverrides (org matrix + exact pin).
+      reviewerModel = modelResolver.resolve("ReviewerAgent", provider, AgentTier.PLANNING);
+      workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    } catch (RuntimeException e) {
+      RunModelOverrides.clear();
+      throw e;
+    }
     if (!Files.isDirectory(workspace)) {
       log.warn(
           "RunOrchestrator reReview: workspace {} missing for run {}, marking PARTIAL",
@@ -1660,6 +1707,7 @@ public class RunLifecycleService {
       run.setCompletedAt(Instant.now());
       runRepo.save(run);
       broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_NO_WORKSPACE"));
+      RunModelOverrides.clear(); // RR-486
       return;
     }
     ExecutionContext rootCtx = new ExecutionContext(runId, "_re_review_", workspace);
@@ -1716,6 +1764,7 @@ public class RunLifecycleService {
     refreshed.setCompletedAt(Instant.now());
     runRepo.save(refreshed);
     broadcaster.emit(runId, RunEvent.complete(runId, terminal.status(), terminal.reason()));
+    RunModelOverrides.clear(); // RR-486 — release the bound route on this pool thread
     log.info(
         "RunOrchestrator reReview run={} done status={} reason={} reviewerVerdict={}",
         runId,

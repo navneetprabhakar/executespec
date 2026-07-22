@@ -73,7 +73,22 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
     try {
       ConfluenceWebhookPayload payload = mapper.readValue(rawBody, ConfluenceWebhookPayload.class);
       if (payload.event() != null && payload.page() != null && payload.page().id() != null) {
-        return payload.event() + "-" + payload.page().id();
+        // RR-581 — the durable identity must change between successive edits of the same page.
+        // `<event>-<pageId>` alone made every `page_updated` after the first look like a replay, so
+        // later requirement/AC changes never launched a run. Prefer the page's monotonic version
+        // number, then the delivery timestamp; only when NEITHER is present do we fall back to a
+        // random id (accept-once) rather than a stable key that would false-dedupe every update.
+        String pageId = payload.page().id();
+        Integer version =
+            payload.page().version() == null ? null : payload.page().version().number();
+        if (version != null) {
+          return payload.event() + "-" + pageId + "-v" + version;
+        }
+        if (payload.timestamp() != null) {
+          return payload.event() + "-" + pageId + "-t" + payload.timestamp();
+        }
+        // No provider-supplied discriminator — cannot prove this is a duplicate, so accept it.
+        return payload.event() + "-" + pageId + "-" + UUID.randomUUID();
       }
     } catch (Exception ignored) {
     }
