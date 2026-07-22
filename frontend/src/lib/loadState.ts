@@ -72,13 +72,26 @@ export type AsyncData<T> = {
   setData: (value: T | null | ((prev: T | null) => T | null)) => void;
 };
 
+/** RR-1423 — shallow dependency comparison (same semantics React uses). */
+function depsEqual(a: unknown[] | null, b: unknown[]): boolean {
+  if (a === null) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) return false;
+  }
+  return true;
+}
+
 /**
  * Loads a value and tracks loading/failure/loaded as three distinct states.
  *
  * The loader is held in a ref so an inline arrow at the call site does not
  * retrigger the effect; re-runs are driven by `deps` and by `reload()`.
  * In-flight results are dropped after unmount or a dependency change, which
- * also removes the stale-write race the old `.then(setX)` sites had.
+ * also removes the stale-write race the old `.then(setX)` sites had. On a
+ * dependency (scope) change the previously loaded value is also cleared
+ * synchronously so another scope's data is never rendered under the new scope
+ * (RR-1423); a same-scope `reload()` keeps its data to avoid a spinner flash.
  */
 export function useAsyncData<T>(
   loader: () => Promise<T>,
@@ -91,13 +104,26 @@ export function useAsyncData<T>(
   const [nonce, setNonce] = useState(0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  // RR-1423 — remember the deps the current `data` belongs to. When the scope
+  // key changes (project A → project B), stale data from the previous scope must
+  // not remain rendered while the next load is in flight, or one tenant's content
+  // is shown under another tenant's route. A plain `reload()` (nonce bump) leaves
+  // deps unchanged, so a same-scope refresh still keeps its data and does not
+  // flicker to a spinner.
+  const prevDepsRef = useRef<unknown[] | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
       return;
     }
+    const scopeChanged = !depsEqual(prevDepsRef.current, deps);
+    prevDepsRef.current = deps;
     let cancelled = false;
+    if (scopeChanged) {
+      // Drop the previous scope's value synchronously before the new load runs.
+      setData(null);
+    }
     setLoading(true);
     setFailure(null);
     loaderRef

@@ -2,7 +2,9 @@ import {describe, expect, it} from 'vitest';
 
 import {
   availableOrgMembers,
+  canManageMembership,
   canManageProjectSharing,
+  canManageShareLinks,
   contractDetectorSummary,
   docStamp,
   driftSummaryMessage,
@@ -124,6 +126,41 @@ describe('projectMoreUtils', () => {
       }),
     ).toBe(true);
     expect(canManageProjectSharing({globalRole: 'SUPER_ADMIN'})).toBe(true);
+  });
+
+  it('RR-1507 — membership and share-link authority track their two server guards', () => {
+    // A PROJECT_DEVELOPER may manage share links (isProjectWriter) but NOT
+    // members (requireProjectAdmin). One boolean conflated the two.
+    const dev = {
+      globalRole: 'USER',
+      orgRole: 'DEVELOPER',
+      projectRole: 'PROJECT_DEVELOPER',
+      hasProjectMembership: true,
+    };
+    expect(canManageMembership(dev)).toBe(false);
+    expect(canManageShareLinks(dev)).toBe(true);
+
+    // PROJECT_ADMIN gets both.
+    const admin = {...dev, projectRole: 'PROJECT_ADMIN'};
+    expect(canManageMembership(admin)).toBe(true);
+    expect(canManageShareLinks(admin)).toBe(true);
+
+    // A host-org ORG_ADMIN who is not a project member manages both.
+    const orgAdmin = {globalRole: 'USER', orgRole: 'ORG_ADMIN', hasProjectMembership: false};
+    expect(canManageMembership(orgAdmin)).toBe(true);
+    expect(canManageShareLinks(orgAdmin)).toBe(true);
+
+    // A PROJECT_VIEWER gets neither.
+    const viewer = {...dev, projectRole: 'PROJECT_VIEWER'};
+    expect(canManageMembership(viewer)).toBe(false);
+    expect(canManageShareLinks(viewer)).toBe(false);
+
+    // SUPER_ADMIN always gets both.
+    expect(canManageMembership({globalRole: 'SUPER_ADMIN'})).toBe(true);
+    expect(canManageShareLinks({globalRole: 'SUPER_ADMIN'})).toBe(true);
+
+    // The deprecated alias keeps the wider share-link semantics.
+    expect(canManageProjectSharing(dev)).toBe(true);
   });
 
   it('splits architecture markdown into preamble and top-level sections', () => {

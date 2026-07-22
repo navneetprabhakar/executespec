@@ -9,7 +9,8 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {
   availableOrgMembers,
-  canManageProjectSharing,
+  canManageMembership,
+  canManageShareLinks,
   isExternalProjectMember,
   memberDisplayName,
 } from '@/ide/projectMoreUtils';
@@ -77,12 +78,18 @@ export function IdeProjectMembers() {
 
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
   const currentMember = members?.find((m) => m.userId === user?.id);
-  const canManage = canManageProjectSharing({
+  // RR-1507 — membership and share-links have different server guards. A
+  // PROJECT_DEVELOPER may manage share links (isProjectWriter) but NOT members
+  // (requireProjectAdmin); a single boolean would show them a member-admin
+  // surface that 403s after every confirm.
+  const authorityInput = {
     globalRole: user?.globalRole,
     orgRole: user?.orgRole,
     projectRole: currentMember?.projectRole,
     hasProjectMembership: !!currentMember,
-  });
+  };
+  const canManageMembers = canManageMembership(authorityInput);
+  const canManageShares = canManageShareLinks(authorityInput);
   const canInviteExternals = isSuperAdmin || externalSharingEnabled === true;
 
   async function invite() {
@@ -259,7 +266,7 @@ export function IdeProjectMembers() {
                 </span>
                 <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{m.email}</span>
                 <IdeBadge kind='ok'>{role}</IdeBadge>
-                {canManage && !isMe && (
+                {canManageMembers && !isMe && (
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 8px', color: 'var(--ide-red)'}}
@@ -274,7 +281,7 @@ export function IdeProjectMembers() {
         </div>
       )}
 
-      {canManage && selectableOrgMembers.length > 0 && (
+      {canManageMembers && selectableOrgMembers.length > 0 && (
         <>
           <div className='ide-h2'>Add org member</div>
           <div className='ide-card'>
@@ -325,7 +332,7 @@ export function IdeProjectMembers() {
         </>
       )}
 
-      {canManage &&
+      {canManageMembers &&
         (canInviteExternals ? (
           <>
             <div className='ide-h2'>Invite external collaborator</div>
@@ -398,7 +405,7 @@ export function IdeProjectMembers() {
           </>
         ))}
 
-      {!canManage && (
+      {!canManageMembers && (
         <div className='ide-card' style={{borderColor: 'var(--ide-blue)', marginTop: 12}}>
           <div
             style={{
@@ -419,7 +426,7 @@ export function IdeProjectMembers() {
         </div>
       )}
 
-      {canManage && (
+      {canManageMembers && (
         <>
           <div className='ide-h2'>Pending invites{invites ? ` · ${invites.length}` : ''}</div>
           {invitesState.failure ? (
@@ -541,13 +548,13 @@ export function IdeProjectMembers() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {canManage
+                    {canManageShares
                       ? `Credential ${s.tokenPrefix}… · URL hidden after creation`
                       : 'Share link details are managed by project writers.'}
                     {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
                   </div>
                 </div>
-                {canManage && (
+                {canManageShares && (
                   <>
                     <button
                       className='ide-btn ghost'
@@ -599,7 +606,7 @@ export function IdeProjectMembers() {
           )}
         </div>
       )}
-      {canManage && (
+      {canManageShares && (
         <button
           className='ide-btn ghost'
           style={{marginTop: 10}}
