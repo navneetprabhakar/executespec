@@ -116,6 +116,23 @@ class RunLedgerAgentTest {
     verify(ledgerRepo).save(any(ProjectRunLedger.class));
   }
 
+  /**
+   * RR-1315 — ledger generation makes one (sometimes two, via compaction) provider calls that can
+   * take tens of seconds. A method-wide transaction would pin a JDBC connection across that latency
+   * and delay the user's terminal run state, so the method must NOT be {@code @Transactional}.
+   */
+  @Test
+  void generateLedgerEntryIsNotTransactional() throws Exception {
+    var method = RunLedgerAgent.class.getMethod("generateLedgerEntry", String.class);
+    org.assertj.core.api.Assertions.assertThat(
+            method.getAnnotation(org.springframework.transaction.annotation.Transactional.class))
+        .isNull();
+    org.assertj.core.api.Assertions.assertThat(
+            RunLedgerAgent.class.getAnnotation(
+                org.springframework.transaction.annotation.Transactional.class))
+        .isNull();
+  }
+
   private static ChatResponse ok(String text) {
     return new ChatResponse(
         List.of(new Generation(AssistantMessage.builder().content(text).build())));

@@ -25,7 +25,6 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,7 +54,15 @@ public class RunLedgerAgent {
 
   private static final int LEDGER_CHAR_CAP = 2000;
 
-  @Transactional
+  /**
+   * RR-1315 — deliberately NOT {@code @Transactional}. This method makes one (sometimes two, via
+   * compaction) LIGHTWEIGHT provider calls that can take tens of seconds; a method-wide transaction
+   * would pin a JDBC connection across that provider latency and delay the user's terminal run
+   * state. Each repository write below runs in its own short transaction, and {@link
+   * MemoryCompactionService} already scopes its own persistence to a short transaction separate
+   * from its provider call — a boundary the old outer transaction defeated. Memory generation is
+   * best-effort and must never break a run, so the whole body is guarded and idempotent.
+   */
   public void generateLedgerEntry(String runId) {
     if (runId == null || ledgerRepo.existsByRunId(runId)) {
       return;

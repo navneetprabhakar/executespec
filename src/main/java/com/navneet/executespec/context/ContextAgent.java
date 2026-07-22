@@ -283,15 +283,23 @@ public class ContextAgent {
             sections.put(headingPrefix, headingPrefix + "\n\n" + content.strip() + "\n");
             log.debug("Context Agent patch: UPDATE [{}]", section);
           } else {
-            // Section not found — treat as ADD at end
+            // RR-1241 — a missing/ambiguous UPDATE target must NOT silently become an ADD. That
+            // let a schema-valid patch fabricate a new section (or, via the old fuzzy matcher,
+            // overwrite an unrelated one). Preserve the doc and skip.
             log.warn(
-                "Context Agent patch: UPDATE [{}] not found — appending as new section", section);
-            sections.put("## " + section, "## " + section + "\n\n" + content.strip() + "\n");
+                "Context Agent patch: UPDATE [{}] target not uniquely found — skipped", section);
           }
         }
         case "ADD" -> {
           if (content == null) {
             log.warn("Context Agent patch: ADD [{}] missing content — skipped", section);
+            continue;
+          }
+          // RR-1241 — ADD must not overwrite an existing heading (the old map-put clobbered it
+          // silently). Refuse when the target already resolves to a section.
+          if (findMatchingHeading(sections, section) != null) {
+            log.warn(
+                "Context Agent patch: ADD [{}] targets an existing section — skipped", section);
             continue;
           }
           String newHeading = "## " + section;
@@ -359,16 +367,43 @@ public class ContextAgent {
   }
 
   /**
-   * Finds the heading key in the sections map that best matches the given section name. Matching is
-   * done by checking if the heading line contains the section name (case-insensitive).
+   * Normalise a heading/section name to its comparable identity: strip leading #'s + whitespace.
+   */
+  private static String normalizeHeading(String value) {
+    if (value == null) return "";
+    return value.replaceAll("^#+\\s*", "").strip().toLowerCase(java.util.Locale.ROOT);
+  }
+
+  /**
+   * RR-1241 — resolve a patch target to at most ONE existing heading. The old matcher used
+   * bidirectional {@code contains}, so the empty-preamble key (normalised {@code ""}) matched every
+   * UPDATE/REMOVE and a short name like {@code API} matched {@code API Security}. Match exact
+   * normalised heading identity first; fall back to a UNIQUE containment match only, and reject a
+   * blank/missing/ambiguous target by returning {@code null} so the caller never mutates an
+   * unrelated section.
    */
   private String findMatchingHeading(LinkedHashMap<String, String> sections, String sectionName) {
-    String lower = sectionName.toLowerCase();
+    String target = normalizeHeading(sectionName);
+    if (target.isEmpty()) return null;
     for (String key : sections.keySet()) {
-      if (key.toLowerCase().contains(lower)
-          || lower.contains(key.replaceAll("^#+\\s*", "").toLowerCase())) {
-        return key;
+      if (normalizeHeading(key).equals(target)) return key;
+    }
+    String unique = null;
+    int matches = 0;
+    for (String key : sections.keySet()) {
+      String normKey = normalizeHeading(key);
+      if (normKey.isEmpty()) continue; // never match the preamble stored under the empty key
+      if (normKey.contains(target) || target.contains(normKey)) {
+        unique = key;
+        matches++;
       }
+    }
+    if (matches == 1) return unique;
+    if (matches > 1) {
+      log.warn(
+          "Context Agent patch: ambiguous section target [{}] matched {} headings — skipped",
+          sectionName,
+          matches);
     }
     return null;
   }
@@ -408,7 +443,7 @@ public class ContextAgent {
         .append(" (run: ")
         .append(run.getRunId())
         .append(")\n\n");
-    entry.append("**Goal:** ").append(run.getUserRequest()).append("\n");
+    entry.append("**Goal:** ").append(sanitizeJournalInline(run.getUserRequest())).append("\n");
 
     if (!input.newPackagesDetected().isEmpty())
       entry
@@ -433,6 +468,27 @@ public class ContextAgent {
         || !input.newFilesDetected().isEmpty()
         || !"Git diff unavailable".equals(input.gitDiffSummary())
         || !input.workerReportSummaries().isEmpty();
+  }
+
+  /** RR-1244 — cap on the user goal appended to decisions.md, to bound the durable journal. */
+  private static final int MAX_JOURNAL_GOAL_CHARS = 4_000;
+
+  /**
+   * RR-1244 — the run goal is user-controlled and was appended verbatim after {@code **Goal:**}.
+   * The scanner later splits {@code decisions.md} on the {@code "## "} heading token and treats
+   * each section as an authoritative recent decision, so a goal carrying headings/fake fields could
+   * forge durable human/model audit records and poison future "do not duplicate" evidence,
+   * unbounded. Collapse to a single bounded line and neutralise every {@code #} run so it cannot
+   * open a heading section the scanner would parse as a record.
+   */
+  static String sanitizeJournalInline(String value) {
+    if (value == null || value.isBlank()) return "(none)";
+    String single = value.replaceAll("\\s+", " ").strip();
+    if (single.length() > MAX_JOURNAL_GOAL_CHARS) {
+      single = single.substring(0, MAX_JOURNAL_GOAL_CHARS) + "…";
+    }
+    // Insert a space after every '#' so no "## " (or "# ") heading token can survive.
+    return single.replace("#", "# ");
   }
 
   /** Bound a run id to one safe filename segment before it is interpolated into a sidecar name. */
