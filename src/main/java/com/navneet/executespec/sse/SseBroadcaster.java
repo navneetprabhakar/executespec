@@ -74,9 +74,22 @@ public class SseBroadcaster {
   private static final String SEQUENCE_PREFIX = "sse:sequence:";
   private static final Duration REPLAY_TTL = Duration.ofHours(24);
 
-  /** Unique ID for this JVM instance — used to suppress echo from Redis pub/sub. */
+  /**
+   * Unique ID for this JVM instance — used to suppress echo from Redis pub/sub.
+   *
+   * <p>RR-424 — the previous identity was {@code loopbackHostName + "-" + pid}. Containers commonly
+   * report the same loopback hostname and run the JVM as PID 1, so two replicas could compute the
+   * SAME id and each classify the other's pub/sub events as a self-echo — subscribers on the
+   * non-origin replica then received no live run events. A per-boot random suffix makes the id
+   * deployment-unique regardless of host/PID collision; it only needs to be stable for the lifetime
+   * of this process and distinct from every peer's.
+   */
   private static final String INSTANCE_ID =
-      java.net.InetAddress.getLoopbackAddress().getHostName() + "-" + ProcessHandle.current().pid();
+      java.net.InetAddress.getLoopbackAddress().getHostName()
+          + "-"
+          + ProcessHandle.current().pid()
+          + "-"
+          + java.util.UUID.randomUUID();
 
   private final Map<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
   private final AtomicInteger totalEmitterCount = new AtomicInteger(0);

@@ -128,6 +128,23 @@ class SimpleKeyEncryptionServiceTest {
   }
 
   @Test
+  void multiplePrimaryKeySourcesAreRejectedAsAmbiguous() {
+    // RR-124 — a local key configured ALONGSIDE the governed GCP resource silently overrode it (the
+    // split-key vector). Configuring both primary sources at once now fails closed at boot, even in
+    // an encryption-required profile.
+    CryptoProperties props = new CryptoProperties();
+    props.setEnabled(true);
+    props.setRequireEncryption(true);
+    props.setLocalKey(KEY_A);
+    props.setGcpSecretName("projects/p/secrets/crypto/versions/7");
+    SimpleKeyEncryptionService service = new SimpleKeyEncryptionService(props);
+
+    assertThatThrownBy(service::init)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("unambiguous");
+  }
+
+  @Test
   void malformedAndUnsupportedEnvelopesFailClosed() {
     var service = service(KEY_A, "1", Map.of(), true);
 
