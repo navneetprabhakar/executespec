@@ -42,7 +42,9 @@ export function IdeProjectSettings() {
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [deleteDocFor, setDeleteDocFor] = useState<{docId: string; label: string} | null>(null);
-  const [projectAction, setProjectAction] = useState<'archive' | 'delete' | null>(null);
+  const [projectAction, setProjectAction] = useState<'archive' | 'unarchive' | 'delete' | null>(
+    null,
+  );
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -418,10 +420,18 @@ export function IdeProjectSettings() {
               </div>
 
               <div className='ide-h2'>Danger zone</div>
-              <div className='ide-card' style={{display: 'flex', gap: 8}}>
-                <button className='ide-btn ghost' onClick={() => setProjectAction('archive')}>
-                  Archive
-                </button>
+              {/* RR-1312 — archive and soft-delete are both reversible. Surface the
+                  matching recovery action and describe the lifecycle honestly. */}
+              <div className='ide-card' style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+                {projectIsArchived(project) ? (
+                  <button className='ide-btn ghost' onClick={() => setProjectAction('unarchive')}>
+                    Unarchive
+                  </button>
+                ) : (
+                  <button className='ide-btn ghost' onClick={() => setProjectAction('archive')}>
+                    Archive
+                  </button>
+                )}
                 <button
                   className='ide-btn ghost'
                   style={{color: 'var(--ide-red)'}}
@@ -430,6 +440,12 @@ export function IdeProjectSettings() {
                   Delete
                 </button>
               </div>
+              {projectIsArchived(project) && (
+                <div className='ide-sub' style={{marginTop: 6}}>
+                  This project is archived. It is hidden from active listings but retained —
+                  unarchive to restore it.
+                </div>
+              )}
             </>
           )}
 
@@ -727,9 +743,25 @@ export function IdeProjectSettings() {
         onClose={() => setProjectAction(null)}
       />
       <ConfirmModal
+        open={projectAction === 'unarchive'}
+        title='Unarchive project'
+        body='Unarchive this project and return it to your active listings?'
+        confirmLabel='Unarchive'
+        onConfirm={() => {
+          setProjectAction(null);
+          // RR-1312 — restoration is an implemented, reachable action, not a dead end.
+          api
+            .unarchiveProject(projectId)
+            .then((p) => setProject(p))
+            .catch((e) => setErr(e instanceof Error ? e.message : 'Unarchive failed.'));
+        }}
+        onClose={() => setProjectAction(null)}
+      />
+      <ConfirmModal
         open={projectAction === 'delete'}
         title='Delete project'
-        body='Delete this project? This cannot be undone.'
+        // RR-1312 — deletion is a soft-delete with a 30-day undo window, not permanent.
+        body='Delete this project? It is soft-deleted and can be restored within a 30-day undo window; after that it is permanently removed.'
         confirmLabel='Delete'
         danger
         onConfirm={() => {
@@ -743,6 +775,12 @@ export function IdeProjectSettings() {
       />
     </div>
   );
+}
+
+// RR-1312 — a project is archived when it carries an archive timestamp (or the
+// backend labels its status ARCHIVED).
+function projectIsArchived(project: api.ProjectDto): boolean {
+  return !!project.archivedAt || (project.status || '').toUpperCase() === 'ARCHIVED';
 }
 
 function formatBytes(value: number): string {

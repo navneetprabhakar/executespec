@@ -140,13 +140,25 @@ export default function IdeRunResult() {
     body: string;
     confirmLabel: string;
     danger?: boolean;
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
   } | null>(null);
+  // RR-763 — a one-shot pending latch so a confirmation dialog cannot fire its
+  // (paid / destructive) callback twice while the first is still in flight. The
+  // ref decides synchronously; the state drives the disabled/'…' rendering.
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const confirmBusyRef = useRef(false);
+  // RR-768 — the single in-flight exclusive run-lifecycle op. A second conflicting
+  // mutation is refused while this is set, and the shared busy label is cleared
+  // only by the op that still owns it (no last-writer-wins clobber).
+  const exclusiveBusyRef = useRef<string | null>(null);
   // RES-1 — run-management overflow menu (Fork / Archive / Delete).
   const [moreOpen, setMoreOpen] = useState(false);
   // Timeline + Chat — IDE parity with Signal ResultPage.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [chat, setChat] = useState<api.RunChatMessage[] | null>(null);
+  // RR-766 — a failed history read is not an empty conversation. Track it so the
+  // panel shows a retryable error instead of a false "No messages yet".
+  const [chatFailure, setChatFailure] = useState<LoadFailure | null>(null);
   const [runAgentSessionId, setRunAgentSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
@@ -305,7 +317,9 @@ export default function IdeRunResult() {
           setCostEvidenceFailure(null);
         })
         .catch((e: unknown) => setCostEvidenceFailure(toLoadFailure(e)));
-    if (tab === 'Chat' && !chat) void loadRunChat();
+    // RR-766 — do not re-fire the load when the last attempt failed (chat stays
+    // null on failure); the Retry button owns the re-attempt.
+    if (tab === 'Chat' && !chat && !chatFailure) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -488,16 +502,61 @@ export default function IdeRunResult() {
     });
   }
 
-  async function action(name: string, fn: () => Promise<unknown>, ok: (r: unknown) => string) {
+  // RR-764 — reconcile the authoritative run + report (+ visible tests) after a
+  // mutation settles, so controls do not stay enabled against stale status and
+  // invalidated tests/scores reflect the new state without a full reload.
+  async function reloadRun() {
+    if (!runId) return;
+    const gen = loadGen.current;
+    try {
+      const r = await api.getRun(runId);
+      if (gen === loadGen.current) setRun(r);
+    } catch {
+      // Keep the last-known run; the action already surfaced any failure message.
+    }
+    reloadReport();
+    if (tab === 'Tests') {
+      try {
+        const t = await api.getTestReport(runId);
+        if (gen === loadGen.current) {
+          setTests(t);
+          setTestsFailure(null);
+        }
+      } catch (e: unknown) {
+        if (gen === loadGen.current) setTestsFailure(toLoadFailure(e));
+      }
+    }
+  }
+
+  // RR-768 — downloads are independent and non-conflicting; every other op is a
+  // run-lifecycle mutation that must be serialized against the others.
+  function isExclusiveAction(name: string): boolean {
+    return name !== 'pdf' && name !== 'pdf2' && name !== 'code' && name !== 'share';
+  }
+
+  async function action(
+    name: string,
+    fn: () => Promise<unknown>,
+    ok: (r: unknown) => string,
+    settle?: () => void | Promise<void>,
+  ) {
+    const exclusive = isExclusiveAction(name);
+    // RR-768 — refuse a second conflicting mutation while one is already running.
+    if (exclusive && exclusiveBusyRef.current) return;
+    if (exclusive) exclusiveBusyRef.current = name;
     setBusy(name);
     setMsg('');
     try {
       const r = await fn();
       setMsg(ok(r));
+      // RR-764 — settle the affected resources on success.
+      if (settle) await settle();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Failed.');
     } finally {
-      setBusy('');
+      if (exclusive) exclusiveBusyRef.current = null;
+      // RR-768 — clear the label only if this op still owns it.
+      setBusy((prev) => (prev === name ? '' : prev));
     }
   }
 
@@ -622,23 +681,70 @@ export default function IdeRunResult() {
     }
   }
 
+  // RR-766 — durable turns are paginated (limit + `before` cursor). Replay the
+  // full transcript in bounded pages instead of silently reading only the first
+  // 50, so older evidence is not dropped from the view.
+  async function loadAllRunAgentTurns(sessionId: string): Promise<api.AgentTurnResponse[]> {
+    const PAGE = 100;
+    const MAX_PAGES = 20; // hard bound: at most 2,000 turns rendered
+    const byId = new Map<string, api.AgentTurnResponse>();
+    let before: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await api.listAgentTurns(sessionId, {limit: PAGE, before});
+      if (!batch.length) break;
+      const sizeBefore = byId.size;
+      for (const t of batch) byId.set(t.turnId, t);
+      // Stop if the cursor made no progress (server without a `before` contract
+      // would otherwise return the same page forever).
+      if (byId.size === sizeBefore || batch.length < PAGE) break;
+      // Cursor on the oldest turn seen so far so the next page walks further back.
+      before = batch.reduce((min, t) => (t.sequence < min.sequence ? t : min), batch[0]).turnId;
+    }
+    // Present oldest → newest regardless of page order.
+    return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
+  }
+
   async function loadRunChat() {
     if (!runId) return;
+    setChatFailure(null);
+    // RR-766 — legacy and durable reads fail independently. A real outage must
+    // surface as an error, not collapse into a false "No messages yet".
+    let legacy: api.RunChatMessage[] = [];
+    let legacyFailed = false;
     try {
-      const [legacy, sessions] = await Promise.all([
-        api.getRunChat(runId).catch(() => []),
-        api.listAgentSessions(100).catch(() => []),
-      ]);
-      const session = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
-      if (session) {
-        setRunAgentSessionId(session.id);
-        const turns = await api.listAgentTurns(session.id, {limit: 50}).catch(() => []);
-        setChat([...legacy, ...turns.flatMap(agentTurnToRunChatMessages)]);
-        return;
-      }
-      setChat(legacy);
+      legacy = await api.getRunChat(runId);
     } catch {
-      setChat([]);
+      legacyFailed = true;
+    }
+    let sessions: api.AgentSessionResponse[];
+    try {
+      sessions = await api.listAgentSessions(100);
+    } catch (e: unknown) {
+      if (legacyFailed) {
+        setChatFailure(toLoadFailure(e));
+        setChat(null);
+      } else {
+        setChat(legacy);
+      }
+      return;
+    }
+    const session = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
+    if (!session) {
+      setChat(legacy);
+      return;
+    }
+    setRunAgentSessionId(session.id);
+    try {
+      const turns = await loadAllRunAgentTurns(session.id);
+      setChat([...legacy, ...turns.flatMap(agentTurnToRunChatMessages)]);
+    } catch (e: unknown) {
+      if (legacyFailed) {
+        setChatFailure(toLoadFailure(e));
+        setChat(null);
+      } else {
+        // Show the legacy history we do have; durable turns are unavailable.
+        setChat(legacy);
+      }
     }
   }
 
@@ -723,7 +829,14 @@ export default function IdeRunResult() {
     if (cmd === '/clear') {
       const session = await ensureRunAgentSession();
       await api.clearAgentSessionHistory(session.id);
-      setChat([]);
+      // RR-766 — only the durable agent-session transcript is clearable; the legacy
+      // /runs/{id}/chat history is immutable server-side. Reload so the view reflects
+      // the real persisted state (legacy retained) instead of a local blank that
+      // silently reappears on the next reload.
+      await loadRunChat();
+      appendRunChatNote(
+        'Cleared this session’s durable history. Earlier read-only run chat is retained and will still appear on reload.',
+      );
       return true;
     }
     if (cmd === '/projects') {
@@ -1222,6 +1335,7 @@ export default function IdeRunResult() {
                       'resume',
                       () => api.resumeRun(runId),
                       () => 'Run resumed.',
+                      reloadRun,
                     )
                   }
                 >
@@ -1237,7 +1351,9 @@ export default function IdeRunResult() {
                   <button
                     className='ide-btn'
                     disabled={busy === 'push'}
-                    onClick={() => action('push', () => api.pushToScm(runId), pushOutcomeMessage)}
+                    onClick={() =>
+                      action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
+                    }
                   >
                     {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                   </button>
@@ -1285,6 +1401,7 @@ export default function IdeRunResult() {
                                 ? 'Workspace revert failed.'
                                 : `Workspace reverted (${response.reposSynced ?? 0} repos).`;
                             },
+                            reloadRun,
                           ),
                       })
                     }
@@ -1852,6 +1969,7 @@ export default function IdeRunResult() {
                                 t.taskId,
                                 () => api.retryTask(runId, t.taskId),
                                 () => 'Retry started.',
+                                reloadRun,
                               )
                             }
                           >
@@ -1872,6 +1990,7 @@ export default function IdeRunResult() {
                                   typeof r === 'object' && r && 'message' in r
                                     ? String(r.message)
                                     : 'Continuation approved.',
+                                reloadRun,
                               )
                             }
                           >
@@ -2684,7 +2803,9 @@ export default function IdeRunResult() {
                 <button
                   className='ide-btn'
                   disabled={busy === 'push'}
-                  onClick={() => action('push', () => api.pushToScm(runId), pushOutcomeMessage)}
+                  onClick={() =>
+                    action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
+                  }
                 >
                   {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                 </button>
@@ -2940,6 +3061,7 @@ export default function IdeRunResult() {
                                           `invalid-${r.testResultId}`,
                                           () => api.markTestInvalid(r.testResultId),
                                           () => 'Marked invalid.',
+                                          reloadRun,
                                         ),
                                     })
                                   }
@@ -3013,7 +3135,10 @@ export default function IdeRunResult() {
                 marginBottom: 12,
               }}
             >
-              {chat == null ? (
+              {chatFailure ? (
+                // RR-766 — an outage is not an empty conversation.
+                <LoadError failure={chatFailure} what='chat history' onRetry={loadRunChat} />
+              ) : chat == null ? (
                 <IdeLoader label='Loading chat…' />
               ) : chat.length === 0 && !chatBusy ? (
                 <div className='ide-empty'>
@@ -3123,8 +3248,28 @@ export default function IdeRunResult() {
         body={confirm?.body ?? ''}
         confirmLabel={confirm?.confirmLabel ?? 'Confirm'}
         danger={confirm?.danger}
-        onConfirm={() => confirm?.onConfirm()}
-        onClose={() => setConfirm(null)}
+        busy={confirmBusy}
+        // RR-763 — a synchronous one-shot latch: the confirm callback (often a paid
+        // or destructive mutation) runs at most once even under rapid double-click
+        // or repeated keyboard activation, and the dialog stays disabled until it
+        // settles.
+        onConfirm={async () => {
+          if (confirmBusyRef.current) return;
+          const c = confirm;
+          if (!c) return;
+          confirmBusyRef.current = true;
+          setConfirmBusy(true);
+          try {
+            await c.onConfirm();
+          } finally {
+            confirmBusyRef.current = false;
+            setConfirmBusy(false);
+            setConfirm(null);
+          }
+        }}
+        onClose={() => {
+          if (!confirmBusyRef.current) setConfirm(null);
+        }}
       />
     </div>
   );

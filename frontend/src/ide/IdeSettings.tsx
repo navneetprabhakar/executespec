@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
@@ -36,6 +36,9 @@ export function IdeIntegrations() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  // RR-772 — Slack disconnect confirmation, with a synchronous one-shot latch.
+  const [disconnectSlack, setDisconnectSlack] = useState(false);
+  const disconnectBusyRef = useRef(false);
 
   const loadSources = () =>
     api
@@ -292,7 +295,17 @@ export function IdeIntegrations() {
         >
           Connect
         </button>
-      ) : undefined,
+      ) : (
+        // RR-772 — a connected integration must be revocable from the surface where
+        // it was connected. The server exposes DELETE /integrations/slack/disconnect.
+        <button
+          className='ide-btn ghost'
+          style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
+          onClick={() => setDisconnectSlack(true)}
+        >
+          Disconnect
+        </button>
+      ),
     },
     {
       name: 'Jira',
@@ -484,6 +497,38 @@ export function IdeIntegrations() {
         }}
         onClose={() => setRevokePat(null)}
       />
+      {/* RR-772 — revoke the connected Slack integration with confirmation + settlement. */}
+      <ConfirmModal
+        open={disconnectSlack}
+        title='Disconnect Slack'
+        body='Disconnect Slack? Work-completion alerts stop and the stored bot token is revoked. You can reconnect later.'
+        confirmLabel='Disconnect'
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          if (disconnectBusyRef.current) return;
+          disconnectBusyRef.current = true;
+          setBusy(true);
+          setErr('');
+          setMsg('');
+          try {
+            await api.disconnectSlack();
+            const s = await api.getSlackStatus().catch(() => null);
+            setSlack(s);
+            setSlackFailure(false);
+            setMsg('Slack disconnected.');
+            setDisconnectSlack(false);
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Could not disconnect Slack.');
+          } finally {
+            disconnectBusyRef.current = false;
+            setBusy(false);
+          }
+        }}
+        onClose={() => {
+          if (!disconnectBusyRef.current) setDisconnectSlack(false);
+        }}
+      />
     </div>
   );
 }
@@ -564,6 +609,50 @@ type PendingAdminWrite = {
   copy: AdminWriteConfirmation;
   run: () => Promise<void>;
 };
+
+// RR-778 — a confirmation dialog for entitlement/status writes that owns a
+// synchronous one-shot pending latch: the (financial) mutation runs at most once
+// under rapid activation, the dialog stays disabled until it settles, and it
+// closes only on success so a failed write remains visible and retryable.
+function AdminWriteConfirmModal({
+  pending,
+  onDone,
+  onCancel,
+}: {
+  pending: PendingAdminWrite | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  return (
+    <ConfirmModal
+      open={!!pending}
+      title={pending?.copy.title ?? 'Confirm admin change'}
+      body={pending?.copy.body ?? ''}
+      confirmLabel={pending?.copy.confirmLabel ?? 'Confirm'}
+      danger={pending?.copy.danger}
+      busy={busy}
+      onConfirm={async () => {
+        if (busyRef.current || !pending) return;
+        busyRef.current = true;
+        setBusy(true);
+        try {
+          await pending.run();
+          onDone();
+        } catch {
+          // The failure was already reported; keep the dialog open for a retry.
+        } finally {
+          busyRef.current = false;
+          setBusy(false);
+        }
+      }}
+      onClose={() => {
+        if (!busyRef.current) onCancel();
+      }}
+    />
+  );
+}
 
 type AdminSection = 'overview' | 'users' | 'orgs' | 'analytics' | 'ops' | 'topups';
 
@@ -721,6 +810,12 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const patch = (u: api.AuthUser) =>
     setUsers((prev) => (prev ? prev.map((x) => (x.id === u.id ? u : x)) : prev));
 
+  // RR-778 — report the failure AND rethrow so the confirmation dialog can keep
+  // itself open (and its one-shot latch honest) instead of closing on a failed write.
+  const reportAndRethrow = (e: unknown) => {
+    bad(e);
+    throw e;
+  };
   function setTier(u: api.AuthUser, tier: string) {
     return api
       .adminUpdateUserTier(u.id, tier)
@@ -728,7 +823,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} → ${tier}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function setRole(u: api.AuthUser, role: string) {
     return api
@@ -737,7 +832,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} role → ${role}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function applyStatus(u: api.AuthUser, status: string) {
     return api
@@ -746,7 +841,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} → ${status}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
@@ -805,16 +900,10 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         ))}
       </AdminList>
 
-      <ConfirmModal
-        open={!!confirm}
-        title={confirm?.copy.title ?? 'Confirm admin change'}
-        body={confirm?.copy.body ?? ''}
-        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
-        danger={confirm?.copy.danger}
-        onConfirm={async () => {
-          if (confirm) await confirm.run();
-        }}
-        onClose={() => setConfirm(null)}
+      <AdminWriteConfirmModal
+        pending={confirm}
+        onDone={() => setConfirm(null)}
+        onCancel={() => setConfirm(null)}
       />
       <PromptModal
         open={!!grantFor}
@@ -863,6 +952,11 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const patch = (o: api.OrgDto) =>
     setOrgs((prev) => (prev ? prev.map((x) => (x.id === o.id ? o : x)) : prev));
 
+  // RR-778 — report AND rethrow so the confirmation dialog stays open on failure.
+  const reportAndRethrow = (e: unknown) => {
+    bad(e);
+    throw e;
+  };
   function setTier(o: api.OrgDto, tier: string) {
     return api
       .adminUpdateOrgTier(o.id, tier)
@@ -870,7 +964,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         patch(r);
         ok(`${o.name} → ${tier}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function applyStatus(o: api.OrgDto, status: string) {
     return api
@@ -879,7 +973,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         patch(r);
         ok(`${o.name} → ${status}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
@@ -937,16 +1031,10 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         ))}
       </AdminList>
 
-      <ConfirmModal
-        open={!!confirm}
-        title={confirm?.copy.title ?? 'Confirm admin change'}
-        body={confirm?.copy.body ?? ''}
-        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
-        danger={confirm?.copy.danger}
-        onConfirm={async () => {
-          if (confirm) await confirm.run();
-        }}
-        onClose={() => setConfirm(null)}
+      <AdminWriteConfirmModal
+        pending={confirm}
+        onDone={() => setConfirm(null)}
+        onCancel={() => setConfirm(null)}
       />
       <PromptModal
         open={!!limitFor}
@@ -1312,6 +1400,12 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
   const [flagsFailure, setFlagsFailure] = useState<LoadFailure | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // RR-777 — a platform-wide flag flip must be confirmed, not applied on a single
+  // stray click. The switch now opens a scope/blast-radius review instead of
+  // mutating global behavior immediately.
+  const [pendingFlag, setPendingFlag] = useState<api.FeatureFlagDto | null>(null);
+  const confirmBusyRef = useRef(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -1320,26 +1414,30 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
       .catch((e: unknown) => setFlagsFailure(toLoadFailure(e)));
   }, []);
 
-  function toggle(f: api.FeatureFlagDto) {
+  function requestToggle(f: api.FeatureFlagDto) {
     if (!isSuperAdmin || busy) return;
+    setPendingFlag(f);
+  }
+
+  async function applyToggle(f: api.FeatureFlagDto) {
     const next = f.flagValue === 'true' ? 'false' : 'true';
     // optimistic
     setFlags((prev) =>
       prev ? prev.map((x) => (x.id === f.id ? {...x, flagValue: next} : x)) : prev,
     );
     setBusy(f.flagKey);
-    api
-      .adminUpdateFeatureFlag(f.flagKey, next)
-      .then((updated) => {
-        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? updated : x)) : prev));
-        ok(`${f.flagKey} → ${next}`);
-      })
-      .catch((e) => {
-        // revert
-        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? f : x)) : prev));
-        bad(e);
-      })
-      .finally(() => setBusy(null));
+    try {
+      const updated = await api.adminUpdateFeatureFlag(f.flagKey, next);
+      setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? updated : x)) : prev));
+      ok(`${f.flagKey} → ${next}`);
+    } catch (e) {
+      // revert
+      setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? f : x)) : prev));
+      bad(e);
+      throw e;
+    } finally {
+      setBusy(null);
+    }
   }
 
   if (flagsFailure) return <LoadError failure={flagsFailure} what='feature flags' />;
@@ -1379,7 +1477,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
                     <IdeSwitch
                       on={f.flagValue === 'true'}
                       disabled={busy === f.flagKey}
-                      onClick={() => toggle(f)}
+                      onClick={() => requestToggle(f)}
                     />
                   ) : (
                     <IdeBadge kind={f.flagValue === 'true' ? 'ok' : 'warn'}>{f.flagValue}</IdeBadge>
@@ -1389,6 +1487,38 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
             })}
           </AdminList>
         ))}
+      {/* RR-777 — confirm a platform-wide flag change with scope + blast radius. */}
+      <ConfirmModal
+        open={!!pendingFlag}
+        title='Change platform feature flag'
+        danger
+        confirmLabel={
+          pendingFlag?.flagValue === 'true' ? 'Turn OFF platform-wide' : 'Turn ON platform-wide'
+        }
+        busy={confirmBusy}
+        body={
+          pendingFlag
+            ? `Set "${pendingFlag.flagKey}" to ${pendingFlag.flagValue === 'true' ? 'false' : 'true'} for scope ${pendingFlag.scope}. This changes behavior for every org on this deployment and takes effect immediately across all instances.`
+            : ''
+        }
+        onConfirm={async () => {
+          if (confirmBusyRef.current || !pendingFlag) return;
+          confirmBusyRef.current = true;
+          setConfirmBusy(true);
+          try {
+            await applyToggle(pendingFlag);
+            setPendingFlag(null);
+          } catch {
+            // Failure already reported + reverted; keep the dialog open for retry.
+          } finally {
+            confirmBusyRef.current = false;
+            setConfirmBusy(false);
+          }
+        }}
+        onClose={() => {
+          if (!confirmBusyRef.current) setPendingFlag(null);
+        }}
+      />
     </>
   );
 }
@@ -1551,7 +1681,6 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
   // D4 — a failed admin read used to render as a hard zero count.
   const [pkgsFailure, setPkgsFailure] = useState<LoadFailure | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
 
   const load = () =>
     api
@@ -1602,24 +1731,16 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
                 </div>
               </div>
               <IdeBadge kind={p.active ? 'ok' : 'warn'}>{p.active ? 'Active' : 'Off'}</IdeBadge>
+              {/* RR-776 — the server DELETE only sets active=false (deactivation), and
+                  the list keeps returning the row as "Off". A "Delete" control that
+                  only deactivates was a false claim and duplicated Disable/Enable,
+                  which is the real, reversible lifecycle. Enable is the reactivate. */}
               <button
                 className='ide-btn ghost'
                 style={{padding: '3px 9px', fontSize: 12}}
                 onClick={() => toggleActive(p)}
               >
                 {p.active ? 'Disable' : 'Enable'}
-              </button>
-              <button
-                className='ide-btn ghost'
-                style={{
-                  padding: '3px 9px',
-                  fontSize: 12,
-                  color: 'var(--ide-red)',
-                  borderColor: 'var(--ide-red)',
-                }}
-                onClick={() => setDeleteFor(p)}
-              >
-                Delete
               </button>
             </div>
           ))}
@@ -1652,25 +1773,6 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
             .catch(bad);
         }}
         onClose={() => setCreating(false)}
-      />
-      <ConfirmModal
-        open={!!deleteFor}
-        title='Delete package'
-        body={deleteFor ? `Delete top-up package "${deleteFor.name}"?` : ''}
-        confirmLabel='Delete'
-        danger
-        onConfirm={async () => {
-          const p = deleteFor;
-          if (!p) return;
-          await api
-            .adminDeleteTopupPackage(p.id)
-            .then(() => {
-              ok(`Deleted ${p.name}`);
-              load();
-            })
-            .catch(bad);
-        }}
-        onClose={() => setDeleteFor(null)}
       />
     </>
   );

@@ -1326,7 +1326,28 @@ export function IdeProjectRepos() {
   const [registered, setRegistered] = useState<ProjectRepo[]>([]);
   const [repoQuery, setRepoQuery] = useState('');
   const [showLink, setShowLink] = useState(false);
-  const [busy, setBusy] = useState('');
+  // RR-755 — one scalar busy string let a second sync/regenerate/index/webhook/
+  // unlink op replace the first's key while both ran, and either `finally` cleared
+  // the state for both. Track every in-flight op by its stable key so pending
+  // feedback is per-op and conflicting per-repo work is serialized.
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+  const isBusy = (key: string) => busyKeys.has(key);
+  const anyBusy = busyKeys.size > 0;
+  const startBusy = (key: string) => setBusyKeys((prev) => new Set(prev).add(key));
+  const endBusy = (key: string) =>
+    setBusyKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  // Only one mutation may run against a given repository at a time; ops on
+  // different repos may still proceed in parallel.
+  const repoBusy = (id: string) =>
+    isBusy(`sync${id}`) ||
+    isBusy(`regen${id}`) ||
+    isBusy(`index${id}`) ||
+    isBusy(`wh${id}`) ||
+    isBusy(`unlink${id}`);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [unlinkFor, setUnlinkFor] = useState<{repoId: string; name: string} | null>(null);
@@ -1411,7 +1432,12 @@ export function IdeProjectRepos() {
   }
 
   async function act(key: string, fn: () => Promise<unknown>, done = 'Done.') {
-    setBusy(key);
+    // RR-755 — refuse a duplicate of the same op, and (for per-repo keys) a
+    // conflicting op on the same repository while one is already running.
+    if (isBusy(key)) return;
+    const repoId = key.replace(/^(sync|regen|index|wh|unlink)/, '');
+    if (repoId !== key && repoBusy(repoId)) return;
+    startBusy(key);
     setMsg('');
     setErr('');
     try {
@@ -1421,7 +1447,7 @@ export function IdeProjectRepos() {
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed.');
     } finally {
-      setBusy('');
+      endBusy(key);
     }
   }
 
@@ -1432,7 +1458,8 @@ export function IdeProjectRepos() {
     provider?: 'GITHUB' | 'BITBUCKET';
   }) {
     const key = remote.fullName;
-    setBusy(`link${key}`);
+    if (isBusy(`link${key}`)) return;
+    startBusy(`link${key}`);
     setMsg('');
     setErr('');
     try {
@@ -1463,7 +1490,7 @@ export function IdeProjectRepos() {
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Link failed.');
     } finally {
-      setBusy('');
+      endBusy(`link${key}`);
     }
   }
 
@@ -1473,8 +1500,8 @@ export function IdeProjectRepos() {
 
   async function selectProvider(candidate: 'GITHUB' | 'BITBUCKET') {
     const key = `provider:${candidate}`;
-    if (busy) return;
-    setBusy(key);
+    if (anyBusy) return;
+    startBusy(key);
     setProvider(candidate);
     setRepoQuery('');
     setAvailable(null);
@@ -1490,7 +1517,7 @@ export function IdeProjectRepos() {
       setAvailable([]);
       setErr(e instanceof Error ? e.message : `Failed to load ${candidate} repos.`);
     } finally {
-      setBusy('');
+      endBusy(key);
     }
   }
 
@@ -1525,11 +1552,11 @@ export function IdeProjectRepos() {
                 <button
                   key={candidate}
                   className={`ide-btn ${provider === candidate ? '' : 'ghost'}`}
-                  disabled={!configured || !!busy}
+                  disabled={!configured || anyBusy}
                   title={configured ? undefined : `Connect ${candidate} in Integrations first`}
                   onClick={() => void selectProvider(candidate)}
                 >
-                  {busy === `provider:${candidate}`
+                  {isBusy(`provider:${candidate}`)
                     ? 'Loading…'
                     : candidate === 'GITHUB'
                       ? 'GitHub'
@@ -1574,7 +1601,7 @@ export function IdeProjectRepos() {
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 12px'}}
-                    disabled={busy === `link${attachableTypedSlug}`}
+                    disabled={isBusy(`link${attachableTypedSlug}`)}
                     onClick={() =>
                       link({
                         fullName: attachableTypedSlug,
@@ -1582,7 +1609,7 @@ export function IdeProjectRepos() {
                       })
                     }
                   >
-                    {busy === `link${attachableTypedSlug}` ? '…' : 'Attach by URL'}
+                    {isBusy(`link${attachableTypedSlug}`) ? '…' : 'Attach by URL'}
                   </button>
                 </div>
               )}
@@ -1615,10 +1642,10 @@ export function IdeProjectRepos() {
                     <button
                       className='ide-btn ghost'
                       style={{padding: '3px 12px'}}
-                      disabled={linked || busy === `link${r.fullName}`}
+                      disabled={linked || isBusy(`link${r.fullName}`)}
                       onClick={() => link(r)}
                     >
-                      {linked ? 'Linked' : busy === `link${r.fullName}` ? '…' : 'Link'}
+                      {linked ? 'Linked' : isBusy(`link${r.fullName}`) ? '…' : 'Link'}
                     </button>
                   </div>
                 );
@@ -1832,18 +1859,18 @@ export function IdeProjectRepos() {
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
-                      disabled={busy === `sync${id}`}
+                      disabled={repoBusy(id)}
                       title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
                       onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
                     >
-                      {busy === `sync${id}` ? '…' : 'Sync'}
+                      {isBusy(`sync${id}`) ? '…' : 'Sync'}
                     </button>
                   )}
                   {!isLocal && canArchitecture && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
-                      disabled={busy === `regen${id}`}
+                      disabled={repoBusy(id)}
                       title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
                       onClick={() =>
                         act(
@@ -1853,14 +1880,14 @@ export function IdeProjectRepos() {
                         )
                       }
                     >
-                      {busy === `regen${id}` ? '…' : 'Regenerate'}
+                      {isBusy(`regen${id}`) ? '…' : 'Regenerate'}
                     </button>
                   )}
                   {!isLocal && semanticIndex?.status !== 'READY' && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
-                      disabled={busy === `index${id}` || semanticIndex?.status === 'INDEXING'}
+                      disabled={repoBusy(id) || semanticIndex?.status === 'INDEXING'}
                       title='Resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
                       onClick={() =>
                         act(
@@ -1870,29 +1897,29 @@ export function IdeProjectRepos() {
                         )
                       }
                     >
-                      {busy === `index${id}` ? '…' : 'Resume semantic index'}
+                      {isBusy(`index${id}`) ? '…' : 'Resume semantic index'}
                     </button>
                   )}
                   {!isLocal && canWebhook && !wh && (
                     <button
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
-                      disabled={busy === `wh${id}`}
+                      disabled={repoBusy(id)}
                       title='Installs a pull_request webhook so PR status + CI results update automatically'
                       onClick={() =>
                         act(`wh${id}`, () => api.installRepoWebhook(id), 'Webhook installed.')
                       }
                     >
-                      {busy === `wh${id}` ? '…' : 'Install webhook'}
+                      {isBusy(`wh${id}`) ? '…' : 'Install webhook'}
                     </button>
                   )}
                   <button
                     className='ide-btn ghost'
                     style={{padding: '4px 10px', color: 'var(--ide-red)'}}
-                    disabled={busy === `unlink${id}`}
+                    disabled={repoBusy(id)}
                     onClick={() => confirmUnlink(id, name)}
                   >
-                    {busy === `unlink${id}` ? '…' : 'Unlink'}
+                    {isBusy(`unlink${id}`) ? '…' : 'Unlink'}
                   </button>
                 </div>
               </div>
@@ -1911,7 +1938,7 @@ export function IdeProjectRepos() {
         }
         confirmLabel='Unlink'
         danger
-        busy={!!unlinkFor && busy === `unlink${unlinkFor.repoId}`}
+        busy={!!unlinkFor && isBusy(`unlink${unlinkFor.repoId}`)}
         onConfirm={async () => {
           const u = unlinkFor;
           if (!u) return;
