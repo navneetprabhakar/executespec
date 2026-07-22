@@ -112,9 +112,10 @@ class OAuthSuccessHandlerTest {
         .thenReturn(null);
     when(mapper.toProfile(eq("google"), any(), any()))
         .thenReturn(
-            new OAuthProfile("google", "user-sub", "oauth-user@test.local", "OAuth User", null));
+            new OAuthProfile(
+                "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true));
     when(authService.findOrCreateFromOAuth(
-            "google", "user-sub", "oauth-user@test.local", "OAuth User", null))
+            "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true))
         .thenReturn(
             AppUser.builder()
                 .id("user-1")

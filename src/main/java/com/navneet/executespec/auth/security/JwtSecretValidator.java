@@ -41,6 +41,12 @@ import lombok.extern.slf4j.Slf4j;
 public class JwtSecretValidator {
 
   private static final int MIN_SECRET_LENGTH = 32;
+
+  /**
+   * RR-129 — a 32+ byte random secret trivially exceeds this; only degenerate secrets fall below.
+   */
+  private static final int MIN_DISTINCT_CHARS = 6;
+
   private static final String DEV_PLACEHOLDER_MARKER = "must-be";
 
   /**
@@ -84,14 +90,30 @@ public class JwtSecretValidator {
           "FATAL: app.jwt.secret still contains the development placeholder. "
               + "Set a strong, unique secret (>= 32 chars) for this environment.");
     }
-    if (jwtSecret.length() < MIN_SECRET_LENGTH) {
+    // RR-129 — measure the actual HMAC key length in bytes, not Java char count. HS256 signs with
+    // the secret's UTF-8 bytes and needs a 256-bit (32-byte) key. A base64/hex-encoded secret is
+    // longer than its decoded key material, so byte length is a safe lower bound that never
+    // under-rejects a genuine 256-bit key; a multi-byte UTF-8 secret is not over-credited either.
+    int keyBytes = effectiveKeyBytes(jwtSecret);
+    if (keyBytes < MIN_SECRET_LENGTH) {
       throw new IllegalStateException(
-          "FATAL: app.jwt.secret is too short ("
-              + jwtSecret.length()
-              + " chars). "
+          "FATAL: app.jwt.secret is too weak ("
+              + keyBytes
+              + " bytes of key material). "
               + "Must be at least "
               + MIN_SECRET_LENGTH
-              + " characters for HS256.");
+              + " bytes (256 bits) for HS256.");
+    }
+    // RR-129 — reject a long-but-trivial secret (a repeated character, "aaaa…", "12121212…", a
+    // single dictionary word). A cryptographically strong secret has broad character diversity; a
+    // secret with almost no distinct characters is low entropy regardless of length.
+    int distinct = distinctChars(jwtSecret);
+    if (distinct < MIN_DISTINCT_CHARS) {
+      throw new IllegalStateException(
+          "FATAL: app.jwt.secret is too low-entropy (only "
+              + distinct
+              + " distinct characters). Generate a random secret, e.g. `openssl rand -base64 48`,"
+              + " and supply it through the secret store.");
     }
     if (isKnownCompromised(jwtSecret)) {
       throw new IllegalStateException(
@@ -115,6 +137,20 @@ public class JwtSecretValidator {
       }
     }
     return configured.contains(digest);
+  }
+
+  /**
+   * RR-129 — the HMAC key length in bytes: the secret's UTF-8 byte length (the bytes HS256 actually
+   * signs with). A base64/hex-encoded key decodes to fewer bytes, so this is a conservative lower
+   * bound on real key strength and cannot false-reject a genuine 256-bit key.
+   */
+  static int effectiveKeyBytes(String value) {
+    return value.getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  /** RR-129 — number of distinct characters, a cheap low-entropy proxy for degenerate secrets. */
+  static int distinctChars(String value) {
+    return (int) value.chars().distinct().count();
   }
 
   static String sha256Hex(String value) {

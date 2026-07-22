@@ -161,11 +161,8 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
               "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
               "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
-              // V2 canary surface — runIds in `/api/v2/runs/` reference Run rows which are a
-              // separate storage from the production `pipeline_run` table; they're scoped to
-              // V2 bring-up testing, not customer data. Live V2 runs go through the production
-              // `/api/runs` surface which has its own RunAccessGuard coverage.
-              "com.navneet.executespec.rollout.RolloutRunController#poll",
+              // RR-934 — the retired `rollout.RolloutRunController` (dead `/api/v2/runs`) was
+              // deleted; its allowlist entry went with it.
               // Public solution/recipe reads keyed by a non-tenant {slug} — no project / run id
               // bind; tier-gating is per-row in the response body. C2 — audit 2026-05-29.
               "com.navneet.executespec.readymade.controller.ReadymadeController#detail",
