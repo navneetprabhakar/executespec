@@ -24,7 +24,7 @@ import io.micrometer.core.instrument.Timer;
  *
  * <ul>
  *   <li><b>{@code executespec.v2.run.outcome}</b> (counter) — tagged {overall} — V2 run terminal
- *       state per {@link com.navneet.executespec.rollout.Run.Status}.
+ *       state.
  *   <li><b>{@code executespec.v2.run.latency}</b> (timer) — tagged {overall} — end-to-end V2
  *       pipeline latency.
  *   <li><b>{@code executespec.v2.planner.latency}</b> (timer) — tagged {classification, provider,

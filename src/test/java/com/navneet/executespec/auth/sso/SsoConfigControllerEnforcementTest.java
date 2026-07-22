@@ -40,6 +40,10 @@ class SsoConfigControllerEnforcementTest {
     controller = new SsoConfigController(orgRepo);
     org = new Org();
     org.setId("org-1");
+    // RR-253 — SSO writes are now tier-gated; seed an entitled tier so the RR-252 enforcement
+    // assertions below exercise their intended code paths rather than tripping the entitlement
+    // gate.
+    org.setTier("ENTERPRISE");
     when(orgRepo.findById("org-1")).thenReturn(Optional.of(org));
   }
 
@@ -78,6 +82,36 @@ class SsoConfigControllerEnforcementTest {
     verify(orgRepo).save(org);
     assertThat(dto.provider()).isEqualTo("GOOGLE_OIDC");
     assertThat(dto.configured()).isTrue();
+  }
+
+  @Test
+  void writeRejectedOnUnentitledTier() {
+    // RR-253 — a FREE/PRO org admin cannot persist SSO config even via a direct API call.
+    org.setTier("PRO");
+
+    assertThatThrownBy(
+            () ->
+                controller.putConfig(
+                    admin(),
+                    new SsoConfigController.SsoConfigUpdate("GOOGLE_OIDC", null, null, null)))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+
+    assertThatThrownBy(() -> controller.clear(admin()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+        .isEqualTo(HttpStatus.FORBIDDEN);
+
+    verify(orgRepo, never()).save(any(Org.class));
+  }
+
+  @Test
+  void readReportsEntitlement() {
+    org.setTier("PRO");
+    assertThat(controller.getConfig(admin()).entitled()).isFalse();
+    org.setTier("TEAM");
+    assertThat(controller.getConfig(admin()).entitled()).isTrue();
   }
 
   @Test

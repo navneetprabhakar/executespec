@@ -245,6 +245,12 @@ public class ProjectService {
       // Already active — idempotent return.
       return ProjectDto.from(project);
     }
+    // RR-829 — unarchiving re-enters the ACTIVE project count, which the tier cap enforces. Without
+    // this recheck a user at their cap could archive a project, create a new one, then unarchive
+    // the
+    // original and exceed the paid limit. Uses the same canonical count predicate as creation.
+    // (The residual check-then-act concurrency window is tracked under RR-831.)
+    tierEnforcement.assertCanCreateProject(actorId, project.getOrgId());
     Instant now = Instant.now();
     project.setStatus("ACTIVE");
     project.setArchivedAt(null);
@@ -317,6 +323,14 @@ public class ProjectService {
     if (project.getDeletedAt() == null) {
       throw new ResponseStatusException(
           HttpStatus.NOT_FOUND, "Project is not deleted — nothing to restore.");
+    }
+    // RR-829 — a project soft-deleted while ACTIVE re-enters the ACTIVE cap count on restore
+    // (restore does not change status, so an archived-then-deleted project comes back archived and
+    // is NOT counted). Recheck the cap in the ACTIVE case with the canonical create predicate so
+    // the
+    // delete/create/restore cycle cannot exceed the paid limit. (Concurrency: RR-831.)
+    if ("ACTIVE".equals(project.getStatus())) {
+      tierEnforcement.assertCanCreateProject(actorId, project.getOrgId());
     }
     Instant now = Instant.now();
     project.setDeletedAt(null);

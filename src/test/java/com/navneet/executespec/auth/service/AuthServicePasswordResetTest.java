@@ -194,4 +194,53 @@ class AuthServicePasswordResetTest {
     assertThatThrownBy(() -> svc.resetPassword("not-a-real-token", "BrandNewPassw0rd!"))
         .isInstanceOf(ResponseStatusException.class);
   }
+
+  @Test
+  void resendVerificationPersistsOnlyAHashedTokenAndMailsThePlaintext() {
+    // RR-132 — the EMAIL_VERIFICATION lane now stores a SHA-256 digest, like the reset lane, so a
+    // read-only DB leak yields no usable activation capability.
+    AppUser user = victim();
+    user.setEmailVerified(false);
+
+    svc.resendVerification("victim@test.local");
+
+    ArgumentCaptor<EmailToken> saved = ArgumentCaptor.forClass(EmailToken.class);
+    verify(emailTokenRepo).save(saved.capture());
+    ArgumentCaptor<String> mailed = ArgumentCaptor.forClass(String.class);
+    verify(mailService)
+        .sendVerificationEmail(eq("victim@test.local"), eq("Victim"), mailed.capture());
+
+    EmailToken token = saved.getValue();
+    assertThat(token.getType()).isEqualTo("EMAIL_VERIFICATION");
+    assertThat(token.getToken())
+        .as("only the digest reaches the database")
+        .isNotEqualTo(mailed.getValue())
+        .isEqualTo(AuthService.hashCapabilityToken(mailed.getValue()));
+  }
+
+  @Test
+  void verifyEmailLooksUpByHashNotRawToken() {
+    // RR-132 — verification matches on the hash of the presented token.
+    AppUser user = victim();
+    user.setEmailVerified(false);
+    user.setStatus("PENDING_VERIFICATION");
+    String plaintext = "email-verify-plaintext";
+    EmailToken stored =
+        EmailToken.builder()
+            .id("evk-1")
+            .userId("victim-1")
+            .token(AuthService.hashCapabilityToken(plaintext))
+            .type("EMAIL_VERIFICATION")
+            .expiresAt(Instant.now().plusSeconds(3600))
+            .build();
+    when(emailTokenRepo.findByTokenAndType(
+            AuthService.hashCapabilityToken(plaintext), "EMAIL_VERIFICATION"))
+        .thenReturn(Optional.of(stored));
+
+    svc.verifyEmail(plaintext);
+
+    assertThat(user.isEmailVerified()).isTrue();
+    // The raw token is not a valid lookup key.
+    verify(emailTokenRepo, never()).findByTokenAndType(eq(plaintext), anyString());
+  }
 }

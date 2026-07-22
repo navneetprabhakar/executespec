@@ -42,9 +42,29 @@ class JwtSecretValidatorTest {
 
   @Test
   void shortSecretIsRejected() {
+    // RR-129 — measured in key bytes now, not char count.
     assertThatThrownBy(() -> validator("too-short", List.of()).validate())
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("too short");
+        .hasMessageContaining("too weak");
+  }
+
+  @Test
+  void lowEntropyLongSecretIsRejected() {
+    // RR-129 — long but trivially low-entropy (one repeated character) must not pass.
+    assertThatThrownBy(() -> validator("a".repeat(48), List.of()).validate())
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("low-entropy");
+  }
+
+  @Test
+  void diverseButUnder32BytesIsRejected() {
+    // RR-129 — a 20-char diverse secret (20 bytes, high per-char diversity) clears the entropy
+    // floor but is still under the 32-byte HS256 key-material minimum.
+    String twentyBytes = "F3kq9Zt2Lp8Wn4Rc7Yb1";
+    assertThat(twentyBytes).hasSize(20);
+    assertThatThrownBy(() -> validator(twentyBytes, List.of()).validate())
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("too weak");
   }
 
   @Test
