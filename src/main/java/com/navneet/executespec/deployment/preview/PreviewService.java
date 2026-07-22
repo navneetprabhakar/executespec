@@ -540,7 +540,13 @@ public class PreviewService {
   public void stop(String runId) {
     PreviewSession session = active.remove(runId);
     if (session == null) return;
-    // Note: lastEnvVars NOT removed here — rebuild() needs them after stop()
+    // RR-475: wipe the retained plaintext environment values on stop. Previously they were kept
+    // "for
+    // rebuild", but a manually stopped preview never reaches cleanupExpired (its active entry is
+    // gone), so the user's API keys / DB passwords lived in heap for the JVM lifetime after the
+    // customer stopped the resource. rebuild() snapshots them BEFORE calling stop(), so removing
+    // them here does not break rebuild; an independent stop now correctly requires re-entry.
+    lastEnvVars.remove(runId);
     Metrics.ACTIVE_PREVIEWS.decrementAndGet();
     releaseGlobalPreviewSlot(runId);
 
@@ -1831,8 +1837,14 @@ public class PreviewService {
   }
 
   private int getMaxConcurrent(String tier) {
-    return switch (tier) {
-      case "ENTERPRISE", "TEAM" -> props.getConcurrency().getEnterpriseMax();
+    // RR-166: PRO_PLUS and BYOK are paid canonical tiers (see AdminMutationValues); the prior
+    // switch
+    // recognised only ENTERPRISE/TEAM/PRO and dropped every other tier — including PRO+ and BYOK —
+    // into the FREE limit, throttling paying customers to a single preview. Map the paid solo/team
+    // tiers to the high (enterprise/team) allowance.
+    String canonical = tier == null ? "" : tier.toUpperCase();
+    return switch (canonical) {
+      case "ENTERPRISE", "TEAM", "BYOK", "PRO_PLUS" -> props.getConcurrency().getEnterpriseMax();
       case "PRO" -> props.getConcurrency().getProMax();
       default -> props.getConcurrency().getFreeMax();
     };

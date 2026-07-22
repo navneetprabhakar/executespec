@@ -107,8 +107,11 @@ public class GlobalPreviewLimiter {
 
   private int limitForTier(String tier) {
     if (tier == null) return FREE_LIMIT;
+    // RR-166: PRO_PLUS and BYOK are paid canonical tiers; the prior switch collapsed them into the
+    // FREE limit, so cross-node enforcement disagreed with the paying user's entitlement. Keep this
+    // aligned with PreviewService.getMaxConcurrent.
     return switch (tier.toUpperCase()) {
-      case "ENTERPRISE", "TEAM" -> ENTERPRISE_LIMIT;
+      case "ENTERPRISE", "TEAM", "BYOK", "PRO_PLUS" -> ENTERPRISE_LIMIT;
       case "PRO" -> PRO_LIMIT;
       default -> FREE_LIMIT;
     };
