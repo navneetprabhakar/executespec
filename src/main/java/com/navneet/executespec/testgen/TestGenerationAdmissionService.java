@@ -23,6 +23,27 @@ public class TestGenerationAdmissionService {
   private static final Set<String> SOURCE_EXTENSIONS =
       Set.of(".java", ".kt", ".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".rs", ".html");
 
+  // RR-300 — bound heap use during automatic post-run admission. A repository with large
+  // generated/minified/vendored artifacts must not trigger multi-gigabyte allocation. Files above
+  // the per-file cap are skipped for content scanning; vendored/generated trees are not walked.
+  private static final long MAX_SCAN_FILE_BYTES = 512L * 1024; // 512 KiB content scan
+  private static final long MAX_FINGERPRINT_FILE_BYTES = 2L * 1024 * 1024; // 2 MiB hashed prefix
+  private static final Set<String> EXCLUDED_DIR_SEGMENTS =
+      Set.of(
+          "node_modules",
+          "vendor",
+          "dist",
+          "build",
+          "target",
+          ".git",
+          ".gradle",
+          ".venv",
+          "venv",
+          "__pycache__",
+          ".next",
+          "coverage",
+          "out");
+
   private final RunChangeEvidenceService changeEvidenceService;
   private final ApiSurfaceExtractor apiSurfaceExtractor;
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
@@ -85,8 +106,10 @@ public class TestGenerationAdmissionService {
     if (admission.runtimePaths().stream()
         .map(p -> p.toLowerCase(Locale.ROOT))
         .anyMatch(path -> tokens.stream().anyMatch(path::contains))) return true;
-    try (Stream<Path> walk = Files.walk(admission.workspace(), 8)) {
-      return walk.filter(Files::isRegularFile)
+    Path root = admission.workspace();
+    try (Stream<Path> walk = Files.walk(root, 8)) {
+      return walk.filter(p -> !isExcludedPath(root, p))
+          .filter(Files::isRegularFile)
           .filter(p -> isSource(p.getFileName().toString().toLowerCase(Locale.ROOT)))
           .limit(2_000)
           .anyMatch(
@@ -94,6 +117,8 @@ public class TestGenerationAdmissionService {
                 String file = p.getFileName().toString().toLowerCase(Locale.ROOT);
                 if (tokens.stream().anyMatch(file::contains)) return true;
                 try {
+                  // RR-300 — never read a large artifact fully into heap just to token-scan it.
+                  if (Files.size(p) > MAX_SCAN_FILE_BYTES) return false;
                   String content = Files.readString(p).toLowerCase(Locale.ROOT);
                   return tokens.stream().anyMatch(content::contains);
                 } catch (IOException ignored) {
@@ -103,6 +128,15 @@ public class TestGenerationAdmissionService {
     } catch (IOException e) {
       return false;
     }
+  }
+
+  /** RR-300 — a path is excluded when any of its segments names a vendored/generated tree. */
+  private static boolean isExcludedPath(Path root, Path path) {
+    Path relative = root.relativize(path);
+    for (Path segment : relative) {
+      if (EXCLUDED_DIR_SEGMENTS.contains(segment.toString().toLowerCase(Locale.ROOT))) return true;
+    }
+    return false;
   }
 
   private static boolean containsSource(Path workspace) {
@@ -141,12 +175,31 @@ public class TestGenerationAdmissionService {
         digest.update(file.status().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         Path changed = workspace.resolve(file.path()).normalize();
         if (changed.startsWith(workspace) && Files.isRegularFile(changed)) {
-          digest.update(Files.readAllBytes(changed));
+          // RR-300 — hash a bounded prefix plus the exact size instead of loading the whole file.
+          // Deterministic and collision-safe for provenance while capping per-file allocation.
+          long size = Files.size(changed);
+          digest.update(Long.toString(size).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          digest.update(boundedPrefix(changed, size));
         }
       }
       return java.util.HexFormat.of().formatHex(digest.digest());
     } catch (Exception e) {
       return null;
+    }
+  }
+
+  /** RR-300 — read at most {@link #MAX_FINGERPRINT_FILE_BYTES} bytes from the head of a file. */
+  private static byte[] boundedPrefix(Path file, long size) throws IOException {
+    int cap = (int) Math.min(size, MAX_FINGERPRINT_FILE_BYTES);
+    byte[] buffer = new byte[cap];
+    try (java.io.InputStream in = Files.newInputStream(file)) {
+      int read = 0;
+      while (read < cap) {
+        int n = in.read(buffer, read, cap - read);
+        if (n < 0) break;
+        read += n;
+      }
+      return read == cap ? buffer : java.util.Arrays.copyOf(buffer, read);
     }
   }
 

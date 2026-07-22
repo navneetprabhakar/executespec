@@ -163,4 +163,65 @@ class ProviderHandoffFixtureHarnessTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("not admissible for quality-evidence comparison");
   }
+
+  // RR-1591 — when the primary pass fixes the file and the fallback writes nothing, the fallback's
+  // evaluator must report FALSE. Before per-pass workspace isolation both passes shared one
+  // workspace, so the fallback inherited the primary's fix and manufactured a pass for a provider
+  // that did no work. Each pass's baseline/result fingerprints must also differ across passes.
+  @Test
+  void fallbackPassIsNotCreditedForThePrimaryPassMutation() throws Exception {
+    WorkerAgent worker = mock(WorkerAgent.class);
+    when(worker.run(any()))
+        .thenAnswer(
+            invocation -> {
+              WorkerTaskRequest request = invocation.getArgument(0);
+              // Only the PRIMARY pass fixes the file; the fallback pass writes nothing.
+              if (!request.context().runId().endsWith("handoff")) {
+                Files.writeString(
+                    request.context().workspaceRoot().resolve("calculator.py"),
+                    "def add(a, b):\n    return a + b\n");
+              }
+              return WorkerResult.builder()
+                  .outcome(WorkerResult.Outcome.COMPLETED)
+                  .iterations(1)
+                  .toolCallsDispatched(1)
+                  .completionSummary("done")
+                  .toolCallLog(java.util.List.of())
+                  .totalLatencyMs(1)
+                  .build();
+            });
+    var root = Files.createTempDirectory("es-handoff-isolation-");
+    try {
+      var request =
+          new ProviderHandoffFixtureHarness.Request(
+              "stuck-handoff-v1",
+              "v1",
+              "deepseek",
+              "deepseek-v4-pro-native",
+              "r-primary",
+              "openrouter",
+              "deepseek/deepseek-v4-pro",
+              "r-fallback",
+              Set.of("deepseek", "openrouter"),
+              ProviderHandoffFixtureHarness.HandoffTrigger.ALWAYS);
+      var evidence =
+          ProviderHandoffFixtureHarness.run(
+              worker, request, "iso-1", root, (reservation, provider, model, runId) -> {});
+
+      assertThat(evidence.handoffTriggered()).isTrue();
+      assertThat(evidence.primary().evaluatorPassed()).isTrue();
+      // The core RR-1591 assertion: the fallback did nothing in its OWN workspace, so it fails.
+      assertThat(evidence.fallback().evaluatorPassed()).isFalse();
+      // The fallback saw its fixture baseline unchanged; the primary's result diverged from
+      // baseline.
+      assertThat(evidence.fallback().baselineFingerprint())
+          .isEqualTo(evidence.fallback().resultFingerprint());
+      assertThat(evidence.primary().baselineFingerprint())
+          .isNotEqualTo(evidence.primary().resultFingerprint());
+    } finally {
+      try (var walk = Files.walk(root)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
 }

@@ -38,6 +38,30 @@ public class ApiSurfaceExtractor {
 
   private static final int MAX_PATHS = 30;
 
+  // RR-301 — do not mine routes from non-runtime trees. Test sources, vendored dependencies and
+  // build output produce test-only, fictitious or dead endpoints that were then presented to the
+  // planner as the real API surface. Only production source is scanned.
+  private static final java.util.Set<String> EXCLUDED_DIR_SEGMENTS =
+      java.util.Set.of(
+          "node_modules",
+          "vendor",
+          "dist",
+          "build",
+          "target",
+          ".git",
+          ".gradle",
+          ".venv",
+          "venv",
+          "__pycache__",
+          ".next",
+          "coverage",
+          "out",
+          "test",
+          "tests",
+          "__tests__",
+          "spec",
+          "specs");
+
   /**
    * Walk the workspace root and return raw API endpoint paths as a list. Used by ApiProber to probe
    * spec-required endpoints against a live preview.
@@ -51,17 +75,7 @@ public class ApiSurfaceExtractor {
     }
     List<String> paths = new ArrayList<>();
     try (Stream<Path> walk = Files.walk(workspaceRoot, 8)) {
-      walk.filter(Files::isRegularFile)
-          .filter(
-              p -> {
-                String name = p.getFileName().toString();
-                return name.endsWith(".java")
-                    || name.endsWith(".js")
-                    || name.endsWith(".ts")
-                    || name.endsWith(".py")
-                    || name.endsWith(".go")
-                    || name.endsWith(".kt");
-              })
+      walk.filter(p -> isRuntimeSource(workspaceRoot, p))
           .forEach(
               file -> {
                 try {
@@ -77,6 +91,34 @@ public class ApiSurfaceExtractor {
   }
 
   /**
+   * RR-301 — a candidate for route mining is a regular source file that lives outside every
+   * non-runtime tree and is not itself a test/spec file.
+   */
+  private static boolean isRuntimeSource(Path root, Path path) {
+    if (!Files.isRegularFile(path)) return false;
+    String name = path.getFileName().toString();
+    boolean sourceExt =
+        name.endsWith(".java")
+            || name.endsWith(".js")
+            || name.endsWith(".ts")
+            || name.endsWith(".py")
+            || name.endsWith(".go")
+            || name.endsWith(".kt");
+    if (!sourceExt) return false;
+    String lower = name.toLowerCase();
+    if (lower.matches(".*(?:test|spec)\\.[a-z]+$")
+        || lower.matches(".*test\\.(?:java|kt)$")
+        || lower.startsWith("test_")) {
+      return false;
+    }
+    Path relative = root.relativize(path);
+    for (Path segment : relative) {
+      if (EXCLUDED_DIR_SEGMENTS.contains(segment.toString().toLowerCase())) return false;
+    }
+    return true;
+  }
+
+  /**
    * Walk the workspace root and extract API endpoint paths. Returns a markdown-formatted summary of
    * found endpoints.
    *
@@ -89,17 +131,7 @@ public class ApiSurfaceExtractor {
     }
     List<String> paths = new ArrayList<>();
     try (Stream<Path> walk = Files.walk(workspaceRoot, 8)) {
-      walk.filter(Files::isRegularFile)
-          .filter(
-              p -> {
-                String name = p.getFileName().toString();
-                return name.endsWith(".java")
-                    || name.endsWith(".js")
-                    || name.endsWith(".ts")
-                    || name.endsWith(".py")
-                    || name.endsWith(".go")
-                    || name.endsWith(".kt");
-              })
+      walk.filter(p -> isRuntimeSource(workspaceRoot, p))
           .forEach(
               file -> {
                 try {
