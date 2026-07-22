@@ -272,22 +272,25 @@ public final class PlannerOutputUtils {
     }
 
     Plan.RuntimeSurface surface = plan.runtimeSurface();
+    // RR-1220 — STATIC_WEB was blanket-exempt from the strict test gate even though the planner
+    // prompts require production-code tests for functional React/static-JS apps (only a genuinely
+    // untestable single-file page is exempt, which is what the isSingleShot bypass already covers).
+    // Include it so a functional static-web plan cannot pass strict planning with zero tests.
     boolean testableSurface =
         surface == Plan.RuntimeSurface.HTTP
             || surface == Plan.RuntimeSurface.CLI
             || surface == Plan.RuntimeSurface.LIBRARY
+            || surface == Plan.RuntimeSurface.STATIC_WEB
             || surface == Plan.RuntimeSurface.MOBILE_APP;
     boolean isSingleShot = plan.classification() == Classification.SINGLE_SHOT;
     if (testableSurface && !isSingleShot) {
       boolean hasTestRequirement =
           reqs.stream().anyMatch(r -> r.kind() == RequirementSpec.RequirementKind.TEST);
+      // RR-1219 — the previous check accepted any task whose title/description merely CONTAINED the
+      // substring "test", so "attestation support", "tests out of scope" and "Do not add tests" all
+      // satisfied the mandatory test gate. Require a genuine, non-negated test signal instead.
       boolean hasTestTask =
-          plan.tasks().stream()
-              .anyMatch(
-                  t ->
-                      (t.title() != null && t.title().toLowerCase(Locale.ROOT).contains("test"))
-                          || (t.description() != null
-                              && t.description().toLowerCase(Locale.ROOT).contains("test")));
+          plan.tasks().stream().anyMatch(t -> looksLikeGenuineTestTask(t.title(), t.description()));
       if (!hasTestRequirement && !hasTestTask) {
         out.add(
             "No test task or TEST-kind requirement on a testable surface ("
@@ -297,6 +300,39 @@ public final class PlannerOutputUtils {
     }
     return out;
   }
+
+  /**
+   * RR-1219 — true when a task's title/description carries a genuine, non-negated test signal.
+   * Requires a whole-word {@code test}/{@code tests}/{@code testing}/{@code tested} token (so
+   * "attestation" no longer qualifies) AND the absence of a negation phrase that turns the token
+   * into a promise NOT to test (so "Do not add tests" and "tests out of scope" no longer qualify).
+   */
+  static boolean looksLikeGenuineTestTask(String title, String description) {
+    String combined =
+        ((title == null ? "" : title) + " \n " + (description == null ? "" : description))
+            .toLowerCase(Locale.ROOT);
+    if (combined.isBlank()) return false;
+    // Negation of testing — a task that explicitly declines to test does not satisfy the gate.
+    if (combined.contains("do not test")
+        || combined.contains("do not add test")
+        || combined.contains("don't test")
+        || combined.contains("dont test")
+        || combined.contains("no test")
+        || combined.contains("not test")
+        || combined.contains("without test")
+        || combined.contains("skip test")
+        || combined.contains("avoid test")
+        || combined.contains("test out of scope")
+        || combined.contains("tests out of scope")
+        || combined.contains("no unit test")) {
+      return false;
+    }
+    // Whole-word test token — excludes "attestation", "contest", "latest", "protest", etc.
+    return TEST_WORD.matcher(combined).find();
+  }
+
+  private static final java.util.regex.Pattern TEST_WORD =
+      java.util.regex.Pattern.compile("\\btest(s|ing|ed)?\\b");
 
   /**
    * Logs a WARN when the spec carries obvious constraint signals ({@code do NOT}, {@code only},
