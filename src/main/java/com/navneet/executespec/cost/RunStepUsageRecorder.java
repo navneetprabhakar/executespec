@@ -25,6 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunStepUsageRecorder {
 
+  /** RR-430 — every intent written here captures the human role before the provider attempt. */
+  private static final String ROLE_CAPTURED_AT_DISPATCH = "CAPTURED_AT_DISPATCH";
+
   private final LlmUsageAttemptIntentRepository intentRepository;
   private final LlmUsageAttributionResolver attributionResolver;
   private final LlmUsageRoleSnapshotResolver roleSnapshotResolver;
@@ -84,6 +87,8 @@ public class RunStepUsageRecorder {
             .humanRoleSnapshot(
                 roleSnapshotResolver.resolve(
                     attribution.orgId(), attribution.userId(), attribution.projectId()))
+            // RR-430 — this role is resolved before the provider attempt begins.
+            .roleProvenance(ROLE_CAPTURED_AT_DISPATCH)
             .stepId(blankToNull(stepId))
             .provider(handle.provider())
             .model(handle.model())
@@ -675,6 +680,8 @@ public class RunStepUsageRecorder {
           .taskId(blankToNull(request.context().taskId()))
           .agentRole(firstNonBlank(request.agentRole(), "UNKNOWN"))
           .humanRoleSnapshot(firstNonBlank(humanRoleSnapshot, "UNKNOWN"))
+          // RR-430 — this role is resolved before the provider attempt begins.
+          .roleProvenance(ROLE_CAPTURED_AT_DISPATCH)
           .stepId(blankToNull(request.stepId()))
           .provider(provider)
           .model(model)

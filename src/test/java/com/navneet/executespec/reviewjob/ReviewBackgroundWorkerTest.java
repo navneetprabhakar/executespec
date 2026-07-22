@@ -35,6 +35,7 @@ class ReviewBackgroundWorkerTest {
                 "summary", List.of(), List.of(), 1, "deepseek", "deepseek-v4-pro-native"),
             0,
             0,
+            CodeReviewAgent.ScanCoverage.COMPLETE, // RR-1696
             1);
     ReviewBackgroundJobStore.Job job =
         new ReviewBackgroundJobStore.Job(
