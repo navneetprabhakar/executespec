@@ -23,33 +23,52 @@ public class SlackRateLimiter {
   /**
    * Blocks until it's safe to send a message for the given workspace. Returns immediately if enough
    * time has elapsed since the last send.
+   *
+   * <p>RR-686 — the reservation is atomic. The old read-then-write let concurrent callers for one
+   * team observe the same last-send timestamp and send together, exceeding Slack's per-workspace
+   * limit exactly under load. {@link java.util.concurrent.ConcurrentHashMap#merge} now assigns each
+   * caller a strictly increasing, non-overlapping send slot in one atomic step; the caller then
+   * sleeps until its reserved slot outside the map operation.
+   *
+   * <p>Interruption ABORTS the send (the reserved slot is already committed, which only pushes
+   * later sends slightly later — safe) rather than silently recording a permit and proceeding.
+   *
+   * <p>Still single-JVM: each application instance keeps an independent map, so multi-instance
+   * throttling requires a shared (Redis) limiter — tracked as the remaining half of RR-686.
    */
   public void acquire(String teamId) {
     long now = System.currentTimeMillis();
-    Long lastSend = lastSendTimestamps.get(teamId);
-    if (lastSend != null) {
-      long elapsed = now - lastSend;
-      if (elapsed < MIN_INTERVAL_MS) {
-        try {
-          long sleepMs = MIN_INTERVAL_MS - elapsed;
-          log.debug("[Slack] Rate limiting for team {}: sleeping {}ms", teamId, sleepMs);
-          Thread.sleep(sleepMs);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        }
+    long scheduled =
+        lastSendTimestamps.merge(
+            teamId, now, (prevSlot, n) -> Math.max(n, prevSlot + MIN_INTERVAL_MS));
+    long waitMs = scheduled - now;
+    if (waitMs > 0) {
+      try {
+        log.debug("[Slack] Rate limiting for team {}: sleeping {}ms", teamId, waitMs);
+        Thread.sleep(waitMs);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("Slack rate-limit wait interrupted for team " + teamId, e);
       }
     }
-    lastSendTimestamps.put(teamId, System.currentTimeMillis());
   }
 
   /** Non-blocking check — returns true if a message can be sent immediately. */
   public boolean tryAcquire(String teamId) {
     long now = System.currentTimeMillis();
-    Long lastSend = lastSendTimestamps.get(teamId);
-    if (lastSend == null || (now - lastSend) >= MIN_INTERVAL_MS) {
-      lastSendTimestamps.put(teamId, now);
-      return true;
-    }
-    return false;
+    // RR-686 — atomic claim under ConcurrentHashMap.compute: exactly one concurrent caller for a
+    // team can observe an expired slot and advance it. The boolean holder distinguishes "I claimed"
+    // from "the stored slot happens to equal now", which a merge-return comparison could not.
+    boolean[] claimed = {false};
+    lastSendTimestamps.compute(
+        teamId,
+        (k, prevSlot) -> {
+          if (prevSlot == null || (now - prevSlot) >= MIN_INTERVAL_MS) {
+            claimed[0] = true;
+            return now;
+          }
+          return prevSlot;
+        });
+    return claimed[0];
   }
 }

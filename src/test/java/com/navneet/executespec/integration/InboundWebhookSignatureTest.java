@@ -15,6 +15,8 @@ import javax.crypto.spec.SecretKeySpec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.integration.bitbucket.BitbucketAdapter;
 import com.navneet.executespec.integration.bitbucket.BitbucketClient;
+import com.navneet.executespec.integration.confluence.ConfluenceAdapter;
+import com.navneet.executespec.integration.confluence.ConfluenceClient;
 import com.navneet.executespec.integration.pagerduty.PagerDutyAdapter;
 import com.navneet.executespec.integration.pagerduty.PagerDutyClient;
 import com.navneet.executespec.integration.servicenow.ServiceNowAdapter;
@@ -59,6 +61,45 @@ class InboundWebhookSignatureTest {
     IntegrationProperties.PagerDutyConfig config = new IntegrationProperties.PagerDutyConfig();
     config.setWebhookSecret(secret);
     return new PagerDutyAdapter(mock(PagerDutyClient.class), config, mapper);
+  }
+
+  private ConfluenceAdapter confluence(String secret, String apiToken) {
+    IntegrationProperties.ConfluenceConfig config = new IntegrationProperties.ConfluenceConfig();
+    config.setWebhookSecret(secret);
+    config.setApiToken(apiToken);
+    return new ConfluenceAdapter(mock(ConfluenceClient.class), config, mapper);
+  }
+
+  // ── RR-584 — Confluence must fail CLOSED and must NOT accept the outbound apiToken as an
+  //    inbound bearer credential ────────────────────────────────────────────────────────────
+
+  @Test
+  void confluenceRejectsUnsignedRequestWhenNoWebhookSecretConfigured() {
+    assertThatThrownBy(() -> confluence(null, null).verifySignature(Map.of(), BODY))
+        .isInstanceOf(WebhookSignatureException.class);
+    assertThatThrownBy(() -> confluence("", null).verifySignature(Map.of(), BODY))
+        .isInstanceOf(WebhookSignatureException.class);
+  }
+
+  @Test
+  void confluenceDoesNotAcceptOutboundApiTokenAsInboundBearer() {
+    // The removed fallback let `Authorization: Bearer <apiToken>` authenticate a webhook when no
+    // webhook secret was configured. That reused the privileged outbound token for ingress.
+    assertThatThrownBy(
+            () ->
+                confluence(null, "outbound-api-token")
+                    .verifySignature(Map.of("authorization", "Bearer outbound-api-token"), BODY))
+        .isInstanceOf(WebhookSignatureException.class);
+  }
+
+  @Test
+  void confluenceValidHmacIsAccepted() {
+    String good = hmacHex(SECRET, BODY);
+    assertThatCode(
+            () ->
+                confluence(SECRET, "outbound-api-token")
+                    .verifySignature(Map.of("x-hub-signature", "sha256=" + good), BODY))
+        .doesNotThrowAnyException();
   }
 
   // ── unsigned traffic with NO secret configured must be rejected ───────────────

@@ -319,10 +319,14 @@ public class SlackIntegrationController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(required = false) String runId) {
     guard.requireOrgAdmin(userDetails);
-    if (runId != null && !runId.isBlank()) {
-      return ResponseEntity.ok(logRepo.findByRunIdOrderByCreatedAtDesc(runId));
-    }
     String orgId = userDetails.getUser().getOrgId();
+    // RR-414 — always scope by the caller's org. The old runId branch returned every log matching
+    // the supplied run id with no org predicate, so an admin who learned or guessed another
+    // tenant's run id could read its Slack delivery metadata + error text. A cross-tenant run id
+    // now simply matches nothing.
+    if (runId != null && !runId.isBlank()) {
+      return ResponseEntity.ok(logRepo.findByOrgIdAndRunIdOrderByCreatedAtDesc(orgId, runId));
+    }
     return ResponseEntity.ok(
         logRepo.findByOrgIdOrderByCreatedAtDesc(orgId, PageRequest.of(0, 100)));
   }
