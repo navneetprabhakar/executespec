@@ -156,4 +156,65 @@ class ContextEvidenceBundleWriterTest {
       assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
     }
   }
+
+  // RR-1268: an ordinary dirty tree is fully fingerprinted, so the fingerprint is COMPLETE and the
+  // bundle stays reusable.
+  @Test
+  void repoStateFingerprintIsCompleteForOrdinaryDirtyTree() throws Exception {
+    try (Git git = Git.init().setDirectory(tempDir.toFile()).call()) {
+      git.getRepository().getConfig().setString("user", null, "name", "test");
+      git.getRepository().getConfig().setString("user", null, "email", "test@example.com");
+      Files.writeString(tempDir.resolve("changed.txt"), "hello world");
+      git.add().addFilepattern(".").call();
+      git.commit()
+          .setMessage("initial")
+          .setAuthor(new PersonIdent("test", "test@example.com"))
+          .call();
+      Files.writeString(tempDir.resolve("changed.txt"), "edited");
+      Files.writeString(tempDir.resolve("untracked.txt"), "new file");
+
+      ContextEvidenceBundleWriter.RepoStateFingerprint fp =
+          ContextEvidenceBundleWriter.resolveRepoState(tempDir);
+      assertThat(fp).isNotNull();
+      assertThat(fp.complete()).isTrue();
+      assertThat(fp.sha()).isNotBlank();
+    }
+  }
+
+  // RR-1268: a bundle whose dirty-state fingerprint was recorded INCOMPLETE (a read budget tripped)
+  // must fail authority on read rather than silently degrade to a HEAD-only guarantee.
+  @Test
+  void rejectsBundleWhoseRepoStateFingerprintIsRecordedIncomplete() throws Exception {
+    try (Git git = Git.init().setDirectory(tempDir.toFile()).call()) {
+      git.getRepository().getConfig().setString("user", null, "name", "test");
+      git.getRepository().getConfig().setString("user", null, "email", "test@example.com");
+      Files.createDirectories(tempDir.resolve(".agent-context"));
+      Files.writeString(tempDir.resolve(".agent-context/CODEBASE_CONTEXT.md"), "context");
+      Files.writeString(tempDir.resolve(".agent-context/decisions.md"), "decisions");
+      git.add().addFilepattern(".").call();
+      git.commit()
+          .setMessage("initial")
+          .setAuthor(new PersonIdent("test", "test@example.com"))
+          .call();
+
+      ObjectMapper mapper = new ObjectMapper();
+      var writer = new ContextEvidenceBundleWriter(mapper);
+      writer.write(
+          tempDir,
+          new ContextAgentInput(
+              "context", "diff", List.of(), List.of(), List.of(), "", "", "run-1", "goal"),
+          "run-1");
+      assertThat(writer.readCurrent(tempDir, "run-1")).isPresent();
+
+      Path bundle = tempDir.resolve(".agent-context/evidence-bundle.json");
+      com.fasterxml.jackson.databind.node.ObjectNode root =
+          (com.fasterxml.jackson.databind.node.ObjectNode)
+              mapper.readTree(Files.readString(bundle));
+      ((com.fasterxml.jackson.databind.node.ObjectNode) root.get("sources"))
+          .put("repoStateComplete", false);
+      Files.writeString(bundle, mapper.writeValueAsString(root));
+
+      assertThat(writer.readCurrent(tempDir, "run-1")).isEmpty();
+    }
+  }
 }

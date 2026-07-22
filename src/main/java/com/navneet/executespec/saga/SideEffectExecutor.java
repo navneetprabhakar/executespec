@@ -216,8 +216,13 @@ public class SideEffectExecutor {
       Path zipPath = exportService.exportWorkspace(runId);
       try {
         String gcsKey = gcsStore.uploadZip(runId, zipPath);
-        if (gcsKey == null || gcsKey.isBlank()) {
-          throw new IllegalStateException("GCS archive returned no durable object key");
+        // RR-1676: a nonblank key is not proof the object landed. Require it to actually exist in
+        // GCS
+        // before persisting it as the run's durable archive key, so a persisted key can never read
+        // as
+        // "archived" over an absent object.
+        if (gcsKey == null || gcsKey.isBlank() || !gcsStore.exists(gcsKey)) {
+          throw new IllegalStateException("GCS archive returned no durable, present object key");
         }
         if (run != null) {
           run.setGcsWorkspaceKey(gcsKey);

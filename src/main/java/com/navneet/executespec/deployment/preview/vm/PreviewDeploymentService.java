@@ -11,7 +11,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.testgen.BoundedProcess;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -27,7 +27,11 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "preview.mode", havingValue = "vm")
+// RR-1044: the VM/SSH preview machinery must be gated on BOTH the selected mode AND the
+// preview.vm.enabled switch (default false), so selecting mode=vm without enabling it no longer
+// instantiates SSH machinery. When absent, PreviewService falls back to its "enable preview.vm"
+// error.
+@ConditionalOnExpression("'${preview.mode:}'.equals('vm') and ${preview.vm.enabled:false}")
 public class PreviewDeploymentService {
 
   private static final String PREVIEW_JSON_PREFIX = "PREVIEW_JSON:";
