@@ -173,6 +173,57 @@ class SequentialExecutorCancelCascadeTest {
             + " all 5 tasks)");
   }
 
+  // RR-271 — a cancelled run must summarise as ABORTED (never ALL_SUCCESS), append SKIPPED outcomes
+  // for the tasks that never ran, and preserve the thread interrupt for the waiting caller.
+  @Test
+  void cancelled_run_is_summarised_ABORTED_with_skipped_remainder() throws Exception {
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    when(taskRepo.findByRunIdAndTaskId(ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
+        .thenReturn(Optional.empty());
+
+    AtomicInteger workerCalls = new AtomicInteger();
+    WorkerAgent worker = mock(WorkerAgent.class);
+    when(worker.run(ArgumentMatchers.any(WorkerTaskRequest.class), ArgumentMatchers.any()))
+        .thenAnswer(
+            inv -> {
+              if (workerCalls.incrementAndGet() == 2) {
+                Thread.currentThread().interrupt();
+              }
+              return WorkerResult.builder()
+                  .outcome(WorkerResult.Outcome.COMPLETED)
+                  .iterations(1)
+                  .toolCallsDispatched(0)
+                  .totalLatencyMs(1)
+                  .toolCallLog(List.of())
+                  .build();
+            });
+
+    SequentialExecutor exec = newExecutor(worker, taskRepo, mock(ContextStore.class));
+    var req =
+        com.navneet.executespec.harness.ExecutionRequest.builder()
+            .plan(fivePlan())
+            .provider("anthropic")
+            .model("claude-sonnet-4-6")
+            .runContext(ctx)
+            .maxIterationsPerTask(null)
+            .enableSmokeTests(false)
+            .designBlock(null)
+            .build();
+
+    ExecutionResult result = exec.execute(req, null);
+
+    assertEquals(
+        ExecutionResult.Overall.ABORTED,
+        result.overall(),
+        "a cancelled run must not be reported as a successful execution");
+    assertTrue(
+        Thread.currentThread().isInterrupted(),
+        "the interrupt must survive so the waiting caller still sees cancellation");
+    // T3..T5 never ran; they are appended as SKIPPED so downstream sees the full plan.
+    assertEquals(3, result.tasksSkipped(), "remaining tasks must be recorded as SKIPPED");
+    assertEquals(5, result.perTask().size());
+  }
+
   @Test
   void preset_interrupt_breaks_loop_before_first_task() throws Exception {
     AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);

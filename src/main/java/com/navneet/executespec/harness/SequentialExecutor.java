@@ -678,6 +678,7 @@ to boot — skip it for those.""";
     Plan plan = req.plan();
     String runId = req.runContext().runId();
     boolean abortedByGoalDecision = false;
+    boolean cancelled = false;
     continuationConfirmationRequiredByRun.put(
         runId,
         requireConfirmationBeforeExpensiveContinuation
@@ -744,6 +745,13 @@ to boot — skip it for those.""";
               "SequentialExecutor cancel detected at task index {}/{}, breaking loop",
               i,
               taskCount);
+          // RR-271 (P1 lifecycle correctness) — a cancelled run must NOT be summarised as a
+          // successful execution. The break previously left `summarize` to map an all-clean prefix
+          // to ALL_SUCCESS, handing the orchestrator a "success" that contradicts the user's
+          // cancellation. Record cancellation explicitly, append SKIPPED outcomes for the remaining
+          // tasks, and preserve the interrupt so RunOrchestrator's future still reads cancelled.
+          cancelled = true;
+          appendSkippedGoalStopOutcomes(outcomes, plan, i);
           Thread.currentThread().interrupt();
           break;
         }
@@ -830,7 +838,8 @@ to boot — skip it for those.""";
       }
 
       ExecutionResult result =
-          summarize(outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision);
+          summarize(
+              outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision, cancelled);
       log.info(
           "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
               + " latency={}ms",
@@ -846,12 +855,11 @@ to boot — skip it for those.""";
       // are saved every 5 iters with a 24h TTL; that TTL is fine for a stuck JVM but is way too
       // long for a normal run-end. Delete every v2:agent-ctx:{runId}:* key now that the executor
       // has produced its terminal result. ALWAYS runs (not behind the retry-retention flag) —
-      // pure hygiene, safe regardless of which other flags are flipped. Cross-provider in-memory
-      // state gets the same cleanup. Both calls are best-effort; failures are logged only.
+      // pure hygiene, safe regardless of which other flags are flipped. Best-effort; failures are
+      // logged only.
       if (contextStore != null) {
         contextStore.deleteAll(runId, req.runContext().workspaceRoot());
       }
-      clearCrossProviderState(runId);
       clearContinuationActionState(runId);
 
       return result;
@@ -1495,18 +1503,7 @@ to boot — skip it for those.""";
     }
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
-      // Action-history writes are part of the task's recovery-owned state.  Always take the row
-      // lock, even when this executor did not capture a local generation (for example a resumed
-      // process handling a synthetic continuation outcome).  A stale JVM must not race a recovery
-      // writer while appending a decision that could overwrite the newer JSON document.
-      var existing = taskRepo.findByIdForUpdate(key);
-      if (existing.isEmpty()) {
-        log.debug("appendContinuationActionHistory: row not found id={}", key);
-        return;
-      }
-      var task = existing.get();
-      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
-      ObjectNode action = actions.addObject();
+      ObjectNode action = objectMapper.createObjectNode();
       action.put("status", status == null || status.isBlank() ? "UNKNOWN" : status);
       action.put("decision", decision.decision().name());
       action.put("provider", candidate.provider());
@@ -1515,7 +1512,30 @@ to boot — skip it for those.""";
       action.put("limitName", actionLimit.limitName());
       action.put("usedLimit", actionLimit.usedAfterReserve());
       action.put("maxLimit", actionLimit.maxAllowed());
-      action.put("attempt", actions.size());
+      String actionJson = objectMapper.writeValueAsString(action);
+      Integer expectedRecoveryAttempt = taskRecoveryAttemptByTask.get(key);
+      if (taskStatusPersistenceService != null) {
+        // RR-265 — route the read-modify-write through the proxied transactional seam so the
+        // pessimistic row lock has an active transaction (the executor is non-transactional) and
+        // the append is recovery-generation fenced. Without this, findByIdForUpdate threw
+        // TransactionRequiredException (swallowed) and the audit row was silently dropped while SSE
+        // claimed the action occurred.
+        taskStatusPersistenceService.appendContinuationAction(
+            runId, taskIdShort, actionJson, expectedRecoveryAttempt);
+        return;
+      }
+      // Test/bounded-constructor path (no transactional service): mocked repos tolerate the inline
+      // lock; a real DB without a transaction is only reachable through the service branch above.
+      var existing = taskRepo.findByIdForUpdate(key);
+      if (existing.isEmpty()) {
+        log.debug("appendContinuationActionHistory: row not found id={}", key);
+        return;
+      }
+      var task = existing.get();
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode appended = (ObjectNode) objectMapper.readTree(actionJson);
+      appended.put("attempt", actions.size());
+      actions.add(appended);
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepo.saveAndFlush(task);
     } catch (Exception ex) {
@@ -1558,18 +1578,56 @@ to boot — skip it for those.""";
           runId, new AtomicInteger(req.initialProviderSwitchesUsed()));
     }
     String targetTaskId = resumeTargetShortTaskId(runId, resume);
-    if (targetTaskId == null || targetTaskId.isBlank()) {
-      return;
+    if (targetTaskId != null && !targetTaskId.isBlank()) {
+      if (req.initialModelStepUpsUsed() > 0) {
+        continuationModelStepUpsPerTask.put(
+            continuationTaskKey(runId, targetTaskId),
+            new AtomicInteger(req.initialModelStepUpsUsed()));
+      }
+      if (req.initialModelStepDownsUsed() > 0) {
+        continuationModelStepDownsPerTask.put(
+            continuationTaskKey(runId, targetTaskId),
+            new AtomicInteger(req.initialModelStepDownsUsed()));
+      }
     }
-    if (req.initialModelStepUpsUsed() > 0) {
-      continuationModelStepUpsPerTask.put(
-          continuationTaskKey(runId, targetTaskId),
-          new AtomicInteger(req.initialModelStepUpsUsed()));
+    // RR-1563 (P1 spend guard) — the escalation counters live only in process memory and are seeded
+    // exclusively from ExecutionRequest.initial*Used, which the approval retry path supplies but
+    // the
+    // crash-recovery resume path does NOT. A run that already spent its one provider switch / model
+    // step-up, then crashed and was resumed, therefore got a fresh full escalation budget once per
+    // crash-resume cycle. Derive the ALREADY-CONSUMED counters from durable task state
+    // (agent_task.continuation_actions_json, V252) on every resume so a process restart cannot
+    // reset
+    // a spend ceiling. putIfAbsent keeps an explicit approval-path seed (already put above)
+    // winning.
+    if (resume != null) {
+      seedConsumedContinuationCountersFromDurableState(runId);
     }
-    if (req.initialModelStepDownsUsed() > 0) {
-      continuationModelStepDownsPerTask.put(
-          continuationTaskKey(runId, targetTaskId),
-          new AtomicInteger(req.initialModelStepDownsUsed()));
+  }
+
+  /**
+   * RR-1563 — seed the escalation counters with the amounts already consumed, reconstructed from
+   * durable per-task history by {@link ContinuationEscalationBudget}. {@code putIfAbsent} keeps an
+   * explicit approval-path seed winning.
+   */
+  private void seedConsumedContinuationCountersFromDurableState(String runId) {
+    ContinuationEscalationBudget.Consumed consumed =
+        ContinuationEscalationBudget.reconstruct(taskRepo, objectMapper, runId);
+    consumed
+        .stepUpsByTask()
+        .forEach(
+            (shortId, n) ->
+                continuationModelStepUpsPerTask.putIfAbsent(
+                    continuationTaskKey(runId, shortId), new AtomicInteger(n)));
+    consumed
+        .stepDownsByTask()
+        .forEach(
+            (shortId, n) ->
+                continuationModelStepDownsPerTask.putIfAbsent(
+                    continuationTaskKey(runId, shortId), new AtomicInteger(n)));
+    if (consumed.providerSwitches() > 0) {
+      continuationProviderSwitchesPerRun.putIfAbsent(
+          runId, new AtomicInteger(consumed.providerSwitches()));
     }
   }
 
@@ -2075,6 +2133,15 @@ to boot — skip it for those.""";
               + (fileWrites == 1 ? "" : "s")
               + " — "
               + WorkerFailureDescriber.describe(primary);
+    } else if (primary.salvagedUnverified()) {
+      // RR-260 — a best-guess salvage WRITE is COMPLETED by the worker's outcome enum, but it is
+      // explicitly unverified ("a wrong-file edit beats an empty patch"). Treat it as a soft
+      // completion so it must pass the smoke gate to reach SUCCESS; when smoke is skipped it lands
+      // COMPLETED_WITH_WARNING, never SUCCESS. "file changed" is not "task completed."
+      softCompletion = true;
+      softWarnReason =
+          "Best-guess salvage edit after the iteration/stagnation limit — unverified; "
+              + WorkerFailureDescriber.describe(primary);
     } else {
       softCompletion = false;
       softWarnReason = null;
@@ -2323,61 +2390,26 @@ to boot — skip it for those.""";
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
-      // 2026-05-28 (RL-2026-05-052, T3.9) — cross-provider fallback. After the existing
-      // same-provider retry fails, try ONCE on the next provider in the failover chain. This
-      // captures cases where one provider can't solve the task but another can (mixed10 showed
-      // this — different arms solved different cases). Hard ceiling: max one cross-provider
-      // retry per task; max MAX_CROSS_PROVIDER_PER_RUN per run; flag-gated default OFF (V220).
-      CrossProviderRetryResult crossProviderRetry =
-          maybeCrossProviderRetry(
-              task, plan, req, cfg, taskCtx, systemPrompt, workerEvidence, smoke, retry);
-      if (crossProviderRetry != null
-          && crossProviderRetry.result().outcome() == WorkerResult.Outcome.COMPLETED) {
-        SmokeTestResult crossSmoke = runSmokeTest(taskCtx, plan.buildCommand());
-        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
-        if (crossSmoke.passed()) {
-          log.info(
-              "Executor task={} SUCCESS_AFTER_CROSS_PROVIDER_RETRY (fallback provider={})",
-              task.id(),
-              crossProviderRetry.provider());
-          persistTaskStatus(runId, task.id(), "COMPLETE");
-          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-          GoalTaskDecision goalDecision =
-              emitGoalDecision(
-                  runId,
-                  task,
-                  crossProviderRetry.result(),
-                  TaskOutcome.Status.SUCCESS_AFTER_RETRY,
-                  true,
-                  null,
-                  crossProviderRetry.provider(),
-                  crossProviderRetry.model());
-          return TaskOutcome.builder()
-              .taskId(task.id())
-              .taskTitle(task.title())
-              .status(TaskOutcome.Status.SUCCESS_AFTER_RETRY)
-              .workerOutcome(primary)
-              .retryAttempted(true)
-              .retryWorkerOutcome(crossProviderRetry.result())
-              .smokeTestPassed(true)
-              .smokeTestExitCode(crossSmoke.exitCode())
-              .smokeTestOutput(crossSmoke.output())
-              .totalLatencyMs(System.currentTimeMillis() - taskStart)
-              .toolCallsDispatched(totalToolCalls)
-              .dispatchedProvider(crossProviderRetry.provider())
-              .dispatchedModel(crossProviderRetry.model())
-              .goalDonenessDecision(goalDecision.doneness())
-              .continuationDecision(goalDecision.continuation())
-              .build();
-        }
-      } else if (crossProviderRetry != null) {
-        totalToolCalls += crossProviderRetry.result().toolCallsDispatched();
-      }
+      // RR-269 (P1 routing-policy bypass) — the legacy same-provider-retry-then-next-YAML-provider
+      // fallback lane was DELETED here (2026-07-22). It dispatched the next failover provider
+      // directly, consulting neither route pins, org key policy, provider availability, strict mode
+      // nor benchmark/confirmation policy, and its per-run ceiling was racy — so it could spend
+      // against an unavailable/disallowed provider or override an Enterprise pin. Every provider or
+      // model change now flows through the single continuation-policy / admission path
+      // (maybeActOnContinuation) with exact authority and atomic durable reservations.
       log.warn(
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
           retry.outcome());
       String retryFailureReason = WorkerFailureDescriber.describe(retry);
+      // RR-263 (P1 durable-state divergence) — this return path used to construct the terminal
+      // outcome WITHOUT persisting a terminal task status, so the row stayed WORKING (set before
+      // the primary attempt) until the run-level reconciliation. A crash in that window let DB
+      // polling/recovery see an in-flight task the executor already considered terminal, risking a
+      // duplicate rerun or a permanently "running" UI. Cross the durable terminalization seam
+      // (COMPLETED_WITH_WARNING maps to the V1 PARTIAL status) before constructing the outcome.
+      persistTaskStatus(runId, task.id(), "PARTIAL", retryFailureReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId,
@@ -4020,16 +4052,33 @@ to boot — skip it for those.""";
     return null;
   }
 
+  /**
+   * RR-268 (P1 waste-guard accounting) — a canonical, provider-safe, NON-overlapping physical-token
+   * count for the {@code max-total-tokens} waste guard.
+   *
+   * <p>The previous sum added {@code reasoningTokens} and {@code cacheReadTokens} on top of
+   * input+output, but both are diagnostic SUBSETS for the providers that report them:
+   *
+   * <ul>
+   *   <li><b>reasoningTokens</b> — Gemini {@code thinking_tokens} is already folded into {@code
+   *       outputTokens} by {@code RunCostTracker}; OpenAI/DeepSeek {@code reasoning_tokens} is a
+   *       subset of completion. Adding it double-counts output.
+   *   <li><b>cacheReadTokens</b> — OpenAI/Gemini include cached tokens INSIDE prompt/input tokens
+   *       (a subset); adding it double-counts input. Anthropic reports it disjointly, so excluding
+   *       it slightly UNDER-counts a cache-heavy Anthropic run — the safe direction for a guard
+   *       that must not stop before the real ceiling.
+   * </ul>
+   *
+   * <p>{@code cacheWriteTokens} is Anthropic-only and genuinely disjoint from input/output (the
+   * first-time prompt tokens processed to populate the cache), and is zero for every other
+   * provider, so it is summed. Never sum a subset dimension into a physical total without set
+   * normalisation.
+   */
   private static int totalTrackedTokens(RunCostTracker.Snapshot cost) {
     if (cost == null) {
       return 0;
     }
-    long total =
-        (long) cost.inputTokens()
-            + cost.outputTokens()
-            + cost.cacheReadTokens()
-            + cost.cacheWriteTokens()
-            + cost.reasoningTokens();
+    long total = (long) cost.inputTokens() + cost.outputTokens() + cost.cacheWriteTokens();
     return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
   }
 
@@ -4498,10 +4547,6 @@ to boot — skip it for those.""";
   /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
   public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
 
-  /** Cross-provider fallback flag (RL-2026-05-052, T3.9). Default OFF, V220. */
-  public static final String FLAG_CROSS_PROVIDER_FALLBACK =
-      "worker.cross-provider-fallback.enabled";
-
   /** Initial worker-route selection from observed candidate evidence; default OFF. */
   public static final String FLAG_INITIAL_ROUTING = "execution.initial-routing.enabled";
 
@@ -4531,18 +4576,6 @@ to boot — skip it for those.""";
    * back to today's auto behaviour for providers that reject the forced choice.
    */
   public static final String FLAG_SALVAGE_FORCE_TOOL = "worker.salvage-force-tool-choice.enabled";
-
-  /** Max per-run cross-provider retries — hard ceiling so a bad run can't cascade-blow up cost. */
-  public static final int MAX_CROSS_PROVIDER_PER_RUN = 3;
-
-  /**
-   * Per-run cross-provider retry counter. Each successful cross-provider retry trigger (regardless
-   * of whether the alternate provider succeeds) increments this. Cleaned by {@link
-   * #clearCrossProviderState(String)} on terminal run state.
-   */
-  private final java.util.concurrent.ConcurrentMap<
-          String, java.util.concurrent.atomic.AtomicInteger>
-      crossProviderTriggersPerRun = new java.util.concurrent.ConcurrentHashMap<>();
 
   // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
   // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
@@ -4641,145 +4674,6 @@ to boot — skip it for those.""";
       sb.append(LOCAL_HANDS_FINAL_OVERRIDE);
     }
     return sb.toString();
-  }
-
-  /**
-   * Cross-provider retry result — wraps the {@link WorkerResult} with the provider + model that
-   * actually ran so we can record it on the {@link TaskOutcome}. Internal to {@link
-   * #maybeCrossProviderRetry}.
-   */
-  private record CrossProviderRetryResult(WorkerResult result, String provider, String model) {}
-
-  /**
-   * Attempt one cross-provider retry on the next provider in the failover chain, when the existing
-   * same-provider retry has failed. Hard ceilings:
-   *
-   * <ul>
-   *   <li>Flag {@link #FLAG_CROSS_PROVIDER_FALLBACK} must be ON (default OFF, V220).
-   *   <li>Max one cross-provider retry per task (this method is only called once per task).
-   *   <li>Max {@link #MAX_CROSS_PROVIDER_PER_RUN} per run.
-   *   <li>The next provider must be different from the primary AND must resolve to a real model.
-   * </ul>
-   *
-   * Returns {@code null} when no retry was attempted (any ceiling missed). Returns a wrapped {@link
-   * WorkerResult} otherwise, regardless of whether the alternate provider succeeded.
-   *
-   * <p>RL-2026-05-052, T3.9.
-   */
-  CrossProviderRetryResult maybeCrossProviderRetry(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      TierConfig primaryCfg,
-      ExecutionContext taskCtx,
-      String systemPrompt,
-      String workerEvidence,
-      SmokeTestResult smoke,
-      WorkerResult sameProviderRetry) {
-    if (featureFlagService == null || !featureFlagService.isEnabled(FLAG_CROSS_PROVIDER_FALLBACK)) {
-      return null;
-    }
-    String runId = req.runContext().runId();
-    var counter =
-        crossProviderTriggersPerRun.computeIfAbsent(
-            runId, k -> new java.util.concurrent.atomic.AtomicInteger(0));
-    if (counter.get() >= MAX_CROSS_PROVIDER_PER_RUN) {
-      log.info(
-          "Executor task={} cross-provider retry SKIPPED — per-run ceiling {} reached for run={}",
-          task.id(),
-          MAX_CROSS_PROVIDER_PER_RUN,
-          runId);
-      return null;
-    }
-    String altProvider = nextProviderInChain(primaryCfg.provider());
-    if (altProvider == null) {
-      log.info(
-          "Executor task={} cross-provider retry SKIPPED — no failover candidate for primary={}",
-          task.id(),
-          primaryCfg.provider());
-      return null;
-    }
-    TierConfig altCfg =
-        tierConfigFor(
-            task.complexity(),
-            altProvider,
-            null,
-            req.projectId() != null,
-            req.lowComplexityWorkerStartTier());
-    if (altCfg.provider().equalsIgnoreCase(primaryCfg.provider())) {
-      // adaptive routing or strict-provider re-resolved back to the primary — abandon.
-      log.info(
-          "Executor task={} cross-provider retry SKIPPED — alt resolved back to primary={}",
-          task.id(),
-          primaryCfg.provider());
-      return null;
-    }
-    counter.incrementAndGet();
-    log.info(
-        "Executor task={} cross-provider retry START — primary={} → alt={} (run-count={}/{})",
-        task.id(),
-        primaryCfg.provider(),
-        altCfg.provider(),
-        counter.get(),
-        MAX_CROSS_PROVIDER_PER_RUN);
-    String userPrompt = composeUserPrompt(task, smoke.output(), workerEvidence);
-    WorkerResult altResult =
-        worker.run(
-            WorkerTaskRequest.builder()
-                .provider(altCfg.provider())
-                .model(altCfg.model())
-                .systemPrompt(systemPrompt)
-                .userPrompt(userPrompt)
-                .context(taskCtx)
-                .maxIterations(altCfg.maxIter())
-                .temperature(0.0)
-                .maxTokensPerCall(altCfg.maxTokens())
-                .stagnationWarnAfter(altCfg.stagnationWarnAfter())
-                .stagnationForceAfter(altCfg.stagnationForceAfter())
-                .wallClockSeconds(altCfg.wallClockSeconds())
-                .requireBuildVerification(true)
-                .forceToolChoiceOnSalvage(altCfg.forceToolChoiceOnSalvage())
-                .criticPass(
-                    featureFlagService != null
-                        && featureFlagService.isEnabled("worker.critic-pass.enabled"))
-                .verifyBeforeComplete(
-                    featureFlagService != null
-                        && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
-                .progressV2(
-                    featureFlagService != null
-                        && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-                .autoVerify(
-                    featureFlagService != null
-                        && featureFlagService.isEnabled("worker.auto-verify.enabled"))
-                .build());
-    log.info(
-        "Executor task={} cross-provider retry DONE — alt={} outcome={}",
-        task.id(),
-        altCfg.provider(),
-        altResult.outcome());
-    return new CrossProviderRetryResult(altResult, altCfg.provider(), altCfg.model());
-  }
-
-  /**
-   * Walk the YAML failover chain (`application.yml model-matrix.failover-order.<primary>`) and
-   * return the first provider that's different from the primary. Returns {@code null} when no chain
-   * exists or the chain has no different candidate.
-   */
-  String nextProviderInChain(String primary) {
-    if (primary == null || matrixProps == null || matrixProps.getFailoverOrder() == null) {
-      return null;
-    }
-    var chain = matrixProps.getFailoverOrder().get(primary.toLowerCase());
-    if (chain == null || chain.isEmpty()) return null;
-    for (String candidate : chain) {
-      if (!primary.equalsIgnoreCase(candidate)) return candidate;
-    }
-    return null;
-  }
-
-  /** Clear per-run cross-provider retry state — call from RunOrchestrator's terminal handlers. */
-  public void clearCrossProviderState(String runId) {
-    crossProviderTriggersPerRun.remove(runId);
   }
 
   /**
@@ -4979,7 +4873,10 @@ to boot — skip it for those.""";
   private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
 
   private ExecutionResult summarize(
-      List<TaskOutcome> outcomes, long totalLatency, boolean abortedByGoalDecision) {
+      List<TaskOutcome> outcomes,
+      long totalLatency,
+      boolean abortedByGoalDecision,
+      boolean cancelled) {
     int succ = 0, warn = 0, fail = 0, skip = 0;
     for (var o : outcomes) {
       switch (o.status()) {
@@ -4990,7 +4887,9 @@ to boot — skip it for those.""";
       }
     }
     ExecutionResult.Overall overall;
-    if (abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
+    // RR-271 — cancellation is a terminal ABORTED, never ALL_SUCCESS, even when every executed task
+    // was clean. Reviewer/publication must not proceed on a cancelled run's "success".
+    if (cancelled || abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
     else if (fail > 0) overall = ExecutionResult.Overall.FAILED;
     else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
     else overall = ExecutionResult.Overall.ALL_SUCCESS;

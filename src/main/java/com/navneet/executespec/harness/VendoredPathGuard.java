@@ -170,7 +170,7 @@ public class VendoredPathGuard {
    */
   public ScrubResult scrubCommittedVendored(Path repoDir) {
     if (!Files.isDirectory(repoDir.resolve(".git"))) {
-      return new ScrubResult(0, 0, java.util.Set.of());
+      return new ScrubResult(0, 0, java.util.Set.of(), false);
     }
     try {
       List<String> tracked = runGit(repoDir, List.of("ls-files"), 30);
@@ -197,7 +197,7 @@ public class VendoredPathGuard {
         log.debug(
             "VendoredPathGuard.scrub: {} has no tracked vendored content (no-op)",
             repoDir.getFileName());
-        return new ScrubResult(0, tracked.size(), java.util.Set.of());
+        return new ScrubResult(0, tracked.size(), java.util.Set.of(), true);
       }
 
       log.info(
@@ -232,6 +232,12 @@ public class VendoredPathGuard {
         // best-effort
       }
       // 3. One scrub commit so the cleanup is atomic in history.
+      // RR-650 — the commit outcome is now part of the result contract. When it fails, the removals
+      // remain only STAGED (not committed), so a later reset/checkout can restore the vendored
+      // content or an unrelated commit can absorb the large staged deletion — the caller must not
+      // be
+      // told the scrub durably succeeded.
+      boolean committed = false;
       try {
         runGit(
             repoDir,
@@ -245,23 +251,28 @@ public class VendoredPathGuard {
                     + vendoredRoots.size()
                     + " roots)"),
             30);
+        committed = true;
       } catch (Exception e) {
         log.warn(
-            "VendoredPathGuard.scrub: scrub commit failed in {}: {}",
+            "VendoredPathGuard.scrub: scrub commit failed in {}: {} — removals remain staged only",
             repoDir.getFileName(),
             e.getMessage());
-        // index is already updated; lack of a commit just means subsequent `git status` shows
-        // a big staged removal. Acceptable.
       }
-      return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots);
+      return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots, committed);
     } catch (Exception e) {
       log.warn("VendoredPathGuard.scrub failed for {}: {}", repoDir.getFileName(), e.getMessage());
-      return new ScrubResult(0, 0, java.util.Set.of());
+      return new ScrubResult(0, 0, java.util.Set.of(), false);
     }
   }
 
-  /** Result of a {@link #scrubCommittedVendored} call. */
-  public record ScrubResult(int filesRemoved, int totalTrackedAtScan, java.util.Set<String> roots) {
+  /**
+   * Result of a {@link #scrubCommittedVendored} call.
+   *
+   * @param committed RR-650 — true only when the scrub commit landed. When false with {@code
+   *     filesRemoved > 0}, the removals are staged but NOT durably committed (a partial state).
+   */
+  public record ScrubResult(
+      int filesRemoved, int totalTrackedAtScan, java.util.Set<String> roots, boolean committed) {
     public boolean changed() {
       return filesRemoved > 0;
     }

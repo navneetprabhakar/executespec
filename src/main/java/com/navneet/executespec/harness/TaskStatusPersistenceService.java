@@ -3,6 +3,9 @@ package com.navneet.executespec.harness;
 import java.time.Duration;
 import java.time.Instant;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 
@@ -23,6 +26,13 @@ public class TaskStatusPersistenceService {
 
   private final AgentTaskRepository taskRepo;
   private final RunCostTracker costTracker;
+
+  /**
+   * RR-265 — a self-contained mapper for the continuation-action-history read/modify/write. Jackson
+   * {@link ObjectMapper} is thread-safe once configured; this is a bounded internal helper, not an
+   * injected collaborator, so the bounded test constructor stays a 2-arg call.
+   */
+  private final ObjectMapper actionHistoryMapper = new ObjectMapper();
 
   public enum Result {
     UPDATED,
@@ -211,6 +221,68 @@ public class TaskStatusPersistenceService {
     task.setContinuationDecisionJson(continuationDecisionJson);
     taskRepo.saveAndFlush(task);
     return Result.UPDATED;
+  }
+
+  /**
+   * RR-265 (P1 audit durability) — atomically append one continuation-action-history entry to the
+   * task's {@code continuation_actions_json} (V252) under the same pessimistic row lock and proxied
+   * transaction {@link #persist} uses.
+   *
+   * <p>The previous {@code SequentialExecutor.appendContinuationActionHistory} called {@code
+   * findByIdForUpdate} (a {@code PESSIMISTIC_WRITE} query that REQUIRES an active transaction)
+   * directly from the non-transactional executor and swallowed every failure, so an executed or
+   * skipped provider/model action could be absent from durable evidence while SSE claimed it
+   * happened — losing the approval/recovery audit trail on reload. The read-modify-write is now one
+   * transaction, fenced by recovery generation exactly like the goal-decision writer, so a stale
+   * JVM cannot clobber a newer document.
+   *
+   * @param actionJson a single pre-built action object (from the executor, which owns the domain
+   *     fields); its {@code attempt} index is (re)assigned here from the durable array length.
+   */
+  @Transactional
+  @Retryable(
+      retryFor = DataAccessException.class,
+      maxAttempts = 3,
+      backoff = @Backoff(delay = 100, multiplier = 2.0))
+  public Result appendContinuationAction(
+      String runId, String taskIdShort, String actionJson, Integer expectedRecoveryAttempt) {
+    if (runId == null || runId.length() < 8 || taskIdShort == null || actionJson == null) {
+      return Result.ROW_NOT_FOUND;
+    }
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    var existing = taskRepo.findByIdForUpdate(key);
+    if (existing.isEmpty()) {
+      return Result.ROW_NOT_FOUND;
+    }
+    var task = existing.get();
+    if (expectedRecoveryAttempt != null
+        && !SequentialExecutor.recoveryAttemptMatches(
+            expectedRecoveryAttempt, task.getRecoveryAttempt())) {
+      return Result.STALE_RECOVERY_ATTEMPT;
+    }
+    try {
+      ArrayNode actions;
+      String existingJson = task.getContinuationActionsJson();
+      if (existingJson == null || existingJson.isBlank()) {
+        actions = actionHistoryMapper.createArrayNode();
+      } else {
+        var parsed = actionHistoryMapper.readTree(existingJson);
+        actions = parsed.isArray() ? (ArrayNode) parsed : actionHistoryMapper.createArrayNode();
+      }
+      var parsedAction = actionHistoryMapper.readTree(actionJson);
+      if (!parsedAction.isObject()) {
+        return Result.ROW_NOT_FOUND;
+      }
+      ObjectNode action = (ObjectNode) parsedAction;
+      action.put("attempt", actions.size());
+      actions.add(action);
+      task.setContinuationActionsJson(actionHistoryMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+      return Result.UPDATED;
+    } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+      log.warn("appendContinuationAction: malformed JSON for {}: {}", key, ex.getMessage());
+      return Result.ROW_NOT_FOUND;
+    }
   }
 
   private static boolean isPersistedTerminalStatus(String status) {
