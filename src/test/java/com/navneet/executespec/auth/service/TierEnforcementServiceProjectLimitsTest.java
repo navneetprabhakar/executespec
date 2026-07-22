@@ -168,16 +168,19 @@ class TierEnforcementServiceProjectLimitsTest {
     }
 
     @Test
-    void noTierConfigRow_treatsAsUnlimited() {
-      // Defensive: a missing tier_config row should not lock the tier
-      // out. The existing limit-resolution code uses fallbacks for
-      // monthly_run_limit; for the project / repo caps we read -1.
+    void noTierConfigRow_failsClosed() {
+      // RR-830 — a missing tier_config row is NOT the same as an explicit unlimited (-1) policy.
+      // Treating it as unlimited silently upgraded seed/migration-drifted accounts to unlimited
+      // projects (fail-open). It must now fail closed with a typed availability error, and it must
+      // NOT even reach the project-count query.
       when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "FREE", "org1")));
       when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "FREE")));
       when(tierConfigRepo.findById("FREE")).thenReturn(Optional.empty());
 
-      svc.assertCanCreateProject("u1", "org1");
-      // no throw
+      assertThatThrownBy(() -> svc.assertCanCreateProject("u1", "org1"))
+          .isInstanceOf(ResponseStatusException.class)
+          .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+          .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
       verify(projectRepo, never())
           .countByOrgIdAndStatusAndDeletedAtIsNull(anyString(), anyString());
     }

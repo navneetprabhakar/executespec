@@ -148,9 +148,33 @@ public class PaymentAuditService {
 
   private String csvField(String val) {
     if (val == null) return "";
-    if (val.contains(",") || val.contains("\"") || val.contains("\n")) {
-      return "\"" + val.replace("\"", "\"\"") + "\"";
+    // RR-242 — neutralize spreadsheet formula injection. Notes, actor/entity identifiers and
+    // gateway-derived values reach these cells; a cell whose first non-whitespace character is one
+    // of = + - @ is executed as a formula when the operator opens the CSV in Excel/Sheets. Prefix a
+    // single quote so the cell is treated as text. Mirrors
+    // cost/SpreadsheetSafeCsv.neutralizeFormula,
+    // including the leading-whitespace/control-character variants.
+    String neutralized = neutralizeFormula(val);
+    if (neutralized.contains(",")
+        || neutralized.contains("\"")
+        || neutralized.contains("\n")
+        || neutralized.contains("\r")
+        || !neutralized.equals(val)) {
+      return "\"" + neutralized.replace("\"", "\"\"") + "\"";
     }
-    return val;
+    return neutralized;
+  }
+
+  /** RR-242 — prefix a leading formula marker (=, +, -, @) with a single quote. */
+  private static String neutralizeFormula(String value) {
+    if (value.isEmpty()) return value;
+    int first = 0;
+    while (first < value.length() && Character.isWhitespace(value.charAt(first))) first++;
+    if (first >= value.length()) return value;
+    char marker = value.charAt(first);
+    if (marker == '=' || marker == '+' || marker == '-' || marker == '@') {
+      return "'" + value;
+    }
+    return value;
   }
 }

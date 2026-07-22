@@ -93,7 +93,35 @@ public class ProjectAccessGuard {
    */
   public Project assertCanWrite(String projectId, AppUserDetails userDetails) {
     Project project = assertCanRead(projectId, userDetails);
+    // RR-832 — a soft-deleted (tombstoned) project must not be mutable through the shared write
+    // guard. The canonical GET already 404s a soft-deleted row and says restore is the only way
+    // back; without this, a caller retaining the id could keep submitting runs, agent turns, chat,
+    // reviews, exports and integration changes — spending against and mutating an object whose
+    // advertised lifecycle permits only restore. Fail closed with the same 404 the GET returns so
+    // existence is not leaked. Only {@link #assertCanRestore} may load a tombstone.
+    if (project.isSoftDeleted()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found");
+    }
+    return assertWriteAuthority(project, userDetails);
+  }
 
+  /**
+   * RR-832 — load a soft-deleted (tombstoned) project for the dedicated restore capability. This is
+   * the ONLY guard that admits a {@code deletedAt != null} row; it grants the same write-level
+   * authority as {@link #assertCanWrite} (SUPER_ADMIN / host ORG_ADMIN / PROJECT_ADMIN /
+   * PROJECT_DEVELOPER) but deliberately skips the tombstone fail-closed check so the restore
+   * endpoint can bring the project back. Non-deleted projects pass through unchanged.
+   */
+  public Project assertCanRestore(String projectId, AppUserDetails userDetails) {
+    Project project = assertCanRead(projectId, userDetails);
+    return assertWriteAuthority(project, userDetails);
+  }
+
+  /**
+   * Shared write-authority decision — used by {@link #assertCanWrite} and {@link
+   * #assertCanRestore}.
+   */
+  private Project assertWriteAuthority(Project project, AppUserDetails userDetails) {
     if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
       return project;
     }
@@ -106,7 +134,7 @@ public class ProjectAccessGuard {
 
     String callerUserId = userDetails.getUser().getId();
     if (callerUserId != null) {
-      var member = projectMemberRepo.findByProjectIdAndUserId(projectId, callerUserId);
+      var member = projectMemberRepo.findByProjectIdAndUserId(project.getId(), callerUserId);
       if (member.isPresent()) {
         String role = member.get().getProjectRole();
         if ("PROJECT_VIEWER".equals(role)) {
@@ -135,6 +163,11 @@ public class ProjectAccessGuard {
    */
   public Project assertCanAdmin(String projectId, AppUserDetails userDetails) {
     Project project = assertCanRead(projectId, userDetails);
+    // RR-832 — administrative access to a tombstoned project is refused for the same reason as
+    // write access; only the restore capability may load a soft-deleted row.
+    if (project.isSoftDeleted()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found");
+    }
 
     if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
       return project;
