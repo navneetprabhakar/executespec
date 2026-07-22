@@ -61,8 +61,41 @@ final class ShellGuardrailVerbs {
       Set.of("export", "prebuild", "install", "doctor", "run", "run:android", "run:ios");
 
   /**
-   * {@code update} (EAS OTA push) is deliberately excluded — it is a deploy-equivalent path and
-   * must route through the managed {@code /api/deployments} endpoint, not shell.
+   * RR-853 — {@code eas build}/{@code submit}/{@code update} are networked external side effects
+   * (paid remote cloud build, app-store submission, OTA push). They must route through the managed
+   * {@code /api/deployments} authorization/confirmation/audit boundary, NOT the worker shell, at
+   * every guardrail level. The verb allowlist is therefore empty (previously {@code build}/{@code
+   * submit} were permitted at HIGH and every EAS verb was permitted at the seeded LOW default), and
+   * {@link #EXTERNAL_SIDE_EFFECT_EAS_VERBS} is enforced unconditionally by {@link
+   * ShellSandboxPolicy}.
    */
-  static final Set<String> EAS = Set.of("build", "submit");
+  static final Set<String> EAS = Set.of();
+
+  /** RR-853 — EAS verbs that trigger a networked build/submit/OTA action; denied at all levels. */
+  static final Set<String> EXTERNAL_SIDE_EFFECT_EAS_VERBS = Set.of("build", "submit", "update");
+
+  /**
+   * RR-853 — returns a rejection reason when {@code tokens} invoke a networked EAS side effect,
+   * whether directly ({@code eas build …}) or via npx ({@code npx eas submit …}), or {@code null}
+   * for any other command. Level-independent: an external mutation is never in-scope for a worker
+   * shell.
+   */
+  static String externalSideEffectReason(String[] tokens) {
+    if (tokens == null || tokens.length == 0) {
+      return null;
+    }
+    String verb = null;
+    if ("eas".equals(tokens[0]) && tokens.length >= 2) {
+      verb = tokens[1];
+    } else if ("npx".equals(tokens[0]) && tokens.length >= 3 && "eas".equals(tokens[1])) {
+      verb = tokens[2];
+    }
+    if (verb != null && EXTERNAL_SIDE_EFFECT_EAS_VERBS.contains(verb)) {
+      return "'eas "
+          + verb
+          + "' is a networked cloud build/submit/OTA action and must route through the managed"
+          + " /api/deployments boundary, not the worker shell";
+    }
+    return null;
+  }
 }

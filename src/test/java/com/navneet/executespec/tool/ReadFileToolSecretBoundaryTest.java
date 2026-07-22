@@ -81,6 +81,45 @@ class ReadFileToolSecretBoundaryTest {
     assertThat(appender.list).extracting(ILoggingEvent::getThrowableProxy).containsOnlyNulls();
   }
 
+  @Test
+  void forbiddenWorkspaceReadDoesNotGroundALaterEdit() throws Exception {
+    // RR-1024 — a read the secret scanner FORBID must not record the read-before-write ledger
+    // entry; otherwise a worker could authorize a full-file edit/overwrite of a file it never
+    // successfully observed. A clean read still grounds the edit.
+    ProjectWorkspaceService workspace = mock(ProjectWorkspaceService.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    when(runs.findById("run-1")).thenReturn(Optional.empty());
+    ReadFileStateStore readState = new ReadFileStateStore();
+    ReadFileTool tool =
+        new ReadFileTool(
+            workspace,
+            runs,
+            mock(ProjectArchitectureDocRepository.class),
+            mock(ProjectCodeMapRepository.class),
+            mock(ProjectRepoLinkRepository.class),
+            mock(ProjectRepoRepository.class),
+            readState,
+            new GeneratedSecretScanner());
+
+    String credential = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";
+    // Resolve exactly as the tool does (real path), so the ledger key matches on every platform.
+    Path secretFile = PathSafety.safeResolve(workspaceRoot, "secret.txt");
+    java.nio.file.Files.writeString(secretFile, "token = " + credential + "\n");
+    Path cleanFile = PathSafety.safeResolve(workspaceRoot, "clean.txt");
+    java.nio.file.Files.writeString(cleanFile, "hello world\n");
+
+    ToolResult forbidden = tool.execute(JSON.readTree("{\"path\":\"secret.txt\"}"), context());
+    assertThat(forbidden).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) forbidden).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    assertThat(readState.check("run-1", secretFile, "token = " + credential + "\n"))
+        .isEqualTo(ReadFileStateStore.Status.NOT_READ);
+
+    ToolResult ok = tool.execute(JSON.readTree("{\"path\":\"clean.txt\"}"), context());
+    assertThat(ok).isInstanceOf(ToolResult.Ok.class);
+    assertThat(readState.check("run-1", cleanFile, "hello world\n"))
+        .isEqualTo(ReadFileStateStore.Status.OK);
+  }
+
   private Fixture fixture() {
     ProjectWorkspaceService workspace = mock(ProjectWorkspaceService.class);
     PipelineRunRepository runs = mock(PipelineRunRepository.class);

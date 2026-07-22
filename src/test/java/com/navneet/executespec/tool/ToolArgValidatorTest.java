@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
 /**
  * B4 (RL-2026-06, vix-leverage W1.3) — pins the conservative, fail-open, absent-only contract of
  * {@link ToolArgValidator}: it must catch a genuinely-absent declared-required field (naming it)
- * and must NOT block anything else (no required list, unparseable schema, advisory-only absence, or
- * a present-but-null required field).
+ * and must NOT block anything else (no required list, unparseable schema, advisory-only absence).
+ * RR-577 additionally treats a present-but-explicit-null required field as missing.
  */
 @DisplayName("ToolArgValidator (B4 — conservative required-field validation)")
 class ToolArgValidatorTest {
@@ -94,8 +94,12 @@ class ToolArgValidatorTest {
   }
 
   @Test
-  @DisplayName("present-but-null required field → allowed (absent-only policy; tool owns the null)")
+  @DisplayName("RR-577: present-but-explicit-null required field → error names the field")
   void presentButNull() {
-    assertThat(ToolArgValidator.validate(SCHEMA_PATH_REQUIRED, json("{\"path\":null}"))).isEmpty();
+    // RR-577 — a required field set to explicit JSON null can never satisfy the schema and would
+    // otherwise reach the handler as a null; treat it as missing, same as an absent key.
+    Optional<String> err = ToolArgValidator.validate(SCHEMA_PATH_REQUIRED, json("{\"path\":null}"));
+    assertThat(err).isPresent();
+    assertThat(err.get()).contains("path");
   }
 }

@@ -82,6 +82,19 @@ public class SearchFilesTool implements Tool {
 
   private static final int MAX_LINE_LEN = 240;
 
+  /**
+   * RR-644 — bounds for the Java-regex fallback (reached when ripgrep is unavailable or rejects the
+   * pattern dialect). The JDK regex engine backtracks, so an unbounded pattern / very long line can
+   * pin a worker thread. Cap the pattern length, skip pathologically long lines before the matcher
+   * touches them, skip oversized files before {@code readAllLines}, and stop the whole walk once a
+   * wall-clock deadline elapses. These are conservative bounds, not a linear-time engine swap.
+   */
+  private static final int MAX_PATTERN_LEN = 2_000;
+
+  private static final int MAX_MATCH_LINE_LEN = 20_000;
+  private static final long MAX_SEARCH_FILE_BYTES = 8L * 1024 * 1024;
+  private static final long WALK_DEADLINE_NANOS = 20L * 1_000_000_000L;
+
   @Override
   public String name() {
     return "searchFiles";
@@ -258,6 +271,12 @@ public class SearchFilesTool implements Tool {
     } catch (RuntimeException e) {
       log.warn("structured repository search failed; retaining compatibility fallback", e);
     }
+    // RR-644 — reject an over-long expression before it reaches the backtracking compiler.
+    if (patternStr.length() > MAX_PATTERN_LEN) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.INVALID_ARGS,
+          "search pattern exceeds " + MAX_PATTERN_LEN + " characters");
+    }
     Pattern regex;
     try {
       regex = Pattern.compile(patternStr);
@@ -327,6 +346,7 @@ public class SearchFilesTool implements Tool {
       Path searchRoot, PathMatcher fileMatcher, Pattern regex, Path workspaceReal)
       throws IOException {
     List<String> matches = new ArrayList<>();
+    long deadline = System.nanoTime() + WALK_DEADLINE_NANOS;
     Files.walkFileTree(
         searchRoot,
         new SimpleFileVisitor<>() {
@@ -340,6 +360,12 @@ public class SearchFilesTool implements Tool {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
+            // RR-644 — stop the whole walk once the wall-clock budget is spent.
+            if (System.nanoTime() > deadline) return FileVisitResult.TERMINATE;
+            // RR-644 — skip a file too large to decode whole before readAllLines allocates it.
+            if (attrs.isRegularFile() && attrs.size() > MAX_SEARCH_FILE_BYTES) {
+              return FileVisitResult.CONTINUE;
+            }
             if (SensitiveWorkspacePathPolicy.isSensitive(file.toString())) {
               return FileVisitResult.CONTINUE;
             }
@@ -367,6 +393,8 @@ public class SearchFilesTool implements Tool {
               List<String> lines = Files.readAllLines(file);
               for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
+                // RR-644 — never feed a pathologically long line to the backtracking matcher.
+                if (line.length() > MAX_MATCH_LINE_LEN) continue;
                 if (regex.matcher(line).find()) {
                   String rel = workspaceReal.relativize(file).toString();
                   matches.add(
