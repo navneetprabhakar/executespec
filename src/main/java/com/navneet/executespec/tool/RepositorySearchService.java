@@ -55,6 +55,18 @@ public class RepositorySearchService {
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
   private static final int HASH_BUFFER_BYTES = 64 * 1024;
+
+  /**
+   * RR-555 — an untrusted REGEX-mode pattern is compiled with the backtracking JDK engine and run
+   * over every indexed line. Bound the pattern length and skip pathologically long lines before the
+   * matcher touches them, so a catastrophic-backtracking expression cannot pin a CPU on a single
+   * attacker-controlled line. RR-554 — cap per-file bytes before decoding so one huge text-looking
+   * file cannot exhaust heap. These are conservative bounds, not a linear-time engine swap.
+   */
+  private static final int MAX_PATTERN_CHARS = 2_000;
+
+  private static final int MAX_MATCH_LINE_CHARS = 20_000;
+  private static final long MAX_DECODE_FILE_BYTES = 8L * 1024 * 1024;
   static final int MAX_CACHED_SNAPSHOTS_PER_WORKSPACE = 512;
   static final long MAX_CACHED_CHARACTERS_PER_WORKSPACE = 8L * 1024 * 1024;
 
@@ -104,7 +116,9 @@ public class RepositorySearchService {
                       request.query(), line, request.caseSensitive(), file.getFileName().toString())
                   : null;
           if (request.mode() == SearchMode.SYMBOL && symbolMatch == null) continue;
-          if (request.mode() != SearchMode.SYMBOL && !pattern.matcher(line).find()) continue;
+          // RR-555 — never feed a pathologically long line to the backtracking matcher.
+          if (request.mode() != SearchMode.SYMBOL
+              && (line.length() > MAX_MATCH_LINE_CHARS || !pattern.matcher(line).find())) continue;
           Path relative = root.relativize(file);
           hits.add(
               new SearchHit(
@@ -265,8 +279,14 @@ public class RepositorySearchService {
         cached = new CachedWorkspace(root, currentFiles);
         cached.lastInventoryRequest = requestSequence;
         workspaceIndex.put(root, cached);
-      } else if (requestSequence >= cached.lastInventoryRequest) {
+      } else if (requestSequence > cached.lastInventoryRequest) {
+        // RR-556 — publish inventory only when this walk is STRICTLY newer than the one currently
+        // stored, and advance the stored sequence in the SAME critical section. The previous code
+        // never assigned lastInventoryRequest after cache creation, so an older (slower) walk that
+        // finished after a newer one still satisfied `>=` and regressed cached.files to a stale
+        // view (omitting new paths / reintroducing deleted ones).
         cached.files = List.copyOf(currentFiles);
+        cached.lastInventoryRequest = requestSequence;
       }
       return cached.files.stream().filter(path -> path.startsWith(searchRoot)).toList();
     }
@@ -307,6 +327,13 @@ public class RepositorySearchService {
         // Metadata is only a useful fast path when the filesystem guarantees a reliable
         // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
         // size and mtime, so compare a streaming content digest before reusing the decoded lines.
+        // RR-554 — bound per-file bytes before decoding so a single huge (or
+        // binary-but-text-looking)
+        // file cannot allocate beyond the intended cache bound and monopolize the search.
+        if (Files.size(file) > MAX_DECODE_FILE_BYTES) {
+          removeSnapshot(file);
+          return null;
+        }
         String contentHash = knownContentHash == null ? contentHash(file) : knownContentHash;
         FileSnapshot previous = snapshots.get(file);
         if (previous != null && previous.contentHash.equals(contentHash)) {
@@ -378,6 +405,11 @@ public class RepositorySearchService {
   }
 
   private static Pattern compile(SearchRequest request) {
+    // RR-555 — reject an over-long expression before it reaches the backtracking compiler.
+    if (request.mode() == SearchMode.REGEX && request.query().length() > MAX_PATTERN_CHARS) {
+      throw new IllegalArgumentException(
+          "search pattern exceeds " + MAX_PATTERN_CHARS + " characters");
+    }
     if (request.mode() == SearchMode.SYMBOL) {
       return Pattern.compile(
           "(?<![A-Za-z0-9_$])" + Pattern.quote(request.query()) + "(?![A-Za-z0-9_$])",

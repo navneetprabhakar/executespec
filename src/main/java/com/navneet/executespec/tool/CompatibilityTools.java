@@ -5,6 +5,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.SimpleFileVisitor;
@@ -559,9 +560,21 @@ final class MovePathTool implements Tool {
     try {
       String srcRel = args.path("src").asText(null);
       String dstRel = args.path("dst").asText(null);
+      // RR-549 — a move is a delete of src + create of dst. Deny reserved control-plane paths
+      // (.git/**, .agent-context/**, …) at BOTH endpoints, so move cannot be used to relocate or
+      // overwrite Git identity/history/config or the run's own evidence.
+      String srcReserved = ReservedWorkspacePaths.rejectionFor(srcRel);
+      if (srcReserved != null) return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, srcReserved);
+      String dstReserved = ReservedWorkspacePaths.rejectionFor(dstRel);
+      if (dstReserved != null) return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, dstReserved);
       String reviewerPolicyError = ReviewerMutationScope.validateMove(srcRel, dstRel);
       if (reviewerPolicyError != null) {
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
+      // RR-549 — never move/rename the workspace root itself (normalized-relative check).
+      if (srcRel == null || Path.of(srcRel).normalize().toString().isEmpty()) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN, "cannot move the workspace root: " + srcRel);
       }
       Path src = PathSafety.safeResolve(ctx.workspaceRoot(), srcRel);
       Path dst = PathSafety.safeResolve(ctx.workspaceRoot(), dstRel);
@@ -612,9 +625,20 @@ final class DeletePathTool implements Tool {
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     try {
       String rel = args.path("path").asText(null);
+      // RR-549 — deny deletion of reserved control-plane paths (.git/**, .agent-context/**, …); a
+      // worker mistake or prompt injection must not erase Git identity/history or run evidence.
+      String reserved = ReservedWorkspacePaths.rejectionFor(rel);
+      if (reserved != null) return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reserved);
       String reviewerPolicyError = ReviewerMutationScope.validateDelete(rel);
       if (reviewerPolicyError != null) {
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
+      // RR-549 — refuse `delete path="."` / empty / `a/..`, which resolves to the workspace root
+      // and would recursively walk and delete the ENTIRE checkout (including .git). Decide on the
+      // normalized RELATIVE form so the check does not depend on symlink-resolved absolute paths.
+      if (rel == null || Path.of(rel).normalize().toString().isEmpty()) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN, "cannot delete the workspace root: " + rel);
       }
       Path target = PathSafety.safeResolve(ctx.workspaceRoot(), rel);
       if (!Files.exists(target))
@@ -951,6 +975,12 @@ final class AstEditCompatibilityTool implements Tool {
 }
 
 final class LspFallbackTool implements Tool {
+
+  /**
+   * RR-552 — per-file byte cap for the reference walk; skip a large/binary target before reading.
+   */
+  private static final long MAX_REFERENCE_FILE_BYTES = 4L * 1024 * 1024;
+
   @Override
   public String name() {
     return "lsp";
@@ -1026,13 +1056,31 @@ final class LspFallbackTool implements Tool {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "symbol/name/query is required");
     }
     Path root = ctx.workspaceRoot();
+    Path rootReal = root.toRealPath();
     ArrayNode matches = JsonSupport.JSON.createArrayNode();
     Pattern token = Pattern.compile("\\b" + Pattern.quote(symbol) + "\\b");
     try (var stream = Files.walk(root, 8)) {
-      for (Path file : stream.filter(Files::isRegularFile).limit(500).toList()) {
+      for (Path file :
+          stream
+              .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
+              .limit(500)
+              .toList()) {
         String rel = root.relativize(file).toString();
         if (rel.contains(".git/") || rel.contains("node_modules/") || rel.contains("target/"))
           continue;
+        // RR-552 — reject symlinks and any file whose real path escapes the workspace, so a
+        // repository link to a host credential/config/source file cannot be read into the
+        // model-visible response. Also skip oversized targets before reading them whole.
+        try {
+          if (Files.isSymbolicLink(file) || !file.toRealPath().startsWith(rootReal)) {
+            continue;
+          }
+          if (Files.size(file) > MAX_REFERENCE_FILE_BYTES) {
+            continue;
+          }
+        } catch (IOException ignored) {
+          continue;
+        }
         String text;
         try {
           text = Files.readString(file);
