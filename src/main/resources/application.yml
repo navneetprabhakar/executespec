@@ -990,7 +990,9 @@ agent:
     enabled: true
     run-interval: 1
   optimiser:
-    enabled: true
+    # RR-1277 — default OFF. Even in candidate-only mode the optimiser runs an ungated LLM over
+    # global outcomes and spends provider budget; operators opt in deliberately.
+    enabled: false
     run-interval: 10
     analysis-window-runs: 20
     failure-rate-threshold: 0.20

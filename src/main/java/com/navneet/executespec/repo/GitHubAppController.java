@@ -88,31 +88,29 @@ public class GitHubAppController {
   }
 
   /**
-   * Persist the install. Called from a GitHub App webhook in Phase 2; for now the front-end can
-   * POST it manually after the install bounce lands the user back on the IntegrationsPage with
-   * `?installation_id=`.
+   * Persist the install.
    *
-   * <p>Webhook signature verification is NOT implemented yet — this endpoint requires ORG_ADMIN
-   * auth in the meantime so it can't be abused via the public webhook URL.
+   * <p><b>RR-141 — refused until a provider-confirmed installation exists.</b> This endpoint
+   * previously wrote a caller-supplied numeric {@code installationId} straight onto the org row
+   * with only ORG_ADMIN auth — no signed GitHub callback, no {@code state}/nonce, no installation
+   * ownership or app-permission check. An org admin (or anything holding an ORG_ADMIN token) could
+   * therefore assert an ARBITRARY installation id, producing false integration readiness and an
+   * unsafe trust anchor for any later installation-token implementation. Because the signed
+   * callback / webhook-signature / installation-lookup flow does not exist yet, self-asserted
+   * installation state must not be persisted at all: the route fails closed with 501 until Phase 2
+   * wires the provider-confirmed exchange. Status/uninstall remain, so an org that already carries
+   * a legacy id can still read and clear it.
    */
   @PostMapping("/callback")
   @PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")
   public Map<String, Object> callback(
       @AuthenticationPrincipal AppUserDetails principal, @RequestBody InstallCallback body) {
-    if (body == null || body.installationId() == null) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "installationId required");
-    }
-    Org org = requireOrg(principal);
-    org.setGithubInstallationId(body.installationId());
-    org.setGithubInstalledAt(Instant.now());
-    org.setUpdatedAt(Instant.now());
-    orgRepo.save(org);
-    log.info(
-        "[GitHubApp] installed installationId={} on orgId={} by userId={}",
-        body.installationId(),
-        org.getId(),
-        principal.getUser().getId());
-    return Map.of("ok", true, "installationId", body.installationId());
+    // Resolve the org first so an unauthorized caller still gets the normal 404, not a 501.
+    requireOrg(principal);
+    throw new ResponseStatusException(
+        HttpStatus.NOT_IMPLEMENTED,
+        "GitHub App installation cannot be self-asserted: a provider-confirmed signed callback is"
+            + " not yet implemented. Refusing to persist an unverified installation id.");
   }
 
   @DeleteMapping("/install")

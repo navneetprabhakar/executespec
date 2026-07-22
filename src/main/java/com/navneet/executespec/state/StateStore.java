@@ -1748,6 +1748,24 @@ public class StateStore {
     return runRepo.countByStatus("COMPLETE");
   }
 
+  /**
+   * RR-1299 — recent TERMINAL runs across COMPLETE/PARTIAL/FAILED (started rows only). The
+   * optimiser's failure-rate trigger previously sampled COMPLETE-only runs and then looked for
+   * FAILED/BLOCKED tasks, but a run that actually failed terminalizes as FAILED/PARTIAL and never
+   * has status COMPLETE — so the failure-rate threshold could never fire on the failures it claims
+   * to monitor. Including PARTIAL/FAILED here lets the cohort contain real failures. CANCELLED is
+   * excluded because a user-initiated cancel is not a prompt-quality signal.
+   */
+  public List<PipelineRun> getRecentTerminalRuns(int limit) {
+    Specification<PipelineRun> terminal =
+        (root, q, cb) ->
+            cb.and(
+                root.get("status").in("COMPLETE", "PARTIAL", "FAILED"),
+                cb.isNotNull(root.get("startedAt")));
+    Pageable sorted = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "startedAt"));
+    return runRepo.findAll(terminal, sorted).getContent();
+  }
+
   public TaskReviewReport getReviewReport(String runId) {
     return runRepo
         .findById(runId)

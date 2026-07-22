@@ -193,6 +193,46 @@ class GitProcessAuthTest {
     }
   }
 
+  // ---- RR-147: the credential is scoped to the host we named ----
+
+  /**
+   * RR-147 — an authenticated invocation with an explicit URL binds {@link GitProcessAuth#HOST_ENV}
+   * to that host, and the helper only answers a matching host. A redirect to another host therefore
+   * re-invokes the helper with a different {@code host=} and receives nothing.
+   */
+  @Test
+  void authenticatedCloneBindsTheCredentialToTheUrlHost() {
+    ProcessBuilder pb =
+        GitProcessAuth.git("ghp_secret", List.of("clone", "https://github.com/acme/api", "/tmp/x"));
+
+    assertThat(pb.environment()).containsEntry(GitProcessAuth.HOST_ENV, "github.com");
+    String argv = String.join(" ", pb.command());
+    assertThat(argv).contains("${" + GitProcessAuth.HOST_ENV + "}");
+    assertThat(argv).contains("$" + "{" + GitProcessAuth.TOKEN_ENV + "}");
+  }
+
+  @Test
+  void explicitPortIsCarriedIntoTheHostBindingLikeGitDoes() {
+    assertThat(
+            GitProcessAuth.expectedHostFromArgs(List.of("clone", "https://ghe.example:8443/a/b")))
+        .isEqualTo("ghe.example:8443");
+    assertThat(GitProcessAuth.expectedHostFromArgs(List.of("clone", "https://github.com/a/b.git")))
+        .isEqualTo("github.com");
+    assertThat(GitProcessAuth.expectedHostFromArgs(List.of("fetch"))).isNull();
+  }
+
+  /**
+   * RR-147 — a named-remote operation resolves its URL from repository config, so there is no URL
+   * to bind the host from. HOST_ENV stays unset (the RR-1669 rewrite guard covers that path), and
+   * the helper answers unconditionally as before.
+   */
+  @Test
+  void namedRemoteOperationLeavesTheHostUnboundForBackwardCompatibility(@TempDir Path tmp)
+      throws Exception {
+    ProcessBuilder pb = GitProcessAuth.git("t", null, initRepo(tmp), List.of("fetch"));
+    assertThat(pb.environment()).doesNotContainKey(GitProcessAuth.HOST_ENV);
+  }
+
   @Test
   void inheritedGitAndAskpassEnvironmentIsStrippedBeforeTheCredentialIsAttached() {
     java.util.Map<String, String> env = new java.util.HashMap<>();
