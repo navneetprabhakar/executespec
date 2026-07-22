@@ -87,6 +87,15 @@ public class MailService {
     Properties props = new Properties();
     props.put("mail.smtp.auth", "true");
     props.put("mail.smtp.starttls.enable", "true");
+    // RR-107 — require STARTTLS so the client refuses to continue over plaintext if the server does
+    // not offer (or negotiate) TLS. With .enable alone, Jakarta Mail silently falls back to
+    // cleartext
+    // when STARTTLS is unavailable, transmitting SMTP-AUTH credentials and message contents in the
+    // clear. .required=true turns that downgrade into a hard failure, and server identity checking
+    // is
+    // enabled so the negotiated certificate must match the host.
+    props.put("mail.smtp.starttls.required", "true");
+    props.put("mail.smtp.ssl.checkserveridentity", "true");
     props.put("mail.smtp.host", smtpHost);
     props.put("mail.smtp.port", String.valueOf(smtpPort));
     props.put("mail.smtp.ssl.trust", smtpHost);

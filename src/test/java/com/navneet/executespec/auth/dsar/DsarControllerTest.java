@@ -15,14 +15,19 @@ import com.navneet.executespec.auth.entity.PaymentAudit;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.PaymentAuditRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * RR-229 / RR-230 — the self-service DSAR export must disclose ONLY the requesting subject's own
@@ -34,8 +39,9 @@ class DsarControllerTest {
   private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
   private final NotificationRepository notifRepo = mock(NotificationRepository.class);
   private final PaymentAuditRepository paymentRepo = mock(PaymentAuditRepository.class);
+  private final ActivityAuditService auditService = mock(ActivityAuditService.class);
   private final DsarController controller =
-      new DsarController(userRepo, runRepo, notifRepo, paymentRepo);
+      new DsarController(userRepo, runRepo, notifRepo, paymentRepo, auditService);
 
   @Test
   @SuppressWarnings("unchecked")
@@ -94,5 +100,65 @@ class DsarControllerTest {
         .containsEntry("truncated", true);
     Map<String, Object> notifsTrunc = (Map<String, Object>) truncation.get("notifications");
     assertThat(notifsTrunc).containsEntry("truncated", false);
+  }
+
+  // RR-231 — a DSAR bundle is highly sensitive and must never be a cacheable JSON resource.
+  @Test
+  void selfExportIsMarkedNonCacheableAttachment() {
+    AppUser subject = new AppUser();
+    subject.setId("subject-1");
+    subject.setEmail("subject@example.com");
+    when(userRepo.findById("subject-1")).thenReturn(Optional.of(subject));
+    when(paymentRepo.findByUserIdOrderByCreatedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+    when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+    when(notifRepo.findByUserIdOrderByCreatedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+
+    ResponseEntity<Map<String, Object>> response =
+        controller.exportSelf(new AppUserDetails(subject, null));
+
+    HttpHeaders headers = response.getHeaders();
+    assertThat(headers.getCacheControl()).contains("no-store");
+    assertThat(headers.getFirst(HttpHeaders.CONTENT_DISPOSITION)).contains("attachment");
+    assertThat(headers.getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
+  }
+
+  // RR-232 — a privileged act-on-behalf export must write a durable audit intent, and must FAIL
+  // CLOSED when that audit cannot be established rather than silently serving another subject's
+  // data.
+  @Test
+  void adminExportRecordsAuditIntent() {
+    AppUser subject = new AppUser();
+    subject.setId("subject-1");
+    subject.setOrgId("org-1");
+    when(userRepo.findById("subject-1")).thenReturn(Optional.of(subject));
+    when(paymentRepo.findByUserIdOrderByCreatedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+    when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+    when(notifRepo.findByUserIdOrderByCreatedAtDesc(eq("subject-1"), any(Pageable.class)))
+        .thenReturn(Page.empty());
+
+    AppUser admin = new AppUser();
+    admin.setId("admin-1");
+    controller.exportFor(new AppUserDetails(admin, null), "subject-1");
+
+    Mockito.verify(auditService).record(any());
+  }
+
+  @Test
+  void adminExportFailsClosedWhenAuditUnavailable() {
+    AppUser subject = new AppUser();
+    subject.setId("subject-1");
+    when(userRepo.findById("subject-1")).thenReturn(Optional.of(subject));
+    Mockito.doThrow(new RuntimeException("audit store down")).when(auditService).record(any());
+
+    AppUser admin = new AppUser();
+    admin.setId("admin-1");
+    org.junit.jupiter.api.Assertions.assertThrows(
+        ResponseStatusException.class,
+        () -> controller.exportFor(new AppUserDetails(admin, null), "subject-1"));
   }
 }
