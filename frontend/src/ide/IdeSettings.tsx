@@ -27,6 +27,9 @@ export function IdeIntegrations() {
   const [patsFailure, setPatsFailure] = useState<LoadFailure | null>(null);
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
+  // RR-770 — status-read failure is distinct from "not connected".
+  const [slackFailure, setSlackFailure] = useState(false);
+  const [ghFailure, setGhFailure] = useState(false);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
   const [pats, setPats] = useState<api.PersonalAccessTokenMeta[] | null>(null);
   const [revokePat, setRevokePat] = useState<api.PersonalAccessTokenMeta | null>(null);
@@ -54,20 +57,59 @@ export function IdeIntegrations() {
   useEffect(() => {
     loadSources();
     loadPats();
+    // RR-770 — a failed status read is not "not connected". Track it separately
+    // so the row can say "Status unavailable" instead of asserting the
+    // credential is absent (which invites re-running OAuth over a working setup).
     api
       .getSlackStatus()
-      .then(setSlack)
-      .catch(() => {});
+      .then((s) => {
+        setSlack(s);
+        setSlackFailure(false);
+      })
+      .catch(() => setSlackFailure(true));
     api
       .getGitHubAppStatus()
-      .then(setGh)
-      .catch(() => {});
+      .then((g) => {
+        setGh(g);
+        setGhFailure(false);
+      })
+      .catch(() => setGhFailure(true));
   }, []);
 
   function openInstall(getUrl: () => Promise<{installUrl?: string}>) {
+    setErr('');
     getUrl()
-      .then((r) => r.installUrl && window.open(r.installUrl, '_blank'))
-      .catch(() => {});
+      .then((r) => {
+        const raw = r.installUrl;
+        if (!raw) {
+          setErr('The install link is unavailable right now. Please try again.');
+          return;
+        }
+        // RR-771 — only follow an https destination, and open it with
+        // `noopener,noreferrer` (and null the opener) so the external OAuth /
+        // install page cannot reach `window.opener` and navigate this
+        // signed-in product tab to a phishing target (reverse tabnabbing).
+        let parsed: URL;
+        try {
+          parsed = new URL(raw, window.location.origin);
+        } catch {
+          setErr('The install link was malformed and was not opened.');
+          return;
+        }
+        if (parsed.protocol !== 'https:') {
+          setErr('The install link was not a secure https URL and was not opened.');
+          return;
+        }
+        const win = window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+        if (win) {
+          win.opener = null;
+        } else {
+          setErr('The install window was blocked. Allow pop-ups for this site and try again.');
+        }
+      })
+      .catch((e: unknown) =>
+        setErr(e instanceof Error ? e.message : 'Could not start the install flow.'),
+      );
   }
 
   // Connected = the source is enabled server-side OR the per-user credential
@@ -215,6 +257,8 @@ export function IdeIntegrations() {
     name: string;
     desc: string;
     connected: boolean;
+    // RR-770 — true when the connection status could not be read at all.
+    statusUnknown?: boolean;
     sub?: string;
     actions?: React.ReactNode;
   }> = [
@@ -222,6 +266,9 @@ export function IdeIntegrations() {
       name: 'GitHub',
       desc: 'Clone repos + open PRs · GitHub App or a personal access token',
       connected: ghConnected,
+      // A set PAT is authoritative on its own; only treat status as unknown when
+      // we have no other signal and the app-status read failed.
+      statusUnknown: ghFailure && !user?.hasGithubPat,
       sub: gh?.installed ? 'app installed' : user?.hasGithubPat ? 'token set' : undefined,
       actions: (
         // RL-2026-05-044 — removed the dead "Install app" button (no system GitHub App is
@@ -235,6 +282,7 @@ export function IdeIntegrations() {
       name: 'Slack',
       desc: 'Work-completion alerts in your channel',
       connected: !!slack?.connected,
+      statusUnknown: slackFailure && !slack,
       sub: slack?.connected ? slack.teamName || undefined : undefined,
       actions: !slack?.connected ? (
         <button
@@ -329,7 +377,11 @@ export function IdeIntegrations() {
                 </div>
               </div>
               <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
-                {r.connected ? 'Connected' : 'Not connected'}
+                {r.connected
+                  ? 'Connected'
+                  : r.statusUnknown
+                    ? 'Status unavailable'
+                    : 'Not connected'}
               </IdeBadge>
               {r.actions}
             </div>

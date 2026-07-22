@@ -651,24 +651,44 @@ export function isTerminalRunStatus(status?: string | null): boolean {
   return isTerminalRunStatusShared(status);
 }
 
-export type RunProgress = {done: number; total: number; pct: number; current: string | null};
+export type RunProgress = {
+  /** Settled tasks (any terminal task status) — the cursor for "Task N of M". */
+  done: number;
+  /** Tasks that actually succeeded — the honest progress-bar numerator. */
+  succeeded: number;
+  /** Tasks that failed or were blocked — a distinct, non-progress outcome. */
+  failed: number;
+  total: number;
+  /** Percent complete computed from SUCCEEDED tasks only. */
+  pct: number;
+  current: string | null;
+};
 
-/** Done/total/percent + the title of the task currently in flight, for the run card. */
+/**
+ * Done/total/percent + the title of the task currently in flight, for the run card.
+ *
+ * RR-1492 — a FAILED or BLOCKED task is settled but is NOT progress. The bar's
+ * percentage is therefore computed from succeeded tasks only, and failed/blocked
+ * are exposed separately so a PARTIAL run with failures cannot render as a full,
+ * green bar. `done` remains the settled count so the "Task N of M" step cursor
+ * still advances past a finished-but-failed task.
+ */
 export function runProgress(
   tasks?: {status?: string | null; title?: string | null}[] | null,
 ): RunProgress {
   const list = tasks ?? [];
   const total = list.length;
-  const isDone = (s?: string | null) =>
-    ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED', 'BLOCKED', 'DONE'].includes(
-      (s || '').toUpperCase(),
-    );
-  const isRunning = (s?: string | null) =>
-    ['WORKING', 'IN_PROGRESS', 'RUNNING'].includes((s || '').toUpperCase());
-  const done = list.filter((t) => isDone(t.status)).length;
+  const norm = (s?: string | null) => (s || '').toUpperCase();
+  const isSucceeded = (s?: string | null) => ['COMPLETE', 'COMPLETED', 'DONE'].includes(norm(s));
+  const isFailed = (s?: string | null) => ['FAILED', 'BLOCKED'].includes(norm(s));
+  const isSettled = (s?: string | null) => isSucceeded(s) || isFailed(s) || norm(s) === 'PARTIAL';
+  const isRunning = (s?: string | null) => ['WORKING', 'IN_PROGRESS', 'RUNNING'].includes(norm(s));
+  const succeeded = list.filter((t) => isSucceeded(t.status)).length;
+  const failed = list.filter((t) => isFailed(t.status)).length;
+  const done = list.filter((t) => isSettled(t.status)).length;
   const current = list.find((t) => isRunning(t.status))?.title ?? null;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  return {done, total, pct, current};
+  const pct = total > 0 ? Math.round((succeeded / total) * 100) : 0;
+  return {done, succeeded, failed, total, pct, current};
 }
 
 /** Route for the run card's "Open" action, by run status. */
