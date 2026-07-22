@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.auth.service.ActivityAuditService;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.DefaultMessage;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,8 +22,9 @@ class FeatureFlagServiceTest {
   private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
   private final RedisMessageListenerContainer listenerContainer =
       mock(RedisMessageListenerContainer.class);
+  private final ActivityAuditService activityAuditService = mock(ActivityAuditService.class);
   private final FeatureFlagService service =
-      new FeatureFlagService(repository, redisTemplate, listenerContainer);
+      new FeatureFlagService(repository, redisTemplate, listenerContainer, activityAuditService);
 
   @Test
   void scheduledReloadSwapsToACompleteSnapshot() {

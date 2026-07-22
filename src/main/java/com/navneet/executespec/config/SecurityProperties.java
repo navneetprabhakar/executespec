@@ -36,8 +36,14 @@ public class SecurityProperties {
             + " https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self' wss:"
             + " https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com"
             + " https://cdn.jsdelivr.net; worker-src 'self' blob:; frame-src 'self'"
-            + " https://*.run.app https://*.executespec.ai; frame-ancestors 'self'"
-            + " https://*.executespec.ai https://*.run.app";
+            + " https://*.run.app https://*.executespec.ai; frame-ancestors 'self'";
+    // RR-431 — `frame-ancestors` controls who may EMBED ExecuteSpec's own authenticated pages, and
+    // is the clickjacking boundary. It must NOT carry the preview wildcards: `https://*.run.app`
+    // let any attacker-controlled Cloud Run origin frame a logged-in ExecuteSpec page for
+    // UI-redress
+    // attacks, and `https://*.executespec.ai` trusted every tenant/compromised subdomain as a
+    // framing parent. Previews that ExecuteSpec itself embeds stay in `frame-src` above; who may
+    // frame ExecuteSpec is now `'self'` only.
   }
 
   @Data

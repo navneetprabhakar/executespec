@@ -92,4 +92,44 @@ class FilePatternEnforcerTest {
         new Standard.FilePatternEnforcement(java.util.Arrays.asList("", "   ", null), List.of());
     assertThat(enforcer.enforce(e, List.of("a.txt", "b.txt"))).isEmpty();
   }
+
+  // RR-1612 — a required-pattern "missing" assertion is unsound over a truncated/pruned inventory:
+  // suppress the false BLOCKING violation and report the check UNAVAILABLE instead.
+  @Test
+  void requiredPattern_missingOverIncompleteInventory_suppressedAndUnavailable() {
+    Standard.FilePatternEnforcement e =
+        new Standard.FilePatternEnforcement(List.of(), List.of("**/LICENSE"));
+    List<String> partial = List.of("src/main/Foo.java", "README.md");
+    FilePatternEnforcer.FilePatternOutcome outcome =
+        enforcer.evaluate(e, partial, /* inventoryComplete= */ false);
+    assertThat(outcome.violations())
+        .noneMatch(v -> v.kind() == FilePatternEnforcer.Violation.Kind.REQUIRED_FILE_MISSING);
+    assertThat(outcome.status())
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.UNAVAILABLE);
+  }
+
+  // RR-1612 — over a COMPLETE inventory the missing-required assertion is sound and preserved.
+  @Test
+  void requiredPattern_missingOverCompleteInventory_stillBlocks() {
+    Standard.FilePatternEnforcement e =
+        new Standard.FilePatternEnforcement(List.of(), List.of("**/LICENSE"));
+    List<String> complete = List.of("src/main/Foo.java", "README.md");
+    FilePatternEnforcer.FilePatternOutcome outcome =
+        enforcer.evaluate(e, complete, /* inventoryComplete= */ true);
+    assertThat(outcome.violations())
+        .anyMatch(v -> v.kind() == FilePatternEnforcer.Violation.Kind.REQUIRED_FILE_MISSING);
+    assertThat(outcome.status())
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED);
+  }
+
+  // RR-1612 — a forbidden match remains sound on a partial inventory (files we DID see).
+  @Test
+  void forbiddenPattern_overIncompleteInventory_stillEmitted() {
+    Standard.FilePatternEnforcement e =
+        new Standard.FilePatternEnforcement(List.of("**/.env"), List.of());
+    FilePatternEnforcer.FilePatternOutcome outcome =
+        enforcer.evaluate(e, List.of("backend/.env"), /* inventoryComplete= */ false);
+    assertThat(outcome.violations())
+        .anyMatch(v -> v.kind() == FilePatternEnforcer.Violation.Kind.FORBIDDEN_FILE_PRESENT);
+  }
 }

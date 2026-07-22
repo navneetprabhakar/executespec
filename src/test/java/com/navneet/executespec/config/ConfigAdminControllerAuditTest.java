@@ -39,6 +39,32 @@ class ConfigAdminControllerAuditTest {
     assertThat(event.getValue().getNewValue()).isEqualTo("{\"present\":true}");
   }
 
+  // RR-533 — a runtime refresh activates externally-edited policy in the live JVM and must record
+  // an
+  // actor-attributed audit event (changed key NAMES only, never secret values).
+  @Test
+  void refreshWritesActorAuditWithChangedKeyNames() {
+    GcsRuntimeConfig runtimeConfig = mock(GcsRuntimeConfig.class);
+    ConfigRefreshService refreshService = mock(ConfigRefreshService.class);
+    ActivityAuditService audit = mock(ActivityAuditService.class);
+    org.mockito.Mockito.when(refreshService.refresh())
+        .thenReturn(
+            new ConfigRefreshService.RefreshResult(
+                java.util.List.of("agent.concurrency.max-runs", "routing.failover.enabled"),
+                java.time.Instant.now()));
+    ConfigAdminController controller =
+        new ConfigAdminController(runtimeConfig, refreshService, audit);
+
+    controller.refresh(user());
+
+    ArgumentCaptor<ActivityAudit> event = ArgumentCaptor.forClass(ActivityAudit.class);
+    verify(audit).record(event.capture());
+    assertThat(event.getValue().getEventType()).isEqualTo("RUNTIME_CONFIG_REFRESHED");
+    assertThat(event.getValue().getActorId()).isEqualTo("super-1");
+    assertThat(event.getValue().getNewValue()).contains("\"changedKeyCount\":2");
+    assertThat(event.getValue().getNewValue()).contains("agent.concurrency.max-runs");
+  }
+
   @Test
   void failedPersistenceReturnsUnavailableAndDoesNotWriteAudit() {
     GcsRuntimeConfig runtimeConfig = mock(GcsRuntimeConfig.class);

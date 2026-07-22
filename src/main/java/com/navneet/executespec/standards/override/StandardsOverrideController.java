@@ -7,9 +7,11 @@ import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
-import com.navneet.executespec.standards.OrgStandardRepository;
+import com.navneet.executespec.standards.EffectiveStandardsResolver;
 import com.navneet.executespec.standards.ProjectStandardOverride;
 import com.navneet.executespec.standards.ProjectStandardOverrideRepository;
 import com.navneet.executespec.standards.StandardsViolation;
@@ -54,7 +56,8 @@ public class StandardsOverrideController {
 
   private final ProjectStandardOverrideRepository overrideRepo;
   private final StandardsViolationRepository violationRepo;
-  private final OrgStandardRepository orgStandardRepo;
+  private final ProjectRepository projectRepository;
+  private final EffectiveStandardsResolver effectiveStandardsResolver;
   private final ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
@@ -119,6 +122,11 @@ public class StandardsOverrideController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "SEVERITY_DOWNGRADE requires newSeverity");
     }
+    // RR-596 — prove the exception targets a real, unlocked org standard, and (for a downgrade) a
+    // strictly-lower severity, BEFORE persisting. Otherwise the API reported success and emitted an
+    // audit event for a change the resolver would silently ignore, and accumulated orphan override
+    // rows for arbitrary identifiers.
+    validateExceptionOrThrow(projectId, standardId, type, body.newSeverity());
     Optional<ProjectStandardOverride> existing =
         overrideRepo.findByProjectIdAndStandardId(projectId, standardId);
     ProjectStandardOverride entity =
@@ -172,6 +180,46 @@ public class StandardsOverrideController {
         "Removed exception on " + standardId,
         Map.of("standardId", standardId));
     return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * RR-596 — resolve the project's org, then reject missing/locked standards and non-downgrades.
+   */
+  private void validateExceptionOrThrow(
+      String projectId,
+      String standardId,
+      ProjectStandardOverride.OverrideType type,
+      String newSeverity) {
+    String orgId = projectRepository.findById(projectId).map(Project::getOrgId).orElse(null);
+    if (orgId == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "project not found");
+    }
+    EffectiveStandardsResolver.ExceptionWriteCheck check =
+        effectiveStandardsResolver.validateProjectException(orgId, standardId, type, newSeverity);
+    switch (check.result()) {
+      case OK -> {
+        /* proceed */
+      }
+      case STANDARD_NOT_FOUND ->
+          throw new ResponseStatusException(
+              HttpStatus.NOT_FOUND, "no org standard '" + standardId + "' for this project's org");
+      case STANDARD_LOCKED ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "standard '" + standardId + "' is org-level-locked and cannot be overridden");
+      case STANDARD_INVALID ->
+          throw new ResponseStatusException(
+              HttpStatus.UNPROCESSABLE_ENTITY,
+              "org standard '" + standardId + "' could not be parsed");
+      case INVALID_SEVERITY ->
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST, "newSeverity must be one of BLOCKING, WARNING, ADVISORY");
+      case NOT_A_DOWNGRADE ->
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST,
+              "newSeverity must be strictly lower than the standard's current severity"
+                  + (check.currentSeverity() == null ? "" : " (" + check.currentSeverity() + ")"));
+    }
   }
 
   private void requireAuth(Authentication auth) {
