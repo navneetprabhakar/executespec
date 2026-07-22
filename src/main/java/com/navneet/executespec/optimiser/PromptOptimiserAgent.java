@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
-import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
@@ -28,6 +27,9 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class PromptOptimiserAgent {
+
+  /** RR-1277 — directory for inert prompt candidates; the live source is never overwritten. */
+  static final String CANDIDATE_DIR = "prompt-optimiser-candidates";
 
   private static final String SYSTEM_PROMPT =
       """
@@ -58,7 +60,6 @@ public class PromptOptimiserAgent {
   private final ModelResolver modelResolver;
   private final PromptOptimiserProperties props;
   private final StateStore stateStore;
-  private final PromptVersioningService versioningService;
 
   @Autowired
   public PromptOptimiserAgent(
@@ -67,15 +68,13 @@ public class PromptOptimiserAgent {
       LlmRouter llmRouter,
       ModelResolver modelResolver,
       PromptOptimiserProperties props,
-      StateStore stateStore,
-      PromptVersioningService versioningService) {
+      StateStore stateStore) {
     this.analyser = analyser;
     this.auditService = auditService;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
     this.stateStore = stateStore;
-    this.versioningService = versioningService;
   }
 
   public void runIfDue(PipelineRun completedRun) {
@@ -106,15 +105,14 @@ public class PromptOptimiserAgent {
         optimisePrompt(entry.getKey(), entry.getValue(), patterns, completedRun);
       }
 
-      // Auto-commit DISABLED — agent ran `git add src/main/resources/prompts && git commit` on
-      // the developer's working tree from a Spring scheduled task, co-opting in-flight edits.
-      // The optimiser still writes prompt-file changes to disk; operators commit them manually
-      // (or via a dedicated CI job operating on a clean checkout) after review.
-      // Audit 2026-05-12 review item F #44.
+      // RR-1277 — the optimiser writes INERT candidate artifacts only; it never mutates the live
+      // prompt source (and therefore never auto-commits). Operators review candidates under the
+      // candidate directory and promote them deliberately through a reviewed change.
       log.info(
-          "Prompt Optimiser updated prompts for run {} — files are written, NOT auto-committed."
-              + " Review with `git diff src/main/resources/prompts/` and commit manually.",
-          completedRun.getRunId());
+          "Prompt Optimiser produced candidates for run {} in '{}/' — live prompts untouched;"
+              + " review and promote deliberately.",
+          completedRun.getRunId(),
+          CANDIDATE_DIR);
 
     } catch (Exception e) {
       log.error(
@@ -147,19 +145,25 @@ public class PromptOptimiserAgent {
       return;
     }
 
-    // Determine next version and backup the current file before overwriting
     int nextVersion =
         auditService.getHistory(promptFile).stream()
             .findFirst()
             .map(e -> e.getVersion() + 1)
             .orElse(1);
-    versioningService.backup(promptPath, nextVersion);
 
-    Files.writeString(
-        promptPath,
-        updatedContent,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.CREATE);
+    // RR-1277 / RR-1301 — NEVER overwrite the canonical prompt source (nor drop backup files into
+    // the checkout) at runtime. An LLM-authored prompt has no schema / size / security-include /
+    // conformance / fixed-corpus-eval / signature / approval gate, so a bad aggregate heuristic or
+    // a
+    // compromised provider could poison instructions for EVERY tenant, and truncating a live source
+    // file from a scheduled task can also mutate a developer/server checkout. Instead write an
+    // inert
+    // CANDIDATE artifact that an operator reviews and promotes deliberately; the live prompt is
+    // untouched, so a partial write / backup failure can never leave a corrupted live prompt with
+    // no
+    // rollback. (Durable candidate registry + deterministic security/conformance/eval promotion is
+    // the deferred full fix; this stops the runtime source mutation, which is the P1 exposure.)
+    Path candidatePath = writeCandidate(promptFile, updatedContent, nextVersion);
 
     auditService.record(
         promptFile,
@@ -169,7 +173,41 @@ public class PromptOptimiserAgent {
         allPatterns.sourceRunIds(),
         determineTriggerType());
 
-    log.info("Prompt Optimiser: updated {} — patterns: {}", promptFile, patterns);
+    log.info(
+        "Prompt Optimiser: wrote CANDIDATE v{} for {} at {} — live source untouched; review and"
+            + " promote deliberately. Patterns: {}",
+        nextVersion,
+        promptFile,
+        candidatePath == null ? "<unavailable>" : candidatePath,
+        patterns);
+  }
+
+  /**
+   * RR-1277 — persist the proposed prompt as an inert candidate under a dedicated directory, never
+   * over the live source. Failure to write the candidate is non-fatal (the live prompt is unchanged
+   * regardless), so it is logged rather than thrown.
+   */
+  private Path writeCandidate(String promptFile, String updatedContent, int version) {
+    try {
+      Path dir = Path.of(CANDIDATE_DIR);
+      Files.createDirectories(dir);
+      // Flatten any subdirectory in promptFile so the candidate name is a single safe filename.
+      String flat = promptFile.replace('/', '_').replace('\\', '_');
+      Path candidate = dir.resolve(flat + ".v" + version + ".candidate");
+      Files.writeString(
+          candidate,
+          updatedContent,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING);
+      return candidate;
+    } catch (IOException e) {
+      log.warn(
+          "Prompt Optimiser: could not persist candidate for {} (v{}): {}",
+          promptFile,
+          version,
+          e.getMessage());
+      return null;
+    }
   }
 
   private String callLlm(String currentContent, List<String> patterns, PipelineRun run) {
@@ -215,20 +253,27 @@ public class PromptOptimiserAgent {
 
     if (props.getRunInterval() > 0 && totalCompleted % props.getRunInterval() == 0) return true;
 
-    List<PipelineRun> recent = stateStore.getRecentCompletedRuns(props.getAnalysisWindowRuns());
+    // RR-1299 — sample the TERMINAL cohort (COMPLETE/PARTIAL/FAILED), not COMPLETE-only, so a run
+    // that actually failed (status FAILED/PARTIAL) can be counted. Sampling COMPLETE-only meant the
+    // failure branch could never trigger and only the modulo cadence ever ran.
+    List<PipelineRun> recent = stateStore.getRecentTerminalRuns(props.getAnalysisWindowRuns());
     if (recent.size() < props.getAnalysisWindowRuns()) return false;
 
-    long failedRuns =
-        recent.stream()
-            .filter(
-                r ->
-                    stateStore.getTasksForRun(r.getRunId()).stream()
-                        .anyMatch(
-                            t -> "FAILED".equals(t.getStatus()) || "BLOCKED".equals(t.getStatus())))
-            .count();
+    long failedRuns = recent.stream().filter(this::runCountedAsFailure).count();
 
     double failureRate = (double) failedRuns / recent.size();
     return failureRate >= props.getFailureRateThreshold();
+  }
+
+  /**
+   * RR-1299 — a run is a failure signal when it terminalized FAILED/PARTIAL, or when any of its
+   * tasks is FAILED/BLOCKED (a task-level failure inside an otherwise-COMPLETE run).
+   */
+  boolean runCountedAsFailure(PipelineRun r) {
+    String status = r.getStatus();
+    if ("FAILED".equals(status) || "PARTIAL".equals(status)) return true;
+    return stateStore.getTasksForRun(r.getRunId()).stream()
+        .anyMatch(t -> "FAILED".equals(t.getStatus()) || "BLOCKED".equals(t.getStatus()));
   }
 
   private String determineTriggerType() {

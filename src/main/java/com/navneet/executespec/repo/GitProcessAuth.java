@@ -71,6 +71,16 @@ public final class GitProcessAuth {
   public static final String USER_ENV = "GIT_AUTH_USER";
 
   /**
+   * RR-147 — the host the credential is scoped to. When set, the ephemeral helper answers ONLY when
+   * git's credential request names this exact {@code host[:port]}. Git re-invokes the helper for
+   * the new host after any HTTP redirect, so a phishing/misconfigured remote that 3xx-redirects to
+   * a host we did not name receives no username/password. Absent (named-remote operations that
+   * resolve their URL from repository config), the helper answers unconditionally — that path is
+   * covered instead by {@link #assertRemoteUrlNotRewritten}.
+   */
+  public static final String HOST_ENV = "GIT_AUTH_HOST";
+
+  /**
    * Hooks directory for every invocation. {@code /dev/null} is a character device, so git's attempt
    * to stat/execute {@code /dev/null/<hook>} fails with {@code ENOTDIR} and the hook is treated as
    * absent. Being absolute, it cannot be reinterpreted relative to the untrusted worktree.
@@ -84,8 +94,22 @@ public final class GitProcessAuth {
   private static final Set<String> GIT_ENV_ALLOWLIST =
       Set.of("GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_EXEC_PATH");
 
+  /**
+   * RR-147 — host-scoped credential helper. Git appends the operation ({@code get}/{@code
+   * store}/{@code erase}) as the last argument and streams the request attributes ({@code
+   * protocol}/{@code host}/{@code path}, terminated by a blank line) on stdin. The helper reads the
+   * requested {@code host} and, when {@link #HOST_ENV} is set, emits the credential only on an
+   * exact match; a mismatch (e.g. a redirect to another host) exits silently, so the PAT never
+   * leaves the host we named. When {@link #HOST_ENV} is unset the behaviour is unchanged.
+   */
   private static final String HELPER =
-      "!f() { echo \"username=${"
+      "!f() { case \"$1\" in get) ;; *) exit 0 ;; esac; __h=; while IFS='=' read -r __k __v; do"
+          + " [ -z \"$__k\" ] && break; [ \"$__k\" = host ] && __h=\"$__v\"; done; if [ -n"
+          + " \"${"
+          + HOST_ENV
+          + "}\" ] && [ \"$__h\" != \"${"
+          + HOST_ENV
+          + "}\" ]; then exit 0; fi; echo \"username=${"
           + USER_ENV
           + ":-oauth2}\"; echo \"password=${"
           + TOKEN_ENV
@@ -144,6 +168,14 @@ public final class GitProcessAuth {
       if (username != null && !username.isBlank()) {
         pb.environment().put(USER_ENV, username);
       }
+      // RR-147 — bind the credential to the host named by an explicit URL argument (clone / a
+      // push or fetch to a literal URL). Named-remote invocations resolve their URL from repository
+      // config and have no URL argument here; they leave HOST_ENV unset and rely on the RR-1669
+      // rewrite guard instead.
+      String expectedHost = expectedHostFromArgs(gitArgs);
+      if (expectedHost != null) {
+        pb.environment().put(HOST_ENV, expectedHost);
+      }
     }
     return pb;
   }
@@ -192,6 +224,38 @@ public final class GitProcessAuth {
       return arg;
     }
     return null;
+  }
+
+  /**
+   * RR-147 — the {@code host[:port]} the credential is allowed to reach, derived from the first
+   * explicit {@code http(s)://} URL argument. Returns null when the invocation names no URL (a
+   * named-remote operation), so the helper answers unconditionally in that case. The port is
+   * included exactly when the URL specified one, mirroring git's own credential {@code host}
+   * attribute so a legitimate explicit-port remote is not falsely refused.
+   */
+  static String expectedHostFromArgs(List<String> gitArgs) {
+    if (gitArgs == null) return null;
+    for (String arg : gitArgs) {
+      if (arg == null) continue;
+      String lower = arg.toLowerCase(java.util.Locale.ROOT);
+      if (lower.startsWith("https://") || lower.startsWith("http://")) {
+        return hostFromUrl(arg);
+      }
+    }
+    return null;
+  }
+
+  private static String hostFromUrl(String url) {
+    try {
+      java.net.URI uri = java.net.URI.create(url.trim());
+      String host = uri.getHost();
+      if (host == null || host.isBlank()) return null;
+      host = host.toLowerCase(java.util.Locale.ROOT);
+      int port = uri.getPort();
+      return port == -1 ? host : host + ":" + port;
+    } catch (RuntimeException malformed) {
+      return null;
+    }
   }
 
   static Path repositoryDirFromArgs(List<String> gitArgs) {
