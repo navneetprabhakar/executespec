@@ -29,4 +29,29 @@ class ContextSanitizerSecretRedactionTest {
         .doesNotContain("abcdefghijklmnopqrstuvwxyz123456")
         .contains("[REDACTED]");
   }
+
+  // RR-037 (2026-07-22, P1) — the redaction set must cover the provider formats
+  // GeneratedSecretScanner already recognizes plus common JWT / Basic-auth / URL-credential shapes.
+  @Test
+  void redactsStripeSlackJwtBasicAndUrlCredentials() {
+    String stripe = sanitizer.sanitizeOutput("key sk_live_ABCDEFGHIJKLMNOPQRSTUVWX");
+    assertThat(stripe).doesNotContain("sk_live_ABCDEFGHIJKLMNOPQRSTUVWX").contains("[REDACTED]");
+
+    String slack = sanitizer.sanitizeOutput("token xoxb-123456789012-abcdefghijklmnop");
+    assertThat(slack).doesNotContain("xoxb-123456789012-abcdefghijklmnop").contains("[REDACTED]");
+
+    String jwt =
+        sanitizer.sanitizeOutput(
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U");
+    assertThat(jwt)
+        .doesNotContain("dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
+        .contains("[REDACTED]");
+
+    String basic = sanitizer.sanitizeOutput("Authorization: Basic dXNlcjpzdXBlcnNlY3JldA==");
+    assertThat(basic).doesNotContain("dXNlcjpzdXBlcnNlY3JldA==").contains("[REDACTED]");
+
+    String urlCred =
+        sanitizer.sanitizeOutput("clone https://alice:hunter2secret@github.com/x/y.git");
+    assertThat(urlCred).doesNotContain("alice:hunter2secret@").contains("[REDACTED]");
+  }
 }

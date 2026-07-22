@@ -168,6 +168,7 @@ class LlmRouterTest {
             managedAiUsageService,
             routePolicyService,
             dispatchAuthorization,
+            new com.navneet.executespec.security.ContextSanitizer(),
             anthropicModelProvider);
     router = spy(real);
     ReflectionTestUtils.setField(router, "executionContextEnforcementEnabled", false);
