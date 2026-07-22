@@ -15,6 +15,9 @@ import {useIsMobile} from '@/hooks/useIsMobile';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
+// RR-790 — reuse the typed event normalizer so the live view renders tool,
+// continuation, usage and evidence envelopes instead of only message/payload.
+import {logLabel, logMessage, isNoisyLogEvent} from '@/ide/runResultUtils';
 import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
 import {
   providerIsDispatchable,
@@ -1398,13 +1401,6 @@ export function IdeCompose() {
   );
 }
 
-type LiveEntry = {
-  id?: string;
-  type?: string;
-  timestamp?: number;
-  data?: {message?: string; payload?: string};
-};
-
 // AgentTask.status is one of PENDING | LOCKED | WORKING | COMPLETE | PARTIAL | FAILED | BLOCKED
 // (see state/entity/AgentTask.java). The earlier checks for 'COMPLETED'/'DONE'/'RUNNING' matched
 // none of these, so the live task list never flipped its indicator. Tolerant + case-insensitive.
@@ -1416,16 +1412,6 @@ function taskIsRunning(s?: string | null): boolean {
   const u = (s || '').toUpperCase();
   return u === 'WORKING' || u === 'RUNNING' || u === 'EXECUTING';
 }
-// Friendly live-log type labels (review/11 IdeLive) — raw enums like TOOL_CALL
-// read as plumbing. Colors keep the same keying in the renderer below.
-function logTypeLabel(type?: string): string {
-  const t = (type || 'log').toLowerCase();
-  if (t.includes('tool')) return '🔧 tool';
-  if (t.includes('llm') || t.includes('completion')) return '🧠 model';
-  if (t.includes('warn')) return '⚠ warning';
-  return t;
-}
-
 export function IdeLive() {
   const params = useParams();
   const navigate = useNavigate();
@@ -1524,7 +1510,14 @@ export function IdeLive() {
   const elapsed = formatElapsed(runElapsedMs(run));
 
   // Prefer SSE entries (real-time); they're the only live source here.
-  const logList = sseEntries.slice(-100) as LiveEntry[];
+  // RR-790 — drop internal RUN_DETAIL refresh pings, keep every typed envelope,
+  // and disclose when the visible window hides older retained events.
+  const renderableEntries = (sseEntries as unknown as api.RunLogEvent[]).filter(
+    (ev) => !isNoisyLogEvent(ev),
+  );
+  const LIVE_WINDOW = 100;
+  const logList = renderableEntries.slice(-LIVE_WINDOW);
+  const hiddenLiveEvents = renderableEntries.length - logList.length;
   const sseConnected = sseStatus === 'CONNECTED';
   // Transport jargon → plain status (review/11 IdeLive copy).
   const sseLabel = sseConnected
@@ -1718,19 +1711,38 @@ export function IdeLive() {
                 padding: 8,
               }}
             >
+              {hiddenLiveEvents > 0 && (
+                <div
+                  role='status'
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: 11,
+                    color: 'var(--ide-fg-muted)',
+                    borderBottom: '1px solid var(--ide-border)',
+                  }}
+                >
+                  {/* RR-790 — the live buffer only shows the most recent window. */}
+                  {hiddenLiveEvents.toLocaleString()} earlier event
+                  {hiddenLiveEvents === 1 ? '' : 's'} scrolled out of the live view — open the run
+                  result Logs tab for the full stream.
+                </div>
+              )}
               {logList.map((ev, i) => {
                 const t = (ev.type || 'log').toLowerCase();
                 const color = t.includes('tool')
                   ? 'var(--ide-accent)'
                   : t.includes('llm') || t.includes('completion')
                     ? 'var(--ide-green)'
-                    : t.includes('warn')
+                    : t.includes('warn') || t.includes('fail')
                       ? 'var(--ide-yellow)'
                       : 'var(--ide-fg-muted)';
-                const body = ev.data?.message || ev.data?.payload || '';
+                // RR-790 — the shared normalizer renders every typed envelope; fall back
+                // to the raw type label only when it produces nothing.
+                const body = logMessage(ev);
+                const ts = typeof ev.timestamp === 'number' ? ev.timestamp : null;
                 return (
                   <div
-                    key={ev.id || i}
+                    key={(ev.id as string) || i}
                     style={{
                       padding: '6px 8px',
                       borderBottom: '1px solid var(--ide-border)',
@@ -1739,14 +1751,14 @@ export function IdeLive() {
                     }}
                   >
                     <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
-                      {logTypeLabel(ev.type)}
+                      {logLabel(ev.type)}
                     </span>
-                    {ev.timestamp && (
+                    {ts != null && (
                       <span
                         className='ide-mono'
                         style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 10}}
                       >
-                        {new Date(ev.timestamp).toLocaleTimeString()}
+                        {new Date(ts).toLocaleTimeString()}
                       </span>
                     )}
                     <span>{body}</span>

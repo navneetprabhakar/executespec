@@ -548,8 +548,16 @@ export const getProjectDoc = async (
   projectId: string,
   docType: GeneratedDocType,
 ): Promise<GeneratedDocRow | null> => {
-  const row = await req<GeneratedDocRow | undefined>(`/projects/${projectId}/docs/${docType}`);
-  return row ?? null;
+  // RR-1313 — only a typed 404/410 means "not generated". Any other status
+  // (401/429/500/network) must propagate so the Docs surface can render a
+  // retryable error instead of a false "no docs" empty state.
+  try {
+    const row = await req<GeneratedDocRow | undefined>(`/projects/${projectId}/docs/${docType}`);
+    return row ?? null;
+  } catch (e) {
+    if (isTypedAbsence(e)) return null;
+    throw e;
+  }
 };
 
 /**
@@ -615,8 +623,16 @@ export const refreshProjectPrs = (projectId: string) =>
   );
 
 export const getArchitectureDoc = async (projectId: string): Promise<ArchitectureDoc | null> => {
-  const doc = await req<ArchitectureDoc | undefined>(`/projects/${projectId}/architecture`);
-  return doc ?? null;
+  // RR-1313 — only a typed 404/410 means "no map generated yet". Any other status
+  // (401/429/500/network) must propagate so the surface renders a retryable error
+  // instead of a false "No system map yet" empty state.
+  try {
+    const doc = await req<ArchitectureDoc | undefined>(`/projects/${projectId}/architecture`);
+    return doc ?? null;
+  } catch (e) {
+    if (isTypedAbsence(e)) return null;
+    throw e;
+  }
 };
 
 export const getArchitectureVersions = (projectId: string) =>
