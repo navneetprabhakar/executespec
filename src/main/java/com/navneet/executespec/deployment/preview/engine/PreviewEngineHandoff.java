@@ -86,6 +86,33 @@ public class PreviewEngineHandoff {
             envVars);
 
     if (!"READY".equals(resp.status())) {
+      // RR-1620: a non-READY response can still carry a preview id. The engine may already be
+      // running a container with the customer's injected env secrets, and the pushed image sits in
+      // the shared registry. Discarding resp.id() throws away the only handle to it, leaving both
+      // orphaned with no reconciliation path. Act on the id before failing: release it, and if the
+      // release does not succeed, log at ERROR so the orphaned image + container are at least
+      // recorded rather than silently lost.
+      String orphanId = resp.id();
+      if (orphanId != null && !orphanId.isBlank()) {
+        boolean released = client.unregister(orphanId);
+        if (released) {
+          log.warn(
+              "[{}] preview-engine handoff non-READY (status={}); released previewId={} image={}",
+              runId,
+              resp.status(),
+              orphanId,
+              pushed.imageRef());
+        } else {
+          log.error(
+              "[{}] preview-engine handoff non-READY (status={}) AND cleanup unregister of"
+                  + " previewId={} did not succeed — image {} and a possibly-running container are"
+                  + " ORPHANED and require reconciliation",
+              runId,
+              resp.status(),
+              orphanId,
+              pushed.imageRef());
+        }
+      }
       throw new PreviewEngineClient.PreviewEngineException(
           "preview-engine reported status=" + resp.status() + " reason=" + resp.statusReason(),
           null);

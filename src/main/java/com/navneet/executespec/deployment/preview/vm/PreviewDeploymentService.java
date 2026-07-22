@@ -34,23 +34,50 @@ public class PreviewDeploymentService {
   private static final int SSH_CONNECT_TIMEOUT = 10;
   private static final int PROCESS_TIMEOUT_SECONDS = 300;
 
+  /** RR-1049: the only DNS suffix a preview URL may carry — the id is the sole variable label. */
+  static final String PREVIEW_DOMAIN_SUFFIX = ".preview.executespec.ai";
+
+  /** RR-1040: upper bound on a single TTL extension, in minutes. */
+  static final int MAX_EXTEND_MINUTES = 240;
+
   private final PreviewVmProperties vmProperties;
   private final PreviewRegistryRepository registryRepo;
   private final PreviewMetricRepository metricsRepo;
   private final ObjectMapper objectMapper;
 
-  /** Deploy a generated project as a live preview on a remote VM. */
+  /**
+   * Backward-compatible overload — deploys with the VM registry's default TTL. Prefer {@link
+   * #deploy(String, String, Path, int)} so the session and registry share one TTL authority
+   * (RR-1042).
+   */
   public PreviewVmResult deploy(String projectName, String executionId, Path projectDir) {
+    return deploy(projectName, executionId, projectDir, vmProperties.getDefaultTtlMinutes());
+  }
+
+  /**
+   * Deploy a generated project as a live preview on a remote VM.
+   *
+   * <p>RR-1042: {@code ttlMinutes} is the authoritative TTL passed through from the caller (the
+   * product session), so the registry expiry, the remote deploy script and the customer-facing
+   * session promise cannot disagree. A non-positive value falls back to the VM default.
+   */
+  public PreviewVmResult deploy(
+      String projectName, String executionId, Path projectDir, int ttlMinutes) {
     String previewId = generatePreviewId(projectName);
     PreviewVmProperties.VmConfig targetVm = selectVm();
-    int ttlMinutes = vmProperties.getDefaultTtlMinutes();
+    if (ttlMinutes <= 0) {
+      ttlMinutes = vmProperties.getDefaultTtlMinutes();
+    }
+    // RR-1049: the canonical, server-derived preview URL. The remote deploy script's output is
+    // never allowed to choose the URL a downstream host-network test container connects to.
+    String canonicalUrl = "https://" + previewId + PREVIEW_DOMAIN_SUFFIX;
 
     PreviewRegistry entry =
         PreviewRegistry.builder()
             .id(previewId)
             .executionId(executionId)
             .projectName(projectName)
-            .url("https://" + previewId + ".preview.executespec.ai")
+            .url(canonicalUrl)
             .vmId(targetVm.getId())
             .vmIp(targetVm.getInternalIp())
             .status("deploying")
@@ -76,8 +103,12 @@ public class PreviewDeploymentService {
                   "/opt/preview-engine/bin/deploy-preview.sh %s %s %d",
                   previewId, remoteTmpDir, ttlMinutes));
 
-      // Parse result from script output
+      // Parse result from script output. RR-1049: the script runs on a remote VM whose output is
+      // untrusted for URL/identity purposes. Validate the port range and pin BOTH the previewId and
+      // the URL to server-derived values so a compromised VM/script cannot forge a teardown
+      // identity or redirect the host-network test container to loopback/RFC1918/metadata targets.
       PreviewVmResult result = parsePreviewJson(output);
+      validateAndPinResult(result, previewId, canonicalUrl);
 
       // If target VM is NOT the gateway, write Caddy config on gateway
       if (!"gateway".equals(targetVm.getRole())) {
@@ -166,12 +197,31 @@ public class PreviewDeploymentService {
     log.info("Preview torn down: {}", previewId);
   }
 
-  /** Extend a preview's TTL. */
+  /**
+   * Extend a preview's TTL.
+   *
+   * <p>RR-1040: the extension is bounded to a positive {@code [1, MAX_EXTEND_MINUTES]} range so a
+   * negative value cannot shorten the preview and a huge value cannot overflow the expiry or revive
+   * stale metadata. Only a live preview (active/deploying/unhealthy) can be extended — a
+   * torn-down/failed/gc row is not resurrected. The new expiry is computed from {@code max(now,
+   * currentExpiry) + duration} so extending an already-future preview genuinely adds time instead
+   * of resetting it to {@code now + duration}.
+   */
   public void extend(String previewId, int extraMinutes) {
+    if (extraMinutes < 1 || extraMinutes > MAX_EXTEND_MINUTES) {
+      throw new PreviewDeploymentException(
+          "Extension must be between 1 and " + MAX_EXTEND_MINUTES + " minutes: " + extraMinutes);
+    }
+
     PreviewRegistry entry =
         registryRepo
             .findById(previewId)
             .orElseThrow(() -> new PreviewDeploymentException("Preview not found: " + previewId));
+
+    if (!List.of("active", "deploying", "unhealthy").contains(entry.getStatus())) {
+      throw new PreviewDeploymentException(
+          "Preview cannot be extended from status " + entry.getStatus() + ": " + previewId);
+    }
 
     String vmExternalIp = resolveExternalIp(entry.getVmId());
 
@@ -179,10 +229,35 @@ public class PreviewDeploymentService {
         vmExternalIp,
         String.format("/opt/preview-engine/bin/extend-preview.sh %s %d", previewId, extraMinutes));
 
-    entry.setExpiresAt(Instant.now().plus(extraMinutes, ChronoUnit.MINUTES));
+    Instant now = Instant.now();
+    Instant base =
+        (entry.getExpiresAt() != null && entry.getExpiresAt().isAfter(now))
+            ? entry.getExpiresAt()
+            : now;
+    entry.setExpiresAt(base.plus(extraMinutes, ChronoUnit.MINUTES));
     registryRepo.save(entry);
 
     log.info("Preview {} extended by {}m", previewId, extraMinutes);
+  }
+
+  /**
+   * RR-1049: validates the untrusted remote deploy-script output and overwrites its URL + preview
+   * id with the server-derived values. The script may only report the port (validated to a legal
+   * range) and the health flag; it may not choose where downstream test traffic goes or forge which
+   * preview id was deployed.
+   */
+  static void validateAndPinResult(PreviewVmResult result, String previewId, String canonicalUrl) {
+    if (result == null) {
+      throw new PreviewDeploymentException("No PREVIEW_JSON result to validate");
+    }
+    int port = result.getPort();
+    if (port < 1 || port > 65535) {
+      throw new PreviewDeploymentException("Remote preview reported an out-of-range port: " + port);
+    }
+    // Pin identity + URL to what the server generated, discarding any attacker-influenced values.
+    result.setPreviewId(previewId);
+    result.setUrl(canonicalUrl);
+    result.setVmIp(null);
   }
 
   /**

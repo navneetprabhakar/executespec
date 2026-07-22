@@ -3,8 +3,11 @@ package com.navneet.executespec.deployment.preview;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -453,6 +456,21 @@ public class DevDockerfileGenerator {
     return PreviewSpringBootDockerfiles.cloudRun(workspace);
   }
 
+  /**
+   * RR-388: the Python manifest COPY line, or empty when neither {@code requirements.txt} nor
+   * {@code pyproject.toml} exists. A bare {@code COPY requirements.txt* pyproject.toml* ./} with no
+   * matching source aborts the Docker/BuildKit build before the documented no-requirements fallback
+   * can run, so the simplest supported Python script/CLI could not build a preview. The wildcard
+   * form is safe as soon as at least one manifest is present; the subsequent {@code COPY . .}
+   * copies everything when none is.
+   */
+  private static String pythonManifestCopy(Path workspace) {
+    boolean hasManifest =
+        Files.exists(workspace.resolve("requirements.txt"))
+            || Files.exists(workspace.resolve("pyproject.toml"));
+    return hasManifest ? "COPY requirements.txt* pyproject.toml* ./\n" : "";
+  }
+
   private String cloudRun_Python(Path workspace) {
     String installStep;
     if (Files.exists(workspace.resolve("requirements.txt"))) {
@@ -479,7 +497,7 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("ENV HOST=0.0.0.0\n");
-    sb.append("COPY requirements.txt* pyproject.toml* ./\n");
+    sb.append(pythonManifestCopy(workspace)); // RR-388
     sb.append(installStep).append("\n");
     sb.append("COPY . .\n");
     sb.append("EXPOSE 8080\n");
@@ -1129,8 +1147,7 @@ public class DevDockerfileGenerator {
     sb.append("COPY package.json package-lock.json* ./\n");
 
     // Copy each workspace's package.json
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       if (Files.exists(wsDir.resolve("package.json"))) {
         sb.append("COPY ").append(wsName).append("/package.json ./").append(wsName).append("/\n");
@@ -1143,8 +1160,7 @@ public class DevDockerfileGenerator {
     // Detect frontend and backend workspaces
     String frontendWs = null;
     String backendWs = null;
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
@@ -1517,8 +1533,8 @@ public class DevDockerfileGenerator {
            FROM python:3.12-slim
            WORKDIR /app
            LABEL preview=true
-           COPY requirements.txt* pyproject.toml* ./
            """
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + "COPY . .\n"
@@ -2202,17 +2218,96 @@ public class DevDockerfileGenerator {
 
   private boolean isMonorepo(JsonNode pkg, Path workspace) {
     JsonNode workspaces = pkg.get("workspaces");
-    if (workspaces == null || !workspaces.isArray() || workspaces.isEmpty()) {
+    if (workspaces == null) {
       return false;
     }
-    // Verify at least one workspace dir exists with its own package.json
-    for (JsonNode ws : workspaces) {
-      Path wsDir = workspace.resolve(ws.asText());
-      if (Files.exists(wsDir.resolve("package.json"))) {
-        return true;
+    // RR-387: a workspace value can be a glob (packages/*, apps/*), so a literal directory check
+    // never matches. Resolve the declaration to real package directories.
+    return !resolveWorkspaceDirs(workspaces, workspace).isEmpty();
+  }
+
+  /**
+   * RR-387: expand an npm/Yarn/pnpm {@code workspaces} declaration into the actual on-disk package
+   * directories. Standard declarations such as {@code packages/*} and {@code apps/*} are globs, not
+   * literal directories, so treating each value verbatim (looking for {@code <value>/package.json})
+   * never finds {@code packages/*} and misclassifies common monorepos as single packages. This
+   * parses both the array form ({@code ["packages/*"]}) and Yarn's object form ({@code
+   * {"packages":[...]}}), expands a single trailing {@code /*} or {@code /**} glob one level within
+   * the canonical workspace root, keeps only directories that actually contain a {@code
+   * package.json}, and returns a de-duplicated, sorted list of workspace-relative directory names.
+   * Absolute or traversing patterns are rejected.
+   */
+  List<String> resolveWorkspaceDirs(JsonNode workspacesNode, Path root) {
+    JsonNode patterns = workspacesNode;
+    if (workspacesNode != null && workspacesNode.isObject()) {
+      patterns = workspacesNode.get("packages"); // Yarn object form
+    }
+    if (patterns == null || !patterns.isArray()) {
+      return List.of();
+    }
+    Path canonicalRoot;
+    try {
+      canonicalRoot = root.toRealPath();
+    } catch (IOException e) {
+      canonicalRoot = root.toAbsolutePath().normalize();
+    }
+    Set<String> dirs = new TreeSet<>();
+    for (JsonNode p : patterns) {
+      String pattern = p.asText("").trim();
+      if (!pattern.isEmpty()) {
+        addWorkspaceMatches(pattern, root, canonicalRoot, dirs);
       }
     }
-    return false;
+    return new ArrayList<>(dirs);
+  }
+
+  private void addWorkspaceMatches(String pattern, Path root, Path canonicalRoot, Set<String> out) {
+    // Reject anything that could escape the workspace root.
+    if (pattern.startsWith("/") || pattern.contains("..")) {
+      return;
+    }
+    int star = pattern.indexOf('*');
+    if (star < 0) {
+      addIfWorkspaceDir(pattern, root, canonicalRoot, out);
+      return;
+    }
+    // Support a single trailing glob segment: "packages/*" or "apps/**".
+    String prefix = pattern.substring(0, star);
+    String base = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+    if (base.contains("*")) {
+      return; // multi-segment globs (packages/*/lib) are not supported — skip rather than guess
+    }
+    Path baseDir = base.isEmpty() ? root : root.resolve(base);
+    if (!Files.isDirectory(baseDir)) {
+      return;
+    }
+    try (Stream<Path> children = Files.list(baseDir)) {
+      children
+          .filter(Files::isDirectory)
+          .forEach(
+              child -> {
+                String name = child.getFileName().toString();
+                String rel = base.isEmpty() ? name : base + "/" + name;
+                addIfWorkspaceDir(rel, root, canonicalRoot, out);
+              });
+    } catch (IOException e) {
+      log.debug("Failed to expand workspace glob {}: {}", pattern, e.getMessage());
+    }
+  }
+
+  private void addIfWorkspaceDir(String rel, Path root, Path canonicalRoot, Set<String> out) {
+    Path dir = root.resolve(rel).normalize();
+    try {
+      Path real = dir.toRealPath();
+      if (!real.startsWith(canonicalRoot)) {
+        return; // containment: resolved dir escaped the workspace root
+      }
+    } catch (IOException e) {
+      return; // does not exist / unreadable
+    }
+    if (Files.exists(dir.resolve("package.json"))) {
+      out.add(rel.replace('\\', '/'));
+    }
   }
 
   /**
@@ -2224,8 +2319,8 @@ public class DevDockerfileGenerator {
     boolean hasFrontend = false;
     boolean hasBackend = false;
 
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      Path wsDir = workspace.resolve(ws.asText());
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
+      Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
 
@@ -2268,8 +2363,7 @@ public class DevDockerfileGenerator {
     sb.append("COPY package.json package-lock.json* ./\n");
 
     // Copy each workspace's package.json
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       if (Files.exists(wsDir.resolve("package.json"))) {
         sb.append("COPY ").append(wsName).append("/package.json ./").append(wsName).append("/\n");
@@ -2289,8 +2383,7 @@ public class DevDockerfileGenerator {
     int frontendPort = 5173;
     int backendPort = 3000;
 
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
@@ -2503,8 +2596,8 @@ LABEL preview=true
 RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
     && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
     && chmod +x /usr/local/bin/ttyd
-COPY requirements.txt* pyproject.toml* ./
 """
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + """
@@ -2592,9 +2685,7 @@ CMD ["sh", "-c", "npx\s"""
         + "RUN npm install -g "
         + MCP_INSPECTOR_PKG
         + "\n"
-        + """
-          COPY requirements.txt* pyproject.toml* ./
-          """
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + """

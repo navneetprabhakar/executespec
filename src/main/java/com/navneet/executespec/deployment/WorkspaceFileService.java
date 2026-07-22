@@ -201,12 +201,25 @@ public class WorkspaceFileService {
       return List.of();
     }
 
+    // RR-862: read the exact revision the run executed against, never the repository's current
+    // default branch.
+    String ref = resolveRunRef(runId, run);
+    if (ref == null) {
+      log.warn(
+          "[WorkspaceFileService] run {} has no snapshot revision — refusing to list today's"
+              + " default branch for {} (evidence unavailable)",
+          runId,
+          run.getRepoUrl());
+      return List.of();
+    }
+
     String pat = resolveGitHubPat(run);
     log.info(
-        "[WorkspaceFileService] Local workspace missing for run {} — listing from GitHub: {}",
+        "[WorkspaceFileService] Local workspace missing for run {} — listing from GitHub {} @ {}",
         runId,
-        run.getRepoUrl());
-    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), pat).stream()
+        run.getRepoUrl(),
+        ref);
+    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), ref, pat).stream()
         .filter(path -> !SensitiveWorkspacePathPolicy.isSensitive(path))
         .toList();
   }
@@ -218,9 +231,24 @@ public class WorkspaceFileService {
       throw new NoSuchFileException(relativePath);
     }
 
+    // RR-862: bind the fallback read to the run's immutable revision. Without it the branchless
+    // GitHub contents API resolves the repository default branch, so a historical run's file could
+    // be served from today's `main` — hiding branch deletion / force-push and destroying
+    // reproducibility. No revision identity ⇒ evidence-unavailable (404), never a mutable default.
+    String ref = resolveRunRef(runId, run);
+    if (ref == null) {
+      log.warn(
+          "[WorkspaceFileService] run {} has no snapshot revision for GitHub fallback of {} —"
+              + " evidence unavailable",
+          runId,
+          relativePath);
+      throw new NoSuchFileException(relativePath);
+    }
+
     String pat = resolveGitHubPat(run);
-    log.debug("[WorkspaceFileService] Reading {} from GitHub for run {}", relativePath, runId);
-    var result = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, pat);
+    log.debug(
+        "[WorkspaceFileService] Reading {} from GitHub for run {} @ {}", relativePath, runId, ref);
+    var result = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, ref, pat);
 
     // RR-1631 — failure is out-of-band. Previously a transport failure returned its message AS the
     // file content ("// Error reading file from GitHub: …"), which then flowed into model context;
@@ -229,6 +257,61 @@ public class WorkspaceFileService {
       throw new NoSuchFileException(relativePath);
     }
     return result.content();
+  }
+
+  /**
+   * RR-862: resolve the EXACT revision a single-repo run executed against, for the GitHub fallback.
+   * Prefers the immutable {@link RunRepoSnapshot#commitSha} (the precise cloned revision), then the
+   * recorded branch. Returns {@code null} when the run carries no revision identity at all, so
+   * callers fail closed (evidence-unavailable) instead of substituting the repository's current
+   * default branch.
+   */
+  String resolveRunRef(String runId, PipelineRun run) {
+    try {
+      List<RunRepoSnapshot> snaps = runRepoSnapshotRepository.findByRunId(runId);
+      if (snaps == null || snaps.isEmpty()) {
+        return null;
+      }
+      RunRepoSnapshot match = null;
+      if (snaps.size() == 1) {
+        match = snaps.get(0); // single-repo run — one snapshot is unambiguous
+      } else {
+        String want = shortRepoName(run.getRepoUrl());
+        for (RunRepoSnapshot s : snaps) {
+          String full = s.getRepoFullName();
+          if (full == null) continue;
+          String shortName = full.contains("/") ? full.substring(full.lastIndexOf('/') + 1) : full;
+          if (shortName.equalsIgnoreCase(want)) {
+            match = s;
+            break;
+          }
+        }
+      }
+      if (match == null) {
+        return null;
+      }
+      if (match.getCommitSha() != null && !match.getCommitSha().isBlank()) {
+        return match.getCommitSha();
+      }
+      if (match.getBranch() != null && !match.getBranch().isBlank()) {
+        return match.getBranch();
+      }
+      return null;
+    } catch (Exception e) {
+      log.debug(
+          "[WorkspaceFileService] run-ref resolution failed for {}: {}", runId, e.getMessage());
+      return null;
+    }
+  }
+
+  /** The short {@code repo} name from an owner/repo GitHub URL, {@code .git} suffix stripped. */
+  static String shortRepoName(String repoUrl) {
+    if (repoUrl == null || repoUrl.isBlank()) {
+      return "";
+    }
+    String s = repoUrl.endsWith(".git") ? repoUrl.substring(0, repoUrl.length() - 4) : repoUrl;
+    int slash = s.lastIndexOf('/');
+    return slash >= 0 ? s.substring(slash + 1) : s;
   }
 
   /**
