@@ -1,6 +1,9 @@
 package com.navneet.executespec.integration.scm;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -104,6 +107,41 @@ class ScmPushServiceProviderRoutingTest {
     assertThat(result.scmProvider()).isEqualTo("BITBUCKET");
     assertThat(result.message()).contains("not supported on this release");
     verifyNoInteractions(bitbucketRepoService, gitHubRepoService, gitTool);
+  }
+
+  @Test
+  void partialRunBitbucketIdentityIsReplacedByCompleteUserCredential() {
+    // RR-867 — the run carries only a Bitbucket username (a partial identity) and no GitHub creds;
+    // the user has a complete Bitbucket config. The old hydration guard keyed on the run's username
+    // presence and skipped, leaving a null workspace/password and a failed push. It must now
+    // hydrate wholesale from the complete user identity and actually push.
+    AppUser user = new AppUser();
+    user.setBitbucketUsername("forge");
+    user.setBitbucketWorkspace("workspace");
+    user.setBitbucketRepoSlug("repo");
+    user.setBitbucketAppPassword("bitbucket-secret");
+
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-partial-bb")
+            .createdByUserId("user-1")
+            .bitbucketUsername("stale-partial-username")
+            .build();
+    when(appUserRepository.findById("user-1")).thenReturn(Optional.of(user));
+
+    ScmPushService.PushResult result = service.push(run);
+
+    // The push reached the Bitbucket git path with the hydrated complete identity, rather than
+    // failing on a null workspace/repo slug.
+    assertThat(result.scmProvider()).isEqualTo("BITBUCKET");
+    verify(gitTool)
+        .pushToBranchBitbucket(
+            eq("run-partial-bb"),
+            eq("https://bitbucket.org/workspace/repo.git"),
+            eq("forge"),
+            eq("bitbucket-secret"),
+            any(),
+            any());
   }
 
   private static AppUser dualCredentialUser() {

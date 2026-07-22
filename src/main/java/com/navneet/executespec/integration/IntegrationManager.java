@@ -146,13 +146,15 @@ public class IntegrationManager {
 
     adapter.verifySignature(headers, rawBody);
 
-    String eventId = adapter.extractEventId(rawBody);
+    // RR-638 — pass normalized headers into id extraction + parsing so an adapter can consult the
+    // provider's authoritative event type / delivery id (Bitbucket carries both only in headers).
+    String eventId = adapter.extractEventId(headers, rawBody);
     if (eventLogRepo.existsBySourceTypeAndEventId(sourceType, eventId)) {
       log.info("[Integration] Duplicate event {} from {} — skipped", eventId, sourceType);
       return "duplicate";
     }
 
-    Optional<IntegrationEvent> maybeEvent = adapter.parseEvent(rawBody);
+    Optional<IntegrationEvent> maybeEvent = adapter.parseEvent(headers, rawBody);
     if (maybeEvent.isEmpty()) {
       log.info(
           "[Integration] Event {} from {} is ignorable (wrong type/status)", eventId, sourceType);

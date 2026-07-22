@@ -59,8 +59,8 @@ public class SlackMessageBuilder {
             field("*Run:*", runLink(run)),
             field(
                 "*Triggered by:*",
-                run.getCreatedByUserId() != null ? run.getCreatedByUserId() : "system"),
-            field("*Spec:*", truncate(run.getUserRequest(), 80))));
+                run.getCreatedByUserId() != null ? esc(run.getCreatedByUserId()) : "system"),
+            field("*Spec:*", esc(truncate(run.getUserRequest(), 80)))));
   }
 
   private Map<String, Object> runComplete(PipelineRun run) {
@@ -86,7 +86,7 @@ public class SlackMessageBuilder {
         fields(
             field("*Run:*", runLink(run)),
             field("*Project:*", projectName(run)),
-            field("*Reason:*", truncate(failReason, 200))));
+            field("*Reason:*", esc(truncate(failReason, 200)))));
   }
 
   private Map<String, Object> planApprovalNeeded(PipelineRun run) {
@@ -115,7 +115,7 @@ public class SlackMessageBuilder {
   }
 
   private Map<String, Object> taskEvent(PipelineRun run, String payload, boolean success) {
-    String taskId = payload != null ? payload : "unknown";
+    String taskId = payload != null ? esc(payload) : "unknown";
     String emoji = success ? "\u2705" : "\u274C";
     String status = success ? "COMPLETE" : "FAILED";
     return simpleMessage(
@@ -136,8 +136,8 @@ public class SlackMessageBuilder {
         run,
         fields(
             field("*Run:*", runLink(run)),
-            field("*Verdict:*", verdict),
-            field("*Summary:*", truncate(details, 150))));
+            field("*Verdict:*", esc(verdict)),
+            field("*Summary:*", esc(truncate(details, 150)))));
   }
 
   private Map<String, Object> mergeGateOpened(PipelineRun run) {
@@ -166,7 +166,7 @@ public class SlackMessageBuilder {
         "\u26A0\uFE0F Stuck Run Recovery",
         "#E67E22",
         run,
-        fields(field("*Run:*", runLink(run)), field("*Details:*", truncate(payload, 200))));
+        fields(field("*Run:*", runLink(run)), field("*Details:*", esc(truncate(payload, 200)))));
   }
 
   private Map<String, Object> taskStarted(PipelineRun run, String payload) {
@@ -175,14 +175,15 @@ public class SlackMessageBuilder {
         run,
         fields(
             field("*Run:*", runLink(run)),
-            field("*Task:*", payload != null ? payload : "unknown")));
+            field("*Task:*", payload != null ? esc(payload) : "unknown")));
   }
 
   private Map<String, Object> reviewStarted(PipelineRun run, String payload) {
     return simpleMessage(
         "\uD83D\uDD0D Review Started",
         run,
-        fields(field("*Run:*", runLink(run)), field("*Model:*", payload != null ? payload : "")));
+        fields(
+            field("*Run:*", runLink(run)), field("*Model:*", payload != null ? esc(payload) : "")));
   }
 
   private Map<String, Object> modelEscalated(PipelineRun run, String payload) {
@@ -193,8 +194,8 @@ public class SlackMessageBuilder {
         run,
         fields(
             field("*Run:*", runLink(run)),
-            field("*From:*", parts[0]),
-            field("*To:*", parts.length > 1 ? parts[1] : "")));
+            field("*From:*", esc(parts[0])),
+            field("*To:*", parts.length > 1 ? esc(parts[1]) : "")));
   }
 
   private Map<String, Object> validationFailed(PipelineRun run, String payload) {
@@ -202,7 +203,7 @@ public class SlackMessageBuilder {
         "\u274C Validation Failed",
         "#E74C3C",
         run,
-        fields(field("*Run:*", runLink(run)), field("*Details:*", truncate(payload, 200))));
+        fields(field("*Run:*", runLink(run)), field("*Details:*", esc(truncate(payload, 200)))));
   }
 
   private Map<String, Object> simpleMessage(
@@ -289,6 +290,20 @@ public class SlackMessageBuilder {
   private String truncate(String s, int max) {
     if (s == null) return "—";
     return s.length() > max ? s.substring(0, max) + "\u2026" : s;
+  }
+
+  /**
+   * RR-583 — neutralize untrusted text before it enters Slack {@code mrkdwn}. Spec, failure reason,
+   * reviewer summary, task ids and model names all originate from user/repository/LLM content.
+   * Slack interprets {@code <...>} as links and {@code <!channel>}/{@code <!here>}/{@code
+   * <!everyone>} as broadcast mentions, so unescaped content could generate deceptive links or ping
+   * whole channels with ExecuteSpec as the apparent sender. Slack's escaping rule (replace {@code
+   * &}, {@code <}, {@code >}) is applied per Slack's docs; server-owned links (run link, action
+   * button) are built from typed fields and stay unescaped.
+   */
+  private static String esc(String s) {
+    if (s == null) return "—";
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
   }
 
   private String fmtTokens(PipelineRun run) {
