@@ -189,7 +189,8 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
       String usageRunId) {
-    String cacheKey = cacheKey(spec, repoFullNames, projectId);
+    String cacheKey =
+        cacheKey(spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet);
     if (cacheKey != null) {
       try {
         String cached = redis.opsForValue().get(cacheKey);
@@ -244,7 +245,14 @@ public class SmartClassifierAgent {
             projectId,
             executionReference,
             usageRunId);
-    cachePut(cacheKey, verified);
+    // RR-1201 — never cache a TRANSIENT fallback. Model-resolve, prompt-assembly, empty-body,
+    // JSON-parse and transport failures all return a LLM_FALLBACK_TO_HEURISTIC verdict; caching it
+    // for the full TTL would suppress verifier recovery for every identical key for an hour after
+    // the provider is healthy again, locking later runs to the weaker heuristic route. Only cache
+    // deterministic heuristic and genuinely-verified LLM results.
+    if (verified.source() != ClassificationResult.Source.LLM_FALLBACK_TO_HEURISTIC) {
+      cachePut(cacheKey, verified);
+    }
     return verified;
   }
 
@@ -583,7 +591,21 @@ public class SmartClassifierAgent {
 
   // Cache helpers
 
-  private static String cacheKey(String spec, List<String> repoFullNames, String projectId) {
+  /**
+   * RR-568 — the cache identity must fingerprint EVERY input that materially changes the verdict.
+   * Classification depends on the project type, the project-memory snippet and the selected
+   * provider (which resolves the model and prompt), not only the spec/repos/project id. Omitting
+   * them let a run reuse a verdict produced under different evidence and a different route after
+   * project memory/type changed or the user switched provider. All effective inputs now enter the
+   * key so a change invalidates it.
+   */
+  private static String cacheKey(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet) {
     if (spec == null) return null;
     StringBuilder sb = new StringBuilder();
     sb.append(spec).append('\u0001');
@@ -593,6 +615,9 @@ public class SmartClassifierAgent {
       sb.append(String.join(",", sorted));
     }
     sb.append('\u0001').append(projectId == null ? "" : projectId);
+    sb.append('\u0001').append(projectType == null ? "" : projectType);
+    sb.append('\u0001').append(aiProvider == null ? "" : aiProvider.name());
+    sb.append('\u0001').append(projectMemorySnippet == null ? "" : projectMemorySnippet);
     try {
       MessageDigest md = MessageDigest.getInstance("SHA-256");
       byte[] hash = md.digest(sb.toString().getBytes(StandardCharsets.UTF_8));
