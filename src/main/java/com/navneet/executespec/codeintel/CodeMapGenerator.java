@@ -107,7 +107,18 @@ public class CodeMapGenerator {
 
   public Result generateWithSha(String repoFullName, String defaultBranch, String pat) {
     String sha = github.getBranchHeadSha("https://github.com/" + repoFullName, defaultBranch, pat);
-    return new Result(generate(repoFullName, defaultBranch, pat), sha);
+    // RR-956 — provenance must be immutable and internally consistent. Resolve the branch HEAD to a
+    // concrete commit ONCE, then scan the tree and read every file at that pinned SHA (GitHub's
+    // Trees and Contents APIs both accept a commit SHA in place of a branch ref) rather than at the
+    // mutable branch name. Previously a push landing mid-generation produced content from a NEWER
+    // tree that callers then persisted under this OLDER SHA as cache / staleness identity, and a
+    // later refresh keyed on the equal SHA was skipped. If the HEAD SHA cannot be resolved there is
+    // no provenance to record, so fail closed rather than scanning an unpinned branch.
+    if (sha == null || sha.isBlank()) {
+      throw new IllegalStateException(
+          "Branch HEAD SHA unavailable for codemap generation (repo=" + repoFullName + ")");
+    }
+    return new Result(generate(repoFullName, sha, pat), sha);
   }
 
   public String generate(String repoFullName, String pat) {
@@ -115,9 +126,10 @@ public class CodeMapGenerator {
   }
 
   public String generate(String repoFullName, String defaultBranch, String pat) {
-    List<String> files;
+    GitHubRepoService.RepoFileListResult inventory;
     try {
-      files = github.listRepoFiles("https://github.com/" + repoFullName, defaultBranch, pat);
+      inventory =
+          github.listRepoFilesResult("https://github.com/" + repoFullName, defaultBranch, pat);
     } catch (Exception e) {
       log.warn(
           "CodeMapGenerator inventory failed for {} (type={})",
@@ -126,9 +138,39 @@ public class CodeMapGenerator {
       throw new IllegalStateException("Repository inventory unavailable for codemap generation", e);
     }
 
+    // RR-955 — the legacy List<String> inventory path collapsed a typed failure into an empty list,
+    // so a missing PAT, auth outage, rate limit or upstream 5xx produced a nonblank "Files: 0"
+    // codemap that callers persisted as an authoritative complete inventory. An unsuccessful
+    // inventory is a hard failure: codemap / architecture / planner context must never be built
+    // from
+    // a tree the system could not actually read. This mirrors the fail-closed guarantee the root
+    // CLAUDE.md states for codemap generation.
+    if (!inventory.successful()) {
+      throw new IllegalStateException(
+          "Repository inventory unavailable for codemap generation (repo="
+              + repoFullName
+              + ", error="
+              + inventory.errorCode()
+              + (inventory.upstreamStatus() == null
+                  ? ""
+                  : ", upstream=" + inventory.upstreamStatus())
+              + ")");
+    }
+    List<String> files = inventory.files();
+
     StringBuilder md = new StringBuilder();
     md.append("# ").append(repoFullName).append("\n\n");
     md.append("**Files**: ").append(files.size()).append("\n\n");
+    // RR-955 — GitHub marks recursive trees as truncated for very large repositories, so the
+    // listing
+    // below is then a strict subset of the repository. Label the codemap PARTIAL in-band so
+    // downstream architecture / planner context never treats a truncated tree as complete coverage.
+    if (inventory.truncated()) {
+      md.append(
+          "> **Inventory: PARTIAL** — the repository tree exceeded the GitHub Trees API limit and"
+              + " was truncated upstream. This codemap covers only the files listed below, not the"
+              + " whole repository.\n\n");
+    }
 
     // Surface major directories
     md.append("## Top-level layout\n\n");
