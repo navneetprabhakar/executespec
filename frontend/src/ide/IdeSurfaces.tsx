@@ -188,7 +188,9 @@ export function IdeWelcome() {
   }
 
   const liveTasks = liveRun?.tasks ?? [];
-  const liveDone = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
+  // RR-781 — the canonical terminal task status is COMPLETE; counting only COMPLETED/DONE left the
+  // hero showing 0/N while tasks actually finished. Reuse the tolerant classifier defined below.
+  const liveDone = liveTasks.filter((t) => taskIsDone(t.status)).length;
   const liveSpent = liveRun?.actualCostUsd ?? 0;
 
   return (
@@ -373,7 +375,11 @@ export function IdeCompose() {
   // FREE $3 · PRO $5 (BYOK lifts it server-side) · TEAM/ENTERPRISE have no platform
   // cap, so the input there only sets a voluntary ceiling.
   const tierMaxCap = tier === 'FREE' ? 3 : tier === 'PRO' ? 5 : tier === 'ENTERPRISE' ? 1000 : 25;
-  const [costCap, setCostCap] = useState<number>(Math.min(2, tierMaxCap));
+  // RR-783 — 0 means "no user override": the request builder sends `userCostCap` only when > 0, so
+  // the server/plan default cap applies. Previously this defaulted to $2, so every run — including
+  // BYOK/Team/Enterprise routes whose platform cap is higher or absent — silently carried a $2
+  // ceiling the user never chose, cutting runs short. Lowering the ceiling is now an explicit opt-in.
+  const [costCap, setCostCap] = useState<number>(0);
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
   // RUN-7 (review/11) — estimate freshness: timestamp of the last fetch + a
   // "stale" flag that flips after 60s and surfaces a refresh link-button.
@@ -497,15 +503,21 @@ export function IdeCompose() {
   }
 
   // Load repos when the project changes; default to all selected.
+  // RR-784 — repository scope is an execution-scope/authorization input. Without a generation guard
+  // a late response for project A could overwrite the repo list + default selection after the user
+  // switched to project B, silently binding the run to the wrong project's repositories. Gate the
+  // commit on a per-effect `cancelled` flag so only the active project's response applies.
   useEffect(() => {
     if (!projectId) {
       setProjectRepos([]);
       setSelectedRepoIds([]);
       return;
     }
+    let cancelled = false;
     api
       .getProjectRepos(projectId)
       .then((rs) => {
+        if (cancelled) return;
         const list = rs as unknown as Array<Record<string, unknown>>;
         setProjectRepos(list);
         setSelectedRepoIds(
@@ -516,9 +528,13 @@ export function IdeCompose() {
         );
       })
       .catch(() => {
+        if (cancelled) return;
         setProjectRepos([]);
         setSelectedRepoIds([]);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // Debounced p25/p75 estimate. Only meaningful inside a project (the
@@ -529,19 +545,28 @@ export function IdeCompose() {
       setEstimateAt(null);
       return;
     }
+    // RR-785 — a debounced estimate has no request identity, so an older project/spec/provider/model
+    // response could settle last and present a fresh timestamp over a cost/task range computed for a
+    // different route — directly affecting approval and cap choices. Discard superseded responses.
+    let cancelled = false;
     const t = setTimeout(() => {
       api
         .estimateRun(projectId, spec.trim(), provider, modelName || undefined)
         .then((e) => {
+          if (cancelled) return;
           setEstimate(e);
           setEstimateAt(Date.now());
         })
         .catch(() => {
+          if (cancelled) return;
           setEstimate(null);
           setEstimateAt(null);
         });
     }, 600);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [projectId, spec, provider, modelName]);
 
   // RUN-7 — flip the estimate card's freshness line to a refresh affordance
@@ -554,10 +579,12 @@ export function IdeCompose() {
   }, [estimateAt]);
 
   // RUN-7 — manual refresh re-runs the existing estimate fetch immediately.
+  // RR-785 — refresh must use the SAME route inputs as the automatic estimate (provider + model),
+  // otherwise Review shows a fresh timestamp on a range computed for the default route.
   function refreshEstimate() {
     if (!projectId || spec.trim().length < 12) return;
     api
-      .estimateRun(projectId, spec.trim())
+      .estimateRun(projectId, spec.trim(), provider, modelName || undefined)
       .then((e) => {
         setEstimate(e);
         setEstimateAt(Date.now());
@@ -1031,18 +1058,26 @@ export function IdeCompose() {
                       className='ide-input'
                       type='number'
                       step='0.5'
-                      min='0.5'
+                      min='0'
                       max={tierMaxCap}
-                      value={costCap}
-                      aria-label='Run cost cap in USD'
+                      value={costCap || ''}
+                      placeholder='Default'
+                      aria-label='Run cost cap in USD (blank = platform default)'
                       aria-labelledby='compose-cap-label'
-                      onChange={(e) =>
-                        setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
-                      }
+                      onChange={(e) => {
+                        // RR-783 — blank / 0 keeps the platform default; a positive value opts into
+                        // a tighter voluntary ceiling clamped to the tier max.
+                        const v = Number(e.target.value) || 0;
+                        setCostCap(v <= 0 ? 0 : Math.max(0.5, Math.min(tierMaxCap, v)));
+                      }}
                       style={{width: 90}}
                     />
                     <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                      {tierMaxCap === 1000 ? 'USD' : `max $${tierMaxCap}`}
+                      {costCap <= 0
+                        ? 'platform default'
+                        : tierMaxCap === 1000
+                          ? 'USD'
+                          : `max $${tierMaxCap}`}
                     </span>
                   </div>
                 </div>
@@ -1263,7 +1298,7 @@ export function IdeCompose() {
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>
-                <span>${costCap.toFixed(4)}</span>
+                <span>{costCap > 0 ? `$${costCap.toFixed(2)}` : 'Platform default'}</span>
               </div>
             </div>
           </section>

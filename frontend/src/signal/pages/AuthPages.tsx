@@ -318,6 +318,7 @@ export function VerifyPage() {
   //   /verify-email                       — sign-up confirmation splash
   //   /verify-email?token=...&type=email  — magic-link verification (user→login)
   const navigate = useNavigate();
+  const adoptSession = useAuthStore((s) => s.adoptSession);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -335,16 +336,26 @@ export function VerifyPage() {
       setMsg('Verifying your email…');
       api
         .authVerifyEmail(token)
-        .then(() => {
-          setMsg('Verified! Redirecting to sign-in…');
-          setTimeout(() => navigate('/login', {replace: true}), 800);
+        .then((resp) => {
+          // RR-1335 — verification returns a login-shaped session (access token + user; the backend
+          // has already set the refresh cookie). Adopt it so the just-verified user lands
+          // authenticated instead of being bounced to /login to re-enter credentials while a valid
+          // refresh cookie is thrown away. Fall back to /login only if the payload is unusable.
+          if (resp?.accessToken && resp?.user) {
+            adoptSession(resp.accessToken, resp.user);
+            setMsg('Verified! Taking you to the app…');
+            setTimeout(() => navigate('/home', {replace: true}), 600);
+          } else {
+            setMsg('Verified! Redirecting to sign-in…');
+            setTimeout(() => navigate('/login', {replace: true}), 800);
+          }
         })
         .catch((e: unknown) => {
           const m = e instanceof Error ? e.message : 'Verification failed.';
           setErr(m);
         });
     }
-  }, [navigate]);
+  }, [navigate, adoptSession]);
 
   return (
     <AuthLayout>

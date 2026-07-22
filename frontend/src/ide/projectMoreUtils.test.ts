@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  actorLabel,
   availableOrgMembers,
   canManageMembership,
   canManageProjectSharing,
@@ -18,6 +19,26 @@ import {
   techDebtCategories,
 } from './projectMoreUtils';
 import type * as api from '@/lib/api';
+
+// RR-1469 — the activity actor column read fields the served ActivityEntry never carries, leaving
+// every row blank. actorLabel resolves the real actorType/actorUserId.
+describe('RR-1469 — activity actor label', () => {
+  it('labels system-authored events as System', () => {
+    expect(actorLabel({actorType: 'SYSTEM', actorUserId: null})).toBe('System');
+  });
+
+  it('shows a legible user identity from actorUserId, never blank', () => {
+    expect(actorLabel({actorType: 'USER', actorUserId: 'abcdef01-2345-6789'})).toBe(
+      'user abcdef01',
+    );
+    expect(actorLabel({actorType: 'USER', actorUserId: 'short'})).toBe('user short');
+  });
+
+  it('falls back to a role word or dash when no id is present, not an empty string', () => {
+    expect(actorLabel({actorType: 'USER'})).toBe('User');
+    expect(actorLabel({})).toBe('—');
+  });
+});
 
 describe('projectMoreUtils', () => {
   it('detects assistant artifacts without classifying short normal answers', () => {

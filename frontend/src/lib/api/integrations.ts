@@ -85,7 +85,15 @@ export const updateConfluenceSettings = (
     body: JSON.stringify({confluenceBaseUrl, confluenceEmail, confluenceApiToken}),
   });
 
-/** Saves per-user Bitbucket credentials. Pass empty strings to clear. */
+/**
+ * Saves per-user Bitbucket credentials. Pass empty strings to clear.
+ *
+ * RR-1341 — the backend `BitbucketSettingsRequest` deserializes `bitbucketUsername`,
+ * `bitbucketAppPassword`, `bitbucketWorkspace`, `bitbucketRepoSlug`. Sending the short field names
+ * made Jackson bind every field to null, so a "Connect" that reported success actually cleared the
+ * credentials. The JSON keys must match the DTO exactly. (The validate endpoint uses the short
+ * names and is unaffected.)
+ */
 export const updateBitbucketSettings = (
   username: string,
   appPassword: string,
@@ -94,7 +102,12 @@ export const updateBitbucketSettings = (
 ) =>
   req<AuthUser>('/auth/settings/bitbucket', {
     method: 'PUT',
-    body: JSON.stringify({username, appPassword, workspace, repoSlug}),
+    body: JSON.stringify({
+      bitbucketUsername: username,
+      bitbucketAppPassword: appPassword,
+      bitbucketWorkspace: workspace,
+      bitbucketRepoSlug: repoSlug,
+    }),
   });
 
 /** Tests Bitbucket credentials by calling the Bitbucket API. */

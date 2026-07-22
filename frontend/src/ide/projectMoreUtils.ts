@@ -1,5 +1,21 @@
 import type * as api from '@/lib/api';
 
+/**
+ * RR-1469 — the project activity row previously read `actorName`/`actor`, fields the served
+ * `ActivityEntry` never carries (it exposes `actorUserId` + `actorType`), so every row rendered a
+ * blank actor. Resolve the real fields: `System` for system-authored events and a legible user id
+ * for user events; never a silent empty string (kept pure here so it's unit-testable).
+ */
+export function actorLabel(e: Record<string, unknown>): string {
+  const actorType = String(e.actorType || '');
+  if (actorType === 'SYSTEM') return 'System';
+  const id = e.actorUserId;
+  if (typeof id === 'string' && id.length > 0) {
+    return id.length > 12 ? `user ${id.slice(0, 8)}` : `user ${id}`;
+  }
+  return actorType === 'USER' ? 'User' : '—';
+}
+
 export type ArchDocSection = {heading: string; body: string};
 export type ContractDetectorSummary = {
   scanned: number;

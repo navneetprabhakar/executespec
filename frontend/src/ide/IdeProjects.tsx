@@ -107,11 +107,11 @@ export default function IdeProjects() {
         (pr as {status?: string; state?: string}).status || (pr as {state?: string}).state || '';
       return st.toUpperCase() === 'OPEN';
     }).length;
-    const repoCount = new Set(
-      ((s.recentPrs as unknown[]) || [])
-        .map((pr) => (pr as {repoFullName?: string}).repoFullName)
-        .filter(Boolean),
-    ).size;
+    // RR-1475 — the card previously printed "N repos" derived from the distinct repos found in
+    // `recentPrs`, which is capped at the 15 most recent PRs and is unrelated to how many
+    // repositories are linked. A project with many linked repos and no recent PRs showed "0 repos".
+    // The dashboard DTO carries no linked-repo count, so we drop the fabricated metric rather than
+    // assert a wrong one; runs and open-PR counts below remain real.
     const avg = numOf(s, 'recencyAvgScore') ?? numOf(s, 'avgScore');
     const spent = isSuperAdmin ? numOf(s, 'totalCostUsd') : undefined;
     const techDebt = debt[p.id];
@@ -136,8 +136,7 @@ export default function IdeProjects() {
         <div className='ide-run-meta ide-mono' style={{marginBottom: 10}}>
           {statsLoaded ? (
             <>
-              {repoCount} repo{repoCount === 1 ? '' : 's'} · {totalRuns} run
-              {totalRuns === 1 ? '' : 's'} · {prs} PR{prs === 1 ? '' : 's'} open
+              {totalRuns} run{totalRuns === 1 ? '' : 's'} · {prs} PR{prs === 1 ? '' : 's'} open
             </>
           ) : (
             'Project activity not loaded'

@@ -75,6 +75,17 @@ const archStatusColor = (status: string): string => {
 const LIVE = new Set(['CLASSIFYING', 'PLANNING', 'EXECUTING', 'AWAITING_APPROVAL', 'RUNNING']);
 const isLive = (s?: string) => LIVE.has((s || '').toUpperCase());
 const scoreOf = (r: unknown) => (r as {verifiedScore?: number}).verifiedScore;
+
+// RR-748 — the canonical terminal-success run status is COMPLETE; the workflow counters recognized
+// only COMPLETED, so real production runs vanished from Shipped/Needs.
+const TERMINAL_SUCCESS = new Set(['COMPLETE', 'COMPLETED']);
+// RR-749 — a missing verified score is NOT evidence a run is shippable. Shipped requires terminal
+// success AND a score of at least 85; an unscored terminal-success run is Needs-review (unverified),
+// not Shipped, and a PARTIAL run is always Needs.
+const isShipped = (s: string, score?: number) =>
+  TERMINAL_SUCCESS.has(s) && score != null && score >= 85;
+const isNeeds = (s: string, score?: number) =>
+  (TERMINAL_SUCCESS.has(s) && (score == null || score < 85)) || s === 'PARTIAL';
 const costOf = (r: unknown) =>
   (r as {actualCostUsd?: number; actualCost?: number; totalCost?: number}).actualCostUsd ??
   (r as {actualCost?: number}).actualCost ??
@@ -604,8 +615,22 @@ function RunDetailPanel({
   // Legacy accuracyScore is an LLM assessment, not the verified score. Never
   // present it as the headline correctness metric in the project surface.
   const score = scoreOf(run);
+  // RR-749 — the verdict must respect terminal run status, not derive from score alone. A
+  // failed/cancelled run with a stale score is never "Shippable"; a terminal-success run with no
+  // score is Unverified, not a positive shipping recommendation.
+  const runStatus = (run.status || '').toUpperCase();
   const verdict =
-    score == null ? '—' : score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+    runStatus === 'FAILED' || runStatus === 'CANCELLED'
+      ? 'Failed'
+      : score == null
+        ? TERMINAL_SUCCESS.has(runStatus)
+          ? 'Unverified'
+          : '—'
+        : score >= 85
+          ? 'Shippable'
+          : score >= 70
+            ? 'Needs review'
+            : 'Failed';
   const cost = (run as unknown as {actualCostUsd?: number}).actualCostUsd ?? 0;
   const prUrl =
     (run as unknown as {scmPrUrl?: string}).scmPrUrl ||
@@ -944,8 +969,8 @@ function IdeProjectRunsInner() {
       const s = (r.status || '').toUpperCase();
       const score = scoreOf(r);
       if (LIVE.has(s)) live++;
-      else if (s === 'COMPLETED' && (score == null || score >= 85)) ship++;
-      else if (s === 'COMPLETED' || s === 'PARTIAL') needs++;
+      else if (isShipped(s, score)) ship++;
+      else if (isNeeds(s, score)) needs++;
       else if (s === 'FAILED' || s === 'CANCELLED') fail++;
     }
     return {live, ship, needs, fail};
@@ -958,9 +983,8 @@ function IdeProjectRunsInner() {
       const score = scoreOf(r);
       if (filter === 'all') return true;
       if (filter === 'live') return LIVE.has(s);
-      if (filter === 'shipped') return s === 'COMPLETED' && (score == null || score >= 85);
-      if (filter === 'needs')
-        return (s === 'COMPLETED' && score != null && score < 85) || s === 'PARTIAL';
+      if (filter === 'shipped') return isShipped(s, score);
+      if (filter === 'needs') return isNeeds(s, score);
       if (filter === 'failed') return s === 'FAILED' || s === 'CANCELLED';
       return true;
     });

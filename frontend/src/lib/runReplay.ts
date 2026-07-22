@@ -31,12 +31,28 @@ export function runEventKey(event: RunLogEvent, transportId?: string | null): st
   ].join(':');
 }
 
+/**
+ * RR-1381 — persisted replay carries an ISO-8601 timestamp string (`Instant` serialization), while
+ * live SSE frames may carry a numeric epoch. Accept either: a finite number passes through, a
+ * parseable date string becomes epoch ms, anything else is 0 (unknown), never a silent 1970.
+ */
+export function normalizeEventTimestamp(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+    const asNum = Number(value);
+    if (Number.isFinite(asNum)) return asNum;
+  }
+  return 0;
+}
+
 export function replayEntry(event: RunLogEvent): LogEntry {
   return {
     id: runEventKey(event),
     type: event.type || 'LOG',
     data: event,
-    timestamp: typeof event.timestamp === 'number' ? event.timestamp : 0,
+    timestamp: normalizeEventTimestamp(event.timestamp),
   };
 }
 
