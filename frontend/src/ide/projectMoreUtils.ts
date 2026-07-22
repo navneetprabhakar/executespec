@@ -1,5 +1,29 @@
 import type * as api from '@/lib/api';
 
+// RR-747 — the project dashboard DTO exposes `recentPrs`, never `openPrs`. Deriving the open-PR list
+// from `recentPrs` (filtered by status/state) instead of reading the invented `openPrs` field stops
+// the PR tab from reporting "No open pull requests" whenever open PRs actually exist. Kept pure here
+// so it is unit-testable without constructing the component tree.
+export const openPrsFromDashboard = (d: unknown): Array<Record<string, unknown>> => {
+  const recent = ((d as {recentPrs?: unknown[]})?.recentPrs || []) as Array<
+    Record<string, unknown>
+  >;
+  return recent.filter(
+    (p) =>
+      String(
+        (p as {status?: string}).status || (p as {state?: string}).state || '',
+      ).toUpperCase() === 'OPEN',
+  );
+};
+
+// RR-1511 — collapse a share link's server-provided lifecycle fields into one explicit state, so
+// revoked and expired links are not rendered identically to live ones.
+export function shareLinkStatus(s: api.ShareLinkDto): 'Active' | 'Revoked' | 'Expired' {
+  if (s.revokedAt || s.active === false) return 'Revoked';
+  if (s.expiresAt && new Date(s.expiresAt).getTime() <= Date.now()) return 'Expired';
+  return 'Active';
+}
+
 /**
  * RR-1469 — the project activity row previously read `actorName`/`actor`, fields the served
  * `ActivityEntry` never carries (it exposes `actorUserId` + `actorType`), so every row rendered a

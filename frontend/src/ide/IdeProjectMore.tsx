@@ -709,12 +709,33 @@ export function IdeProjectCode() {
   const docs = docsState.data;
   const setDocs = docsState.setData;
 
-  // Browse — file list per selected repo.
+  // RR-633 — the file-content cache is keyed only by path, so a common path such as README.md
+  // would otherwise reuse the previous repository's (or project's) body. `scopeRef` identifies the
+  // active (project, repo) so a late read that resolves after a scope change is discarded instead of
+  // being written under the wrong repository.
+  const scopeRef = useRef(`${projectId}::${repoId}`);
+
+  // RR-634 — health and standards use `undefined` as the sole not-loaded sentinel and refuse to
+  // refetch once set, but nothing reset them on a project change. React can retain this route
+  // component while only projectId changes, so without this reset the previous project's health /
+  // compliance report renders under the new project name.
+  useEffect(() => {
+    // scopeRef is (re)stamped by the browse effect below, which is the only place open() reads it.
+    setContent({});
+    setActive(null);
+    setHealth(undefined);
+    setStandards(undefined);
+  }, [projectId]);
+
+  // Browse — file list per selected repo. Also clears the content cache and selection so a repo
+  // switch cannot show repo A's source while repo B is selected (RR-633).
   useEffect(() => {
     if (sub !== 'browse' || !repoId) return;
     setFiles(null);
     setFilesError('');
     setActive(null);
+    setContent({});
+    scopeRef.current = `${projectId}::${repoId}`;
     api
       .listRepoFiles(projectId, repoId)
       .then((r) => setFiles(r.files ?? []))
@@ -751,10 +772,13 @@ export function IdeProjectCode() {
     setActive(path);
     setMobileCodeMode('file');
     if (content[path]) return;
+    const scope = `${projectId}::${repoId}`;
     try {
       const f = await api.readRepoFile(projectId, repoId, path);
+      if (scopeRef.current !== scope) return; // RR-633: repo/project changed mid-read.
       setContent((c) => ({...c, [path]: f.content ?? ''}));
     } catch {
+      if (scopeRef.current !== scope) return;
       setContent((c) => ({...c, [path]: '// could not load'}));
     }
   }
@@ -1366,15 +1390,29 @@ export function IdeProjectArchitecture() {
   const [diffReport, setDiffReport] = useState<api.ArchDiffReport | null>(null);
   const [diffBusy, setDiffBusy] = useState(false);
 
+  // RR-635 — refresh() launches the current-map request, a seven-request wave and a nested
+  // per-repository coverage wave, then commits results unconditionally. Without a scope guard a
+  // slower response for project A could overwrite versions/invariants/ADRs/repos/staleness/coverage
+  // for project B after navigation, or combine a new map with an old repository's coverage. Every
+  // commit is now gated on the refresh generation captured when the request wave started, so only
+  // the active route's results are published.
+  const refreshGen = useRef(0);
+
   function refresh() {
     if (!projectId) return;
+    const gen = ++refreshGen.current;
+    const scoped =
+      <T,>(apply: (v: T) => void) =>
+      (v: T) => {
+        if (gen === refreshGen.current) apply(v);
+      };
     // The current map is the primary surface. Render it as soon as its own request completes;
     // history, rules, decisions, staleness, repos, and coverage must not form a shared latency
     // barrier around it.
     setArch(undefined);
     uiBound(api.getArchitectureDoc(projectId))
-      .then(setArch)
-      .catch(() => setArch(null));
+      .then(scoped(setArch))
+      .catch(scoped(() => setArch(null)));
     Promise.allSettled([
       uiBound(api.getArchitectureVersions(projectId)),
       uiBound(api.listProjectInvariants(projectId)),
@@ -1384,6 +1422,7 @@ export function IdeProjectArchitecture() {
       uiBound(api.getArchitectureStaleness(projectId)),
       uiBound(api.getProjectRepos(projectId)),
     ]).then(async ([v, inv, viol, adr, adrCap, st, rp]) => {
+      if (gen !== refreshGen.current) return;
       setVersions(v.status === 'fulfilled' ? (v.value as ArchitectureDoc[]) : []);
       setInvariants(inv.status === 'fulfilled' ? inv.value : []);
       if (viol.status === 'fulfilled') setViolations(viol.value);
@@ -1403,7 +1442,7 @@ export function IdeProjectArchitecture() {
             }
           }),
         );
-        setCoverage(Object.fromEntries(entries));
+        if (gen === refreshGen.current) setCoverage(Object.fromEntries(entries));
       }
     });
   }

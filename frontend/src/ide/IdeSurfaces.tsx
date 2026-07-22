@@ -115,6 +115,7 @@ export function IdeWelcome() {
   const [liveRun, setLiveRun] = useState<api.RunDetail | null>(null);
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState('');
 
   // Surface the monthly run cap (mirrors HomePage). Permissions are loaded on
   // login; fetch lazily if the store hasn't been hydrated yet.
@@ -176,15 +177,21 @@ export function IdeWelcome() {
 
   async function startFromSample(s: api.SampleSpecDto) {
     setSampleBusyId(s.id);
+    setSampleError('');
     try {
       const picked = await api.pickOnboardingSample(s.id);
-      writeSpecHandoff({spec: picked.spec || s.title, source: 'onboarding-sample'});
+      // RR-782 — only hand off a real executable spec. The catalogue DTO carries a display title,
+      // not the spec, so on failure we must NOT substitute `s.title` (that silently turns a detailed
+      // starter into a vague one-liner). Block with a retryable error instead.
+      const spec = (picked.spec || '').trim();
+      if (!spec) throw new Error('empty spec');
+      writeSpecHandoff({spec, source: 'onboarding-sample'});
+      navigate('/compose');
     } catch {
-      writeSpecHandoff({spec: s.title, source: 'onboarding-sample'});
+      setSampleError('Could not load that starter spec. Please try again.');
     } finally {
       setSampleBusyId(null);
     }
-    navigate('/compose');
   }
 
   const liveTasks = liveRun?.tasks ?? [];
@@ -279,6 +286,11 @@ export function IdeWelcome() {
                   {sampleBusyId === s.id ? 'Preparing…' : s.title}
                 </button>
               ))}
+            </div>
+          )}
+          {sampleError && (
+            <div style={{marginBottom: 10, fontSize: 12, color: 'var(--ide-red)'}}>
+              {sampleError}
             </div>
           )}
           <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
@@ -492,11 +504,14 @@ export function IdeCompose() {
     setErr('');
     try {
       const picked = await api.pickOnboardingSample(sample.id);
-      setSpec(picked.spec || sample.title);
+      // RR-782 — the sample title is display metadata, not the executable spec. Only populate the
+      // composer from a real spec; on failure surface an error rather than seeding a vague title.
+      const spec = (picked.spec || '').trim();
+      if (!spec) throw new Error('empty spec');
+      setSpec(spec);
       if (picked.preferredProvider) chooseProvider(picked.preferredProvider);
     } catch {
-      // Backend tracking is best-effort; still let the user start from the title.
-      setSpec(sample.title);
+      setErr('Could not load that starter spec. Please try again.');
     } finally {
       setSampleBusyId(null);
     }
@@ -951,25 +966,63 @@ export function IdeCompose() {
               </div>
             )}
 
-            {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
-          system PAT since 2026-05-23). Without one, a project run completes but
-          the PR push fails — previously discovered only on the result page. */}
-            {projectId != null && user != null && !user.hasGithubPat && (
-              <div
-                className='ide-card'
-                style={{
-                  borderColor: 'var(--ide-yellow)',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                }}
-              >
-                No GitHub token connected. The run can generate code, but it cannot open a PR until
-                you add one.{' '}
-                <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-                  Connect GitHub →
-                </Link>
-              </div>
-            )}
+            {/* PAT pre-flight (2026-06-10): pushes use the CALLER's own credential (no system PAT
+          since 2026-05-23). Without one, a project run completes but the PR push fails — previously
+          discovered only on the result page.
+          RR-787 — aggregate the SCM providers of the SELECTED repositories and warn only for the
+          provider(s) actually needed, so a Bitbucket-only user no longer sees an irrelevant GitHub
+          blocker (and vice versa). A greenfield/no-repo run publishes to GitHub, so default there. */}
+            {projectId != null &&
+              user != null &&
+              (() => {
+                const providers = new Set<string>(
+                  projectRepos.length > 0 && selectedRepoIds.length > 0
+                    ? selectedRepoIds.map((id) =>
+                        String(
+                          (
+                            projectRepos.find((r) => repoIdFor(r) === id) as
+                              | {scmProvider?: string}
+                              | undefined
+                          )?.scmProvider || 'GITHUB',
+                        ).toUpperCase(),
+                      )
+                    : ['GITHUB'],
+                );
+                const needsGithub = providers.has('GITHUB') && !user.hasGithubPat;
+                const needsBitbucket = providers.has('BITBUCKET') && !user.hasBitbucketAppPassword;
+                if (!needsGithub && !needsBitbucket) return null;
+                return (
+                  <div
+                    className='ide-card'
+                    style={{borderColor: 'var(--ide-yellow)', fontSize: 13, lineHeight: 1.5}}
+                  >
+                    {needsGithub && (
+                      <div>
+                        No GitHub token connected. The run can generate code, but it cannot open a
+                        GitHub PR until you add one.{' '}
+                        <Link
+                          to='/integrations'
+                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
+                        >
+                          Connect GitHub →
+                        </Link>
+                      </div>
+                    )}
+                    {needsBitbucket && (
+                      <div style={{marginTop: needsGithub ? 8 : 0}}>
+                        No Bitbucket credential connected. The run can generate code, but it cannot
+                        open a Bitbucket PR until you add one.{' '}
+                        <Link
+                          to='/integrations'
+                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
+                        >
+                          Connect Bitbucket →
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
           </section>
         </div>
 
