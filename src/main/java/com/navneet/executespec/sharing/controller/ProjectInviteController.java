@@ -84,10 +84,13 @@ public class ProjectInviteController {
   @GetMapping("/api/projects/{projectId}/invites")
   public ResponseEntity<List<ProjectInviteDto>> listPending(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    // List is a read operation — assertCanRead is correct here.
+    // Tenant read guard satisfies the arch coverage pin; the service adds RR-974 host-admin
+    // authority on top, because the returned rows carry recipient PII.
     accessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
-        inviteService.listPending(projectId).stream().map(ProjectInviteDto::from).toList());
+        inviteService.listPending(projectId, userDetails.getUser()).stream()
+            .map(ProjectInviteDto::from)
+            .toList());
   }
 
   @DeleteMapping("/api/projects/{projectId}/invites/{inviteId}")

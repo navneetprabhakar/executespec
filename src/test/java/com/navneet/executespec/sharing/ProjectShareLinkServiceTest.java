@@ -44,6 +44,7 @@ class ProjectShareLinkServiceTest {
   private com.navneet.executespec.codereview.repository.CodeReviewScanRepository scanRepo;
   private com.navneet.executespec.prreview.repository.PrReviewRepository prReviewRepo;
   private ProjectShareLinkAuditService auditService;
+  private com.navneet.executespec.entitlements.EntitlementResolver entitlementResolver;
   private ProjectShareLinkService service;
 
   @BeforeEach
@@ -55,9 +56,27 @@ class ProjectShareLinkServiceTest {
     scanRepo = mock(com.navneet.executespec.codereview.repository.CodeReviewScanRepository.class);
     prReviewRepo = mock(com.navneet.executespec.prreview.repository.PrReviewRepository.class);
     auditService = mock(ProjectShareLinkAuditService.class);
+    entitlementResolver = mock(com.navneet.executespec.entitlements.EntitlementResolver.class);
+    // RR-1328 — the cap now reads the canonical effective tier. Default the resolver to the
+    // caller's own tier so pre-existing single-identity tests keep their intended tier; the
+    // divergence test below overrides it explicitly.
+    lenient()
+        .when(entitlementResolver.resolveTier(any()))
+        .thenAnswer(
+            inv -> {
+              AppUser u = inv.getArgument(0);
+              return u == null || u.getTier() == null ? "FREE" : u.getTier();
+            });
     service =
         new ProjectShareLinkService(
-            linkRepo, tierRepo, projectRepo, runRepo, scanRepo, prReviewRepo, auditService);
+            linkRepo,
+            tierRepo,
+            projectRepo,
+            runRepo,
+            scanRepo,
+            prReviewRepo,
+            auditService,
+            entitlementResolver);
     lenient()
         .when(projectRepo.findByIdForQuotaUpdate(anyString()))
         .thenReturn(Optional.of(Project.builder().id("p1").build()));
@@ -77,6 +96,28 @@ class ProjectShareLinkServiceTest {
                 service.createLink(
                     "p1", ProjectShareLink.Surface.PROJECT_OVERVIEW, null, "demo", expiry(), free));
     assertEquals(429, ex.getStatusCode().value());
+  }
+
+  @Test
+  void rr1328_effective_host_tier_governs_cap_not_stale_personal_tier() {
+    // An external collaborator whose personal app_user.tier is still FREE, but whose canonical
+    // effective tier (via an ENTERPRISE host-org membership) is ENTERPRISE, must get the ENTERPRISE
+    // unlimited cap — not be capped as FREE. Before RR-1328 assertCanCreate read caller.getTier().
+    AppUser externalOnEnterpriseHost = userOnTier("u-ext", "FREE");
+    when(entitlementResolver.resolveTier(externalOnEnterpriseHost)).thenReturn("ENTERPRISE");
+    lenient().when(tierRepo.findById("ENTERPRISE")).thenReturn(Optional.of(tier("ENTERPRISE", -1)));
+    when(linkRepo.countActiveByProject(anyString(), any())).thenReturn(10_000L);
+
+    ProjectShareLink link =
+        service.createLink(
+            "p1",
+            ProjectShareLink.Surface.PROJECT_OVERVIEW,
+            null,
+            "demo",
+            expiry(),
+            externalOnEnterpriseHost);
+
+    assertNotNull(link);
   }
 
   @Test

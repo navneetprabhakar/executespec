@@ -13,6 +13,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.codereview.repository.CodeReviewScanRepository;
+import com.navneet.executespec.entitlements.EntitlementResolver;
 import com.navneet.executespec.prreview.entity.PrReview;
 import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
@@ -55,13 +56,21 @@ public class ProjectShareLinkService {
   private final CodeReviewScanRepository scanRepo;
   private final PrReviewRepository prReviewRepo;
   private final ProjectShareLinkAuditService auditService;
+  private final EntitlementResolver entitlementResolver;
 
   /** Active link count must be below the per-tier cap. {@code -1} on the cap means unlimited. */
   void assertCanCreate(AppUser caller, String projectId) {
     if (caller == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    String tier = caller.getTier() == null ? "FREE" : caller.getTier();
+    // RR-1328 — resolve the caller's CANONICAL effective tier, not the raw personal
+    // {@code app_user.tier}. The personal column disagrees with every other entitlement surface
+    // for an external collaborator on a higher-tier host org (they were capped as FREE) and for
+    // operator-promoted / stale-org rows. {@link EntitlementResolver#resolveTier} picks the highest
+    // rank across personal, home-org and active external host-org tiers — the same answer /billing
+    // and run admission read — so the share-link cap is no longer identity-path dependent.
+    String tier = entitlementResolver.resolveTier(caller);
+    if (tier == null || tier.isBlank()) tier = "FREE";
     Optional<TierConfig> cfg = tierConfigRepo.findById(tier);
     int cap = cfg.map(TierConfig::getShareLinkActiveCap).orElse(0);
     if (cap < 0) return; // unlimited
