@@ -1,7 +1,6 @@
 package com.navneet.executespec.project.workspace;
 
 import java.util.List;
-import java.util.Map;
 
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
@@ -50,9 +49,15 @@ public class ProjectWorkspaceWarmer {
     try {
       workspace.initIfMissing(projectId);
 
-      // Resolve repo short names once.
+      // RR-463 — warm exactly the LATEST codemap per linked repo, keyed on the immutable repo id.
+      // The old path loaded findByProjectId(projectId) (every retained historical version) and
+      // wrote
+      // each to the same per-repo filename in DB iteration order, so a cross-node warm could
+      // clobber
+      // a freshly generated codemap with an arbitrary older version while logging success. Query
+      // latest-per-repo deterministically so the disk cache reflects current planner evidence.
       List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
-      Map<java.util.UUID, String> shortNameByRepoId = new java.util.HashMap<>();
+      int warmed = 0;
       for (ProjectRepoLink link : links) {
         ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
         if (repo == null) continue;
@@ -62,14 +67,13 @@ public class ProjectWorkspaceWarmer {
                 ? full.substring(full.indexOf('/') + 1)
                 : (full == null ? repo.getId().toString() : full);
         shortName = shortName.replaceAll("[^A-Za-z0-9._-]", "-");
-        shortNameByRepoId.put(repo.getId(), shortName);
-      }
-
-      List<ProjectCodeMap> maps = codeMapRepo.findByProjectId(projectId);
-      for (ProjectCodeMap cm : maps) {
-        String shortName =
-            shortNameByRepoId.getOrDefault(cm.getRepoId(), cm.getRepoId().toString());
+        ProjectCodeMap cm =
+            codeMapRepo
+                .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId())
+                .orElse(null);
+        if (cm == null) continue;
         workspace.writeRawFile(projectId, "codemaps/" + shortName + ".md", cm.getContent());
+        warmed++;
       }
 
       archRepo
@@ -78,7 +82,7 @@ public class ProjectWorkspaceWarmer {
               (ProjectArchitectureDoc doc) ->
                   workspace.writeRawFile(projectId, "architecture.md", doc.getContent()));
 
-      log.debug("Warmed disk cache for project {} ({} codemaps)", projectId, maps.size());
+      log.debug("Warmed disk cache for project {} ({} codemaps)", projectId, warmed);
     } catch (Exception e) {
       log.warn("warmDiskCache failed for project {}: {}", projectId, e.getMessage());
     }

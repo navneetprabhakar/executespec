@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
@@ -78,21 +77,19 @@ public class WorkspaceHealthService {
 
   public Report report(String projectId, String callerUserId) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
-    Map<java.util.UUID, ProjectCodeMap> latestByRepo = new java.util.HashMap<>();
-    for (ProjectCodeMap cm : codeMapRepo.findByProjectId(projectId)) {
-      ProjectCodeMap prev = latestByRepo.get(cm.getRepoId());
-      if (prev == null
-          || (cm.getVersion() != null
-              && (prev.getVersion() == null || cm.getVersion() > prev.getVersion()))) {
-        latestByRepo.put(cm.getRepoId(), cm);
-      }
-    }
 
     List<RepoHealth> rows = new ArrayList<>();
     for (ProjectRepoLink link : links) {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
       if (repo == null) continue;
-      ProjectCodeMap cm = latestByRepo.get(repo.getId());
+      // RR-319 — resolve only the newest codemap per linked repo directly in SQL. Materializing
+      // codeMapRepo.findByProjectId(projectId) loaded the project's entire codemap HISTORY into
+      // memory and reduced it to latest-per-repo on the heap, making one dashboard poll O(history).
+      // A latest-per-repo projection bounds the work to one row per linked repo.
+      ProjectCodeMap cm =
+          codeMapRepo
+              .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId())
+              .orElse(null);
       String lastSha = cm == null ? null : cm.getGeneratedFromSha();
       String currentSha = resolveOriginSha(repo, callerUserId);
       boolean stale = currentSha != null && (lastSha == null || !lastSha.equals(currentSha));

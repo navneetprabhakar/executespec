@@ -285,6 +285,32 @@ class CodeIndexingServiceTest {
             eq("scoped-api-token"));
   }
 
+  @Test
+  void recorded_full_commit_that_cannot_be_pinned_fails_the_index(@TempDir Path root)
+      throws Exception { // RR-641
+    // A real 40-hex revision must be checked out exactly. When the clone's HEAD cannot be pinned to
+    // it (branch force-pushed/rebased away the recorded commit), the index must FAIL rather than
+    // publish chunks from a different tree under the recorded SHA.
+    String fullSha = "a".repeat(40);
+    repo.setLastSyncedSha(fullSha);
+    Lease pinnedLease =
+        new Lease("proj-1", repo.getId(), fullSha, "node:a", 8L, Instant.now().plusSeconds(60));
+    when(states.tryAcquire(eq("proj-1"), eq(repo.getId()), eq(fullSha), anyString(), any()))
+        .thenReturn(Optional.of(pinnedLease));
+    Files.writeString(root.resolve("A.java"), "class A {}\n");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+    when(ws.checkoutExactCommit(anyString(), eq(fullSha))).thenReturn(false);
+
+    var result = service(4000).indexRepo("proj-1", repo, null);
+
+    assertThat(result.outcome()).isEqualTo(CodeIndexingService.Outcome.FAILED);
+    verify(ws).checkoutExactCommit(anyString(), eq(fullSha));
+    verify(states).fail(pinnedLease, "SOURCE_REVISION_UNAVAILABLE");
+    verify(embedder, never())
+        .embedForProject(
+            anyString(), anyList(), anyString(), anyString(), anyString(), nullable(String.class));
+  }
+
   private static ProjectRepo repo() {
     return ProjectRepo.builder()
         .id(UUID.randomUUID())

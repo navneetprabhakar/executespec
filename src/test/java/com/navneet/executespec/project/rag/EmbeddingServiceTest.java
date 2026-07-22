@@ -375,6 +375,67 @@ class EmbeddingServiceTest {
   }
 
   @Test
+  void invokesProgressCallbackAfterEachBatch() { // RR-676
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "customer-openai-key", RunKeyContext.Source.PLATFORM, null));
+    when(transport.embed(
+            eq("customer-openai-key"), eq(EmbeddingService.DEFAULT_MODEL), eq(List.of("hello"))))
+        .thenReturn(new OpenAiEmbeddingTransport.Result(List.of(new float[] {0.1f}), 5));
+    java.util.concurrent.atomic.AtomicInteger heartbeats =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    List<float[]> out =
+        service.embedForProject(
+            "project-1",
+            List.of("hello"),
+            "ProjectDocumentEmbedding",
+            "PROJECT_DOCUMENT",
+            "doc-1",
+            null,
+            (completed, total) -> {
+              heartbeats.incrementAndGet();
+              return true;
+            });
+
+    assertThat(out).hasSize(1);
+    assertThat(heartbeats.get()).isEqualTo(1);
+  }
+
+  @Test
+  void progressCallbackReturningFalseAbortsBeforeSpendingNextBatch() { // RR-676
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "customer-openai-key", RunKeyContext.Source.ORG, null));
+    List<String> texts = IntStream.range(0, 150).mapToObj(i -> "chunk-" + i).toList();
+    when(transport.embed(
+            eq("customer-openai-key"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq(texts.subList(0, 100))))
+        .thenReturn(
+            new OpenAiEmbeddingTransport.Result(
+                IntStream.range(0, 100).mapToObj(i -> new float[] {0.1f}).toList(), 100));
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1",
+                    texts,
+                    "ProjectCodeEmbedding",
+                    "PROJECT_REPOSITORY",
+                    "repo-1",
+                    null,
+                    (completed, total) -> false))
+        .isInstanceOf(EmbeddingOwnershipLostException.class);
+
+    // Only the first batch was dispatched; ownership loss stopped the second batch's provider
+    // spend.
+    verify(transport, times(1)).embed(anyString(), anyString(), any());
+  }
+
+  @Test
   void rejectsConfiguredModelOrDimensionDriftBeforeServingVectors() {
     ReflectionTestUtils.setField(service, "model", "text-embedding-4-experimental");
     assertThatThrownBy(service::validateVectorContract)

@@ -11,6 +11,8 @@ import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +40,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class PrCommentInboxService {
+
+  /**
+   * RR-193 — reviewer comment bodies arrive from an external webhook and are persisted +
+   * rebroadcast. GitHub caps a review-comment body at 65536 characters; bound the durable value
+   * defensively so a single oversized field cannot consume unbounded storage/SSE payload regardless
+   * of what the wire actually delivered.
+   */
+  static final int MAX_BODY_CHARS = 65_536;
 
   private final PrCommentInboxRepository inboxRepo;
   private final PullRequestRecordRepository prRecordRepo;
@@ -85,7 +95,7 @@ public class PrCommentInboxService {
             .commentId(req.commentId())
             .filePath(req.filePath())
             .lineNumber(req.lineNumber())
-            .body(req.body() == null ? "" : req.body())
+            .body(boundBody(req.body())) // RR-193 field-length bound
             .author(req.author() == null ? "unknown" : req.author())
             .githubUrl(req.githubUrl() == null ? "" : req.githubUrl())
             .status("PENDING")
@@ -101,7 +111,15 @@ public class PrCommentInboxService {
         req.commentId(),
         saved.getAuthor());
 
-    // SSE: open RunDetail tab gets a live banner without a refetch round-trip.
+    // RR-194 — SSE is a best-effort live convenience, not part of the durable ingest contract.
+    // Emitting inside this @Transactional method meant a broadcaster failure rolled back the
+    // committed inbox row, permanently dropping an actionable reviewer comment while GitHub was
+    // told
+    // the delivery succeeded (204). Emit AFTER the transaction commits, and never let an emit
+    // failure
+    // unwind the durable ingestion. When there is no active transaction (defensive), emit inline
+    // but
+    // still isolate the failure.
     String preview =
         saved.getBody().length() > 80 ? saved.getBody().substring(0, 80) + "…" : saved.getBody();
     String anchor =
@@ -110,9 +128,37 @@ public class PrCommentInboxService {
             : saved.getFilePath()
                 + (saved.getLineNumber() != null ? ":" + saved.getLineNumber() : "");
     String summary = saved.getAuthor() + "|" + anchor + "|" + preview;
-    broadcaster.emit(runId, RunEvent.prCommentReceived(runId, summary));
+    emitAfterCommit(runId, summary);
 
     return Optional.of(saved);
+  }
+
+  private static String boundBody(String body) {
+    if (body == null) return "";
+    return body.length() > MAX_BODY_CHARS ? body.substring(0, MAX_BODY_CHARS) : body;
+  }
+
+  private void emitAfterCommit(String runId, String summary) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              safeEmit(runId, summary);
+            }
+          });
+    } else {
+      safeEmit(runId, summary);
+    }
+  }
+
+  private void safeEmit(String runId, String summary) {
+    try {
+      broadcaster.emit(runId, RunEvent.prCommentReceived(runId, summary));
+    } catch (RuntimeException e) {
+      // Durable ingestion already committed; a live-stream failure is not an ingest failure.
+      log.warn("[pr-comment-inbox] SSE emit failed for run {}: {}", runId, e.getMessage());
+    }
   }
 
   /** Pending + Addressed + Dismissed for a run, newest first. */

@@ -366,7 +366,7 @@ class ProjectDocumentServiceSecurityTest {
 
     verify(blobRepo, never()).findById(any());
     verify(embedder, never())
-        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
+        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any());
   }
 
   @Test
@@ -395,7 +395,7 @@ class ProjectDocumentServiceSecurityTest {
                     .build()));
     when(workspace.resolve("p1", "docs/.uploads/d-recover.bin"))
         .thenReturn(tempDir.resolve("docs/.uploads/d-recover.bin"));
-    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class)))
+    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any()))
         .thenReturn(java.util.List.of(new float[] {0.1f}));
 
     service.processDocument("d-recover");
@@ -405,7 +405,7 @@ class ProjectDocumentServiceSecurityTest {
     assertThat(pending.getProcessingAttempt()).isEqualTo(1);
     verify(blobRepo, org.mockito.Mockito.times(1)).findById("d-recover");
     verify(embedder, org.mockito.Mockito.times(1))
-        .embedForProject(any(), any(), any(), any(), any(), eq("member-1"));
+        .embedForProject(any(), any(), any(), any(), any(), eq("member-1"), any());
     verify(chunkStore, org.mockito.Mockito.times(1)).insertAll(any(), any(), any());
   }
 
@@ -446,7 +446,7 @@ class ProjectDocumentServiceSecurityTest {
     // RR-1526: the stored source bytes must not survive a credential rejection on the restart path.
     verify(blobRepo, org.mockito.Mockito.times(1)).deleteById("d-secret");
     verify(embedder, never())
-        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
+        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any());
     verify(chunkStore, never()).insertAll(any(), any(), any());
     verify(chunkStore, never()).insertLexicalAll(any(), any());
   }
@@ -493,7 +493,7 @@ class ProjectDocumentServiceSecurityTest {
     assertThat(pending.getEmbeddingProvider()).isNull();
     assertThat(pending.getEmbeddingModel()).isNull();
     verify(embedder, never())
-        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class));
+        .embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any());
     verify(chunkStore).insertLexicalAll(eq("d-lexical"), any());
     verify(chunkStore, never()).insertAll(any(), any(), any());
   }
@@ -536,7 +536,7 @@ class ProjectDocumentServiceSecurityTest {
                 EmbeddingService.DEFAULT_MODEL,
                 "GOVERNED_OPENAI_EMBEDDING_AVAILABLE"));
     when(embedder.model()).thenReturn(EmbeddingService.DEFAULT_MODEL);
-    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class)))
+    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any()))
         .thenReturn(java.util.List.of(new float[] {0.2f}));
 
     // The ordinary worker entrypoint must still treat a published document as terminal.
@@ -660,7 +660,7 @@ class ProjectDocumentServiceSecurityTest {
                     .build()));
     when(workspace.resolve("p1", "docs/.uploads/d-retry.bin"))
         .thenReturn(tempDir.resolve("docs/.uploads/d-retry.bin"));
-    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class)))
+    when(embedder.embedForProject(any(), any(), any(), any(), any(), nullable(String.class), any()))
         .thenThrow(new IllegalStateException("synthetic provider outage"));
 
     service.processDocument("d-retry");
