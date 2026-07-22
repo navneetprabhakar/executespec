@@ -86,7 +86,15 @@ class RunPlanningCoordinator {
         try {
           List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
           for (ProjectRepo r : repos) {
-            if (r.getGithubRepoFullName() != null) repoNames.add(r.getGithubRepoFullName());
+            // RR-1202 — provider-neutral identity. A Bitbucket or LOCAL source legitimately has a
+            // null githubRepoFullName but carries a stable sourceKey / display name (V278). Keying
+            // only off githubRepoFullName dropped those rows, so three selected Bitbucket/local
+            // sources looked like a tiny one-repo SINGLE_SHOT change to the classifier. Prefer the
+            // GitHub full name, then the provider-neutral sourceKey, then the display name.
+            String name = r.getGithubRepoFullName();
+            if (name == null || name.isBlank()) name = r.getSourceKey();
+            if (name == null || name.isBlank()) name = r.getSourceDisplayName();
+            if (name != null && !name.isBlank()) repoNames.add(name);
           }
         } catch (Exception ignored) {
           /* fall through with empty list */
@@ -328,7 +336,19 @@ class RunPlanningCoordinator {
                                 taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
                             expanded.put(t.id(), List.of(full));
                           }
-                        } catch (Throwable ex) {
+                        } catch (Exception ex) {
+                          // RR-449 — catch only recoverable Exceptions; a fatal Error (OOM,
+                          // linkage,
+                          // thread-death) now propagates to the future instead of being concealed
+                          // as
+                          // a low-quality fallback plan. A cancellation (cancel(true) sets the
+                          // thread's interrupt flag) is likewise not a planning failure: fail the
+                          // future rather than masking it as a fallback task.
+                          if (Thread.currentThread().isInterrupted()
+                              || ex instanceof InterruptedException) {
+                            Thread.currentThread().interrupt();
+                            throw new java.util.concurrent.CompletionException(ex);
+                          }
                           log.warn(
                               "V2 run={} task expansion failed for {}: {}",
                               runId,
@@ -367,6 +387,13 @@ class RunPlanningCoordinator {
               futures.toArray(new java.util.concurrent.CompletableFuture[0]))
           .get(20, java.util.concurrent.TimeUnit.MINUTES);
     } catch (Exception expandWaitEx) {
+      // RR-1175 — cancel every still-running sibling so the expansion pool is not left holding
+      // zombie provider work that keeps spending + mutating shared state after we synthesize a
+      // fallback. cancel(true) interrupts the worker thread; the lambda's RR-449
+      // InterruptedException
+      // branch then fails that future cleanly instead of writing a late fallback task.
+      for (var f : futures) f.cancel(true);
+      if (expandWaitEx instanceof InterruptedException) Thread.currentThread().interrupt();
       throw new IllegalStateException(
           "LARGE expansion phase exceeded 20-minute timeout: " + expandWaitEx.getMessage(),
           expandWaitEx);
@@ -527,11 +554,34 @@ class RunPlanningCoordinator {
       return List.of(coerceToLeafFallback(epic));
     }
 
-    // Re-id with parent prefix and force LEAF (depth cap).
+    // RR-450 — build the old-id → new-id map FIRST, then rewrite every child's dependsOn through
+    // it.
+    // The sub-outline expresses sibling prerequisites using the model's own ids, but we rename each
+    // child to `{epicId}.{position}`. Copying dependsOn unchanged (the old behaviour) left dangling
+    // references to ids that no longer exist, so the scheduler could run children out of order or
+    // treat a prerequisite as missing. A dependency the sub-outline did not define as a sibling is
+    // dropped (it cannot be resolved within this EPIC and referencing an external/parent id here
+    // would be incoherent), and self-references are removed.
+    java.util.Map<String, String> idRemap = new java.util.HashMap<>();
+    for (int i = 0; i < children.size(); i++) {
+      String original = children.get(i).id();
+      if (original != null && !original.isBlank()) {
+        idRemap.put(original, epic.id() + "." + (i + 1));
+      }
+    }
     List<PlannedTask> reIdChildren = new ArrayList<>(children.size());
     for (int i = 0; i < children.size(); i++) {
       PlannedTask c = children.get(i);
       String childId = epic.id() + "." + (i + 1);
+      List<String> rewrittenDeps = new ArrayList<>();
+      if (c.dependsOn() != null) {
+        for (String dep : c.dependsOn()) {
+          String mapped = idRemap.get(dep);
+          if (mapped != null && !mapped.equals(childId) && !rewrittenDeps.contains(mapped)) {
+            rewrittenDeps.add(mapped);
+          }
+        }
+      }
       reIdChildren.add(
           PlannedTask.builder()
               .id(childId)
@@ -539,7 +589,7 @@ class RunPlanningCoordinator {
               .description(c.description())
               .complexity(c.complexity() == null ? PlannedTask.Complexity.MEDIUM : c.complexity())
               .touchesFiles(c.touchesFiles())
-              .dependsOn(c.dependsOn())
+              .dependsOn(rewrittenDeps)
               .hardConstraints(c.hardConstraints())
               .meetsRequirements(c.meetsRequirements())
               .taskType(PlannedTask.TaskType.LEAF) // depth cap: no further recursion
@@ -579,7 +629,17 @@ class RunPlanningCoordinator {
                           bodied.put(
                               child.id(),
                               taskExpander.expand(child, subPlanForContext, parentReq, childCtx));
-                        } catch (Throwable ex) {
+                        } catch (Exception ex) {
+                          // RR-449 — recoverable-only; a fatal Error propagates to the future, and
+                          // a
+                          // cancellation (interrupt flag set) fails the future rather than masking
+                          // it
+                          // as a fallback task.
+                          if (Thread.currentThread().isInterrupted()
+                              || ex instanceof InterruptedException) {
+                            Thread.currentThread().interrupt();
+                            throw new java.util.concurrent.CompletionException(ex);
+                          }
                           log.warn(
                               "V2 run={} sub-task expansion failed for {}: {}",
                               runId,
@@ -612,6 +672,10 @@ class RunPlanningCoordinator {
               subFutures.toArray(new java.util.concurrent.CompletableFuture[0]))
           .get(10, java.util.concurrent.TimeUnit.MINUTES);
     } catch (Exception subExpandEx) {
+      // RR-1175 — cancel outstanding sub-expansion futures so they stop spending after we fall back
+      // to whatever completed.
+      for (var f : subFutures) f.cancel(true);
+      if (subExpandEx instanceof InterruptedException) Thread.currentThread().interrupt();
       log.warn(
           "V2 run={} sub-expansion for EPIC {} hit timeout/error — using whatever completed: {}",
           runId,
