@@ -186,6 +186,9 @@ class RunStepUsageRecorderTest {
     assertThat(intent.getCorrelationId()).isEqualTo("corr-1");
     assertThat(intent.getOrgId()).isEqualTo("org-1");
     assertThat(intent.getHumanRoleSnapshot()).isEqualTo("ORG_ADMIN");
+    // RR-430 — this role was resolved before transport, so it is provably captured at dispatch and
+    // must not be indistinguishable from a migration-reconstructed role.
+    assertThat(intent.getRoleProvenance()).isEqualTo("CAPTURED_AT_DISPATCH");
     assertThat(intent.getModelTier()).isEqualTo("CAPABLE");
     assertThat(intent.getAttemptKind()).isEqualTo("PRIMARY");
     assertThat(intent.getStartedAt()).isNotNull();

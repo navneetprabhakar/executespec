@@ -95,7 +95,12 @@ The schema-v4 JSON report includes a paginated intent-first attempt list and a c
 org/global role x provider x model x agent role x feature x project x run/session x key-source x
 status roll-up. V301 snapshots the most-scoped project/org/global human role on the immutable
 attempt intent before provider dispatch, so historical exports do not change after membership edits. Legacy attempts are
-backfilled once at upgrade time. Run and agent-session ids are
+backfilled once at upgrade time. **V337 (RR-430)** adds
+`llm_usage_attempt_intent.role_provenance` (nullable) recording HOW that role was obtained —
+`CAPTURED_AT_DISPATCH` for every intent `RunStepUsageRecorder` writes going forward, and NULL legacy
+rows read as `UNKNOWN` (surfaced as `user_role_provenance` in the report/CSV) so a
+migration-reconstructed role is never presented with the authority of a true dispatch-time snapshot.
+Pinned by `RunStepUsageRecorderTest`. Run and agent-session ids are
 resolved only by exact tenant-scoped primary-key joins; no source-id guessing is allowed. A missing
 terminal is returned as `MISSING_TERMINAL`/`PENDING_TERMINAL`, never silently omitted.
 

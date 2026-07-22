@@ -73,6 +73,15 @@ public class LlmUsageAttemptIntent {
   @Column(name = "human_role_snapshot", nullable = false, length = 40)
   private String humanRoleSnapshot;
 
+  /**
+   * RR-430 — how {@link #humanRoleSnapshot} was obtained: {@code CAPTURED_AT_DISPATCH} (recorded
+   * before the provider attempt), {@code BACKFILLED_AT_MIGRATION} (reconstructed by a data
+   * migration), or {@code UNKNOWN}. Null legacy rows (pre-V337) are read as UNKNOWN so a
+   * reconstructed role is never presented with the authority of a true snapshot.
+   */
+  @Column(name = "role_provenance", length = 40)
+  private String roleProvenance;
+
   @Column(name = "step_id", length = 120)
   private String stepId;
 

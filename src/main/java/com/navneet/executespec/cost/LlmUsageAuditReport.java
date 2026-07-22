@@ -82,6 +82,9 @@ public record LlmUsageAuditReport(
       String userId,
       String userEmail,
       String userRole,
+      // RR-430 — CAPTURED_AT_DISPATCH | BACKFILLED_AT_MIGRATION | UNKNOWN; distinguishes a role
+      // recorded before the provider attempt from one reconstructed by a migration.
+      String userRoleProvenance,
       String projectId,
       String projectName,
       String runId,

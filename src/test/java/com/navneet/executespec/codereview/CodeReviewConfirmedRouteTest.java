@@ -190,6 +190,7 @@ class CodeReviewConfirmedRouteTest {
             new CodeReviewAgent.AgentResult("ok", List.of(), List.of(), 1, "deepseek", "model"),
             0,
             0,
+            CodeReviewAgent.ScanCoverage.COMPLETE, // RR-1696
             1);
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> service.publishDurableResult(lease, prepared))

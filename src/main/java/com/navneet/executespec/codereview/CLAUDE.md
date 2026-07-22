@@ -114,9 +114,13 @@ Also note the counts measure different populations: `totalFiles` counts every
 non-skipped file under the per-file size cap, while `totalLoc` counts lines only
 of the language-recognised files actually read — hence the prompt now says
 "Scanned file count" and "Lines of code read" rather than implying a repository
-total. **Not covered:** `code_review_scan.total_files_scanned` /
-`total_loc` and the `CodeReviewController` DTO still persist and expose the bare
-numbers with no coverage marker; that needs a migration and is out of scope here.
+total. **Persisted (RR-1696, V339):** `code_review_scan.scan_coverage VARCHAR(32)`
+(nullable) records why the walk ended (`COMPLETE | TRUNCATED_*`); `completeScan`
+writes it from `SampleResult.coverage`, and the `CodeReviewController` scan DTO
+exposes `scanCoverage` (NULL legacy rows read as UNKNOWN — a lower bound) so the
+human-facing scan record no longer states a possibly-truncated
+`total_files_scanned` / `total_loc` as fact. Pinned by
+`CodeReviewScanDtoCoverageTest`.
 
 ### Credential boundary (RR-435)
 

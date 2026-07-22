@@ -82,6 +82,12 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   (`GET /api/integrations/runs`) scope on `org_id`; legacy rows keep NULL and are visible only to
   SUPER_ADMIN. `created_by_user_id` records the actor that caused an interactive trigger, which now
   runs under the caller's identity rather than the global `run-on-behalf-of-user-id` runner.
+- **V338** (RR-1446): `agent_task.plan_index INTEGER` (nullable) — persists the planner-intent order
+  of each task so the approval gate renders the planner's sequence rather than the unspecified
+  database row order (all tasks are PENDING at the gate, so the old status-only sort was a no-op).
+  Written by `StateStore.savePlan` / `RunPersistenceWriter.persistTasks` (and appended plans);
+  `RunMapper.TASK_DISPLAY_ORDER` sorts by it first, status is decoration only, legacy NULL rows sort
+  last. Pinned by `RunMapperTaskOrderTest`.
 - **V283**: expands `run_step_usage` into the canonical physical-provider-attempt ledger with tenant/context, feature, key source, retry/failure, latency, BIGINT call-index, and safe numeric usage metadata. Historical arbitrary raw JSON is scrubbed during upgrade.
 - **V191** (PR-B-part-2, 2026-05-13): `project.{archived_at,deleted_at}` columns + partial indexes (`idx_project_active` on `(org_id) WHERE archived_at IS NULL AND deleted_at IS NULL`, `idx_project_deleted_at` for the PR-H cleanup sweeper). Backfills `archived_at = updated_at` on legacy `status='ARCHIVED'` rows. Companion code change: project archive is now reversible (`POST /api/projects/{id}/unarchive`), `DELETE /api/projects/{id}` performs a soft-delete with a 30-day undo window (restored via `POST /api/projects/{id}/restore`). PipelineRun already carried the same two columns from V60 / V60.1 — same lifecycle endpoints (`/runs/{id}/unarchive`, `/runs/{id}/soft-delete`, `/runs/{id}/restore`) wired on the run side too.
 - **V192** (PR-M, 2026-05-13): `project_architecture_doc.generated_from_branches jsonb` — captures the branch each per-repo codemap was generated from. Fixes the permanent-STALE-badge bug on projects regenerated with a `?branch=<non-default>` override: `StalenessService.compute` now probes the SAME branch the codemap came from instead of always assuming `defaultBranch`. Nullable; legacy pre-V192 rows fall through to existing defaultBranch behaviour.

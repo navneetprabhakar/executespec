@@ -127,22 +127,25 @@ public class StateStore {
     run.setTechStack(detectTechStack(plan, run.getUserRequest()));
     runRepo.save(run);
 
-    plan.getTasks()
-        .forEach(
-            t ->
-                taskRepo.save(
-                    AgentTask.builder()
-                        .taskId(t.getTaskId())
-                        .runId(runId)
-                        .title(t.getTitle())
-                        .complexity(t.getComplexity())
-                        .assignedModel(
-                            t.getAssignedModel()) // planner routes: Sonnet for HIGH/MEDIUM,
-                        // Haiku for LOW
-                        .status("PENDING")
-                        .taskJson(toJson(t))
-                        .compactionCount(0)
-                        .build()));
+    // RR-1446 — persist the planner-intent order so the approval gate renders the planner's
+    // sequence rather than the unspecified database row order (all tasks are PENDING at the gate).
+    List<TaskDefinition> planTasks = plan.getTasks();
+    for (int i = 0; i < planTasks.size(); i++) {
+      TaskDefinition t = planTasks.get(i);
+      taskRepo.save(
+          AgentTask.builder()
+              .taskId(t.getTaskId())
+              .runId(runId)
+              .title(t.getTitle())
+              .complexity(t.getComplexity())
+              .assignedModel(t.getAssignedModel()) // planner routes: Sonnet for HIGH/MEDIUM,
+              // Haiku for LOW
+              .status("PENDING")
+              .taskJson(toJson(t))
+              .planIndex(i)
+              .compactionCount(0)
+              .build());
+    }
 
     savePlanVersion(runId, "PLANNER", null);
   }
@@ -1987,8 +1990,19 @@ public class StateStore {
     }
 
     // Create AgentTask rows for each new task
+    // RR-1446 — appended tasks keep planner-intent order by continuing past the run's current
+    // highest plan_index so the DTO renders them after the already-planned tasks.
     List<AgentTask> created = new ArrayList<>();
-    for (TaskDefinition t : miniPlan.getTasks()) {
+    int planIndexBase =
+        taskRepo.findByRunId(runId).stream()
+                .map(AgentTask::getPlanIndex)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(-1)
+            + 1;
+    List<TaskDefinition> miniTasks = miniPlan.getTasks();
+    for (int i = 0; i < miniTasks.size(); i++) {
+      TaskDefinition t = miniTasks.get(i);
       AgentTask task =
           taskRepo.save(
               AgentTask.builder()
@@ -1999,6 +2013,7 @@ public class StateStore {
                   .assignedModel(t.getAssignedModel())
                   .status("PENDING")
                   .taskJson(toJson(t))
+                  .planIndex(planIndexBase + i)
                   .compactionCount(0)
                   .build());
       created.add(task);

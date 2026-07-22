@@ -617,7 +617,14 @@ public class CodeReviewService {
     }
 
     return new DurableCodeReviewResult(
-        staticResult, agentResult, totalFiles, totalLoc, System.currentTimeMillis() - start);
+        staticResult,
+        agentResult,
+        totalFiles,
+        totalLoc,
+        // RR-1696 — carry WHY the walk ended so the persisted scan record marks the counts as
+        // exact or a lower bound, matching what the prompt was already told (RR-1685).
+        samples.coverage(),
+        System.currentTimeMillis() - start);
   }
 
   /** Locks the V299 fence and publishes result + terminal job state in one transaction. */
@@ -632,6 +639,7 @@ public class CodeReviewService {
             result.agentResult(),
             result.totalFiles(),
             result.totalLoc(),
+            result.coverage(),
             result.durationMs());
     if (!reviewJobStore.complete(lease)) throw new ReviewBackgroundJobStore.LeaseFencedException();
     String channel = "code-review-" + lease.job().subjectId();
@@ -661,6 +669,8 @@ public class CodeReviewService {
       CodeReviewAgent.AgentResult agentResult,
       int totalFiles,
       int totalLoc,
+      /** RR-1696 — whether totalFiles/totalLoc are exact or a lower bound. */
+      CodeReviewAgent.ScanCoverage coverage,
       long durationMs) {}
 
   /**
@@ -711,6 +721,7 @@ public class CodeReviewService {
       CodeReviewAgent.AgentResult agentResult,
       int totalFiles,
       int totalLoc,
+      CodeReviewAgent.ScanCoverage coverage,
       long durationMs) {
     CodeReviewScan row = scanRepo.findById(scanId).orElse(null);
     if (row == null) {
@@ -720,6 +731,10 @@ public class CodeReviewService {
     row.setStatus("COMPLETE");
     row.setTotalFilesScanned(totalFiles);
     row.setTotalLoc(totalLoc);
+    // RR-1696 — persist why the walk ended so the human-facing scan record marks a possibly
+    // truncated count as a lower bound instead of stating it as fact. Null is left as-is and read
+    // as UNKNOWN by the DTO.
+    row.setScanCoverage(coverage == null ? null : coverage.name());
     row.setStaticFindingsCount(staticResult.findings().size());
     row.setLlmFindingsCount(agentResult.issues().size());
     row.setLlmFilteredOutCount(agentResult.droppedStaticFindings().size());
