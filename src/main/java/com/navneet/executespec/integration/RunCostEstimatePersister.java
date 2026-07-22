@@ -96,11 +96,17 @@ class RunCostEstimatePersister {
     // it would return the same number for two runs that differ only by pinned model. When the run
     // carries an explicit model pin, skip history and price that exact model with the model-aware
     // formula so the estimate actually changes with the selected model.
+    //
+    // RR-1551 — the history lookup is scoped to THIS run's owning org. The band it returns becomes
+    // creditsCharged and hardCapUsd below, so pricing a tenant from other tenants' observed spend
+    // was both a billing defect and a cross-tenant aggregate disclosure. A run with no orgId gets
+    // the model-aware formula, never a global pool.
+    String orgId = runRow == null ? null : runRow.getOrgId();
     Optional<RunCostTracker.Estimate> historical =
         pinnedModel != null
             ? Optional.empty()
             : costHistoryService.estimateFromHistory(
-                strategyKey, providerKey, repoCount, complexities.size());
+                orgId, strategyKey, providerKey, repoCount, complexities.size());
     RunCostTracker.Estimate est =
         historical.orElseGet(
             () ->

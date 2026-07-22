@@ -129,3 +129,18 @@ database outbox scheduler can claim an expired lease and recover the exact fact 
 Prometheus loads `observability/alerts/executespec-enterprise-alerts.yml`. Alertmanager/pager
 delivery, deployed multi-JVM process-kill/DB-denial qualification, a shared fallback directory for
 total PostgreSQL outage, and ledger retention/partitioning remain release work.
+
+## Historical cost estimation is tenant-scoped (RR-1551)
+
+`CostHistoryService.estimateFromHistory` sets `pipeline_run.credits_charged` and
+`pipeline_run.hard_cap_usd` through `integration/RunCostEstimatePersister`, so it is derived
+exclusively from the submitting run's OWN org history. Both `RunCostHistoryRepository` queries
+(`findSimilarCosts`, `findSimilarCostsLoose`) take a required `orgId` predicate; the loose fallback
+relaxes shape only, never the tenant boundary. A run with no `orgId` skips history entirely and
+takes the model-aware Stage-1 formula — a global pool is never a fallback. Before this fix the
+P25/P75 band was computed across every organisation's observed `actual_cost_usd`, which both
+mispriced runs across tenants and made foreign orgs' cost distribution reconstructable by varying
+`planStrategy`/`provider`. Deferred: `idx_run_cost_history_similarity` still leads on
+`plan_strategy`, so the org-scoped query does not have a leading-column index — a future migration
+should add `(org_id, plan_strategy, provider, repo_count, task_count, completed_at DESC)`. This is
+a performance concern only; correctness does not depend on it.

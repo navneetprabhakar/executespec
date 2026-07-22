@@ -116,26 +116,40 @@ public class CostHistoryService {
    * Optional#empty()} when fewer than {@link #MIN_SAMPLES} similar runs exist — caller MUST fall
    * back to the formula estimator.
    *
+   * <p>RR-1551 — the estimate is TENANT-SCOPED. It is only ever computed from the submitting org's
+   * own past runs, because the caller writes it straight onto {@code creditsCharged} and {@code
+   * hardCapUsd}. A blank {@code orgId} is a fail-closed skip, not a licence to widen the pool: an
+   * unattributable run takes the model-aware Stage-1 formula instead.
+   *
+   * @param orgId owning organisation of the run being priced — required; blank ⇒ formula fallback
    * @param strategy plan strategy (SINGLE_SHOT / SMALL / ...)
    * @param provider provider key (uppercase: ANTHROPIC / OPENAI / GEMINI)
    * @param repoCount linked repo count
    * @param taskCount expected task count
    */
   public Optional<RunCostTracker.Estimate> estimateFromHistory(
-      String strategy, String provider, int repoCount, int taskCount) {
+      String orgId, String strategy, String provider, int repoCount, int taskCount) {
     if (strategy == null || provider == null) return Optional.empty();
+    // RR-1551 — no tenant, no history. Never fall through to a cross-org pool.
+    if (orgId == null || orgId.isBlank()) {
+      log.debug(
+          "[CostHistory] estimate-from-history skipped — run has no orgId; using formula estimate");
+      return Optional.empty();
+    }
     List<BigDecimal> strict =
         historyRepo.findSimilarCosts(
-            strategy, provider, repoCount, taskCount, PageRequest.of(0, MAX_SAMPLES));
+            orgId, strategy, provider, repoCount, taskCount, PageRequest.of(0, MAX_SAMPLES));
     List<BigDecimal> use =
         strict.size() >= MIN_SAMPLES
             ? strict
-            : historyRepo.findSimilarCostsLoose(strategy, provider, PageRequest.of(0, MAX_SAMPLES));
+            : historyRepo.findSimilarCostsLoose(
+                orgId, strategy, provider, PageRequest.of(0, MAX_SAMPLES));
     if (use.size() < MIN_SAMPLES) {
       log.debug(
-          "[CostHistory] estimate-from-history skipped — only {} samples for {} {} repos={}"
+          "[CostHistory] estimate-from-history skipped — only {} samples for org={} {} {} repos={}"
               + " tasks={} (need ≥{})",
           use.size(),
+          orgId,
           strategy,
           provider,
           repoCount,
@@ -149,8 +163,9 @@ public class CostHistoryService {
     int credits = Math.max(1, (int) Math.ceil(((low + high) / 2.0 * 1.20) / 5.0));
     double hardCap = credits * 5.0;
     log.info(
-        "[CostHistory] estimate from {} samples for {} {} repos={} tasks={}: ${}-${}",
+        "[CostHistory] estimate from {} samples for org={} {} {} repos={} tasks={}: ${}-${}",
         sorted.length,
+        orgId,
         strategy,
         provider,
         repoCount,
