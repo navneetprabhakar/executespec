@@ -151,6 +151,10 @@ public class DeploymentController {
       return ResponseEntity.noContent().build();
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (DeploymentService.DeploymentCleanupException e) {
+      // RR-1399: do not report success when the cloud resources could not be removed. The row is
+      // marked FAILED and remains retryable; tell the caller the deletion did not settle.
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
   }
 

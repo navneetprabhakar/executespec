@@ -158,7 +158,13 @@ public class Deployment {
     GO,
     RUST,
     DOTNET,
-    STATIC
+    STATIC,
+    // RR-1395 — a deployment that failed before a strategy was detected (workspace unavailable or
+    // strategy detection error). Persisted so the FAILED row satisfies the NOT NULL strategy column
+    // (VARCHAR(32), no CHECK constraint) instead of throwing a persistence exception on the
+    // graceful
+    // failure path.
+    UNKNOWN
   }
 
   public enum DeployStatus {
