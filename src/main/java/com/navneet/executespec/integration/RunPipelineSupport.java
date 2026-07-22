@@ -7,10 +7,13 @@ import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.engine.EngineBudget;
+import com.navneet.executespec.engine.EngineOutcome;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import lombok.extern.slf4j.Slf4j;
@@ -164,6 +167,59 @@ public final class RunPipelineSupport {
         .build();
   }
 
+  /** Terminal-status reason stamped when a finding PATCH stops without ever proving its change. */
+  public static final String PATCH_STOPPED_UNVERIFIED_REASON = "PATCH_STOPPED_UNVERIFIED";
+
+  /** RR-1566 — wall-clock ceiling (seconds) for a CUSTOMER (finding-triggered) PATCH run. */
+  private static final int PATCH_WALL_CLOCK_SECONDS = 3600;
+
+  /** RR-1566 — time reserved before the absolute deadline for cleanup + response delivery. */
+  private static final long PATCH_SHUTDOWN_RESERVE_MS = 90_000L;
+
+  /**
+   * RR-1566 — the {@link EngineBudget} the CUSTOMER PATCH path must pass. It previously passed
+   * none, so {@code wallClockSeconds}/{@code absoluteDeadlineEpochMs} were null and a stuck autofix
+   * worker could loop the full per-provider iteration cap with no time bound (the dollar cap the
+   * only backstop). Benchmark sources return {@code null} (engine/tier defaults) — they own
+   * campaign timing. iterCap stays null (per-provider default) and dollarCap stays null (the run
+   * row's hardCapUsd bounds spend); the wall clock + absolute deadline are the new bound.
+   */
+  public static EngineBudget patchEngineBudget(String sourceType) {
+    if (BenchmarkSourceType.isControlledWorkerSource(sourceType)) return null;
+    long deadline = System.currentTimeMillis() + PATCH_WALL_CLOCK_SECONDS * 1000L;
+    return new EngineBudget(
+        null, PATCH_WALL_CLOCK_SECONDS, null, deadline, PATCH_SHUTDOWN_RESERVE_MS);
+  }
+
+  /**
+   * RR-1567 — publication gate for finding-triggered PATCH runs. The HARD_GATE test-verification
+   * check only blocks the {@code completeTask} tool, so a worker that never calls {@code
+   * completeTask} ({@code STOPPED_WITHOUT_COMPLETE} → {@link EngineOutcome#STOPPED}) never faced
+   * the gate and has proven nothing — yet the old outcome map called that COMPLETE and auto-pushed
+   * it to a customer PR head branch. The gate is thus bypassable by doing LESS. This makes the
+   * publication decision read the same evidence the gate reads: for a {@code finding:} source, only
+   * a genuine completion (a {@code completeTask}, which under {@code requireTestVerification} is
+   * refused without a passing {@code runTests}, or a stagnation-forced terminal where writes are
+   * present) is publishable. {@code STOPPED} / iteration / budget / wall-clock / error outcomes are
+   * not.
+   *
+   * <p>Non-finding sources return {@code true}: benchmark PATCH runs never reach the auto-push
+   * block (their diff is captured externally), so this method does not govern them.
+   */
+  public static boolean patchResultPublishable(EngineOutcome outcome, String sourceType) {
+    if (sourceType == null || !sourceType.startsWith("finding:")) return true;
+    return outcome == EngineOutcome.COMPLETED || outcome == EngineOutcome.STAGNATED;
+  }
+
+  /**
+   * RR-1567 — true when a finding PATCH ended unverified-STOPPED (label demoted, not published).
+   */
+  public static boolean patchStoppedUnverified(EngineOutcome outcome, String sourceType) {
+    return outcome == EngineOutcome.STOPPED
+        && sourceType != null
+        && sourceType.startsWith("finding:");
+  }
+
   public static String shortMsg(Exception e) {
     String msg = e.getMessage();
     String s = e.getClass().getSimpleName() + ": " + (msg == null ? "" : msg);
@@ -192,26 +248,49 @@ public final class RunPipelineSupport {
             "venv",
             ".venv");
     List<String> out = new java.util.ArrayList<>();
-    try (var stream = Files.walk(workspace)) {
-      stream
-          // RR-405 — NOFOLLOW_LINKS so a symlink inside the workspace pointing at an external file
-          // is NOT counted as generated code. A symlink is not a regular file under NOFOLLOW, so it
-          // is excluded here; Files.walk itself does not descend symlinked directories
-          // (FOLLOW_LINKS
-          // is not passed), so a symlinked subtree is likewise never enumerated. This keeps the
-          // generated-file/language evidence and nonzero score floor to files the run actually
-          // created inside its own workspace boundary.
-          .filter(p -> Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-          .filter(
-              p -> {
-                for (Path part : workspace.relativize(p)) {
-                  String name = part.toString();
-                  if (skipDirs.contains(name)) return false;
-                  if (name.startsWith(".") && !".env.example".equals(name)) return false;
+    // RR-404 — prune ignored dependency/build subtrees at the DIRECTORY boundary with SKIP_SUBTREE
+    // instead of Files.walk()-then-filter, which fully descended node_modules / target / .git
+    // before
+    // discarding their files. On a large repo the old shape did filesystem work proportional to
+    // every
+    // vendored/build artefact. RR-405's symlink-containment guarantee is preserved: walkFileTree
+    // does
+    // not follow symbolic links unless FOLLOW_LINKS is passed, and a symlink is not a regular file
+    // under BasicFileAttributes.isRegularFile(), so a symlinked file/subtree is still excluded.
+    try {
+      Files.walkFileTree(
+          workspace,
+          new java.nio.file.SimpleFileVisitor<Path>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(
+                Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
+              if (dir.equals(workspace)) return java.nio.file.FileVisitResult.CONTINUE;
+              String name = dir.getFileName().toString();
+              if (skipDirs.contains(name)
+                  || (name.startsWith(".") && !".env.example".equals(name))) {
+                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+              }
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(
+                Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
+              if (attrs.isRegularFile()) {
+                String name = file.getFileName().toString();
+                if (!name.startsWith(".") || ".env.example".equals(name)) {
+                  out.add(workspace.relativize(file).toString());
                 }
-                return true;
-              })
-          .forEach(p -> out.add(workspace.relativize(p).toString()));
+              }
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFileFailed(Path file, java.io.IOException e) {
+              return java.nio.file.FileVisitResult
+                  .CONTINUE; // skip an unreadable entry, keep walking
+            }
+          });
     } catch (IOException e) {
       log.debug("listWorkspaceFiles failed at {}: {}", workspace, e.getMessage());
     }

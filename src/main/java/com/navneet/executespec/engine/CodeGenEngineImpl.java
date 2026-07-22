@@ -48,6 +48,17 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private static final int MAX_TOKENS_PER_CALL = 16_000;
   private static final int DEFAULT_MAX_ITERATIONS = 180;
 
+  /**
+   * RR-1566 — no-progress (no writeFile/editFile) iteration thresholds for a CUSTOMER PATCH run.
+   * The v1 stagnation watchdog is disabled for benchmark runs (their repetition trigger is
+   * progress-v2's job), but a customer autofix worker got NO stagnation force at all and could loop
+   * the full iteration cap with zero writes. These re-enable a tier-appropriate warn+force for
+   * non-benchmark PATCH sources without depending on the default-OFF progress-v2 flag.
+   */
+  private static final int PATCH_STAGNATION_WARN_AFTER = 12;
+
+  private static final int PATCH_STAGNATION_FORCE_AFTER = 20;
+
   private final WorkerAgent workerAgent;
   private final PipelineRunRepository runRepo;
   private final FeatureFlagService featureFlagService;
@@ -106,7 +117,14 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         request.budget() != null && request.budget().iterCap() != null
             ? request.budget().iterCap()
             : iterCapFor(request.provider());
-    int stagnationDisabled = maxIterations;
+    // RR-1566 — a benchmark PATCH keeps the watchdog disabled (progress-v2 owns loop protection for
+    // held-out target tests); a CUSTOMER PATCH re-enables a bounded warn+force so a no-write worker
+    // stops well before the iteration cap.
+    boolean controlled = isControlledRun(request);
+    int stagnationWarn =
+        controlled ? maxIterations : Math.min(PATCH_STAGNATION_WARN_AFTER, maxIterations);
+    int stagnationForce =
+        controlled ? maxIterations : Math.min(PATCH_STAGNATION_FORCE_AFTER, maxIterations);
 
     return WorkerTaskRequest.builder()
         .provider(request.provider())
@@ -117,8 +135,8 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .maxIterations(maxIterations)
         .temperature(0.0)
         .maxTokensPerCall(MAX_TOKENS_PER_CALL)
-        .stagnationWarnAfter(stagnationDisabled)
-        .stagnationForceAfter(stagnationDisabled)
+        .stagnationWarnAfter(stagnationWarn)
+        .stagnationForceAfter(stagnationForce)
         .requireTestVerification(requireTestVerification(request))
         .wallClockSeconds(request.budget() == null ? null : request.budget().wallClockSeconds())
         .absoluteDeadlineEpochMs(
@@ -157,6 +175,16 @@ public class CodeGenEngineImpl implements CodeGenEngine {
     return orientation.isBlank()
         ? taskEvidence
         : taskEvidence + "\n\n" + PromptTrustBoundary.wrap("REPOSITORY_ORIENTATION", orientation);
+  }
+
+  /**
+   * RR-1566 — true when this run is an operator-controlled blind benchmark worker (SWE-bench /
+   * ProgramBench / Terminal-Bench). Same classifier {@link #requireTestVerification} uses, so the
+   * stagnation-watchdog and test-gate behaviours cannot drift.
+   */
+  private boolean isControlledRun(EngineRequest request) {
+    String src = runRepo.findById(request.runId()).map(PipelineRun::getSourceType).orElse("");
+    return BenchmarkSourceType.isControlledWorkerSource(src);
   }
 
   private boolean requireTestVerification(EngineRequest request) {

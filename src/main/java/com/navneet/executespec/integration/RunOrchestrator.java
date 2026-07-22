@@ -2638,6 +2638,8 @@ public class RunOrchestrator implements RunControlPort {
                   .workspace(rootCtx.workspaceRoot())
                   .provider(provider)
                   .model(model)
+                  // RR-1566 — bound the CUSTOMER PATCH path with a wall clock + absolute deadline.
+                  .budget(RunPipelineSupport.patchEngineBudget(run.getSourceType()))
                   .runId(runId)
                   .taskId(rootCtx.taskId())
                   .verifyMode(VerifyMode.HARD_GATE)
@@ -2654,8 +2656,8 @@ public class RunOrchestrator implements RunControlPort {
     }
 
     // Map outcome → terminal status + reason.
-    final String terminalStatus;
-    final String terminalReason;
+    String terminalStatus;
+    String terminalReason;
     switch (result.outcome()) {
       case COMPLETED -> {
         terminalStatus = "COMPLETE";
@@ -2689,6 +2691,16 @@ public class RunOrchestrator implements RunControlPort {
         terminalStatus = "FAILED";
         terminalReason = "PATCH_UNKNOWN_OUTCOME";
       }
+    }
+
+    // RR-1567 — a finding PATCH that ended STOPPED_WITHOUT_COMPLETE never reached the
+    // HARD_GATE test-verification check, so it must not wear a COMPLETE label. Demote it to PARTIAL
+    // with an explicit unverified reason; the auto-push guard below independently refuses to
+    // publish
+    // it via RunPipelineSupport.patchResultPublishable.
+    if (RunPipelineSupport.patchStoppedUnverified(result.outcome(), run.getSourceType())) {
+      terminalStatus = "PARTIAL";
+      terminalReason = RunPipelineSupport.PATCH_STOPPED_UNVERIFIED_REASON;
     }
 
     RunCostTracker.Snapshot patchCost = costTracker.snapshot(runId);
@@ -2733,7 +2745,12 @@ public class RunOrchestrator implements RunControlPort {
     // stamps as `finding:<TYPE>`.
     if (("COMPLETE".equals(persistedTerminalStatus) || "PARTIAL".equals(persistedTerminalStatus))
         && run.getSourceType() != null
-        && run.getSourceType().startsWith("finding:")) {
+        && run.getSourceType().startsWith("finding:")
+        // RR-1567 — publication reads the verification gate's own evidence: only a proven
+        // completion
+        // may be pushed to a customer PR head branch. A STOPPED (never-verified) worker is refused
+        // here, so the gate can no longer be bypassed by simply never calling completeTask.
+        && RunPipelineSupport.patchResultPublishable(result.outcome(), run.getSourceType())) {
       // 2026-05-13 audit Fix-A — same PostEditFormatter pass the BUILD-mode reviewer
       // runs. Without this, autofix surfaces (PR Review / TechDebt / CI failure /
       // Code Review severity buckets) pushed unformatted code to the existing PR

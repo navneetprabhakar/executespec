@@ -202,11 +202,36 @@ class CodeGenEngineImplTest {
         .endsWith("UNTRUSTED_PATCH_TASK>>>");
     assertThat(workerReq.maxIterations()).isEqualTo(220);
     assertThat(workerReq.maxTokensPerCall()).isEqualTo(16_000);
-    assertThat(workerReq.stagnationWarnAfter()).isEqualTo(220);
-    assertThat(workerReq.stagnationForceAfter()).isEqualTo(220);
+    // RR-1566 — a CUSTOMER (non-benchmark) PATCH run now re-enables a bounded stagnation watchdog
+    // so
+    // a no-write worker stops well before the iteration cap, instead of the old disabled (=220)
+    // form.
+    assertThat(workerReq.stagnationWarnAfter()).isEqualTo(12);
+    assertThat(workerReq.stagnationForceAfter()).isEqualTo(20);
     assertThat(workerReq.requireTestVerification()).isTrue();
     assertThat(workerReq.criticPass()).isFalse();
     assertThat(workerReq.verifyBeforeComplete()).isFalse();
+  }
+
+  @Test
+  void solve_benchmarkSourceKeepsStagnationWatchdogDisabled(@TempDir Path workspace) {
+    // RR-1566 — a benchmark PATCH run keeps the v1 watchdog disabled (=maxIterations);
+    // progress-v2's
+    // repetition trigger owns loop protection there because the target test is held out by design.
+    stubWorker(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    when(runRepo.findById(anyString()))
+        .thenReturn(Optional.of(PipelineRun.builder().sourceType("benchmark").build()));
+
+    engine.solve(req(workspace));
+
+    ArgumentCaptor<WorkerTaskRequest> req = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(req.capture());
+    WorkerTaskRequest workerReq = req.getValue();
+    assertThat(workerReq.stagnationWarnAfter()).isEqualTo(220);
+    assertThat(workerReq.stagnationForceAfter()).isEqualTo(220);
+    assertThat(workerReq.requireTestVerification()).isFalse();
   }
 
   @Test

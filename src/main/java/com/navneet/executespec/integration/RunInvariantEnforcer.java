@@ -60,14 +60,42 @@ class RunInvariantEnforcer {
             .toList();
     if (active.isEmpty()) return List.of();
 
-    List<String> files = collectFiles(workspaceRoot);
+    // RR-542 — the walk may prune skip-dirs, hit the file cap, omit a >1MB file, or fail to read an
+    // entry. When it does, the file list is a SUBSET of the candidate workspace, so a checker PASS
+    // over it cannot soundly assert the invariant holds — a forbidden dependency/file could be in
+    // the unseen part. An incomplete inventory therefore downgrades every PASS to a critical
+    // UNVERIFIED outcome (fail-closed governance), exactly as VIOLATIONS/degraded statuses already
+    // produce evidence. VIOLATIONS found over a partial list are still real and pass through.
+    Inventory inventory = collectFiles(workspaceRoot);
+    List<String> files = inventory.files();
     List<ReviewIssue> issues = new ArrayList<>();
     int issueNumber = 0;
     for (ArchInvariant invariant : active) {
       InvariantChecker.CheckResult result =
           checker.checkDetailed(
               invariant.getInvariantYaml(), files, path -> readBounded(workspaceRoot, path));
-      if (result.status() == InvariantChecker.CheckStatus.PASS) continue;
+      if (result.status() == InvariantChecker.CheckStatus.PASS) {
+        if (inventory.complete()) continue;
+        issueNumber++;
+        persist(
+            invariant,
+            "UNVERIFIED",
+            null,
+            null,
+            "workspace inventory incomplete (" + inventory.reason() + "); PASS is not provable");
+        issues.add(
+            issue(
+                "SYNTH-INVARIANT-UNAVAILABLE-" + issueNumber,
+                null,
+                "Architecture invariant '"
+                    + invariant.getInvariantId()
+                    + "' could not be verified: the workspace scan was incomplete ("
+                    + inventory.reason()
+                    + ").",
+                "Reduce repository size / excluded paths so governance can scan the whole"
+                    + " workspace, then rerun."));
+        continue;
+      }
       if (result.status() == InvariantChecker.CheckStatus.VIOLATIONS) {
         for (InvariantChecker.Finding finding : result.findings()) {
           issueNumber++;
@@ -151,9 +179,22 @@ class RunInvariantEnforcer {
         .build();
   }
 
-  private static List<String> collectFiles(Path root) {
+  /**
+   * Bounded, pruned workspace inventory. {@code complete} is true only when the walk saw every
+   * eligible file — it neither pruned a {@link #SKIP_DIRS} subtree, hit {@link #FILE_CAP}, omitted
+   * a file larger than {@link #CONTENT_FILE_CAP_BYTES}, nor failed to read an entry (RR-542).
+   */
+  private record Inventory(List<String> files, boolean complete, String reason) {}
+
+  private static Inventory collectFiles(Path root) {
     List<String> files = new ArrayList<>();
-    if (root == null || !Files.isDirectory(root)) return files;
+    if (root == null || !Files.isDirectory(root)) {
+      return new Inventory(files, false, "workspace missing");
+    }
+    // 0=complete 1=pruned 2=cap 3=oversize 4=read-error — highest-set wins for the reason string.
+    boolean[] pruned = {false};
+    boolean[] cappedOrOversize = {false};
+    boolean[] readError = {false};
     try {
       Files.walkFileTree(
           root,
@@ -161,6 +202,7 @@ class RunInvariantEnforcer {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
               if (!dir.equals(root) && SKIP_DIRS.contains(dir.getFileName().toString())) {
+                pruned[0] = true; // a pruned subtree may hold a forbidden dependency/file
                 return FileVisitResult.SKIP_SUBTREE;
               }
               return FileVisitResult.CONTINUE;
@@ -168,17 +210,37 @@ class RunInvariantEnforcer {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-              if (files.size() >= FILE_CAP) return FileVisitResult.TERMINATE;
-              if (attrs.isRegularFile() && attrs.size() <= CONTENT_FILE_CAP_BYTES) {
-                files.add(root.relativize(file).toString());
+              if (files.size() >= FILE_CAP) {
+                cappedOrOversize[0] = true; // hit the cap — the rest of the tree is unseen
+                return FileVisitResult.TERMINATE;
               }
+              if (attrs.isRegularFile()) {
+                if (attrs.size() <= CONTENT_FILE_CAP_BYTES) {
+                  files.add(root.relativize(file).toString());
+                } else {
+                  cappedOrOversize[0] = true; // a large file was omitted from content checks
+                }
+              }
+              return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, java.io.IOException e) {
+              readError[0] = true; // an unreadable entry means the inventory is not provably whole
               return FileVisitResult.CONTINUE;
             }
           });
     } catch (Exception e) {
       throw new IllegalStateException("Architecture invariant workspace inventory failed", e);
     }
-    return files;
+    boolean complete = !pruned[0] && !cappedOrOversize[0] && !readError[0];
+    String reason =
+        complete
+            ? "complete"
+            : (readError[0]
+                ? "unreadable files"
+                : (cappedOrOversize[0] ? "file cap / oversize files" : "pruned directories"));
+    return new Inventory(files, complete, reason);
   }
 
   private static String readBounded(Path root, String relativePath) {
