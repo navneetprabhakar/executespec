@@ -25,18 +25,28 @@ public interface RunCostHistoryRepository extends JpaRepository<RunCostHistory, 
    * is coarse but matches what the indexes support. A future revision can layer spec-similarity
    * (embedding distance) on top.
    *
+   * <p>RR-1551 — the band this query returns sets {@code creditsCharged} and {@code hardCapUsd} on
+   * a customer's run, so it MUST be tenant-scoped. Without the {@code orgId} predicate it was the
+   * P25/P75 of every OTHER organisation's observed dollar spend: a BYOK org running a flagship
+   * model inflated a PRO user's charge, a cheap cohort depressed another org's ceiling, and the
+   * returned band was a materially reconstructable aggregate of foreign tenants' costs. {@code
+   * orgId} is required and never nullable — a caller that cannot name a tenant falls back to the
+   * model-aware Stage-1 formula, never to a global pool.
+   *
    * <p>Returns descending by completed_at so the freshest runs dominate the percentile when pricing
    * or pipeline behaviour shifts; caller can {@code limit} to last N.
    */
   @Query(
       "SELECT h.actualCostUsd FROM RunCostHistory h "
-          + "WHERE h.planStrategy = :strategy "
+          + "WHERE h.orgId = :orgId "
+          + "AND h.planStrategy = :strategy "
           + "AND h.provider = :provider "
           + "AND h.repoCount = :repoCount "
           + "AND h.taskCount = :taskCount "
           + "AND h.actualCostUsd IS NOT NULL "
           + "ORDER BY h.completedAt DESC")
   List<BigDecimal> findSimilarCosts(
+      @Param("orgId") String orgId,
       @Param("strategy") String strategy,
       @Param("provider") String provider,
       @Param("repoCount") int repoCount,
@@ -44,15 +54,22 @@ public interface RunCostHistoryRepository extends JpaRepository<RunCostHistory, 
       Pageable pageable);
 
   /**
-   * Broader fallback — same provider + strategy, any repoCount/taskCount. Used when the strict
-   * similarity query returns too few rows to be statistically meaningful (< 10).
+   * Broader fallback — same org + provider + strategy, any repoCount/taskCount. Used when the
+   * strict similarity query returns too few rows to be statistically meaningful (&lt; 10).
+   *
+   * <p>RR-1551 — tenant-scoped for the same reason as {@link #findSimilarCosts}. Relaxing the shape
+   * predicates must never relax the tenant boundary.
    */
   @Query(
       "SELECT h.actualCostUsd FROM RunCostHistory h "
-          + "WHERE h.planStrategy = :strategy "
+          + "WHERE h.orgId = :orgId "
+          + "AND h.planStrategy = :strategy "
           + "AND h.provider = :provider "
           + "AND h.actualCostUsd IS NOT NULL "
           + "ORDER BY h.completedAt DESC")
   List<BigDecimal> findSimilarCostsLoose(
-      @Param("strategy") String strategy, @Param("provider") String provider, Pageable pageable);
+      @Param("orgId") String orgId,
+      @Param("strategy") String strategy,
+      @Param("provider") String provider,
+      Pageable pageable);
 }
