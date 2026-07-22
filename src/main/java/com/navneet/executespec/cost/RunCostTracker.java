@@ -295,8 +295,9 @@ public class RunCostTracker {
   /**
    * Tier-aware estimate: each task's cost uses the model that will actually run it (resolved via
    * {@link ModelResolver} per complexity → tier mapping). HIGH tasks price at PLANNING tier rates
-   * (e.g. Sonnet / gpt-5.4), LOW/MEDIUM at WORKHORSE/LIGHTWEIGHT rates (Haiku / gpt-5.4-mini).
-   * Reflects the real dispatch done by {@code SequentialExecutor}.
+   * (e.g. Sonnet / gpt-5.4); LOW and MEDIUM both price at WORKHORSE tier rates because that is the
+   * executor's default worker route (RR-066 — LOW no longer estimates at LIGHTWEIGHT). Reflects the
+   * real dispatch done by {@code SequentialExecutor}.
    *
    * <p>v2.6.2 slice 5 — convenience overload that defaults to a null strategy (legacy single-phase
    * planner shape). New callers should pass an explicit {@link
@@ -379,7 +380,15 @@ public class RunCostTracker {
     for (String c : taskComplexities) {
       AgentTier tier =
           switch (c == null ? "MEDIUM" : c.toUpperCase()) {
-            case "LOW" -> AgentTier.LIGHTWEIGHT;
+              // RR-066 (2026-07-22) billing/cap integrity: the production executor
+              // (SequentialExecutor.tierConfigFor) routes LOW workers to WORKHORSE by default — LOW
+              // only drops to LIGHTWEIGHT when a run explicitly opts in via
+              // execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT. This estimator
+              // must mirror the DEFAULT the executor actually uses, or LOW-run estimates, credit
+              // authorization and hard caps are materially understated (premature budget stop, or
+              // platform COGS beyond the authorized estimate). Estimate the conservative default
+              // (WORKHORSE); an opt-in cheaper start tier only ever spends less than estimated.
+            case "LOW" -> AgentTier.WORKHORSE;
             case "HIGH" -> AgentTier.PLANNING;
             default -> AgentTier.WORKHORSE;
           };
