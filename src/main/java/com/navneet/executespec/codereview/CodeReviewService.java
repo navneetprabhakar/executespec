@@ -304,9 +304,17 @@ public class CodeReviewService {
     if (defaultBranch == null || defaultBranch.isBlank()) defaultBranch = "main";
     String sha = github.getBranchHeadSha(repoUrl, defaultBranch, pat);
     if (sha == null || sha.isBlank()) {
-      // We can still scan against whatever HEAD ends up being; record an "unknown" marker so
-      // the idempotency key doesn't collide with a different commit.
-      sha = "unknown-" + Instant.now().toEpochMilli();
+      // RR-438 — never fabricate a timestamp SHA. A synthetic "unknown-<millis>" made every retry
+      // a distinct billable scan and bound the persisted result to no immutable commit, while
+      // presenting it as review evidence for that repo. Reject/hold until the branch head is
+      // resolvable rather than scanning mutable, unidentified content. (The durable versioned
+      // idempotency-key + unique-constraint half of RR-438 remains deferred: it needs a migration.)
+      throw new IllegalStateException(
+          "Could not resolve the head commit for "
+              + repoFullName
+              + "@"
+              + defaultBranch
+              + " — retry once the repository is reachable.");
     }
     final String resolvedSha = sha;
 
@@ -449,6 +457,50 @@ public class CodeReviewService {
     UUID repoId = lease.job().repoId();
     String channel = "code-review-" + scanId;
     long start = System.currentTimeMillis();
+    String workspaceRunId = "scan-" + scanId;
+    // RR-439 — the review clone holds a private source tree and credentials-derived clone state,
+    // and is only needed for the duration of THIS attempt (the staged DurableCodeReviewResult
+    // carries everything publishDurableResult needs). Reclaim it no-follow on every terminal path
+    // — success, agent failure, clone failure, cancellation and lease loss — so scans do not
+    // accumulate clones on disk until the host fills up.
+    try {
+      return runScanInternal(
+          lease,
+          repoFullName,
+          sha,
+          pat,
+          confirmedProvider,
+          confirmedModel,
+          actorUserId,
+          confirmedActionReference,
+          checkpoint,
+          scanId,
+          projectId,
+          repoId,
+          channel,
+          start,
+          workspaceRunId);
+    } finally {
+      cleanupReviewWorkspace(workspaceRunId);
+    }
+  }
+
+  private DurableCodeReviewResult runScanInternal(
+      ReviewBackgroundJobStore.Lease lease,
+      String repoFullName,
+      String sha,
+      String pat,
+      LlmProvider confirmedProvider,
+      String confirmedModel,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference,
+      Runnable checkpoint,
+      UUID scanId,
+      String projectId,
+      UUID repoId,
+      String channel,
+      long start,
+      String workspaceRunId) {
     checkpoint.run();
 
     // 1. CLONING — provision a workspace at workspace/{scan-{scanId}} and clone the repo.
@@ -457,7 +509,6 @@ public class CodeReviewService {
     broadcaster.emit(
         channel, RunEvent.log(channel, "scan", "Cloning " + repoFullName + " @ " + shortSha(sha)));
 
-    String workspaceRunId = "scan-" + scanId;
     Path workspaceRoot;
     try {
       String cloneUrl = resolveCloneUrl(repoId, repoFullName);
@@ -612,6 +663,41 @@ public class CodeReviewService {
       int totalLoc,
       long durationMs) {}
 
+  /**
+   * RR-439 — recursively delete a review clone without following symbolic links. {@link
+   * Files#walk(Path, java.nio.file.FileVisitOption...)} does not follow links by default, so a
+   * planted symlink is removed as a link and its target is never traversed. Idempotent and
+   * best-effort: a leftover file is preferable to failing a terminal path, and the containment
+   * guard means a mis-derived path can never delete outside the code-review clone tree.
+   */
+  void cleanupReviewWorkspace(String workspaceRunId) {
+    if (workspaceRunId == null || !workspaceRunId.startsWith("scan-")) return;
+    Path workspace;
+    try {
+      workspace = workspaceInitService.runWorkspacePath(workspaceRunId);
+    } catch (RuntimeException e) {
+      return;
+    }
+    if (workspace == null
+        || !Files.exists(workspace, LinkOption.NOFOLLOW_LINKS)
+        || !workspace.getFileName().toString().equals(workspaceRunId)) {
+      return;
+    }
+    try (var walk = Files.walk(workspace)) {
+      walk.sorted(Comparator.reverseOrder())
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                  // best-effort; a leftover file is preferable to failing the terminal path
+                }
+              });
+    } catch (IOException e) {
+      log.warn("CodeReview: failed to reclaim clone {}: {}", workspaceRunId, e.getMessage());
+    }
+  }
+
   /** Resolve the linked project's configured provider; never hardcode a review-only provider. */
   String resolveProvider(String projectId) {
     return projectProviderResolver.resolve(projectId).name().toLowerCase(java.util.Locale.ROOT);
@@ -717,11 +803,37 @@ public class CodeReviewService {
         CodeReviewMarkdownRenderer.render(row, agentResult, persisted, droppedKeys.size()));
     scanRepo.save(row);
 
-    // Free cost-tracker per-scan bucket.
-    costTracker.finalizeRun("code-review-" + scanId);
+    // RR-440 — free the cost-tracker per-scan bucket only AFTER the durable result/cost rows
+    // commit. finalizeRun removes the in-memory bucket; running it inside the transaction meant a
+    // commit failure (deadlock, constraint, outage) rolled back the persisted cost while the
+    // bucket was already gone, so a retry would publish zero spend even though provider cost
+    // occurred. Deferring to afterCommit keeps the bucket intact for a retry on rollback.
+    finalizeCostBucketAfterCommit("code-review-" + scanId);
 
     return new CodeReviewSummary(
         persisted.size(), critical, major, droppedKeys.size(), staticResult.findings().size());
+  }
+
+  /**
+   * RR-440 — release the transient cost bucket after the surrounding transaction commits, so a
+   * rollback leaves the bucket intact for the retry to re-snapshot. Falls back to an immediate free
+   * only when no transaction is active (the focused-test path), where there is nothing to roll
+   * back.
+   */
+  void finalizeCostBucketAfterCommit(String costRunId) {
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isSynchronizationActive()) {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .registerSynchronization(
+              new org.springframework.transaction.support.TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                  costTracker.finalizeRun(costRunId);
+                }
+              });
+    } else {
+      costTracker.finalizeRun(costRunId);
+    }
   }
 
   @Transactional

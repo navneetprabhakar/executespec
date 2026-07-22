@@ -83,8 +83,44 @@ public class RunSandboxStore {
     if (inserted == 1) {
       return get(request.id()).orElseThrow();
     }
-    return findByIdempotency(request.idempotencyKey())
-        .orElseThrow(() -> new IllegalStateException("run_sandbox insert conflict was lost"));
+    // RR-329 — the insert lost the idempotency-key conflict, so a row already owns this key. The
+    // key is globally unique, so returning it blind would hand THIS request another request's
+    // sandbox (and its runtime identity), and would treat a changed source revision or isolation
+    // policy as an idempotent retry. Return the existing row only when its accountable identity
+    // and immutable source/isolation policy match exactly; otherwise fail closed with a typed
+    // conflict.
+    RunSandbox existing =
+        findByIdempotency(request.idempotencyKey())
+            .orElseThrow(() -> new IllegalStateException("run_sandbox insert conflict was lost"));
+    requireSameRequest(existing, request);
+    return existing;
+  }
+
+  /**
+   * RR-329 — proves a reused idempotency key names the SAME admission. Compares the accountable
+   * identity (org, run, project, actor, session) and the immutable source/isolation policy
+   * (revision, config digest, isolation profile + version, network and secret policy). The raw
+   * {@code repository_set} JSON is deliberately not string-compared here because it is stored as
+   * JSONB and read back re-serialized, so a whitespace-only difference is not a real conflict; the
+   * repository identity it encodes is already bound into {@code config_digest} and {@code
+   * source_revision}.
+   */
+  static void requireSameRequest(RunSandbox existing, RunSandbox.CreateRequest request) {
+    if (!java.util.Objects.equals(existing.orgId(), request.orgId())
+        || !java.util.Objects.equals(existing.runId(), request.runId())
+        || !java.util.Objects.equals(existing.projectId(), request.projectId())
+        || !java.util.Objects.equals(existing.requestedByUserId(), request.requestedByUserId())
+        || !java.util.Objects.equals(existing.sessionId(), request.sessionId())
+        || !java.util.Objects.equals(existing.sourceRevision(), request.sourceRevision())
+        || !java.util.Objects.equals(existing.configDigest(), request.configDigest())
+        || existing.isolationProfile() != request.isolationProfile()
+        || existing.networkPolicy() != request.networkPolicy()
+        || existing.secretPolicy() != request.secretPolicy()) {
+      throw new SandboxIdempotencyConflictException(
+          "idempotency key "
+              + request.idempotencyKey()
+              + " already names a sandbox with a different identity or source/isolation policy");
+    }
   }
 
   public Optional<RunSandbox> get(UUID id) {

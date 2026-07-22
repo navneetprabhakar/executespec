@@ -33,6 +33,41 @@ class PrCommentInboxServiceTest {
     verify(inboxRepo, never()).save(row);
   }
 
+  // RR-195 — the apply path atomically claims PENDING -> APPLY_QUEUED before enqueuing, so repeated
+  // requests cannot each dispatch a duplicate workspace mutation.
+  @Test
+  void claimForApplySucceedsForExactlyOneWinner() {
+    when(inboxRepo.claimForApply(
+            org.mockito.ArgumentMatchers.eq(20L),
+            org.mockito.ArgumentMatchers.eq("run-1"),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(1);
+
+    assertThat(service.claimForApply(20L, "run-1")).isTrue();
+  }
+
+  @Test
+  void claimForApplyFailsWhenAlreadyClaimedOrNotPending() {
+    when(inboxRepo.claimForApply(
+            org.mockito.ArgumentMatchers.eq(21L),
+            org.mockito.ArgumentMatchers.eq("run-1"),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(0);
+
+    assertThat(service.claimForApply(21L, "run-1")).isFalse();
+  }
+
+  @Test
+  void releaseApplyClaimRevertsClaim() {
+    service.releaseApplyClaim(22L, "run-1");
+
+    verify(inboxRepo)
+        .releaseApplyClaim(
+            org.mockito.ArgumentMatchers.eq(22L),
+            org.mockito.ArgumentMatchers.eq("run-1"),
+            org.mockito.ArgumentMatchers.any());
+  }
+
   @Test
   void dismissForRunDismissesPendingCommentOwnedByRun() {
     PrCommentInbox row = PrCommentInbox.builder().id(12L).runId("run-1").status("PENDING").build();
