@@ -1,7 +1,6 @@
 package com.navneet.executespec.router;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -13,7 +12,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.benchmark.BenchmarkRun;
 import com.navneet.executespec.benchmark.BenchmarkRunRepository;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +39,7 @@ public class ModelProviderCandidateService {
   private final TaskOutcomeMetricService taskOutcomeMetricService;
   private final ModelProviderCapabilityRegistry capabilityRegistry =
       new ModelProviderCapabilityRegistry();
+  private volatile BenchmarkQualityPriorProvider benchmarkPriorProvider;
 
   @Value("${execution.continuation.parallel-provider-evaluation-enabled:true}")
   private boolean parallelProviderEvaluationEnabled = true;
@@ -284,8 +283,24 @@ public class ModelProviderCandidateService {
   private List<ModelProviderCapabilitySignal> externalSignals(
       ModelProviderCandidateRequest request) {
     List<ModelProviderCapabilitySignal> signals = new ArrayList<>(request.externalSignals());
-    signals.addAll(benchmarkSignals(request.taskCategory(), benchmarkMinSampleTasks()));
+    signals.addAll(
+        benchmarkPriorProvider()
+            .benchmarkSignals(request.taskCategory(), benchmarkMinSampleTasks()));
     return List.copyOf(signals);
+  }
+
+  /**
+   * Benchmark-evidence machinery was extracted to {@link BenchmarkQualityPriorProvider} (RR-818) so
+   * this already-oversized class does not grow. Created lazily — its dependencies are constructor-
+   * injected final fields that are not yet assigned during a field initializer.
+   */
+  private BenchmarkQualityPriorProvider benchmarkPriorProvider() {
+    BenchmarkQualityPriorProvider provider = benchmarkPriorProvider;
+    if (provider == null) {
+      provider = new BenchmarkQualityPriorProvider(modelRegistry, benchmarkRunRepository);
+      benchmarkPriorProvider = provider;
+    }
+    return provider;
   }
 
   private int benchmarkMinSampleTasks() {
@@ -318,253 +333,6 @@ public class ModelProviderCandidateService {
             request.taskComplexity(),
             outcomeMinSampleTasks())
         .orElse(null);
-  }
-
-  private List<ModelProviderCapabilitySignal> benchmarkSignals(
-      String taskCategory, int minSampleTasks) {
-    if (benchmarkRunRepository == null) {
-      return List.of();
-    }
-    try {
-      List<BenchmarkRun> runs =
-          benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE");
-      if (runs == null || runs.isEmpty()) {
-        return List.of();
-      }
-      // Do not let a set of differently-sized benchmark runs distort routing by giving every run
-      // the same weight. A 5-task smoke and a 200-task evaluation must contribute in proportion
-      // to the evidence they contain. Keep below-threshold/incompatible rows as individual
-      // explanatory signals, but combine all eligible rows for a provider/model into one
-      // sample-weighted prior. This also prevents the candidate scorer from averaging stale run
-      // snapshots as if they were independent observations.
-      Map<BenchmarkAggregateKey, List<BenchmarkRun>> eligible = new LinkedHashMap<>();
-      List<ModelProviderCapabilitySignal> informational = new ArrayList<>();
-      for (BenchmarkRun run : runs) {
-        if (run == null || run.getTotalTasks() <= 0) continue;
-        // A benchmark row without a provider/model cannot influence any candidate. Ignore it
-        // rather than allowing one malformed historical row to fail closed for every route.
-        if (!hasRouteIdentity(run)) continue;
-        boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
-        boolean compatibleTaskCategory =
-            benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
-        if (enoughSample && compatibleTaskCategory) {
-          eligible
-              .computeIfAbsent(
-                  new BenchmarkAggregateKey(
-                      run.getProvider(), canonicalBenchmarkModel(run.getModel()), taskCategory),
-                  ignored -> new ArrayList<>())
-              .add(run);
-        } else {
-          informational.add(benchmarkSignal(run, taskCategory, minSampleTasks));
-        }
-      }
-      List<ModelProviderCapabilitySignal> out = new ArrayList<>(informational);
-      eligible.values().stream()
-          .map(group -> benchmarkAggregateSignal(group, taskCategory, minSampleTasks))
-          .forEach(out::add);
-      return List.copyOf(out);
-    } catch (RuntimeException ex) {
-      log.warn("ModelProviderCandidateService benchmark signal read failed: {}", ex.getMessage());
-      return List.of();
-    }
-  }
-
-  private static boolean hasRouteIdentity(BenchmarkRun run) {
-    return run.getProvider() != null
-        && !run.getProvider().isBlank()
-        && run.getModel() != null
-        && !run.getModel().isBlank();
-  }
-
-  private static ModelProviderCapabilitySignal benchmarkAggregateSignal(
-      List<BenchmarkRun> runs, String taskCategory, int minSampleTasks) {
-    BenchmarkRun first = runs.getFirst();
-    String canonicalModel = first.getModel();
-    // RR-219 evidence integrity: repeated runs of the SAME corpus are not independent observations.
-    // Two evaluations of one (suite, dataset) re-measure the same tasks, so summing their
-    // totalTasks/resolvedTasks inflates the sample weight with experiment frequency rather than
-    // adding evidence. Collapse each (suite, dataset) to its most recent run before
-    // sample-weighting
-    // so a favorable (or unfavorable) benchmark that is re-run repeatedly cannot dominate the
-    // prior.
-    // Runs arrive newest-first (createdAt desc), so the first occurrence per corpus is the newest.
-    List<BenchmarkRun> distinctObservations = dedupeRepeatedTrials(runs);
-    int repeatedTrialsCollapsed = runs.size() - distinctObservations.size();
-    long totalTasks = distinctObservations.stream().mapToLong(BenchmarkRun::getTotalTasks).sum();
-    long resolvedTasks =
-        distinctObservations.stream().mapToLong(BenchmarkRun::getResolvedTasks).sum();
-    double resolvedRate = totalTasks <= 0 ? 0.0 : (resolvedTasks * 100.0) / totalTasks;
-    String reason;
-    if (distinctObservations.size() == 1) {
-      BenchmarkRun only = distinctObservations.getFirst();
-      String collapsedNote =
-          repeatedTrialsCollapsed > 0
-              ? String.format(
-                  Locale.ROOT,
-                  " (used as quality prior; %d repeated trial(s) of the same corpus collapsed to"
-                      + " newest)",
-                  repeatedTrialsCollapsed)
-              : " (used as quality prior)";
-      reason =
-          String.format(
-              Locale.ROOT,
-              "benchmark %s/%s resolved %d/%d tasks%s",
-              only.getSuite(),
-              only.getDataset(),
-              only.getResolvedTasks(),
-              only.getTotalTasks(),
-              collapsedNote);
-    } else {
-      String collapsedNote =
-          repeatedTrialsCollapsed > 0
-              ? String.format(
-                  Locale.ROOT,
-                  "; %d repeated trial(s) collapsed to newest",
-                  repeatedTrialsCollapsed)
-              : "";
-      reason =
-          String.format(
-              Locale.ROOT,
-              "benchmark aggregate %s/%s resolved %d/%d tasks across %d distinct observation(s)"
-                  + " (sample-weighted; minimum %d-task prior%s)",
-              first.getProvider(),
-              first.getModel(),
-              resolvedTasks,
-              totalTasks,
-              distinctObservations.size(),
-              minSampleTasks,
-              collapsedNote);
-    }
-    return ModelProviderCapabilitySignal.builder()
-        .provider(first.getProvider())
-        .model(canonicalModel)
-        .taskCategory(taskCategory)
-        .benchmarkQualityScore(resolvedRate)
-        .reasons(List.of(reason))
-        .build();
-  }
-
-  /**
-   * Collapse repeated trials of the same benchmark observation to the newest run. The observation
-   * key is (suite, dataset): two runs sharing it are re-evaluations of the same task corpus, not
-   * independent evidence (RR-219). Distinct datasets under the same suite (e.g. {@code lite-a} and
-   * {@code lite-b}) remain separate observations and are legitimately summed. Input is assumed
-   * newest-first, so the first occurrence of each key is retained.
-   */
-  private static List<BenchmarkRun> dedupeRepeatedTrials(List<BenchmarkRun> runs) {
-    Map<String, BenchmarkRun> newestPerObservation = new LinkedHashMap<>();
-    for (BenchmarkRun run : runs) {
-      String key =
-          normalizeBenchmarkLabel(run.getSuite()) + "|" + normalizeBenchmarkLabel(run.getDataset());
-      newestPerObservation.putIfAbsent(key, run);
-    }
-    return List.copyOf(newestPerObservation.values());
-  }
-
-  private record BenchmarkAggregateKey(String provider, String model, String taskCategory) {}
-
-  /**
-   * Canonicalise benchmark route identities before aggregation. Benchmark producers are allowed to
-   * emit legacy aliases (for example a tier label rather than the registered model id). If aliases
-   * are grouped separately, the later candidate average gives a tiny run the same weight as a large
-   * run and can materially distort the quality prior. The candidate service owns the registry, so
-   * normalize once at ingestion while preserving the original run text in reasons.
-   */
-  private String canonicalBenchmarkModel(String model) {
-    return modelRegistry.canonicalize(model);
-  }
-
-  private static ModelProviderCapabilitySignal benchmarkSignal(
-      BenchmarkRun run, String taskCategory, int minSampleTasks) {
-    double resolvedRate = (run.getResolvedTasks() * 100.0) / run.getTotalTasks();
-    boolean enoughSample = run.getTotalTasks() >= minSampleTasks;
-    boolean compatibleTaskCategory =
-        benchmarkSuiteSupportsTaskCategory(run.getSuite(), taskCategory);
-    return ModelProviderCapabilitySignal.builder()
-        .provider(run.getProvider())
-        .model(run.getModel())
-        .taskCategory(taskCategory)
-        .benchmarkQualityScore(enoughSample && compatibleTaskCategory ? resolvedRate : null)
-        .reasons(
-            List.of(
-                String.format(
-                    Locale.ROOT,
-                    "benchmark %s/%s resolved %d/%d tasks%s",
-                    run.getSuite(),
-                    run.getDataset(),
-                    run.getResolvedTasks(),
-                    run.getTotalTasks(),
-                    benchmarkPriorSuffix(
-                        enoughSample,
-                        compatibleTaskCategory,
-                        minSampleTasks,
-                        run.getSuite(),
-                        taskCategory))))
-        .build();
-  }
-
-  private static String benchmarkPriorSuffix(
-      boolean enoughSample,
-      boolean compatibleTaskCategory,
-      int minSampleTasks,
-      String suite,
-      String taskCategory) {
-    if (!enoughSample) {
-      return " (below " + minSampleTasks + "-task minimum; not used as quality prior)";
-    }
-    if (!compatibleTaskCategory) {
-      return " (suite "
-          + safeLabel(suite)
-          + " is not a prior for task category "
-          + safeLabel(taskCategory)
-          + ")";
-    }
-    return " (used as quality prior)";
-  }
-
-  /**
-   * Closed, versioned suite→task-category taxonomy. Only the suites ExecuteSpec actually knows
-   * (mirroring {@link com.navneet.executespec.benchmark.BenchmarkSuite}, plus their legacy
-   * lowercase/variant aliases) can back a routing quality prior.
-   *
-   * <p>RR-218 fail-closed: the {@code default} branch previously declared every UNKNOWN suite
-   * compatible with the common coding categories, so a newly introduced, misspelled or unrelated
-   * benchmark could silently become a production quality prior. An unrecognised suite is now
-   * informational only — it stays visible as an explanatory signal but never drives model/provider
-   * selection until it is explicitly mapped here.
-   */
-  private static boolean benchmarkSuiteSupportsTaskCategory(String suite, String taskCategory) {
-    String normalizedSuite = normalizeBenchmarkLabel(suite);
-    String normalizedCategory = normalizeBenchmarkLabel(taskCategory);
-    if (normalizedSuite.isEmpty() || normalizedCategory.isEmpty()) {
-      return false;
-    }
-    return switch (normalizedSuite) {
-      case "terminal_bench", "terminalbench" ->
-          normalizedCategory.equals("terminal_task")
-              || normalizedCategory.equals("benchmark_patch");
-      case "swe_bench", "swebench", "swe_bench_lite", "swe_bench_verified" ->
-          normalizedCategory.equals("bug_fix")
-              || normalizedCategory.equals("test_fix")
-              || normalizedCategory.equals("project_patch")
-              || normalizedCategory.equals("benchmark_patch");
-      case "program_bench", "programbench" ->
-          normalizedCategory.equals("bug_fix")
-              || normalizedCategory.equals("test_fix")
-              || normalizedCategory.equals("benchmark_patch");
-        // RR-218: unknown/unmapped suite -> not a quality prior for any task category.
-      default -> false;
-    };
-  }
-
-  private static String normalizeBenchmarkLabel(String value) {
-    return value == null
-        ? ""
-        : value.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
-  }
-
-  private static String safeLabel(String value) {
-    return value == null || value.isBlank() ? "UNKNOWN" : value;
   }
 
   private static String providerFor(String model, ModelMatrixProperties.ModelConfig config) {

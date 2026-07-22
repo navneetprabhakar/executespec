@@ -19,7 +19,6 @@ public class ModelProviderCapabilityRegistry {
   private static final double CODE_REVIEW_WEIGHT = 0.10;
   private static final double TOOL_RELIABILITY_WEIGHT = 0.05;
   private static final double UNAVAILABLE_PROVIDER_PENALTY = 100.0;
-  private static final double FALLBACK_ORDER_PENALTY = 0.25;
 
   public List<ModelProviderScore> scoreAll(List<ModelProviderCapabilitySignal> signals) {
     if (signals == null || signals.isEmpty()) {
@@ -46,7 +45,13 @@ public class ModelProviderCapabilityRegistry {
             : weightedSignals.stream().mapToDouble(WeightedSignal::weightedValue).sum()
                 / weightedSignals.stream().mapToDouble(WeightedSignal::weight).sum();
     quality -= signal.recentFailurePenalty();
-    quality -= signal.fallbackOrder() * FALLBACK_ORDER_PENALTY;
+    // RR-816 (2026-07-22) policy correctness: provider preference position must NOT be subtracted
+    // from measured quality. Doing so let a user's ordering preference push an otherwise-qualified
+    // model below the quality threshold (or across the cost tie band) even though no quality
+    // evidence changed, conflating policy preference with empirical quality and contradicting the
+    // quality-first ranking contract. Preference is now carried through {@link ModelProviderScore}
+    // and applied only as a tie-breaker inside the eligible band by {@link
+    // ModelProviderRankingPolicy}, so the quality gate is invariant under preference reordering.
     if (!signal.providerAvailable()) {
       quality -= UNAVAILABLE_PROVIDER_PENALTY;
     }
@@ -103,7 +108,8 @@ public class ModelProviderCapabilityRegistry {
         !weightedSignals.isEmpty(),
         signal.providerAvailable(),
         reasons,
-        signal.contextFitsRequestedBudget());
+        signal.contextFitsRequestedBudget(),
+        signal.fallbackOrder());
   }
 
   private static List<WeightedSignal> weightedSignals(ModelProviderCapabilitySignal signal) {

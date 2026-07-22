@@ -22,7 +22,8 @@ public record ModelProviderScore(
     boolean observedQualityEvidenceAvailable,
     boolean providerAvailable,
     List<String> reasons,
-    boolean contextFitsRequestedBudget) {
+    boolean contextFitsRequestedBudget,
+    int providerPreferenceOrder) {
 
   public ModelProviderScore {
     if (provider == null || provider.isBlank()) {
@@ -32,6 +33,10 @@ public record ModelProviderScore(
       throw new IllegalArgumentException("model required");
     }
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
+    // RR-816: provider preference position is a POLICY signal, not empirical quality. It is carried
+    // as a separate value and applied only as a tie-breaker inside the eligible band (see
+    // ModelProviderRankingPolicy), never subtracted from qualityScore before the quality threshold.
+    providerPreferenceOrder = Math.max(0, providerPreferenceOrder);
     // RR-397 fail-closed: a NaN/infinite quality score or threshold must never be able to pass the
     // below-threshold check. Java comparisons against NaN are always false, so a NaN qualityScore
     // would slip past {@code score < threshold} rejection and a NaN threshold would let every score
@@ -73,7 +78,8 @@ public record ModelProviderScore(
         false,
         providerAvailability(reasons),
         reasons,
-        true);
+        true,
+        0);
   }
 
   /**
@@ -107,7 +113,8 @@ public record ModelProviderScore(
         false,
         providerAvailability(reasons),
         reasons,
-        true);
+        true,
+        0);
   }
 
   /** Compatibility constructor retaining the pre-context-budget score shape. */
@@ -137,7 +144,43 @@ public record ModelProviderScore(
         observedQualityEvidenceAvailable,
         providerAvailable,
         reasons,
-        true);
+        true,
+        0);
+  }
+
+  /**
+   * Compatibility constructor retaining the pre-RR-816 score shape (before provider-preference
+   * order was carried separately). Preference defaults to 0 (highest preference / no penalty).
+   */
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      boolean benchmarkQualityPriorAvailable,
+      boolean observedQualityEvidenceAvailable,
+      boolean providerAvailable,
+      List<String> reasons,
+      boolean contextFitsRequestedBudget) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        benchmarkQualityPriorAvailable,
+        observedQualityEvidenceAvailable,
+        providerAvailable,
+        reasons,
+        contextFitsRequestedBudget,
+        0);
   }
 
   public boolean meetsQualityThreshold() {
