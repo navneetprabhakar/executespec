@@ -11,7 +11,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
-import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.contracts.ContractDriftEventRepository;
 import com.navneet.executespec.contracts.ContractRegistry;
@@ -37,9 +36,10 @@ class ContractDriftControllerProjectBoundaryTest {
     ContractRegistryRepository registryRepo = mock(ContractRegistryRepository.class);
     ProjectRepoLinkRepository linkRepo = mock(ProjectRepoLinkRepository.class);
     ProjectAccessGuard accessGuard = mock(ProjectAccessGuard.class);
-    AppUserRepository userRepo = mock(AppUserRepository.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<ActivityEventEmitter> emitterProvider = mock(ObjectProvider.class);
+    // RR-524 — the controller no longer takes AppUserRepository; PAT + actor come from the
+    // authenticated principal (auth.getName() is the email, not the AppUser id).
     ContractDriftController controller =
         new ContractDriftController(
             driftService,
@@ -49,7 +49,6 @@ class ContractDriftControllerProjectBoundaryTest {
             linkRepo,
             mock(ExecutespecFolderWriter.class),
             mock(GitHubRepoService.class),
-            userRepo,
             mock(PullRequestRecordService.class),
             accessGuard,
             emitterProvider);

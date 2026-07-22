@@ -8,7 +8,6 @@ import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
-import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.contracts.ContractDriftEvent;
 import com.navneet.executespec.contracts.ContractDriftEventRepository;
 import com.navneet.executespec.contracts.ContractRegistry;
@@ -51,7 +50,6 @@ public class ContractDriftController {
   private final ProjectRepoLinkRepository linkRepo;
   private final ExecutespecFolderWriter folderWriter;
   private final GitHubRepoService gitHub;
-  private final AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
@@ -161,11 +159,13 @@ public class ContractDriftController {
 
     // Mark every unresolved drift event for this contract as REFRESHED
     Instant now = Instant.now();
-    UUID actorUserId = parseUuidOrNull(auth.getName());
+    // RR-524 — attribute resolution + activity to the immutable actor id, not the email.
+    String actorId = resolvedUserId(auth);
+    UUID actorUserId = parseUuidOrNull(actorId);
     for (ContractDriftEvent open : driftRepo.findUnresolvedByContractId(contractId)) {
       open.setResolvedAction(ContractDriftEvent.ResolvedAction.REFRESHED.name());
       open.setResolvedAt(now);
-      open.setResolvedByUserId(auth.getName());
+      open.setResolvedByUserId(actorId);
       open.setResolvedRationale("Refreshed via dashboard PR " + pr.get().prUrl());
       driftRepo.save(open);
     }
@@ -195,12 +195,14 @@ public class ContractDriftController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rationale required (≥10 chars)");
     }
     Instant now = Instant.now();
-    UUID actorUserId = parseUuidOrNull(auth.getName());
+    // RR-524 — attribute resolution + activity to the immutable actor id, not the email.
+    String actorId = resolvedUserId(auth);
+    UUID actorUserId = parseUuidOrNull(actorId);
     int dismissed = 0;
     for (ContractDriftEvent open : driftRepo.findUnresolvedByContractId(contractId)) {
       open.setResolvedAction(ContractDriftEvent.ResolvedAction.DISMISSED.name());
       open.setResolvedAt(now);
-      open.setResolvedByUserId(auth.getName());
+      open.setResolvedByUserId(actorId);
       open.setResolvedRationale(body.rationale().trim());
       driftRepo.save(open);
       dismissed++;
@@ -246,8 +248,19 @@ public class ContractDriftController {
   }
 
   private String patFor(Authentication auth) {
-    if (auth == null || auth.getName() == null) return null;
-    return userRepo.findById(auth.getName()).map(u -> u.getGithubPat()).orElse(null);
+    // RR-524 — auth.getName() is AppUserDetails.getUsername(), i.e. the user's EMAIL, not the id
+    // used as the AppUser primary key. userRepo.findById(email) therefore always returned null, so
+    // every private-repository drift check / refresh silently passed a null PAT to SCM and failed
+    // (a public-repo smoke hid it). Resolve the decrypted PAT from the already-authenticated
+    // principal instead.
+    return principal(auth).getUser().getGithubPat();
+  }
+
+  /**
+   * RR-524 — the immutable actor id (UUID string), never the email, for resolution/audit writes.
+   */
+  private String resolvedUserId(Authentication auth) {
+    return principal(auth).getUser().getId();
   }
 
   private static UUID parseUuidOrNull(String s) {
