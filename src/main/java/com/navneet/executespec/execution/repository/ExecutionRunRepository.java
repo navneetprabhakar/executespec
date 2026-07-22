@@ -54,7 +54,9 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
 
   @Query(
       "SELECT e FROM ExecutionRun e "
-          + "WHERE e.status NOT IN ('COMPLETE', 'FAILED', 'CANCELLED', 'ABORTED') "
+          // RR-345 — PARTIAL is terminal; a PARTIAL launch must not be reconciled to FAILED by the
+          // stale-launch sweep.
+          + "WHERE e.status NOT IN ('COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED') "
           + "AND e.updatedAt < :cutoff")
   List<ExecutionRun> findStaleNonTerminal(@Param("cutoff") Instant cutoff);
 
