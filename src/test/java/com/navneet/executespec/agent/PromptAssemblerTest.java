@@ -59,6 +59,36 @@ class PromptAssemblerTest {
         .isEqualTo(1.0);
   }
 
+  @Test
+  void substitutionDoesNotRescanInsertedValues() {
+    // RR-1230 — a value containing another {{MARKER}} must be emitted verbatim, never rewritten by
+    // a later map entry, and the result must be independent of map iteration order.
+    PromptHashAuditRepository repo = mock(PromptHashAuditRepository.class);
+    PromptAssembler assembler =
+        new PromptAssembler(loaderReturning("A={{A}} B={{B}}"), repo, meterRegistry);
+
+    java.util.Map<String, String> vars = new java.util.LinkedHashMap<>();
+    vars.put("A", "before-{{B}}-after");
+    vars.put("B", "SECRET");
+
+    String out = assembler.assemble("p.md", vars);
+
+    // The literal {{B}} inside A's value survives — it is NOT replaced by B's value.
+    assertThat(out).isEqualTo("A=before-{{B}}-after B=SECRET");
+  }
+
+  @Test
+  void unknownMarkersAreLeftLiteral() {
+    // RR-1230 — a placeholder with no supplied value stays literal (prior behaviour preserved).
+    PromptHashAuditRepository repo = mock(PromptHashAuditRepository.class);
+    PromptAssembler assembler =
+        new PromptAssembler(loaderReturning("x={{X}} y={{Y}}"), repo, meterRegistry);
+
+    String out = assembler.assemble("p.md", Map.of("X", "1"));
+
+    assertThat(out).isEqualTo("x=1 y={{Y}}");
+  }
+
   private static ResourceLoader loaderReturning(String content) {
     ResourceLoader loader = mock(ResourceLoader.class);
     Resource resource = mock(Resource.class);

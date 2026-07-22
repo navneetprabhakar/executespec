@@ -252,50 +252,77 @@ public class AnthropicForcedToolClient {
             true);
       }
 
-      // 4) Parse content blocks -> text + forced tool call(s).
-      StringBuilder text = new StringBuilder();
-      List<AssistantMessage.ToolCall> calls = new ArrayList<>();
-      for (AnthropicApi.ContentBlock cb : resp.content()) {
-        if (cb.type() == AnthropicApi.ContentBlock.Type.TEXT && cb.text() != null) {
-          text.append(cb.text());
-        } else if (cb.type() == AnthropicApi.ContentBlock.Type.TOOL_USE) {
-          String args = objectMapper.writeValueAsString(cb.input() == null ? Map.of() : cb.input());
-          calls.add(new AssistantMessage.ToolCall(cb.id(), "function", cb.name(), args));
-        }
-      }
-      ChatResponseMetadata.Builder meta = ChatResponseMetadata.builder().model(model);
-      if (resp.usage() != null) {
-        int in = resp.usage().inputTokens() == null ? 0 : resp.usage().inputTokens();
-        int out = resp.usage().outputTokens() == null ? 0 : resp.usage().outputTokens();
-        int cr =
-            resp.usage().cacheReadInputTokens() == null ? 0 : resp.usage().cacheReadInputTokens();
-        meta.usage(new DefaultUsage(in, out));
-        meta.keyValue("cache_read_input_tokens", cr);
-      }
-      log.info(
-          "Anthropic forced salvage: forced {} tool call(s) via ToolChoiceAny (stopReason={})",
-          calls.size(),
-          resp.stopReason());
-      AssistantMessage msg =
-          AssistantMessage.builder().content(text.toString()).toolCalls(calls).build();
-      ChatResponse response =
-          new ChatResponse(
-              List.of(
-                  new Generation(
-                      msg,
-                      ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
-              meta.build());
-      if (calls.isEmpty()) {
-        log.info(
-            "Anthropic forced salvage: model returned no tool call (stopReason={})",
-            resp.stopReason());
-        return new ForcedToolCallOutcome(response, false, null, true);
-      }
-      return new ForcedToolCallOutcome(response, true, null, true);
+      // 4) Parse content blocks -> outcome (fail-closed on abnormal stop reason, RR-1181).
+      return buildForcedOutcome(resp, model);
     } catch (Exception e) {
       log.warn("Anthropic forced salvage failed — falling back to auto: {}", e.toString());
       return new ForcedToolCallOutcome(null, false, e, true);
     }
+  }
+
+  /**
+   * Normalizes a completed Anthropic forced-call response into a {@link ForcedToolCallOutcome}.
+   * Package-private so the RR-1181 fail-closed stop-reason gate is unit-testable without a live
+   * provider call.
+   *
+   * <p>RR-1181 — a forced tool call is only trustworthy when Anthropic terminated with the
+   * documented complete tool-call stop reason ({@code tool_use}). An abnormal reason ({@code
+   * max_tokens}, {@code refusal}, {@code stop_sequence}, …) means the response was truncated or the
+   * model declined, so a {@code tool_use} block's input JSON may be incomplete or the call
+   * unauthorized. Previously stop reason was metadata only, so a truncated/refused response with
+   * any tool_use block was dispatched as an authorized write/edit/shell mutation. Fail closed: keep
+   * the response for audit/usage but mark it NOT usable so {@code LlmRouter} falls through to the
+   * normal auto path rather than executing mutations from an abnormally-terminated response.
+   */
+  ForcedToolCallOutcome buildForcedOutcome(AnthropicApi.ChatCompletionResponse resp, String model)
+      throws Exception {
+    StringBuilder text = new StringBuilder();
+    List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+    for (AnthropicApi.ContentBlock cb : resp.content()) {
+      if (cb.type() == AnthropicApi.ContentBlock.Type.TEXT && cb.text() != null) {
+        text.append(cb.text());
+      } else if (cb.type() == AnthropicApi.ContentBlock.Type.TOOL_USE) {
+        String args = objectMapper.writeValueAsString(cb.input() == null ? Map.of() : cb.input());
+        calls.add(new AssistantMessage.ToolCall(cb.id(), "function", cb.name(), args));
+      }
+    }
+    ChatResponseMetadata.Builder meta = ChatResponseMetadata.builder().model(model);
+    if (resp.usage() != null) {
+      int in = resp.usage().inputTokens() == null ? 0 : resp.usage().inputTokens();
+      int out = resp.usage().outputTokens() == null ? 0 : resp.usage().outputTokens();
+      int cr =
+          resp.usage().cacheReadInputTokens() == null ? 0 : resp.usage().cacheReadInputTokens();
+      meta.usage(new DefaultUsage(in, out));
+      meta.keyValue("cache_read_input_tokens", cr);
+    }
+    log.info(
+        "Anthropic forced salvage: forced {} tool call(s) via ToolChoiceAny (stopReason={})",
+        calls.size(),
+        resp.stopReason());
+    AssistantMessage msg =
+        AssistantMessage.builder().content(text.toString()).toolCalls(calls).build();
+    ChatResponse response =
+        new ChatResponse(
+            List.of(
+                new Generation(
+                    msg, ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
+            meta.build());
+    if (calls.isEmpty()) {
+      log.info(
+          "Anthropic forced salvage: model returned no tool call (stopReason={})",
+          resp.stopReason());
+      return new ForcedToolCallOutcome(response, false, null, true);
+    }
+    String stopReason = resp.stopReason();
+    if (stopReason != null && !"tool_use".equals(stopReason)) {
+      log.warn(
+          "Anthropic forced salvage: {} tool call(s) present but stopReason={} is not a complete"
+              + " tool_use termination — failing closed, no mutation dispatched",
+          calls.size(),
+          stopReason);
+      return new ForcedToolCallOutcome(response, false, null, true);
+    }
+    return new ForcedToolCallOutcome(response, true, null, true);
   }
 
   public record ForcedToolCallOutcome(

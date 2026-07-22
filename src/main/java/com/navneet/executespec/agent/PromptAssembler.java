@@ -42,6 +42,14 @@ public class PromptAssembler {
   private static final Pattern INCLUDE_PATTERN =
       Pattern.compile("\\{\\{include:([a-z-]+)(?::([a-z-]+))?\\}\\}");
 
+  /**
+   * RR-1230 — matches a single {@code {{VAR}}} placeholder token. Variable substitution scans the
+   * template for these tokens exactly once and replaces each from the supplied map, so an inserted
+   * value that happens to contain another {@code {{MARKER}}} is NEVER rescanned and rewritten by a
+   * later map entry. Every declared prompt variable is uppercase/digit/underscore.
+   */
+  private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{\\{([A-Za-z0-9_]+)\\}\\}");
+
   private static final String PROMPTS_BASE = "classpath:prompts/";
 
   private final ResourceLoader resourceLoader;
@@ -76,10 +84,38 @@ public class PromptAssembler {
   public String assemble(String promptPath, Map<String, String> variables) {
     String template = loadFile(promptPath);
     template = resolveIncludes(template);
-    for (var entry : variables.entrySet()) {
-      template = template.replace("{{" + entry.getKey() + "}}", entry.getValue());
+    return substituteVariables(template, variables);
+  }
+
+  /**
+   * RR-1230 — single-pass variable substitution. The template is scanned once for {@code {{VAR}}}
+   * tokens; each token found in the ORIGINAL template is replaced by its mapped value. Because
+   * replacements are written into a fresh buffer via {@link Matcher#appendReplacement}, a value
+   * that itself contains a {@code {{MARKER}}} substring is emitted verbatim and never re-matched,
+   * so a content-controlled marker (customer spec, repository text, memory, tool/history) can no
+   * longer duplicate or mutate another input, amplify prompt size, or break cache/audit
+   * byte-stability. The result is independent of {@code Map} iteration order. Unknown tokens (no
+   * map entry) are left literal, preserving the prior behaviour for prompts with unfilled
+   * placeholders.
+   */
+  private static String substituteVariables(String template, Map<String, String> variables) {
+    if (variables == null || variables.isEmpty()) {
+      return template;
     }
-    return template;
+    Matcher matcher = VARIABLE_PATTERN.matcher(template);
+    StringBuilder sb = new StringBuilder(template.length());
+    while (matcher.find()) {
+      String key = matcher.group(1);
+      String value = variables.get(key);
+      if (value == null) {
+        // Not a supplied variable — keep the token literal (unfilled placeholder).
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(0)));
+      } else {
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(value));
+      }
+    }
+    matcher.appendTail(sb);
+    return sb.toString();
   }
 
   private String resolveIncludes(String template) {
