@@ -325,10 +325,17 @@ public class ProjectArchitectureController {
     // Defensive size cap — repos with massive generated SQL dumps or vendored
     // bundles shouldn't drag the chat thread. 1 MB matches what the worker's
     // tool dispatcher already enforces.
-    int bytes = content == null ? 0 : content.length();
-    if (bytes > 1_000_000) {
+    // RR-585 — sizeBytes was content.length(), a CHAR count that silently under-reports every
+    // multibyte file even though the field is labelled bytes and the cap is a "1 MB" byte cap.
+    // Report the true UTF-8 byte size of the original content and decide truncation from it;
+    // truncation itself stays on a char boundary, which is always a safe UTF-8 split point. (The
+    // wider RR-585 fix — upstream byte/time bounds + cursor-paginated inventory — is deferred.)
+    int bytes =
+        content == null ? 0 : content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    if (bytes > 1_000_000 && content != null) {
+      int charCap = Math.min(content.length(), 1_000_000);
       content =
-          content.substring(0, 1_000_000) + "\n\n// … (truncated; file exceeds 1 MB display cap)";
+          content.substring(0, charCap) + "\n\n// … (truncated; file exceeds 1 MB display cap)";
     }
     return ResponseEntity.ok(new RepoFileDto(slug, branch, path, content, bytes));
   }

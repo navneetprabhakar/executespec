@@ -312,8 +312,10 @@ class CodeMapGeneratorFunctionMapTest {
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
     CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
-    when(gh.listRepoFiles(any(), any(), any()))
-        .thenReturn(List.of("src/services/user.service.ts", "package.json", "README.md"));
+    when(gh.listRepoFilesResult(any(), any(), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("src/services/user.service.ts", "package.json", "README.md")));
     lenient()
         .when(gh.readRepoFile(any(), eq("src/services/user.service.ts"), any(), any()))
         .thenReturn(
@@ -337,8 +339,10 @@ class CodeMapGeneratorFunctionMapTest {
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
     CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
-    when(gh.listRepoFiles(any(), any(), any()))
-        .thenReturn(List.of("README.md", "LICENSE", "package.json"));
+    when(gh.listRepoFilesResult(any(), any(), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("README.md", "LICENSE", "package.json")));
 
     String md = gen.generate("owner/repo", "main", "pat");
 
@@ -353,12 +357,84 @@ class CodeMapGeneratorFunctionMapTest {
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
     CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
-    when(gh.listRepoFiles(any(), any(), any()))
+    when(gh.listRepoFilesResult(any(), any(), any()))
         .thenThrow(new RuntimeException("upstream body must not become a valid empty codemap"));
 
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> gen.generate("owner/repo", "main", "pat"));
 
     assertEquals("Repository inventory unavailable for codemap generation", failure.getMessage());
+  }
+
+  // RR-955 — an UNSUCCESSFUL typed inventory (missing PAT / auth outage / rate limit / upstream
+  // error) must fail closed, not become a valid "Files: 0" codemap the caller persists.
+  @Test
+  void generate_failsClosedWhenTypedInventoryUnsuccessful() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    when(gh.listRepoFilesResult(any(), any(), any()))
+        .thenReturn(GitHubRepoService.RepoFileListResult.failed("MISSING_GITHUB_PAT", null));
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> gen.generate("owner/repo", "main", "pat"));
+
+    assertTrue(
+        failure.getMessage().contains("MISSING_GITHUB_PAT"),
+        "failure names the typed inventory error code");
+  }
+
+  // RR-955 — a truncated tree is a strict subset and must be labelled PARTIAL in-band so downstream
+  // never treats it as a complete repository inventory.
+  @Test
+  void generate_marksTruncatedInventoryAsPartial() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    when(gh.listRepoFilesResult(any(), any(), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("README.md", "package.json"), /* truncated= */ true));
+
+    String md = gen.generate("owner/repo", "main", "pat");
+
+    assertTrue(md.contains("Inventory: PARTIAL"), "truncated tree carries a PARTIAL marker");
+  }
+
+  // RR-956 — a null / blank HEAD SHA leaves no immutable provenance to record; generateWithSha must
+  // fail closed rather than scan an unpinned branch and persist content under a null SHA.
+  @Test
+  void generateWithSha_failsClosedWhenHeadShaUnresolvable() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    when(gh.getBranchHeadSha(any(), any(), any())).thenReturn(null);
+
+    assertThrows(
+        IllegalStateException.class, () -> gen.generateWithSha("owner/repo", "main", "pat"));
+  }
+
+  // RR-956 — once the HEAD SHA is resolved, the tree + file reads must be pinned to that immutable
+  // SHA (passed as the ref), not the mutable branch name, so a mid-generation push cannot be
+  // mislabelled under this SHA.
+  @Test
+  void generateWithSha_pinsInventoryReadToResolvedSha() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    when(gh.getBranchHeadSha(any(), any(), any())).thenReturn("abc123sha");
+    when(gh.listRepoFilesResult(any(), eq("abc123sha"), any()))
+        .thenReturn(GitHubRepoService.RepoFileListResult.success(List.of("README.md")));
+
+    CodeMapGenerator.Result result = gen.generateWithSha("owner/repo", "main", "pat");
+
+    assertEquals("abc123sha", result.sha());
+    // The inventory read used the resolved SHA as the ref, not "main". Verified implicitly: the
+    // stub only matches eq("abc123sha"); a branch-name read would return null and NPE below.
+    assertTrue(result.markdown().contains("# owner/repo"));
   }
 }
