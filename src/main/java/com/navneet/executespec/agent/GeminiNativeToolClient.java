@@ -372,6 +372,21 @@ public class GeminiNativeToolClient {
         : s.substring(0, max) + "...[" + (s.length() - max) + " chars omitted]";
   }
 
+  /**
+   * RR-511 — true when a Gemini candidate's {@code finishReason} is NOT a complete-generation
+   * terminal state. Gemini finishes a normal tool-emitting response with {@code STOP} (or omits the
+   * field entirely on some responses). Any other explicit reason (SAFETY, RECITATION, MAX_TOKENS,
+   * MALFORMED_FUNCTION_CALL, BLOCKLIST, PROHIBITED_CONTENT, SPII, IMAGE_SAFETY, LANGUAGE,
+   * UNEXPECTED_TOOL_CALL, OTHER, …) means the candidate was blocked or truncated and its parts
+   * cannot be trusted as an authorized tool call. Treated conservatively: {@code null}/blank/{@code
+   * STOP} are the only complete states so we never over-block a legitimate call, and every explicit
+   * non-STOP reason fails closed.
+   */
+  private static boolean isAbnormalGeminiTermination(String finishReason) {
+    if (finishReason == null || finishReason.isBlank()) return false;
+    return !"STOP".equals(finishReason);
+  }
+
   private ObjectNode buildRequestBody(GeminiToolCallRequest request, String cacheName) {
     ObjectNode body = objectMapper.createObjectNode();
 
@@ -594,6 +609,32 @@ public class GeminiNativeToolClient {
         }
       }
       String finishReason = candidate.path("finishReason").asText(null);
+      // RR-511 — fail closed on abnormal terminations that STILL carry tool calls. Gemini
+      // completes a legitimate tool-emitting response with finishReason=STOP (or omits it). A
+      // non-STOP reason (SAFETY, RECITATION, MAX_TOKENS, MALFORMED_FUNCTION_CALL, BLOCKLIST,
+      // PROHIBITED_CONTENT, SPII, UNEXPECTED_TOOL_CALL, …) means the candidate was blocked or
+      // truncated, so any functionCall in it may be incomplete or unauthorized. Previously such a
+      // candidate was returned normally whenever it contained ANY tool call — the finishReason
+      // guard below only fired when both tool calls AND text were empty — so a blocked/truncated
+      // provider response could cross the boundary as an executable writeFile/editFile/shell
+      // request. Drop the tool calls and surface the block as visible error text instead, so the
+      // worker sees a typed provider-terminated state and never dispatches mutations from it.
+      if (!toolCalls.isEmpty() && isAbnormalGeminiTermination(finishReason)) {
+        String detail = candidate.path("finishMessage").asText("");
+        log.warn(
+            "Gemini wrapper: DROPPING {} tool call(s) from a candidate that terminated abnormally"
+                + " (finishReason={}, finishMessage={}) — failing closed, no mutation dispatched",
+            toolCalls.size(),
+            finishReason,
+            truncate(detail, 400));
+        toolCalls.clear();
+        if (textBuf.length() > 0) textBuf.append("\n");
+        textBuf
+            .append("[Gemini terminated with finishReason=")
+            .append(finishReason)
+            .append(detail.isEmpty() ? "" : "; detail: " + truncate(detail, 400))
+            .append("; tool call(s) suppressed by provider-safety gate]");
+      }
       // Surface MALFORMED_FUNCTION_CALL (and other abnormal terminations) as a visible
       // error in the text — otherwise the worker sees an empty response and silently
       // exits with STOPPED_WITHOUT_COMPLETE, which masks the real problem.

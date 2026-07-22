@@ -143,7 +143,9 @@ class PlannerOutputUtilsValidationTest {
   }
 
   @Test
-  void staticWebSurfaceBypassesTestTaskRule() {
+  void staticWebSurfaceWithoutTestFlagged() {
+    // RR-1220 — a multi-task (non single-shot) STATIC_WEB plan is a testable surface; a functional
+    // static-web app with zero tests must be flagged, not blanket-exempt.
     Plan plan =
         buildPlan(
             List.of(new RequirementSpec("R1", "Render hero section", RequirementKind.FUNCTIONAL)),
@@ -151,7 +153,53 @@ class PlannerOutputUtilsValidationTest {
             Plan.RuntimeSurface.STATIC_WEB,
             Classification.MEDIUM);
 
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(v -> v.contains("No test task") && v.contains("STATIC_WEB"));
+  }
+
+  @Test
+  void staticWebSurfaceWithTestTaskOk() {
+    // RR-1220 — a STATIC_WEB plan that actually plans tests satisfies the gate.
+    Plan plan =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "Render hero section", RequirementKind.FUNCTIONAL)),
+            List.of(task("T1", "Write HTML and Jest tests", List.of("R1"))),
+            Plan.RuntimeSurface.STATIC_WEB,
+            Classification.MEDIUM);
+
     assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
+  }
+
+  @Test
+  void substringTestDoesNotSatisfyTestGate() {
+    // RR-1219 — "attestation" and negated "Do not add tests" must NOT satisfy the mandatory gate.
+    Plan attestation =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "POST /api/shorten", RequirementKind.FUNCTIONAL)),
+            List.of(task("T1", "Add attestation support", List.of("R1"))),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+    assertThat(PlannerOutputUtils.validatePlan(attestation))
+        .anyMatch(v -> v.contains("No test task"));
+
+    Plan negated =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "POST /api/shorten", RequirementKind.FUNCTIONAL)),
+            List.of(task("T1", "Implement endpoint. Do not add tests.", List.of("R1"))),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+    assertThat(PlannerOutputUtils.validatePlan(negated)).anyMatch(v -> v.contains("No test task"));
+  }
+
+  @Test
+  void genuineTestTaskSignalRecognized() {
+    // RR-1219 — a real whole-word test signal still satisfies the gate.
+    assertThat(PlannerOutputUtils.looksLikeGenuineTestTask("Write unit tests", "for the service"))
+        .isTrue();
+    assertThat(PlannerOutputUtils.looksLikeGenuineTestTask("Add attestation", "signed JWT"))
+        .isFalse();
+    assertThat(PlannerOutputUtils.looksLikeGenuineTestTask("Endpoint", "tests out of scope"))
+        .isFalse();
   }
 
   @Test
