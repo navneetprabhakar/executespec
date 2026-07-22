@@ -128,13 +128,24 @@ public class GitHubRepoService {
         continue;
       }
 
-      // Some other failure (auth, network, etc.) — don't retry
-      return "https://github.com/" + effectiveOwner + "/" + name + ".git";
+      // RR-149 — some other failure (auth, network, API error). A repository was NOT created, so we
+      // must NOT return a constructed URL: the run would persist and publish against a source that
+      // does not exist. Signal failure (null); callers surface a safe, explicit creation error.
+      log.warn(
+          "[GitHubRepoService] Repo creation for '{}' failed without a name collision — no repo was"
+              + " created; returning null rather than a fabricated URL",
+          name);
+      return null;
     }
 
-    // All retries exhausted
-    String fallbackName = baseName + "-" + ThreadLocalRandom.current().nextInt(10, 100);
-    return "https://github.com/" + effectiveOwner + "/" + fallbackName + ".git";
+    // RR-149 — all name-collision retries exhausted without a successful create. Never return an
+    // unattempted URL; report failure so retry/idempotency stays explicit.
+    log.warn(
+        "[GitHubRepoService] Repo creation exhausted {} name-collision retries for base '{}' —"
+            + " returning null",
+        3,
+        baseName);
+    return null;
   }
 
   /**
@@ -667,33 +678,53 @@ public class GitHubRepoService {
     cloneRepo(repoUrl, workspacePath, null);
   }
 
+  /** Thrown when an existing-repo clone cannot proceed because no credential is available. */
+  public static final class MissingCredentialException extends RuntimeException {
+    public MissingCredentialException(String message) {
+      super(message);
+    }
+  }
+
   /**
-   * Clones a GitHub repo into {@code workspacePath} using the provided PAT for auth. Falls back to
-   * {@code git init} if no PAT is available.
+   * Clones a GitHub repo into {@code workspacePath} using the provided PAT for auth.
+   *
+   * <p>RR-150 — a missing PAT NEVER silently substitutes an empty {@code git init} workspace: doing
+   * so let callers plan and generate against an empty tree while believing they were modifying an
+   * existing repository (replacement-style diffs, false readiness). Without a credential we attempt
+   * an unauthenticated clone, which succeeds for public repositories; if that fails (private/
+   * unreachable) we fail closed with {@link MissingCredentialException} so the caller stops before
+   * planning rather than proceeding against an empty source.
    */
   public void cloneRepo(String repoUrl, String workspacePath, String overridePat) throws Exception {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) {
+    boolean authenticated = effectivePat != null && !effectivePat.isBlank();
+    if (!authenticated) {
       log.info(
-          "[GitHubRepoService] No PAT configured — initializing empty git repo at {}",
-          workspacePath);
-      ProcessBuilder pb = new ProcessBuilder("git", "init", workspacePath);
-      pb.inheritIO();
-      int exit = pb.start().waitFor();
-      if (exit != 0) throw new RuntimeException("git init failed with exit code " + exit);
-      return;
+          "[GitHubRepoService] No PAT configured — attempting unauthenticated clone of {} (public"
+              + " repositories only)",
+          repoUrl);
     }
 
     // Credential-gate 2026-07-17: PAT rides the child env (GitProcessAuth), not argv/remote —
     // and inheritIO is gone so child git output can't stream tokens into the parent's stdout.
     ProcessBuilder pb =
-        GitProcessAuth.git(effectivePat, java.util.List.of("clone", repoUrl, workspacePath));
+        GitProcessAuth.git(
+            authenticated ? effectivePat : null,
+            java.util.List.of("clone", repoUrl, workspacePath));
     pb.redirectErrorStream(true);
     Process p = pb.start();
     String out = new String(p.getInputStream().readAllBytes());
     int exit = p.waitFor();
-    if (exit != 0)
+    if (exit != 0) {
+      if (!authenticated) {
+        throw new MissingCredentialException(
+            "MISSING_GITHUB_PAT: clone of "
+                + repoUrl
+                + " failed without a credential (likely a private or unreachable repository);"
+                + " refusing to substitute an empty workspace");
+      }
       throw new RuntimeException("git clone failed with exit code " + exit + ": " + out);
+    }
   }
 
   /** Generates a random memorable repo name (e.g. "swift-spark", "bold-nexus"). */

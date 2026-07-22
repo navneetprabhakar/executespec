@@ -10,7 +10,9 @@ import lombok.Data;
 @Data
 public class PromptOptimiserProperties {
 
-  private boolean enabled = true;
+  // RR-1277 — default OFF. The optimiser now only produces inert candidates, but even that runs an
+  // ungated LLM against global outcomes and spends provider budget; an operator opts in explicitly.
+  private boolean enabled = false;
 
   /** Run every N completed runs */
   private int runInterval = 10;

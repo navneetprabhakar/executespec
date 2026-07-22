@@ -127,11 +127,19 @@ public class SpecChatController {
     }
 
     String userId = String.valueOf(userDetails.getUser().getId());
+    // RR-875 — a project-scoped chat may be driven by an external collaborator whose home org is
+    // not
+    // the project's owner. Security-audit events for that project must be filed under the org that
+    // OWNS the host project, not the actor's home org, or the host tenant's compliance queries miss
+    // allowed/tool-use activity on its own project. The authorized Project returned by the guard is
+    // the authoritative host-org source. Null for non-project sessions (falls back to actor org).
+    String hostOrgId = null;
     // Project-scoped chat binds project read tools. Validate the caller before creating the audit
     // row or entering the agent loop so an arbitrary projectId cannot become an IDOR oracle.
     if (request.projectId() != null && !request.projectId().isBlank()) {
       try {
-        projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+        var hostProject = projectAccessGuard.assertCanWrite(request.projectId(), userDetails);
+        hostOrgId = hostProject == null ? null : hostProject.getOrgId();
       } catch (RuntimeException denied) {
         chatSecurityAuditService.record(
             "CHAT_TURN_DENIED",
@@ -144,6 +152,7 @@ public class SpecChatController {
         throw denied;
       }
     }
+    final String hostOrgIdFinal = hostOrgId;
     String ip = clientIp(http);
     String ipHash = sha256(ip);
 
@@ -161,7 +170,8 @@ public class SpecChatController {
         userDetails,
         "spec_chat_turn",
         ChatToolPolicy.Capability.SPEND_AI,
-        "ALLOWED");
+        "ALLOWED",
+        hostOrgIdFinal);
 
     log.info(
         "spec-chat session={} user={} org={} project={} turn={} ipHash={}",
@@ -212,6 +222,7 @@ public class SpecChatController {
                     userDetails,
                     userId,
                     orgId,
+                    hostOrgIdFinal,
                     effectiveProvider,
                     audit.getId()));
     if (!admitted) {
@@ -228,6 +239,7 @@ public class SpecChatController {
       AppUserDetails userDetails,
       String userId,
       String orgId,
+      String hostOrgId,
       String effectiveProvider,
       String auditId) {
     try {
@@ -236,9 +248,9 @@ public class SpecChatController {
       // compatibility path observable without granting the legacy chat loop any new authority:
       // the route classifier can only propose a route, while existing chat tools still enforce
       // action and plan-gate policy.
-      emitRouteDecision(emitter, request, effectiveProvider, userDetails);
+      emitRouteDecision(emitter, request, effectiveProvider, userDetails, hostOrgId);
       specChatService.runTurn(
-          sseSink(emitter, userDetails, request),
+          sseSink(emitter, userDetails, request, hostOrgId),
           userDetails,
           request.sessionId(),
           request.projectId(),
@@ -266,7 +278,8 @@ public class SpecChatController {
       SseEmitter emitter,
       SpecChatRequest request,
       String effectiveProvider,
-      AppUserDetails principal) {
+      AppUserDetails principal,
+      String hostOrgId) {
     try {
       OrchestratorDecision decision =
           agentIntentService.decide(
@@ -299,7 +312,8 @@ public class SpecChatController {
           decision.policy() != null && decision.policy().runApiAllowed()
               ? ChatToolPolicy.Capability.SPEND_AI
               : ChatToolPolicy.Capability.PROJECT_READ,
-          decision.requiresUserConfirmation() ? "REQUIRED" : "ROUTED");
+          decision.requiresUserConfirmation() ? "REQUIRED" : "ROUTED",
+          hostOrgId);
     } catch (RuntimeException e) {
       // Advisory route evidence must not turn a compatibility chat request into an outage.
       log.debug(
@@ -380,7 +394,7 @@ public class SpecChatController {
 
   /** Adapt {@link SpecChatService.Sink} to this request's SSE emitter (null-safe data maps). */
   private SpecChatService.Sink sseSink(
-      SseEmitter emitter, AppUserDetails principal, SpecChatRequest request) {
+      SseEmitter emitter, AppUserDetails principal, SpecChatRequest request, String hostOrgId) {
     return new SpecChatService.Sink() {
       private final java.util.Map<String, String> toolById =
           new java.util.concurrent.ConcurrentHashMap<>();
@@ -403,7 +417,8 @@ public class SpecChatController {
             principal,
             tool,
             ChatToolPolicy.capability(tool),
-            "REQUESTED");
+            "REQUESTED",
+            hostOrgId);
         send(
             emitter,
             "tool_call",
@@ -423,7 +438,8 @@ public class SpecChatController {
             principal,
             tool,
             ChatToolPolicy.capability(tool),
-            resultJson != null && resultJson.contains("\"ok\":true") ? "OK" : "ERROR");
+            resultJson != null && resultJson.contains("\"ok\":true") ? "OK" : "ERROR",
+            hostOrgId);
         send(
             emitter,
             "tool_result",
