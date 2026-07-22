@@ -84,9 +84,20 @@ public class EmbeddingService {
     return policyResolver.resolve(projectId);
   }
 
+  /**
+   * RR-676 — a hook invoked after each embedding batch completes so a caller holding a fenced
+   * processing lease can renew it between batches (a large document embeds across many batches
+   * under a fixed lease that would otherwise expire mid-call). Returning {@code false} signals that
+   * the caller has lost ownership; the dispatcher stops before spending the next batch.
+   */
+  @FunctionalInterface
+  public interface BatchProgressCallback {
+    boolean onBatchComplete(int completedBatches, int totalBatches);
+  }
+
   public List<float[]> embedForProject(
       String projectId, List<String> texts, String feature, String sourceType, String sourceId) {
-    return embedForProject(projectId, texts, feature, sourceType, sourceId, null);
+    return embedForProject(projectId, texts, feature, sourceType, sourceId, null, null);
   }
 
   public List<float[]> embedForProject(
@@ -96,6 +107,17 @@ public class EmbeddingService {
       String sourceType,
       String sourceId,
       String actorUserId) {
+    return embedForProject(projectId, texts, feature, sourceType, sourceId, actorUserId, null);
+  }
+
+  public List<float[]> embedForProject(
+      String projectId,
+      List<String> texts,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String actorUserId,
+      BatchProgressCallback progress) {
     if (texts == null || texts.isEmpty()) return List.of();
     var availability = policyResolver.resolve(projectId);
     if (!availability.semanticSearchAvailable()) {
@@ -114,6 +136,7 @@ public class EmbeddingService {
     String runId = usageRunId(sourceId);
 
     List<float[]> vectors = new ArrayList<>(texts.size());
+    int totalBatches = (texts.size() + BATCH_SIZE - 1) / BATCH_SIZE;
     int batchNumber = 0;
     for (int from = 0; from < texts.size(); from += BATCH_SIZE) {
       batchNumber++;
@@ -203,6 +226,12 @@ public class EmbeddingService {
             batchNumber);
       }
       vectors.addAll(result.vectors());
+      // RR-676 — renew the caller's fenced lease between batches and cancel promptly if ownership
+      // was lost (delete / takeover), so a large multi-batch embedding cannot expire its own lease
+      // and then fail to publish, and a lost owner stops spending on further batches.
+      if (progress != null && !progress.onBatchComplete(batchNumber, totalBatches)) {
+        throw new EmbeddingOwnershipLostException(feature, batchNumber, totalBatches);
+      }
     }
     if (vectors.size() != texts.size()) {
       throw new IllegalStateException("Embedding result count mismatch");

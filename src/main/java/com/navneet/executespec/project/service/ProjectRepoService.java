@@ -30,6 +30,8 @@ import com.navneet.executespec.repo.ScmSourceInventory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
@@ -421,14 +423,28 @@ public class ProjectRepoService {
     // PUTs + open PR) runs on the background executor. Failures persist
     // BOOTSTRAP_FAILED on the project_repo row + emit an activity event;
     // they never bubble back to this thread.
+    //
+    // RR-311 — dispatch bootstrap AFTER this transaction commits. Firing it inline (before the
+    // linkToProject transaction returns) let the async worker query/update repo/link state while
+    // the
+    // creating transaction was still invisible: it could report false-missing rows, race a
+    // rollback,
+    // or open a bootstrap PR for a link that never committed. Registering an after-commit callback
+    // guarantees the link row is durable before any background work observes it; if the transaction
+    // rolls back, afterCommit never runs and no orphan bootstrap is dispatched.
     com.navneet.executespec.folder.BootstrapService bootstrap =
         bootstrapServiceProvider.getIfAvailable();
     if (bootstrap != null && supportsCapability(repo, ScmCapability.BOOTSTRAP)) {
       String pat = userRepo.findById(callerUserId).map(u -> u.getGithubPat()).orElse(null);
       UUID actorUserId = parseUuidOrNull(callerUserId);
       UUID projectUuid = parseUuidOrNull(projectId);
+      UUID repoIdForBootstrap = repo.getId();
+      String projectName = project.getName();
       if (projectUuid != null) {
-        bootstrap.bootstrapAsync(repo.getId(), projectUuid, project.getName(), actorUserId, pat);
+        dispatchAfterCommit(
+            () ->
+                bootstrap.bootstrapAsync(
+                    repoIdForBootstrap, projectUuid, projectName, actorUserId, pat));
       }
     }
 
@@ -440,6 +456,24 @@ public class ProjectRepoService {
       return s == null ? null : UUID.fromString(s);
     } catch (IllegalArgumentException ex) {
       return null;
+    }
+  }
+
+  /**
+   * RR-311 — run {@code action} only after the current transaction commits. When there is no active
+   * transaction (defensive / test paths) the action runs inline.
+   */
+  private static void dispatchAfterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              action.run();
+            }
+          });
+    } else {
+      action.run();
     }
   }
 
@@ -714,6 +748,11 @@ public class ProjectRepoService {
             .ownerUserId(project.getOrgId() != null ? null : callerUserId)
             .githubRepoFullName(fullName)
             .githubOwner(extractOwner(fullName))
+            // RR-318 — a created source must carry the same neutral SCM identity contract as an
+            // attached one, not just legacy name/owner columns, so run admission can reason about
+            // it.
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider(ScmProvider.GITHUB.name())
             .sourceKey(fullName)
             .sourceDisplayName(fullName)
             .defaultBranch("main")
@@ -721,6 +760,13 @@ public class ProjectRepoService {
             .lastSyncedSha(null)
             .webhookInstalled(webhookOk)
             .build();
+    // RR-318 — pass the created repo through the same canonical inspect/inventory/readiness
+    // finalizer as attach so it persists an immutable provider id, credential-free clone URL,
+    // capabilities, branch SHA and an honest readiness verdict. A brand-new repo has no commits, so
+    // this correctly persists BLOCKED (BRANCH_UNREADABLE/EMPTY_REPOSITORY) readiness — RR-313 run
+    // admission then refuses it until the user pushes code and re-syncs, instead of admitting a
+    // just-created source with false identity and no proven readability.
+    hydrateCreatedSourceIdentity(entity, fullName, pat);
     repoRepo.save(entity);
 
     linkRepo.save(
@@ -757,6 +803,49 @@ public class ProjectRepoService {
       repoRepo.save(repo);
     }
     return ok;
+  }
+
+  /**
+   * RR-318 — hydrate the immutable source identity + readiness of a just-created GitHub repository
+   * from an authenticated provider read, mirroring the attach path. Fails closed: any inability to
+   * verify the identity leaves the source BLOCKED so it cannot be admitted for a run.
+   */
+  private void hydrateCreatedSourceIdentity(ProjectRepo entity, String fullName, String pat) {
+    try {
+      ScmRepositoryClient client = scmClients.require(ScmProvider.GITHUB);
+      ScmCredential credential = new ScmCredential(null, pat);
+      ScmRemoteRepository remote = client.inspect(fullName, credential);
+      if (remote.immutableId() != null && !remote.immutableId().isBlank()) {
+        entity.setScmRepositoryId(remote.immutableId());
+      }
+      entity.setScmCloneUrl(requireCredentialFreeCloneUrl(remote.cloneUrl()));
+      entity.setSourceKey(remote.fullName());
+      entity.setSourceDisplayName(remote.displayName());
+      entity.setSourceCapabilities(remote.capabilities().stream().sorted().toList());
+      String branch = entity.getDefaultBranch();
+      String headSha = null;
+      try {
+        headSha = client.branchHeadSha(remote, branch, credential);
+      } catch (RuntimeException noCommitsYet) {
+        // A repository created moments ago has no commits — leave headSha null.
+      }
+      ScmSourceInventory inventory = null;
+      try {
+        inventory = client.inventory(remote, branch, credential);
+      } catch (RuntimeException inventoryFailure) {
+        // Fall through with a null inventory → applySourceReadiness marks it BLOCKED.
+      }
+      if (headSha != null && !headSha.isBlank()) entity.setLastSyncedSha(headSha);
+      applySourceReadiness(entity, headSha, inventory);
+    } catch (RuntimeException identityFailure) {
+      log.warn(
+          "RR-318 — created repo {} identity could not be verified; marking source BLOCKED: {}",
+          fullName,
+          identityFailure.getMessage());
+      entity.setSourceReadinessCheckedAt(Instant.now());
+      entity.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      entity.setSourceReadinessReason("SOURCE_IDENTITY_UNVERIFIED");
+    }
   }
 
   private static String extractFullNameFromCloneUrl(String cloneUrl) {

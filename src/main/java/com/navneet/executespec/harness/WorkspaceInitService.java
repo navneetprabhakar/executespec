@@ -456,6 +456,43 @@ public class WorkspaceInitService {
     }
   }
 
+  /**
+   * RR-641 — pin an already-cloned workspace to an exact commit and prove it. {@link
+   * #cloneFromRepo} lands the repository's current default HEAD, so a semantic index that labels
+   * its chunks with a previously recorded {@code lastSyncedSha} would silently publish newer code
+   * under the older SHA once the branch advances between metadata sync and clone. Checking out the
+   * exact commit (detached) and verifying {@code HEAD} byte-for-byte closes that gap.
+   *
+   * <p>A full clone contains all branch history, so an ancestor commit checks out without a network
+   * fetch. A commit that is no longer reachable (force-push / rebase) fails to check out, the HEAD
+   * verification fails, and this returns {@code false} so the caller can stale/fail the index
+   * rather than index a tree that does not match the recorded revision.
+   *
+   * @return {@code true} only when the resulting {@code HEAD} equals {@code commitSha}
+   */
+  public boolean checkoutExactCommit(String runId, String commitSha) {
+    if (commitSha == null || commitSha.isBlank()) return false;
+    Path workspace = runWorkspacePath(runId);
+    try {
+      runGit(workspace, "git", "checkout", "--detach", commitSha);
+      String head = captureHeadSha(workspace);
+      boolean matched = head != null && commitSha.equalsIgnoreCase(head.trim());
+      if (!matched) {
+        log.warn(
+            "RR-641 — workspace {} could not be pinned to {} (HEAD={})", runId, commitSha, head);
+      }
+      return matched;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.warn("RR-641 — checkoutExactCommit interrupted for {} @ {}", runId, commitSha);
+      return false;
+    } catch (IOException e) {
+      log.warn(
+          "RR-641 — checkoutExactCommit failed for {} @ {}: {}", runId, commitSha, e.getMessage());
+      return false;
+    }
+  }
+
   private String captureHeadSha(Path repoDir) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder("git", "rev-parse", "HEAD").directory(repoDir.toFile());
     pb.redirectErrorStream(true);
