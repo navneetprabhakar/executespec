@@ -1223,6 +1223,16 @@ public class DevDockerfileGenerator {
    * onto any customer-authored {@code .dockerignore} rather than overwriting it (RR-384), appending
    * these security exclusions last so a customer re-include cannot pull a secret back in.
    *
+   * <p><b>RR-384 (2026-07-22) — every security pattern is anchored with {@code **&#47;} as well as
+   * at the context root.</b> A {@code .dockerignore} pattern is matched against the whole path
+   * relative to the build-context root using {@code filepath.Match} semantics, so a bare {@code
+   * .env} / {@code *.pem} / {@code id_rsa} excluded ONLY the root-level file: {@code backend/.env},
+   * {@code config/id_rsa} and {@code certs/server.pem} were still copied into the image by {@code
+   * COPY . .}. Since a monorepo or any two-service repository keeps its credentials one directory
+   * down, the exclusion list was missing the common case it exists for. Both forms are emitted
+   * rather than only the recursive one so the block does not depend on a particular engine's
+   * treatment of the zero-directory branch of {@code **}.
+   *
    * <p><b>Not closed here:</b> this is still a deny-list over the customer's tree, not an
    * allowlisted staged context. A repository secret under an unrecognised name is still copied.
    */
@@ -1241,57 +1251,82 @@ public class DevDockerfileGenerator {
            .dockerignore.user
            Dockerfile
 
-           # ExecuteSpec control directories — planner/spec context, never product source
-           .agent-context
-           .executespec
+           """
+        + securityExclusions();
+  }
 
-           # Environment / configuration secrets
-           .env
-           .env.*
-           .env.local
-           .env.production
-           credentials.json
-           service-account.json
-           service_account.json
-           key.json
-           keyfile.json
-           secrets.yml
-           secrets.yaml
-           secrets.json
+  /**
+   * The credential / control-directory families of the generated {@code .dockerignore}, each
+   * emitted twice: once anchored at the build-context root and once as {@code **&#47;<pattern>} so
+   * the same name is excluded at ANY depth (RR-384). Grouped, and package-visible, so the
+   * regression test can assert the recursive form for every entry rather than a sampled few.
+   */
+  static final java.util.Map<String, java.util.List<String>> SECURITY_EXCLUSIONS =
+      java.util.Map.of(
+          "ExecuteSpec control directories — planner/spec context, never product source",
+              java.util.List.of(".agent-context", ".executespec"),
+          "Environment / configuration secrets",
+              java.util.List.of(
+                  ".env",
+                  ".env.*",
+                  ".env.local",
+                  ".env.production",
+                  "credentials.json",
+                  "service-account.json",
+                  "service_account.json",
+                  "key.json",
+                  "keyfile.json",
+                  "secrets.yml",
+                  "secrets.yaml",
+                  "secrets.json"),
+          "Package manager + registry credentials",
+              java.util.List.of(
+                  ".npmrc",
+                  ".yarnrc",
+                  ".yarnrc.yml",
+                  ".pypirc",
+                  ".netrc",
+                  "_netrc",
+                  "pip.conf",
+                  ".docker/config.json",
+                  ".m2/settings.xml"),
+          "Cloud and CI credentials",
+              java.util.List.of(
+                  ".aws", ".gcloud", ".config/gcloud", ".azure", ".kube", "gha-creds-*.json"),
+          "Keys, certificates, keystores",
+              java.util.List.of(
+                  ".ssh",
+                  "id_rsa",
+                  "id_rsa.*",
+                  "id_ed25519",
+                  "id_ed25519.*",
+                  "*.pem",
+                  "*.key",
+                  "*.p12",
+                  "*.pfx",
+                  "*.jks",
+                  "*.keystore",
+                  "*.der"));
 
-           # Package manager + registry credentials
-           .npmrc
-           .yarnrc
-           .yarnrc.yml
-           .pypirc
-           .netrc
-           _netrc
-           pip.conf
-           .docker/config.json
-           .m2/settings.xml
+  /** Deterministic order for the emitted blocks — a generated artifact must not vary per JVM. */
+  private static final java.util.List<String> SECURITY_EXCLUSION_ORDER =
+      java.util.List.of(
+          "ExecuteSpec control directories — planner/spec context, never product source",
+          "Environment / configuration secrets",
+          "Package manager + registry credentials",
+          "Cloud and CI credentials",
+          "Keys, certificates, keystores");
 
-           # Cloud and CI credentials
-           .aws
-           .gcloud
-           .config/gcloud
-           .azure
-           .kube
-           gha-creds-*.json
-
-           # Keys, certificates, keystores
-           .ssh
-           id_rsa
-           id_rsa.*
-           id_ed25519
-           id_ed25519.*
-           *.pem
-           *.key
-           *.p12
-           *.pfx
-           *.jks
-           *.keystore
-           *.der
-           """;
+  private static String securityExclusions() {
+    StringBuilder sb = new StringBuilder();
+    for (String heading : SECURITY_EXCLUSION_ORDER) {
+      sb.append("\n# ").append(heading).append('\n');
+      for (String pattern : SECURITY_EXCLUSIONS.get(heading)) {
+        sb.append(pattern).append('\n');
+        sb.append("**/").append(pattern).append('\n');
+      }
+    }
+    return sb.toString();
   }
 
   /**
