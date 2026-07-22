@@ -74,7 +74,7 @@ const ResetPasswordPage = lazy(() =>
   import('@/signal/pages/AuthRecoveryPages').then((m) => ({default: m.ResetPasswordPage})),
 );
 const AcceptInvitePage = lazy(() =>
-  import('@/signal/pages/ExtraPages').then((m) => ({default: m.AcceptInvitePage})),
+  import('@/signal/pages/AcceptInvitePage').then((m) => ({default: m.AcceptInvitePage})),
 );
 const TermsPage = lazy(() =>
   import('@/signal/pages/LegalPages').then((m) => ({default: m.TermsPage})),

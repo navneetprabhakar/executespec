@@ -26,6 +26,55 @@ export interface UsageAuditSummaryRow {
   unknownCostAttempts: number;
 }
 
+// RR-1370 — map a reconciliation status to a severity badge so match / mismatch /
+// indeterminate / unavailable states are visually distinct, not hidden.
+export function reconciliationBadgeKind(status: string): 'ok' | 'warn' | 'bad' {
+  const s = (status || '').toUpperCase();
+  if (s.includes('MATCH') || s === 'OK' || s === 'RECONCILED') return 'ok';
+  if (s.includes('MISMATCH') || s.includes('FAIL')) return 'bad';
+  return 'warn';
+}
+
+function ReconciliationCard({
+  reconciliation,
+}: {
+  reconciliation: api.LlmUsageAuditReport['reconciliation'];
+}) {
+  const rows: Array<{label: string; status: string; explanation?: string}> = [
+    {
+      label: 'Physical ledger vs run totals',
+      status: reconciliation.runTotals.status,
+      explanation: reconciliation.runTotals.explanation,
+    },
+    {
+      label: 'Physical ledger vs managed-AI debits',
+      status: reconciliation.managedAiEvents.status,
+      explanation: reconciliation.managedAiEvents.explanation,
+    },
+    {label: 'Provider invoice', status: reconciliation.providerInvoiceStatus},
+  ];
+  return (
+    <div className='ide-card' style={{marginBottom: 12}}>
+      <div style={{fontSize: 12.5, fontWeight: 700, marginBottom: 8}}>Reconciliation</div>
+      <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+        {rows.map((row) => (
+          <div key={row.label} style={{display: 'flex', gap: 8, alignItems: 'flex-start'}}>
+            <IdeBadge kind={reconciliationBadgeKind(row.status)}>
+              {row.status || 'UNKNOWN'}
+            </IdeBadge>
+            <div style={{minWidth: 0}}>
+              <div style={{fontSize: 12.5, color: 'var(--ide-fg-bright)'}}>{row.label}</div>
+              {row.explanation && (
+                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>{row.explanation}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function dimensionValue(
   row: api.LlmUsageRollup,
   dimension: api.UsageAuditDimension,
@@ -116,6 +165,9 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
   const [loading, setLoading] = useState(false);
   const [download, setDownload] = useState<'csv' | 'json' | null>(null);
   const [error, setError] = useState('');
+  // RR-1369 — disclose export truncation so a partial CSV/JSON is not saved as if
+  // it were the complete audit evidence.
+  const [downloadNote, setDownloadNote] = useState('');
 
   const params = useMemo(
     () => ({orgId, from, to, timezone, page, size: 100}),
@@ -148,9 +200,33 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
   async function runDownload(kind: 'csv' | 'json') {
     setDownload(kind);
     setError('');
+    setDownloadNote('');
     try {
-      if (kind === 'csv') await api.downloadLlmUsageAuditCsv(params);
-      else await api.downloadLlmUsageAuditJson(params);
+      if (kind === 'csv') {
+        const meta = await api.downloadLlmUsageAuditCsv(params);
+        // RR-1369 — the CSV endpoint caps at its row limit and reports truncation.
+        if (meta.truncated) {
+          const limit = meta.rowLimit != null ? meta.rowLimit.toLocaleString() : 'the export limit';
+          setDownloadNote(
+            `CSV truncated at ${limit} rows${
+              report ? ` of ${report.page.totalRows.toLocaleString()} total` : ''
+            }. Narrow the window to export the rest.`,
+          );
+        } else {
+          setDownloadNote('CSV export complete.');
+        }
+      } else {
+        await api.downloadLlmUsageAuditJson(params);
+        // RR-1369 — the JSON export is always the first page of 500 rows.
+        const total = report?.page.totalRows ?? null;
+        if (total != null && total > api.JSON_EXPORT_ROW_LIMIT) {
+          setDownloadNote(
+            `JSON export contains only the first ${api.JSON_EXPORT_ROW_LIMIT} of ${total.toLocaleString()} rows. Use CSV or narrow the window for the rest.`,
+          );
+        } else {
+          setDownloadNote(`JSON export complete (first ${api.JSON_EXPORT_ROW_LIMIT} rows max).`);
+        }
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Download failed.');
     } finally {
@@ -214,11 +290,16 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
             disabled={download !== null}
             onClick={() => runDownload('json')}
           >
-            {download === 'json' ? 'Downloading…' : 'Download JSON'}
+            {download === 'json' ? 'Downloading…' : 'Download JSON (first 500)'}
           </button>
         </div>
         {error && (
           <div style={{color: 'var(--ide-red)', fontSize: 12.5, marginTop: 10}}>{error}</div>
+        )}
+        {downloadNote && (
+          <div role='status' style={{color: 'var(--ide-yellow)', fontSize: 12.5, marginTop: 10}}>
+            {downloadNote}
+          </div>
         )}
       </div>
 
@@ -248,6 +329,10 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               displayed USD amount is a lower bound, not a reconciled invoice total.
             </div>
           )}
+
+          {/* RR-1370 — surface the computed reconciliation evidence (physical ledger
+              vs run totals vs managed debits, plus provider-invoice availability). */}
+          <ReconciliationCard reconciliation={report.reconciliation} />
 
           <div className='ide-card' style={{marginBottom: 12}}>
             <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>

@@ -6,7 +6,7 @@ import type {ArchitectureDoc} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {LoadError} from '@/ide/LoadError';
-import {useAsyncData} from '@/lib/loadState';
+import {useAsyncData, toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {CodeReviewPanel} from '@/signal/components/CodeReviewPanel';
@@ -699,9 +699,13 @@ export function IdeProjectCode() {
   const debt = debtState.data;
   const docsState = useAsyncData(
     () =>
+      // RR-1313 — getProjectDoc returns null only on a typed 404/410 absence and
+      // throws every other failure, so a real outage rejects into docsState.failure
+      // instead of being filtered into a false empty state. A genuinely absent doc
+      // (null) is still filtered so one present + one absent renders correctly.
       Promise.all([
-        api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
-        api.getProjectDoc(projectId, 'SETUP').catch(() => null),
+        api.getProjectDoc(projectId, 'EXPLANATION'),
+        api.getProjectDoc(projectId, 'SETUP'),
       ]).then(([e, s]) => [e, s].filter(Boolean) as api.GeneratedDocRow[]),
     [projectId],
     !!projectId,
@@ -1367,6 +1371,9 @@ export function IdeProjectArchitecture() {
   const [msg, setMsg] = useState('');
 
   const [arch, setArch] = useState<ArchitectureDoc | null | undefined>(undefined);
+  // RR-1313 — a real failure of the primary map request is a retryable error, not
+  // absence. Only a typed 404/410 (getArchitectureDoc returns null) renders empty.
+  const [archFailure, setArchFailure] = useState<LoadFailure | null>(null);
   const [staleness, setStaleness] = useState<api.StalenessReport | null>(null);
   const [versions, setVersions] = useState<ArchitectureDoc[] | null>(null);
   const [invariants, setInvariants] = useState<api.InvariantSummary[] | null>(null);
@@ -1410,9 +1417,22 @@ export function IdeProjectArchitecture() {
     // history, rules, decisions, staleness, repos, and coverage must not form a shared latency
     // barrier around it.
     setArch(undefined);
+    setArchFailure(null);
     uiBound(api.getArchitectureDoc(projectId))
-      .then(scoped(setArch))
-      .catch(scoped(() => setArch(null)));
+      .then(
+        scoped((doc: ArchitectureDoc | null) => {
+          setArchFailure(null);
+          setArch(doc);
+        }),
+      )
+      // RR-1313 — getArchitectureDoc already maps typed absence to null, so the
+      // catch only fires for real, retryable failures.
+      .catch(
+        scoped((e: unknown) => {
+          setArchFailure(toLoadFailure(e));
+          setArch(null);
+        }),
+      );
     Promise.allSettled([
       uiBound(api.getArchitectureVersions(projectId)),
       uiBound(api.listProjectInvariants(projectId)),
@@ -1590,7 +1610,10 @@ export function IdeProjectArchitecture() {
 
       {/* ── Current ── */}
       {sub === 'current' &&
-        (arch === undefined ? (
+        (archFailure ? (
+          // RR-1313 — a failed map read is a retryable error, not "no map yet".
+          <LoadError failure={archFailure} what='system map' onRetry={refresh} />
+        ) : arch === undefined ? (
           <IdeLoader label='Loading system map…' />
         ) : (
           <>

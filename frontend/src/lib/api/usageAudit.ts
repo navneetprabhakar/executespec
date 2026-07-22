@@ -152,12 +152,34 @@ function query(params: LlmUsageAuditParams, includePage = true): string {
 export const getLlmUsageAudit = (params: LlmUsageAuditParams) =>
   req<LlmUsageAuditReport>(`/admin/analytics/llm-usage-audit?${query(params)}`);
 
-async function download(path: string, fallbackName: string): Promise<void> {
+// RR-1369 — export truncation must not be discarded. The CSV endpoint returns
+// X-Export-Truncated / X-Export-Row-Count / X-Export-Row-Limit headers; surface
+// them so a partial export is disclosed instead of saved as if it were complete.
+export interface ExportMeta {
+  truncated: boolean | null;
+  rowCount: number | null;
+  rowLimit: number | null;
+}
+
+function numHeader(response: Response, name: string): number | null {
+  const raw = response.headers.get(name);
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function download(path: string, fallbackName: string): Promise<ExportMeta> {
   const response = await fetch(`${BASE}${path}`, {headers: {...authHeader()}});
   if (!response.ok) {
     const raw = await response.text().catch(() => response.statusText);
     throw new ApiError(response.status, parseErrorMessage(response.status, raw));
   }
+  const truncatedHeader = response.headers.get('X-Export-Truncated');
+  const meta: ExportMeta = {
+    truncated: truncatedHeader == null ? null : truncatedHeader === 'true',
+    rowCount: numHeader(response, 'X-Export-Row-Count'),
+    rowLimit: numHeader(response, 'X-Export-Row-Limit'),
+  };
   const disposition = response.headers.get('content-disposition') ?? '';
   const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName;
   const href = URL.createObjectURL(await response.blob());
@@ -168,6 +190,7 @@ async function download(path: string, fallbackName: string): Promise<void> {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(href);
+  return meta;
 }
 
 export const downloadLlmUsageAuditCsv = (params: LlmUsageAuditParams) =>
@@ -176,8 +199,12 @@ export const downloadLlmUsageAuditCsv = (params: LlmUsageAuditParams) =>
     `llm-usage-${params.from}-to-${params.to}.csv`,
   );
 
+// RR-1369 — the JSON export always requests only page 0 / size 500, so it is a
+// bounded "first 500" export, not a full one. Exported so the UI can label it.
+export const JSON_EXPORT_ROW_LIMIT = 500;
+
 export const downloadLlmUsageAuditJson = (params: LlmUsageAuditParams) =>
   download(
-    `/admin/analytics/llm-usage-audit.json?${query({...params, page: 0, size: 500})}`,
+    `/admin/analytics/llm-usage-audit.json?${query({...params, page: 0, size: JSON_EXPORT_ROW_LIMIT})}`,
     `llm-usage-${params.from}-to-${params.to}.json`,
   );
