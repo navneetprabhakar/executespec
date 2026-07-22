@@ -406,18 +406,45 @@ public class DeploymentService {
     log.info("Rolled back to deployment {} revision {}", deploymentId, target.getRevisionName());
   }
 
-  /** Manual deletion of a live deployment. */
+  /**
+   * Manual deletion of a live deployment.
+   *
+   * <p>RR-1399: propagates a cloud-cleanup failure so the caller can report it truthfully. The
+   * prior path swallowed every provider error, marked the row FAILED and returned normally, so the
+   * API answered 204 and the UI said "Done" while a billable Cloud Run service/image remained
+   * alive.
+   *
+   * @throws DeploymentCleanupException when the underlying cloud resources could not be removed
+   */
   public void deleteDeployment(String deploymentId) {
     Deployment d =
         deploymentRepo
             .findById(deploymentId)
             .orElseThrow(
                 () -> new IllegalArgumentException("Deployment not found: " + deploymentId));
-    cleanupDeployment(d, "manual");
+    if (!cleanupDeployment(d, "manual")) {
+      throw new DeploymentCleanupException(
+          "Cloud cleanup failed for deployment "
+              + deploymentId
+              + "; the resources may still exist and continue to bill. Retry the deletion.");
+    }
   }
 
-  /** Shared cleanup logic — used by both TTL job and manual deletion. */
-  void cleanupDeployment(Deployment d, String reason) {
+  /** Signals that a deployment's cloud resources could not be removed (RR-1399). */
+  public static class DeploymentCleanupException extends RuntimeException {
+    public DeploymentCleanupException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Shared cleanup logic — used by both TTL job and manual deletion.
+   *
+   * @return {@code true} when the cloud resources were removed; {@code false} when cleanup failed
+   *     (the row is marked FAILED for later retry). The TTL job ignores the result; manual deletion
+   *     surfaces the failure (RR-1399).
+   */
+  boolean cleanupDeployment(Deployment d, String reason) {
     d.setStatus(DeployStatus.CLEANING_UP);
     deploymentRepo.save(d);
     try {
@@ -428,10 +455,12 @@ public class DeploymentService {
       sseBroadcaster.emit(
           d.getRunId(), RunEvent.deployDeleted(d.getRunId(), d.getVersionTag(), reason));
       log.info("Cleaned up deployment: {} (reason: {})", d.getVersionTag(), reason);
+      return true;
     } catch (Exception e) {
       log.error("Cleanup failed for {}: {}", d.getVersionTag(), e.getMessage());
       d.markFailed("Cleanup failed: " + e.getMessage());
       deploymentRepo.save(d);
+      return false;
     }
   }
 
@@ -440,7 +469,11 @@ public class DeploymentService {
     d.setId(UUID.randomUUID().toString());
     d.setRunId(runId);
     d.setVersionTag("failed");
-    d.setStrategy(null);
+    // RR-1395 — the strategy column is NOT NULL; a pre-strategy failure (workspace unavailable /
+    // detection error) used to persist null and turn a recoverable FAILED record into a 500. Use
+    // the
+    // explicit UNKNOWN strategy so the failure row is schema-valid and durable.
+    d.setStrategy(Deployment.DeployStrategy.UNKNOWN);
     d.setImageUri("");
     d.setServiceName("");
     d.setStatus(DeployStatus.FAILED);

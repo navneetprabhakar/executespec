@@ -187,7 +187,11 @@ public class CredentialService {
     List<PermissionCheck> permissionChecks = new ArrayList<>();
 
     try {
-      GoogleCredentials credentials = credentialProvider.getCredentialsOrThrow(userId);
+      // RR-1003 / RR-1396: authenticate the EXACT credential row we resolved and are about to mark
+      // validated. The prior code resolved the project-scoped row but then authenticated with the
+      // default-only overload, so a valid project key could be marked invalid, or a different valid
+      // default key could bless an invalid project credential. Pass the same project scope through.
+      GoogleCredentials credentials = credentialProvider.getCredentialsOrThrow(userId, projectId);
       // Try to refresh the access token — validates the key is active
       credentials.refreshIfExpired();
 

@@ -3,6 +3,7 @@ package com.navneet.executespec.deployment;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +15,7 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -394,30 +396,20 @@ public class WorkspaceFileService {
    */
   private String runGitShow(Path repoDir, String sha, String path)
       throws IOException, InterruptedException {
+    // RR-861: the prior code drained the full historical blob to EOF on the calling thread and only
+    // THEN called waitFor(15s), so a large object exhausted heap and a child that kept stdout open
+    // never reached the timeout. BoundedProcess drains on a separate thread (deadline reachable),
+    // caps the captured bytes, and destroys the whole process tree on expiry.
     ProcessBuilder pb =
         new ProcessBuilder("git", "show", sha + ":" + path)
             .directory(repoDir.toFile())
-            .redirectErrorStream(false);
-    Process p = pb.start();
-    StringBuilder sb = new StringBuilder();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      char[] buf = new char[4096];
-      int n;
-      while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
-    }
-    boolean done = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git show timed out");
-    }
-    if (p.exitValue() != 0) {
+            .redirectErrorStream(true);
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofSeconds(15), "git show");
+    if (outcome.exitCode() != 0) {
       // Most common reason: file didn't exist at that commit. Caller classifies as ADDED.
       return null;
     }
-    return sb.toString();
+    return outcome.output();
   }
 
   private List<String> runGit(Path repoDir, List<String> args, int timeoutSeconds)
@@ -425,26 +417,35 @@ public class WorkspaceFileService {
     List<String> cmd = new ArrayList<>(args.size() + 1);
     cmd.add("git");
     cmd.addAll(args);
+    // RR-861: same bounded, drain-on-separate-thread process runner as runGitShow, so a git command
+    // producing unbounded output (or a silently-open pipe) cannot exhaust heap or defeat the
+    // timeout.
     ProcessBuilder pb =
         new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
-    Process p = pb.start();
-    List<String> lines = new ArrayList<>();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = br.readLine()) != null) lines.add(line);
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofSeconds(timeoutSeconds), "git");
+    if (outcome.exitCode() != 0) {
+      throw new IOException("git exit=" + outcome.exitCode() + " for " + cmd);
     }
-    boolean done = p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git command timed out: " + cmd);
+    return outcome.output().isEmpty()
+        ? new ArrayList<>()
+        : new ArrayList<>(outcome.output().lines().toList());
+  }
+
+  /** RR-861 — shared bounded-process invocation for the git helpers. */
+  private BoundedProcess.Outcome runBounded(ProcessBuilder pb, Duration timeout, String label)
+      throws IOException {
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, timeout);
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException(label + " failed", e);
     }
-    if (p.exitValue() != 0) {
-      throw new IOException("git exit=" + p.exitValue() + " for " + cmd);
+    if (!outcome.finished()) {
+      throw new IOException(label + " timed out");
     }
-    return lines;
+    return outcome;
   }
 
   /**
