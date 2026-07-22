@@ -89,7 +89,16 @@ class WorkspaceFileServiceSecurityTest {
         .thenThrow(new IllegalStateException("not archived"));
     PipelineRun run = PipelineRun.builder().runId("run-1").repoUrl("owner/repo").build();
     when(stateStore.findRun("run-1")).thenReturn(java.util.Optional.of(run));
-    when(gitHubRepoService.listRepoFiles("owner/repo", null))
+    // RR-862 — the fallback now reads the run's exact revision, not the default branch.
+    when(snapshots.findByRunId("run-1"))
+        .thenReturn(
+            java.util.List.of(
+                com.navneet.executespec.state.entity.RunRepoSnapshot.builder()
+                    .runId("run-1")
+                    .repoFullName("owner/repo")
+                    .commitSha("sha-1")
+                    .build()));
+    when(gitHubRepoService.listRepoFiles("owner/repo", "sha-1", null))
         .thenReturn(java.util.List.of("src/App.java", ".env", "certs/client.pem"));
 
     assertThat(service.listFiles("run-1")).containsExactly("src/App.java");
