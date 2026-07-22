@@ -35,6 +35,20 @@ public final class ChatToolPolicy {
   public static final double MAX_TURN_COST_USD = 0.50;
   public static final int MAX_CONVERSATION_CHARS = 60_000;
 
+  /**
+   * RR-514 — bounds on inline Base64 media carried by the legacy JSON compatibility chat path,
+   * which (unlike the canonical attachment store) has no upload-admission gate. Enforced BEFORE any
+   * decode so a request cannot allocate many copies of large encoded images and exhaust heap while
+   * its declared conversation budget stays empty.
+   */
+  public static final int MAX_MEDIA_ITEMS = 4;
+
+  /** Maximum decoded bytes for a single inline image. */
+  public static final int MAX_MEDIA_ITEM_BYTES = 5 * 1024 * 1024;
+
+  /** Maximum decoded bytes across all inline images on one turn. */
+  public static final long MAX_MEDIA_TOTAL_BYTES = 12L * 1024 * 1024;
+
   private static final Map<String, Capability> CAPABILITIES =
       Map.ofEntries(
           // Run/session reads.
