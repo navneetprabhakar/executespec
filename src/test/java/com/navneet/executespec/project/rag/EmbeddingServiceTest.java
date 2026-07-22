@@ -342,6 +342,39 @@ class EmbeddingServiceTest {
   }
 
   @Test
+  void reresolvesDispatchAuthorizationBeforeEveryBatchSoRevocationStopsLaterCalls() { // RR-915
+    // First batch authorizes; authority is revoked between batches, so re-resolving the durable
+    // dispatch guard per batch must fail closed on the second batch instead of continuing under the
+    // stale first-batch authorization and cached key.
+    when(guard.authorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "customer-openai-key", RunKeyContext.Source.ORG, null))
+        .thenThrow(
+            new LlmDispatchPolicyException(
+                LlmDispatchPolicyException.Reason.PROVIDER_NOT_ALLOWED, "revoked mid-document"));
+    List<String> texts = IntStream.range(0, 101).mapToObj(i -> "chunk-" + i).toList();
+    List<float[]> firstBatchVectors =
+        IntStream.range(0, 100).mapToObj(i -> new float[] {0.1f}).toList();
+    when(transport.embed(
+            eq("customer-openai-key"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq(texts.subList(0, 100))))
+        .thenReturn(new OpenAiEmbeddingTransport.Result(firstBatchVectors, 100));
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1", texts, "ProjectCodeEmbedding", "PROJECT_REPOSITORY", "repo-1"))
+        .isInstanceOf(EmbeddingUnavailableException.class)
+        .extracting(error -> ((EmbeddingUnavailableException) error).reason())
+        .isEqualTo("PROVIDER_NOT_ALLOWED");
+
+    verify(guard, times(2)).authorizeProviderCapability(reference, "openai");
+    verify(transport, times(1)).embed(anyString(), anyString(), any());
+  }
+
+  @Test
   void rejectsConfiguredModelOrDimensionDriftBeforeServingVectors() {
     ReflectionTestUtils.setField(service, "model", "text-embedding-4-experimental");
     assertThatThrownBy(service::validateVectorContract)

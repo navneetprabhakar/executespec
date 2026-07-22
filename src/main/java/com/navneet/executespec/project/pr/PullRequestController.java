@@ -32,6 +32,16 @@ public class PullRequestController {
   private final RunAccessGuard runAccessGuard;
   private final ProjectAccessGuard projectAccessGuard;
 
+  /**
+   * RR-519 (2026-07-22) — hard server cap on the PR-snapshot diff preview. The endpoint accepts a
+   * caller {@code maxChars}, which previously flowed straight through to the substring bound with
+   * no ceiling — a caller could request an arbitrarily large slice of a huge PR diff and force the
+   * whole thing to be buffered and returned. The snapshot is a preview surface, so we clamp the
+   * caller value into {@code [0, SNAPSHOT_MAX_DIFF_CHARS]}. (The upstream GitHub body is still read
+   * fully in GitHubRepoService; streaming/cancelling that read is a separate, larger change.)
+   */
+  static final int SNAPSHOT_MAX_DIFF_CHARS = 20_000;
+
   public record PrSummary(
       String repoFullName,
       Integer prNumber,
@@ -114,7 +124,9 @@ public class PullRequestController {
       @RequestParam("number") int prNumber,
       @RequestParam(value = "maxChars", defaultValue = "4000") int maxChars) {
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-    var snap = gitHub.getPullRequestSnapshot(repoFullName, prNumber, pat, maxChars);
+    // RR-519 — clamp the caller-supplied preview size to a bounded server constant.
+    int boundedMaxChars = Math.max(0, Math.min(maxChars, SNAPSHOT_MAX_DIFF_CHARS));
+    var snap = gitHub.getPullRequestSnapshot(repoFullName, prNumber, pat, boundedMaxChars);
     if (snap == null) return ResponseEntity.noContent().build();
     return ResponseEntity.ok(snap);
   }

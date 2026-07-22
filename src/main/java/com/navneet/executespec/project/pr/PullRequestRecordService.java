@@ -123,6 +123,14 @@ public class PullRequestRecordService {
       return;
     }
     PullRequestRecord r = found.get();
+    // RR-911 (2026-07-22) — a delayed or duplicate non-merged `closed` webhook must not downgrade a
+    // PR that GitHub already recorded as MERGED. Merge is a terminal, monotonic transition; a later
+    // "closed" delivery for the same PR is stale and is ignored rather than overwriting MERGED with
+    // CLOSED (which loses mergedAt and breaks branch-cleanup / merge-cascade eligibility).
+    if (!merged && r.getStatus() == PullRequestRecord.Status.MERGED) {
+      log.debug("Ignoring stale close webhook for already-merged PR {}#{}", repoFullName, prNumber);
+      return;
+    }
     boolean wasNotMerged = r.getStatus() != PullRequestRecord.Status.MERGED;
     boolean wasOpen = r.getStatus() == PullRequestRecord.Status.OPEN;
     if (merged) {
@@ -136,66 +144,101 @@ public class PullRequestRecordService {
     repo.save(r);
     log.info("PR {}#{} updated via webhook -> {}", repoFullName, prNumber, r.getStatus());
 
+    final boolean mergedTransition = merged && wasNotMerged;
+    final boolean closedTransition = !merged && wasOpen;
+    final boolean bootstrapMerge =
+        mergedTransition && r.getKind() == PullRequestRecord.Kind.BOOTSTRAP;
+    final PullRequestRecord record = r;
+
     // RL-2026-05-041 (audit #11) — emit the PR lifecycle to the project activity feed. Only on a
     // real state transition (merge once; close once from OPEN) so a repeated webhook doesn't spam.
-    if (merged && wasNotMerged) {
+    // Emission is @Async so it never participates in this transaction.
+    if (mergedTransition) {
       emitPrActivity(
-          r, ActivityEventType.PR_MERGED, "PR #" + prNumber + " merged in " + repoFullName);
-    } else if (!merged && wasOpen) {
+          record, ActivityEventType.PR_MERGED, "PR #" + prNumber + " merged in " + repoFullName);
+    } else if (closedTransition) {
       emitPrActivity(
-          r, ActivityEventType.PR_CLOSED, "PR #" + prNumber + " closed in " + repoFullName);
+          record, ActivityEventType.PR_CLOSED, "PR #" + prNumber + " closed in " + repoFullName);
     }
 
-    // V169-companion (2026-05-02) — when a BOOTSTRAP PR merges, flip the
-    // corresponding repo's folder_status from BOOTSTRAP_PR_OPEN to
-    // BOOTSTRAPPED so the dashboard badge isn't stuck. Without this the
-    // user has to re-trigger bootstrap (or the migrate endpoint) for the
-    // status to refresh — a poor UX surfaced when a user asked "do I need
-    // to sync again after merging the PR?". Best-effort: any failure logs
-    // and continues so the webhook still completes.
-    if (merged && wasNotMerged && r.getKind() == PullRequestRecord.Kind.BOOTSTRAP) {
-      try {
-        flipFolderStatusToBootstrapped(r);
-      } catch (Exception e) {
-        log.warn(
-            "Could not flip folder_status to BOOTSTRAPPED for PR {}#{}: {}",
-            repoFullName,
-            prNumber,
-            e.getMessage());
-      }
-    }
+    // RR-910 (2026-07-22) — best-effort side effects below each perform their own database writes
+    // (folder_status flip, run-owner notification, activation tracking). Previously they ran inside
+    // this authoritative transaction, so a caught JPA failure in any of them could still mark the
+    // transaction rollback-only and undo the PR status update on commit (the UnexpectedRollback
+    // class also seen in PrRefreshService). Run them AFTER the authoritative status commit so an
+    // isolated side-effect failure can no longer roll back the durable PR state.
+    runAfterCommit(
+        () -> {
+          // V169-companion (2026-05-02) — when a BOOTSTRAP PR merges, flip the corresponding repo's
+          // folder_status from BOOTSTRAP_PR_OPEN to BOOTSTRAPPED so the dashboard badge isn't
+          // stuck.
+          if (bootstrapMerge) {
+            try {
+              flipFolderStatusToBootstrapped(record);
+            } catch (Exception e) {
+              log.warn(
+                  "Could not flip folder_status to BOOTSTRAPPED for PR {}#{}: {}",
+                  repoFullName,
+                  prNumber,
+                  e.getMessage());
+            }
+          }
 
-    // v2.5.12 — fire a notification for the run owner on the merged transition.
-    if (merged && wasNotMerged && r.getRunId() != null) {
-      try {
-        notifyMerged(r);
-      } catch (Exception e) {
-        // Non-fatal: notification failure must not undo the PR state update.
-        log.warn(
-            "Failed to create PR_MERGED notification for run {} PR {}#{}: {}",
-            r.getRunId(),
-            repoFullName,
-            prNumber,
-            e.getMessage());
-      }
-      // Wave 2.1 — activation funnel step 6. The run owner's first-ever
-      // merged PR is the clearest "the AI shipped my code" signal.
-      try {
-        PipelineRun run = pipelineRunRepo.findById(r.getRunId()).orElse(null);
-        if (run != null && run.getCreatedByUserId() != null) {
-          eventTracking.track(
-              run.getCreatedByUserId(),
-              com.navneet.executespec.analytics.EventName.PR_MERGED,
-              java.util.Map.of(
-                  "repoFullName", repoFullName, "runId", r.getRunId() == null ? "" : r.getRunId()));
-        }
-      } catch (Exception e) {
-        log.warn(
-            "Activation track PR_MERGED failed for PR {}#{}: {}",
-            repoFullName,
-            prNumber,
-            e.getMessage());
-      }
+          // v2.5.12 — fire a notification for the run owner on the merged transition.
+          if (mergedTransition && record.getRunId() != null) {
+            try {
+              notifyMerged(record);
+            } catch (Exception e) {
+              log.warn(
+                  "Failed to create PR_MERGED notification for run {} PR {}#{}: {}",
+                  record.getRunId(),
+                  repoFullName,
+                  prNumber,
+                  e.getMessage());
+            }
+            // Wave 2.1 — activation funnel step 6. The run owner's first-ever merged PR is the
+            // clearest "the AI shipped my code" signal.
+            try {
+              PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
+              if (run != null && run.getCreatedByUserId() != null) {
+                eventTracking.track(
+                    run.getCreatedByUserId(),
+                    com.navneet.executespec.analytics.EventName.PR_MERGED,
+                    java.util.Map.of(
+                        "repoFullName",
+                        repoFullName,
+                        "runId",
+                        record.getRunId() == null ? "" : record.getRunId()));
+              }
+            } catch (Exception e) {
+              log.warn(
+                  "Activation track PR_MERGED failed for PR {}#{}: {}",
+                  repoFullName,
+                  prNumber,
+                  e.getMessage());
+            }
+          }
+        });
+  }
+
+  /**
+   * RR-910 — run a best-effort side effect only after the surrounding transaction commits, so its
+   * own (possibly failing) database writes cannot mark the authoritative transaction rollback-only.
+   * When no synchronization is active (a non-transactional caller) the action runs inline.
+   */
+  private void runAfterCommit(Runnable action) {
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isSynchronizationActive()) {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .registerSynchronization(
+              new org.springframework.transaction.support.TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                  action.run();
+                }
+              });
+    } else {
+      action.run();
     }
   }
 
