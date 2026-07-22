@@ -28,6 +28,7 @@ Corrected live sequence: initial `/me` 200; logout 204; old access JWT 401; old 
 | Frontend build/tests/lint/format | PASS | build; 390 tests; lint 0 errors (4 pre-existing warnings); format check |
 | CLI build/typecheck/lint/format | PASS | standalone `executespec-cli` repository |
 | CLI tests | PASS | 996 passed, 2 skipped, 0 failed |
+| GitHub PR CI | Repaired and requeued | first Java job exposed a test-only dependency on an absent sibling docs checkout; contract now reads checked-in canonical `CLAUDE.md`; focused and full local backend gates pass |
 | API assertions | PASS after repair | 41 checks; initial logout defect repaired and live-retested |
 | Cross-tenant isolation | PASS for exercised matrix | FREE/PRO/TEAM own detail+cost 200; all six cross-org combinations 403; visible run-ID intersections 0 |
 | Submission idempotency | PASS | same key/body returned same run; changed body 409; failed claim replay 409 |

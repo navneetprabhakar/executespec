@@ -14,9 +14,7 @@ class FlywayCompatibilityContractTest {
 
   private static final Path V256 =
       Path.of("src/main/resources/db/migration/V256__remove_sarvam_provider_state.sql");
-  private static final Path POLICY =
-      Path.of(
-          "../executespec-docs/backend/plans/source-repository/executespec-2.0-flyway-compatibility.md");
+  private static final Path POLICY = Path.of("CLAUDE.md");
   private static final Path APPLICATION = Path.of("src/main/resources/application.yml");
 
   @Test
@@ -35,9 +33,9 @@ class FlywayCompatibilityContractTest {
   void policyForbidsRewritingAppliedMigrationsAndDefinesCleanInstallBaseline() throws IOException {
     String policy = Files.readString(POLICY);
     assertThat(policy)
-        .contains("Applied `V*.sql` files are immutable")
-        .contains("baseline migration")
-        .contains("upgrade from a database that has applied V255");
+        .contains("Applied migrations are immutable")
+        .contains("clean-install baseline migration")
+        .contains("never rewrite an applied V-file");
   }
 
   @Test
