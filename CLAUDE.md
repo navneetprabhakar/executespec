@@ -117,8 +117,14 @@ key existed seed it from the blob, so they keep exactly one owner. Separately th
 and the stub dispatcher all logged the token verbatim (or a usable prefix) and
 `POST /api/v3/auth/claim-anonymous-session` echoed it back after authentication; every diagnostic now
 uses a truncated SHA-256 fingerprint and `ClaimResponse` no longer carries the bearer field at all.
-**Not closed:** the Redis key and stored blob still contain the token, which is inherent to a
-token-keyed session store; only the log and response surfaces are cleaned.
+**At-rest closure (2026-07-22):** the earlier "inherent to a token-keyed session store" note was
+wrong — the store is only ever asked about a token the caller already holds, so the bearer never has
+to be persisted. Both the session and claim keys are now the full `sha256(token)` (the same one-way
+discipline as `personal_access_token.token_hash`) and `save` strips the token out of the JSON before
+writing; `find` re-attaches the caller's own token so every consumer sees an unchanged
+`AnonymousRunSession`. A keyspace listing, `SCAN`/`MONITOR` trace or Redis snapshot therefore yields
+no usable credential, pinned by `AnonymousRunSessionStoreTest`. Sessions written under the legacy
+raw-token key stay readable and are rewritten hashed on their next update.
 
 **Framework path containment (2026-07-21):** `security/SafeWorkspacePath` is the shared
 containment boundary for framework-owned filesystem access into customer-controlled trees, applying
