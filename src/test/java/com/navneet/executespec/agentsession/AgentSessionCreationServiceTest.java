@@ -81,6 +81,35 @@ class AgentSessionCreationServiceTest {
     verify(sessionRepo, never()).save(any(AgentSession.class));
   }
 
+  // RR-487 — a customer must not be able to mint a reserved `web-qa-` fixture id, which would
+  // otherwise activate the provider-free scripted stream with fabricated tool/verification
+  // evidence.
+  @Test
+  void rejectsReservedFixtureSessionIdPrefix() {
+    assertThatThrownBy(
+            () ->
+                service.create(
+                    new CreateSessionRequest(
+                        "web-qa-attacker",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                    user(),
+                    "org-1"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("reserved session id");
+    verify(sessionRepo, never()).findById(any());
+    verify(sessionRepo, never()).save(any(AgentSession.class));
+  }
+
   @Test
   void rejectsExistingRequestedSessionForDifferentUser() {
     when(sessionRepo.findById("requested-session"))

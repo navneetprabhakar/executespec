@@ -33,9 +33,12 @@ class AgentAttachmentServiceTest {
   private final InputSanitizer inputSanitizer = mock(InputSanitizer.class);
   private final ContextSanitizer contextSanitizer = mock(ContextSanitizer.class);
   private final ActivityAuditService audit = mock(ActivityAuditService.class);
+  private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags =
+      mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class);
 
   private final AgentAttachmentService service =
-      new AgentAttachmentService(store, extractor, inputSanitizer, contextSanitizer, audit);
+      new AgentAttachmentService(
+          store, extractor, inputSanitizer, contextSanitizer, audit, featureFlags);
 
   private final AppUserDetails user = mock(AppUserDetails.class);
 
@@ -60,9 +63,25 @@ class AgentAttachmentServiceTest {
     verify(store).put(any());
   }
 
+  // RR-491 — images are fail-closed by default: a raster upload is rejected while the flag is OFF.
   @Test
-  void acceptsBoundedImageUploadsAndStoresBytes() {
+  void rejectsImageUploadWhenFlagDisabled() {
     byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0};
+    MultipartFile file = new MockMultipartFile("file", "shot.png", "image/png", png);
+    assertThatThrownBy(() -> service.validateAndStore("sess-1", file, user))
+        .isInstanceOf(ResponseStatusException.class);
+    verify(store, never()).put(any());
+  }
+
+  // RR-491 — with the flag ON, a genuinely decodable raster is accepted and its bytes are stored.
+  @Test
+  void acceptsRealImageWhenFlagEnabledAndDecodable() throws Exception {
+    when(featureFlags.isEnabled(AgentAttachmentService.IMAGES_FLAG)).thenReturn(true);
+    java.awt.image.BufferedImage img =
+        new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_RGB);
+    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+    javax.imageio.ImageIO.write(img, "png", baos);
+    byte[] png = baos.toByteArray();
     MultipartFile file = new MockMultipartFile("file", "shot.png", "image/png", png);
 
     var response = service.validateAndStore("sess-1", file, user);
@@ -73,6 +92,17 @@ class AgentAttachmentServiceTest {
     verify(store).put(captor.capture());
     assertThat(captor.getValue().rawBytes()).containsExactly(png);
     verify(extractor, never()).extract(any(), any());
+  }
+
+  // RR-491 — deny-by-default: a PNG-signed but undecodable payload is rejected even when enabled.
+  @Test
+  void rejectsUndecodableImageWhenFlagEnabled() {
+    when(featureFlags.isEnabled(AgentAttachmentService.IMAGES_FLAG)).thenReturn(true);
+    byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0};
+    MultipartFile file = new MockMultipartFile("file", "shot.png", "image/png", png);
+    assertThatThrownBy(() -> service.validateAndStore("sess-1", file, user))
+        .isInstanceOf(ResponseStatusException.class);
+    verify(store, never()).put(any());
   }
 
   @Test

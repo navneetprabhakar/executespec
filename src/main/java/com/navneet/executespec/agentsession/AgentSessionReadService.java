@@ -43,9 +43,17 @@ class AgentSessionReadService {
 
   List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
     int capped = Math.max(1, Math.min(100, limit));
+    String userOrgId = user.getUser().getOrgId();
+    // RR-1025 — the base query is (user, status) only, so after an org move/revocation a user could
+    // still list prior-org session titles/status/PR URLs. Restrict the result to the caller's
+    // current effective tenant before any linked-run projection is loaded.
     List<AgentSession> sessions =
-        sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
-            user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped));
+        sessionRepo
+            .findByUserIdAndStatusOrderByUpdatedAtDesc(
+                user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped))
+            .stream()
+            .filter(session -> belongsToTenant(session, userOrgId))
+            .toList();
     Map<String, PipelineRun> latestRuns = latestLinkedRunsBySessionId(sessions);
     return sessions.stream()
         .map(session -> toResponse(session, latestRuns.get(session.getId())))
@@ -194,11 +202,23 @@ class AgentSessionReadService {
     if (!user.getUser().getId().equals(session.getUserId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
-    String userOrgId = user.getUser().getOrgId();
-    if (userOrgId != null && session.getOrgId() != null && !userOrgId.equals(session.getOrgId())) {
+    if (!belongsToTenant(session, user.getUser().getOrgId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
     return session;
+  }
+
+  /**
+   * RR-1025 — one effective-tenant rule shared by list, detail and idempotency replay. A session
+   * with no org is a legacy pre-org row that the owner check already covers. Otherwise the caller's
+   * current org must be present and match; a null caller org (org moved/revoked) no longer skips
+   * the comparison and silently authorizes prior-org access.
+   */
+  private static boolean belongsToTenant(AgentSession session, String userOrgId) {
+    if (session.getOrgId() == null) {
+      return true;
+    }
+    return userOrgId != null && userOrgId.equals(session.getOrgId());
   }
 
   AgentSessionResponse toResponse(AgentSession s) {

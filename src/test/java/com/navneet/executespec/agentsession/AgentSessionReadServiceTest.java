@@ -124,6 +124,39 @@ class AgentSessionReadServiceTest {
         .hasMessageContaining("forbidden");
   }
 
+  // RR-1025 — the base query is (user, status) only, so a prior-org session can be returned. The
+  // list must be restricted to the caller's current effective tenant.
+  @Test
+  void listSessionsExcludesPriorOrgSessions() {
+    AgentSession current = session("s1", "u1"); // org-1
+    AgentSession priorOrg = session("s2", "u1");
+    priorOrg.setOrgId("org-other");
+    when(sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
+            eq("u1"), eq("ACTIVE"), any(Pageable.class)))
+        .thenReturn(List.of(current, priorOrg));
+    when(turnRepo.findLatestLinkedRunTurnsBySessionIds(List.of("s1"))).thenReturn(List.of());
+
+    var sessions = service.listSessions(user(), 25);
+
+    assertThat(sessions).extracting("id").containsExactly("s1");
+  }
+
+  // RR-1025 — a null caller org must not skip the tenant comparison for an org-scoped session.
+  @Test
+  void requireSessionRejectsNullCallerOrgAgainstOrgScopedSession() {
+    AgentSession scoped = session("scoped", "u1"); // org-1
+    when(sessionRepo.findById("scoped")).thenReturn(Optional.of(scoped));
+    AppUser noOrg = new AppUser();
+    noOrg.setId("u1");
+    noOrg.setOrgId(null);
+    noOrg.setGlobalRole("USER");
+    noOrg.setEmail("u1@example.com");
+
+    assertThatThrownBy(() -> service.requireSession("scoped", new AppUserDetails(noOrg, null)))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("forbidden");
+  }
+
   @Test
   void listsEventsAfterSessionOwnershipCheck() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
