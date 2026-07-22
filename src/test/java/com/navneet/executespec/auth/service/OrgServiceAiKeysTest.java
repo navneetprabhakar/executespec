@@ -126,16 +126,15 @@ class OrgServiceAiKeysTest {
   }
 
   @Test
-  void deepSeekAndFireworksRejectedOnNonEnterprise() {
-    seedOrg("TEAM", null, null, null, null);
+  void deepSeekAndFireworksRejectedOnUnentitledTier() {
+    // RR-834 — DeepSeek/Fireworks are BYOK lanes; a non-BYOK tier (PRO) is still rejected.
+    seedOrg("PRO", null, null, null, null);
 
     assertThatThrownBy(() -> svc.updateAiKeySettings("org-1", "", "", "", "", "sk-ds", "", "actor"))
-        .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Enterprise");
+        .isInstanceOf(ResponseStatusException.class);
     assertThatThrownBy(
             () -> svc.updateAiKeySettings("org-1", "", "", "", "", "", "fw-key", "actor"))
-        .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Enterprise");
+        .isInstanceOf(ResponseStatusException.class);
   }
 
   @Test
@@ -146,6 +145,21 @@ class OrgServiceAiKeysTest {
 
     assertThat(org.getDeepSeekApiKey()).isEqualTo("sk-ds-new");
     assertThat(org.getFireworksApiKey()).isEqualTo("fw-new");
+  }
+
+  @Test
+  void deepSeekAndFireworksAcceptedOnTeamAndByok() {
+    // RR-834 — TEAM and BYOK are BYOK-capable tiers and must be able to configure these org lanes,
+    // matching canManageAiKeys and the personal-key path (V237).
+    Org team = seedOrg("TEAM", null, null, null, null);
+    svc.updateAiKeySettings("org-1", "", "", "", "", "sk-ds-team", "fw-team", "actor");
+    assertThat(team.getDeepSeekApiKey()).isEqualTo("sk-ds-team");
+    assertThat(team.getFireworksApiKey()).isEqualTo("fw-team");
+
+    Org byok = seedOrg("BYOK", null, null, null, null);
+    svc.updateAiKeySettings("org-1", "", "", "", "", "sk-ds-byok", "fw-byok", "actor");
+    assertThat(byok.getDeepSeekApiKey()).isEqualTo("sk-ds-byok");
+    assertThat(byok.getFireworksApiKey()).isEqualTo("fw-byok");
   }
 
   @Test

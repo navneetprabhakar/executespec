@@ -431,21 +431,34 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails, @RequestBody AdminInviteRequest req) {
 
     String adminId = adminDetails.getUser().getId();
-    String resolvedOrgId = null;
 
+    // RR-013 — an invite must name a target email and a target org (existing or new). The old code
+    // silently did NOTHING when both newOrgName and orgId were absent, then returned
+    // "Invitation sent" — a false-success that created no invitation and no onboarding action.
+    // There is no implemented "free invite with no org" flow, so reject that input instead of
+    // claiming success.
+    if (req.email() == null || req.email().isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email is required");
+    }
+
+    String resolvedOrgId;
     if (req.newOrgName() != null && !req.newOrgName().isBlank()) {
       Org newOrg = orgService.createOrgAsAdmin(req.newOrgName(), adminId);
       resolvedOrgId = newOrg.getId();
     } else if (req.orgId() != null && !req.orgId().isBlank()) {
       resolvedOrgId = req.orgId();
+    } else {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Provide an existing orgId or a newOrgName to invite into. A free invite with no target"
+              + " org is not supported — direct the user to self-register.");
     }
 
-    if (resolvedOrgId != null) {
-      invitationService.createAdminInvitation(resolvedOrgId, req.email(), req.orgRole(), adminId);
-    }
-    // FREE invite: user registers independently via the normal flow
+    invitationService.createAdminInvitation(resolvedOrgId, req.email(), req.orgRole(), adminId);
 
-    return ResponseEntity.ok(Map.of("message", "Invitation sent to " + req.email()));
+    // Typed result describing what was created so the caller isn't guessing.
+    return ResponseEntity.ok(
+        Map.of("message", "Invitation sent to " + req.email(), "orgId", resolvedOrgId));
   }
 
   @GetMapping("/invitations/escalated")

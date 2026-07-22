@@ -72,6 +72,8 @@ public class RunController {
   private final ModelAccessService modelAccessService;
   private final UsageTrackingService usageTrackingService;
   private final RunVisibilitySpec runVisibilitySpec;
+  private final com.navneet.executespec.auth.repository.ProjectMemberRepository
+      projectMemberRepository;
   private final RunAccessGuard guard;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
@@ -446,7 +448,14 @@ public class RunController {
       @RequestParam(defaultValue = "20") int size) {
     guard.requireAuthenticated(userDetails);
     var requestedPage = com.navneet.executespec.api.PageBounds.request(page, size, 100);
-    var visSpec = runVisibilitySpec.forUser(userDetails.getUser(), userDetails.getOrgMember());
+    // RR-212 — include runs of projects the caller actively belongs to (cross-org collaborations
+    // included) so an accepted collaborator can discover them in the list, not only open a known
+    // run URL. Detail access is still enforced per-run by RunAccessGuard.
+    java.util.List<String> memberProjectIds =
+        projectMemberRepository.findActiveMemberProjectIdsByUserId(userDetails.getUser().getId());
+    var visSpec =
+        runVisibilitySpec.forUser(
+            userDetails.getUser(), userDetails.getOrgMember(), memberProjectIds);
     boolean realProjectFilter =
         projectId != null && !projectId.isBlank() && !"__none__".equals(projectId);
     if (realProjectFilter) {

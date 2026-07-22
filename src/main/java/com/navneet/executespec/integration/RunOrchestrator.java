@@ -95,11 +95,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 integration point for V1's existing endpoints.
  *
- * <p>{@link RunController} consults {@link com.navneet.executespec.rollout.HarnessVersionResolver}
- * on each {@code POST /api/runs}; when the flag resolves to V2, this orchestrator takes over. The
- * {@code submitRun(...)} signature originally mirrored V1's {@code PipelineHarness.submitRun(...)}
- * (since deleted) so the controller's call site needed only an if/else swap during the V1 → V2
- * cutover.
+ * <p>{@link RunController} routes each {@code POST /api/runs} to this orchestrator (V2 is the only
+ * harness; the historical HarnessVersionResolver flag was retired). The {@code submitRun(...)}
+ * signature originally mirrored V1's {@code PipelineHarness.submitRun(...)} (since deleted) so the
+ * controller's call site needed only an if/else swap during the V1 → V2 cutover.
  *
  * <p>Writes to V1's {@code pipeline_run} and {@code agent_task} tables so the existing UI keeps
  * working unchanged — {@code GET /api/runs/{id}} returns V2 runs as V1-shaped JSON. The only
