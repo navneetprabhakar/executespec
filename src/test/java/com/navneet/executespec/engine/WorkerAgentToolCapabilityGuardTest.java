@@ -125,4 +125,31 @@ class WorkerAgentToolCapabilityGuardTest {
     assertThat(WorkerAgent.isProgressTool("executeCommand", false)).isFalse();
     assertThat(WorkerAgent.isProgressTool("executeCommand", true)).isTrue();
   }
+
+  // RR-622 — a model-supplied tool name must collapse to a bounded metric tag. Registered aliases
+  // keep their name; anything unregistered (an adversarial per-iteration string) becomes "unknown".
+  @Test
+  void boundedToolMetricNameCollapsesUnknownNamesToASingleSeries() {
+    assertThat(WorkerAgentSupport.boundedToolMetricName("writeFile")).isEqualTo("writeFile");
+    assertThat(WorkerAgentSupport.boundedToolMetricName("executeCommand"))
+        .isEqualTo("executeCommand");
+    assertThat(WorkerAgentSupport.boundedToolMetricName("completeTask")).isEqualTo("completeTask");
+    assertThat(WorkerAgentSupport.boundedToolMetricName("evil-tool-0001")).isEqualTo("unknown");
+    assertThat(WorkerAgentSupport.boundedToolMetricName("evil-tool-0002")).isEqualTo("unknown");
+    assertThat(WorkerAgentSupport.boundedToolMetricName(null)).isEqualTo("unknown");
+    assertThat(WorkerAgentSupport.boundedToolMetricName("  ")).isEqualTo("unknown");
+  }
+
+  // RR-1562 — the effective per-solve dollar cap is the tighter of two nullable caps (null =
+  // unbounded); a non-positive value is treated as unset so it cannot disable enforcement.
+  @Test
+  void minNullableCapPicksTheTighterEnforceableCeiling() {
+    assertThat(WorkerAgentSupport.minNullableCap(5.0, 2.0)).isEqualTo(2.0);
+    assertThat(WorkerAgentSupport.minNullableCap(2.0, 5.0)).isEqualTo(2.0);
+    assertThat(WorkerAgentSupport.minNullableCap(null, 3.0)).isEqualTo(3.0);
+    assertThat(WorkerAgentSupport.minNullableCap(3.0, null)).isEqualTo(3.0);
+    assertThat(WorkerAgentSupport.minNullableCap(null, null)).isNull();
+    assertThat(WorkerAgentSupport.minNullableCap(0.0, 4.0)).isEqualTo(4.0);
+    assertThat(WorkerAgentSupport.minNullableCap(-1.0, null)).isNull();
+  }
 }

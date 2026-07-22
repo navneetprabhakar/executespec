@@ -112,3 +112,23 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 - Context-overflow recovery: `isContextLengthError` + compactNow → `hardTrimHistory` → ERROR (was: instant ERROR). The deterministic fallback now bounds oversized short tool envelopes while preserving assistant/tool pairing, and progress signatures use text-safe separators (no NUL byte). Pinned by `WorkerAgentOverflowRecoveryTest`.
 - `RepoOrientationService` (`worker.localization.enabled`): deterministic warm-start block (layout, identifier grep hits, resolver commands) injected into the BUILD planner cold-start and the first worker user message. The planner and worker share the same advisory evidence marker; the flag remains fail-open and default-off until a measured gate flips it.
 - `WorkerTaskRequest` gained `progressV2` + `autoVerify`. New `@RequiredArgsConstructor` deps go at the END of the field list (7 test ctor sites were churned by mid-list insertion).
+
+## P1 audit-remediation batch (engine lane, 2026-07-22)
+
+Fail-closed / evidence-honest corrections; no migration.
+
+- **RR-259** — worker progress and `totalWriteCalls` now derive from SUCCESSFUL mutations /
+  verification transitions (`isOkEnvelope && !isFailureEnvelope`), not tool-name matches. A rejected
+  write or failing build no longer resets the no-progress watchdog, and a single failed write no
+  longer inflates `totalWriteCalls` (which had disabled zero-write Lever-B salvage).
+- **RR-260** — `WorkerResult.salvagedUnverified` flags a best-guess salvage write; the executor
+  treats a salvaged `COMPLETED` as a soft completion so it must pass the smoke gate to reach SUCCESS
+  (COMPLETED_WITH_WARNING when smoke is skipped). "file changed" is no longer "task completed".
+- **RR-591** — the direct verification/critic path (`dispatchToolDirect` and the
+  missingDeliverables / visibleTestsExist / readDeliverableContext / snapshotTerminalVerifiedCandidate
+  / terminalVerifierPass helpers) now threads the task's immutable absolute deadline into
+  `dispatchRemote`, so reconnects can no longer renew a terminal remote call forever.
+- **RR-622** — worker tool-call metrics record `boundedToolMetricName(tc.name())` (registered alias
+  or `"unknown"`), so an adversarial provider cannot mint unbounded Micrometer series.
+- **RR-1562** — `EngineBudget.dollarCap` now propagates onto `WorkerTaskRequest.dollarCap`; the worker
+  enforces `min(dollarCap, PipelineRun.hardCapUsd)`, so a per-solve cap is no longer a dead field.

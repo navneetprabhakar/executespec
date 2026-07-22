@@ -154,6 +154,10 @@ import lombok.Builder;
  * @param shutdownReserveMs protected tail budget for terminal classification, durable cost/state
  *     writes, SSE completion, and trajectory flushing. New provider/tool calls may use only {@code
  *     deadline-now-reserve}; null/negative is treated as zero.
+ * @param dollarCap RR-1562 — optional per-solve hard dollar ceiling forwarded from {@code
+ *     EngineBudget.dollarCap}. The worker terminates at {@code min(dollarCap,
+ *     PipelineRun.hardCapUsd)} (each treated as unbounded when null), so a caller that pins only
+ *     the per-solve cap still gets enforcement even when no run-row hard cap exists.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -181,7 +185,8 @@ public record WorkerTaskRequest(
     Boolean autoVerify,
     Boolean strictProvider,
     Long absoluteDeadlineEpochMs,
-    Long shutdownReserveMs) {
+    Long shutdownReserveMs,
+    Double dollarCap) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

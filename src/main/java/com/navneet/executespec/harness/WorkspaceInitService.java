@@ -2,12 +2,12 @@ package com.navneet.executespec.harness;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.springframework.stereotype.Service;
 
@@ -250,45 +250,38 @@ public class WorkspaceInitService {
     Process p = pb.start();
     String trackedFilesOutput = new String(p.getInputStream().readAllBytes());
     int exit = p.waitFor();
-    if (exit != 0) {
-      log.warn(
-          "git ls-files failed for source run {} (exit {}); copying all files instead",
+    // RR-153 (P1 data integrity) — whether tracked-file enumeration actually SUCCEEDED gates the
+    // copy. The old code fell back to copying the ENTIRE source directory (minus .git/) when
+    // ls-files failed or returned empty, so a corrupted/non-repository source silently carried
+    // untracked spill files, secrets, build output and tool artifacts into the new run and onward
+    // to
+    // publication. Fail closed: on an enumeration failure copy NOTHING (start from a clean,
+    // git-init'd workspace) rather than copying unfiltered content.
+    boolean enumerationOk = (exit == 0);
+    if (!enumerationOk) {
+      log.error(
+          "git ls-files failed for source run {} (exit {}); starting the target from an EMPTY"
+              + " workspace rather than copying unfiltered content",
           sourceRunId,
           exit);
     }
 
-    List<String> trackedFiles = trackedFilesOutput.lines().filter(l -> !l.isBlank()).toList();
+    List<String> trackedFiles =
+        enumerationOk ? trackedFilesOutput.lines().filter(l -> !l.isBlank()).toList() : List.of();
 
     Files.createDirectories(target);
     runGit(target, "git", "init", "-b", "main");
     runGit(target, "git", "config", "user.email", "agent@executespec.local");
     runGit(target, "git", "config", "user.name", "ExecuteSpec Agent");
 
-    // 3. Copy each tracked file, preserving directory structure
+    // 3. Copy each tracked file, preserving directory structure. RR-153 — there is deliberately NO
+    // "copy everything" fallback: an empty tracked set (a genuinely empty source, or a failed
+    // enumeration handled above) yields an empty initialised workspace, never an unfiltered copy.
     if (trackedFiles.isEmpty()) {
-      // Fallback: copy everything that is not under .git/
       log.info(
-          "No tracked files found in source run {} — performing full directory copy", sourceRunId);
-      Files.walkFileTree(
-          source,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              return dir.equals(source.resolve(".git"))
-                  ? FileVisitResult.SKIP_SUBTREE
-                  : FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                throws IOException {
-              Path rel = source.relativize(file);
-              Path dst = target.resolve(rel);
-              Files.createDirectories(dst.getParent());
-              Files.copy(file, dst, StandardCopyOption.REPLACE_EXISTING);
-              return FileVisitResult.CONTINUE;
-            }
-          });
+          "No tracked files copied from source run {} — target starts from an empty initialised"
+              + " workspace",
+          sourceRunId);
     } else {
       for (String relPath : trackedFiles) {
         Path srcFile = source.resolve(relPath);
@@ -423,7 +416,12 @@ public class WorkspaceInitService {
       throw new IllegalArgumentException("repository full name is required");
     }
     int slash = fullName.lastIndexOf('/');
-    return slash >= 0 ? fullName.substring(slash + 1) : fullName;
+    String name = slash >= 0 ? fullName.substring(slash + 1) : fullName;
+    // RR-152 — the checkout directory is a single contained segment beneath repos/. A repository
+    // full name ending in a reserved/traversal segment (e.g. "owner/..") would otherwise resolve
+    // the clone target outside the run workspace. Reject it before it becomes a directory name.
+    SafeWorkspacePath.requireSafeRelativePosixPath(name);
+    return name;
   }
 
   /**
@@ -490,6 +488,13 @@ public class WorkspaceInitService {
 
   /** Returns the absolute, normalised path to the per-run workspace directory. */
   public Path runWorkspacePath(String runId) {
+    // RR-152 (P1 filesystem integrity) — the run id is the ONLY user/caller-derived segment
+    // appended
+    // to the configured workspace root. Enforce the containment invariant at the edge (single safe
+    // relative POSIX segment: no traversal, no dot/empty/absolute/encoded separator) so a
+    // non-canonical or legacy run identity cannot turn ordinary read/write/clone into traversal
+    // outside the workspace. Normal UUID run ids pass unchanged.
+    SafeWorkspacePath.requireSafeRelativePosixPath(runId);
     return Path.of(props.getWorkspace(), runId).toAbsolutePath().normalize();
   }
 

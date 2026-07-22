@@ -145,4 +145,30 @@ class WorkerToolLogEvidenceTest {
     assertThat(WorkerToolLogEvidence.countFileWrites(List.of("writeFile(...)", "editFile(...)")))
         .isEqualTo(2);
   }
+
+  // RR-261 — a rejected edit is not delivered code. Failed / refused mutation entries must not
+  // count.
+  @Test
+  void countFileWritesExcludesFailedAndRefusedMutations() {
+    List<String> log =
+        List.of(
+            "writeFile(sig=1) [target=a] -> ERR: stale hunk",
+            "editFile(sig=2) [target=b] -> ERR",
+            "writeFile(sig=3) [target=c] → REFUSED (generated secret)",
+            "applyPatch(sig=4) [target=d] -> OK");
+    // Only the single OK mutation counts; three failed/refused attempts do not.
+    assertThat(WorkerToolLogEvidence.countFileWrites(log)).isEqualTo(1);
+  }
+
+  // RR-261 — a worker that attempted ONLY rejected edits produced zero delivered files, so it
+  // cannot
+  // be laundered into a soft completion.
+  @Test
+  void countFileWritesIsZeroWhenEveryEditWasRejected() {
+    List<String> log =
+        List.of(
+            "writeFile(sig=1) [target=a] -> ERR",
+            "editFile(sig=2) [target=b] → REFUSED (no recent runTests)");
+    assertThat(WorkerToolLogEvidence.countFileWrites(log)).isZero();
+  }
 }

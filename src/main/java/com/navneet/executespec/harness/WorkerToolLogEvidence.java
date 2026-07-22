@@ -67,21 +67,43 @@ final class WorkerToolLogEvidence {
   }
 
   /**
-   * Counts file-mutating tool calls. We only need a count (not paths) to decide whether an
-   * incomplete worker still produced real output.
+   * Counts SUCCESSFUL file-mutating tool calls. We only need a count (not paths) to decide whether
+   * an incomplete worker still produced real output.
    *
    * <p>Fails CLOSED in the opposite direction from the safety predicates: an UNCLASSIFIED name is
    * NOT counted, because over-counting would falsely clear the zero-write provider-breakdown
    * signal. The old literal list omitted {@code ast_edit}, {@code move} and {@code delete}, so a
    * worker delivering only through those looked like it had written nothing.
+   *
+   * <p>RR-261 (P1 outcome integrity) — a REJECTED edit is not delivered code. The entry's trailing
+   * status ({@code -> OK} / {@code -> ERR}, or a {@code → REFUSED} gate marker) is now consulted,
+   * so a worker that attempted only stale/forbidden/invalid edits counts zero file writes and
+   * cannot be laundered into a soft completion. A mutation entry with no explicit status is still
+   * counted (legacy/synthesised entries), because the live worker path always stamps a status and
+   * dropping an unlabelled genuine write would understate a real delivery.
    */
   static int countFileWrites(List<String> toolLog) {
     if (toolLog == null || toolLog.isEmpty()) return 0;
     int n = 0;
     for (String entry : toolLog) {
-      if (entry != null && mutatesFiles(leadingToolName(entry.trim()))) n++;
+      if (entry != null && mutatesFiles(leadingToolName(entry.trim())) && !isRejectedEntry(entry)) {
+        n++;
+      }
     }
     return n;
+  }
+
+  /**
+   * RR-261 — true when a tool-log entry records a failed or refused call. Matches the {@code ->
+   * ERR} status stamped by {@code WorkerAgent.toolCallLogEntry} and the {@code → REFUSED} gate
+   * markers, across the {@code →}/{@code ->} arrow variants.
+   */
+  private static boolean isRejectedEntry(String entry) {
+    String normalized = entry.replace("→", "->").replaceAll("\\s+", " ").trim();
+    int arrow = normalized.lastIndexOf("-> ");
+    if (arrow < 0) return false;
+    String status = normalized.substring(arrow + 3).trim();
+    return status.startsWith("ERR") || status.startsWith("REFUSED");
   }
 
   private static boolean mutatesFiles(String toolName) {

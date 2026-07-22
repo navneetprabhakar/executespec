@@ -93,10 +93,18 @@ public class GateStore {
         record.setComment(continuationPayload);
         gateRepository.save(record);
       }
-    } catch (Exception ex) {
-      // Lost a race against another thread inserting the same row — that's fine;
-      // duplicate-key just means the row already exists.
-      log.debug("[GateStore] openPlanGate upsert race for run={}: {}", runId, ex.getMessage());
+    } catch (org.springframework.dao.DataIntegrityViolationException dup) {
+      // Genuine duplicate-key race — another thread inserted the same PLAN row concurrently. The
+      // row exists, which is the desired end state, so this is safe to swallow.
+      log.debug("[GateStore] openPlanGate insert race for run={}: {}", runId, dup.getMessage());
+    } catch (org.springframework.dao.DataAccessException ex) {
+      // RR-685 (P1 plan-gate durability) — a real DB outage / serialization failure must NOT be
+      // laundered into "gate opened". The previous broad catch logged every failure as an "upsert
+      // race" and returned success, so a run could enter AWAITING_APPROVAL with no recoverable
+      // continuation payload — an approval the restart-recovery path cannot honour. Fail closed so
+      // the caller aborts the run instead of parking it at a phantom gate.
+      log.error("[GateStore] openPlanGate durable write failed for run={}", runId, ex);
+      throw new IllegalStateException("Unable to durably open plan gate for run " + runId, ex);
     }
   }
 

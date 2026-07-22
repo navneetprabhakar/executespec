@@ -19,6 +19,11 @@ import lombok.Builder;
  * @param toolCallLog ordered log of {tool name, opaque argument signature, safe target, ok/err} per
  *     dispatched call; raw arguments are never retained
  * @param totalLatencyMs wall-clock time across the whole loop
+ * @param salvagedUnverified RR-260 — true when this result was produced by the best-guess salvage
+ *     path (a single write after the iteration / stagnation / budget limit) rather than a real
+ *     {@code completeTask}. That write is explicitly unverified ("a wrong-file edit beats an empty
+ *     patch"), so the executor must earn promotion through the smoke gate instead of treating it as
+ *     a clean completion. Defaults to false for every normal outcome.
  */
 @Builder
 public record WorkerResult(
@@ -29,7 +34,8 @@ public record WorkerResult(
     String finalAssistantText,
     int repeatedAssistantTextCount,
     List<String> toolCallLog,
-    long totalLatencyMs) {
+    long totalLatencyMs,
+    boolean salvagedUnverified) {
 
   public enum Outcome {
     /** completeTask was called — task succeeded by the worker's own assertion. */

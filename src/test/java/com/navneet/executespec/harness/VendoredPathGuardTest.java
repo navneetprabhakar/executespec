@@ -238,6 +238,33 @@ class VendoredPathGuardTest {
     assertTrue(Files.exists(repoDir.resolve("frontend/node_modules/pkg/index.js")));
   }
 
+  // RR-650 — the scrub commit outcome is part of the result contract. Over a real repository the
+  // scrub of committed vendored content must report committed()=true and leave a clean tree with
+  // the
+  // vendored subtree untracked.
+  @Test
+  void scrubCommittedVendored_reportsCommitAndLeavesACleanTree(@TempDir Path tmp) throws Exception {
+    Path repoDir = tmp.resolve("repo");
+    initBareRepo(repoDir);
+
+    Files.createDirectories(repoDir.resolve("src"));
+    Files.writeString(repoDir.resolve("src/App.tsx"), "export default 1;\n");
+    Files.createDirectories(repoDir.resolve("node_modules/pkg"));
+    Files.writeString(repoDir.resolve("node_modules/pkg/index.js"), "module.exports={};\n");
+    runCmd(repoDir, "git", "add", "-A");
+    runCmd(repoDir, "git", "commit", "-q", "-m", "initial with vendored content");
+
+    VendoredPathGuard.ScrubResult result = new VendoredPathGuard().scrubCommittedVendored(repoDir);
+
+    assertTrue(result.changed(), "expected vendored content to be removed");
+    assertTrue(result.committed(), "the scrub must land a durable commit");
+    // The cleanup is durable: no staged residue, and the vendored path is no longer tracked.
+    assertEquals("", capture(repoDir, "git", "status", "--porcelain").trim());
+    String tracked = capture(repoDir, "git", "ls-files");
+    assertTrue(tracked.contains("src/App.tsx"), "app source must survive: " + tracked);
+    assertFalse(tracked.contains("node_modules/"), "vendored content must be gone: " + tracked);
+  }
+
   private String capture(Path dir, String... cmd) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
     Process p = pb.start();

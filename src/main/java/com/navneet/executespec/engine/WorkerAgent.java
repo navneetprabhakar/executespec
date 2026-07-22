@@ -498,7 +498,11 @@ public class WorkerAgent {
     // itself if cost blows past it mid-task. Null cap = no enforcement.
     final String runId = req.context().runId();
     Optional<PipelineRun> runRow = pipelineRunRepository.findById(runId);
-    final Double hardCapUsd = runRow.map(r -> r.getHardCapUsd()).orElse(null);
+    // RR-1562 — the effective ceiling is the TIGHTER of the run-row hard cap and the per-solve
+    // EngineBudget.dollarCap (each unbounded when null); previously only the run-row cap was read.
+    final Double hardCapUsd =
+        WorkerAgentSupport.minNullableCap(
+            runRow.map(r -> r.getHardCapUsd()).orElse(null), req.dollarCap());
     final boolean patchNoEditNudgeOn =
         !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
 
@@ -926,6 +930,8 @@ public class WorkerAgent {
       // test run.  The broader progress watchdog still records the attempted tool call below so
       // a model cannot hide a stuck loop behind repeated failed writes.
       int successfulEditsThisIter = 0;
+      boolean successfulProgressThisIter =
+          false; // RR-259 — set on a SUCCESSFUL progress-class call
       // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
       // call for the next LLM turn; its output is the most likely to be re-referenced by the
       // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
@@ -1056,7 +1062,7 @@ public class WorkerAgent {
           // path list — only TB supplies one today, so it is inert (not forked) for BUILD/PATCH.
           if (!requiredDeliverables.isEmpty()
               && deliverableRefusals < DELIVERABLE_GATE_MAX_REFUSALS) {
-            List<String> missing = missingDeliverables(req.context(), requiredDeliverables);
+            List<String> missing = missingDeliverables(req, requiredDeliverables);
             if (!missing.isEmpty()) {
               deliverableRefusals++;
               String refused =
@@ -1150,7 +1156,7 @@ public class WorkerAgent {
               && terminalVerifyGateOn
               && !terminalVerifiedPass
               && terminalVisibleTestRefusals < TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS
-              && visibleTestsExist(req.context())) {
+              && visibleTestsExist(req)) {
             terminalVisibleTestRefusals++;
             String refused =
                 errEnvelope("TERMINAL_VISIBLE_TESTS_REQUIRED", terminalVisibleTestsMessage());
@@ -1272,7 +1278,7 @@ public class WorkerAgent {
               .totalLatencyMs(System.currentTimeMillis() - start)
               .build();
         }
-        metrics.recordToolCall(tc.name());
+        metrics.recordToolCall(WorkerAgentSupport.boundedToolMetricName(tc.name()));
         // C1 — use the pre-computed concurrent result for a read-only batch; else dispatch now.
         if (terminalVerifiedPass && terminalRiskyAfterVerifiedPass(tc.name())) {
           String refused = errEnvelope("TERMINAL_VERIFIED_PASS", terminalVerifiedPassMessage());
@@ -1296,6 +1302,12 @@ public class WorkerAgent {
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
         if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
           successfulEditsThisIter++;
+        }
+        // RR-259 — a progress-class call counts only when it succeeded.
+        if (isProgressTool(tc.name(), terminalTaskMode)
+            && isOkEnvelope(envelope)
+            && !isFailureEnvelope(envelope)) {
+          successfulProgressThisIter = true;
         }
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
@@ -1331,10 +1343,10 @@ public class WorkerAgent {
         if (terminalTaskMode
             && !terminalVerifiedPass
             && terminalVerifierPass(
-                tc.name(), tc.arguments(), envelope, requiredDeliverables, req.context())) {
+                tc.name(), tc.arguments(), envelope, requiredDeliverables, req)) {
           terminalVerifiedPass = true;
           terminalVerifiedPassEvidence = terminalVerifierEvidence(tc.name(), tc.arguments());
-          snapshotTerminalVerifiedCandidate(req.context(), requiredDeliverables);
+          snapshotTerminalVerifiedCandidate(req, requiredDeliverables);
           toolLog.add("TERMINAL_VERIFIED_PASS → " + terminalVerifiedPassEvidence);
           log.info(
               "WorkerAgent terminal verified-pass detected run={} task={} iter={} evidence={}",
@@ -1371,19 +1383,15 @@ public class WorkerAgent {
       // text-only-stop path uses); crossing progressForceAfter force-terminates with
       // COMPLETED_BY_STAGNATION (Lever B salvage first if nothing was ever written). One counter,
       // one nudge — this replaces the old Lever A + Lever C + stagnation-warn trio.
-      boolean wroteThisIter =
-          calls.stream().anyMatch(tc -> isProgressTool(tc.name(), terminalTaskMode));
+      // RR-259 — progress requires a SUCCESSFUL progress-class call (or edit), not a bare tool-name
+      // match, so a rejected write / failing build no longer resets the no-progress watchdog.
+      boolean wroteThisIter = successfulProgressThisIter || successfulEditsThisIter > 0;
       if (patchNoEditNudgeOn && totalWriteCalls == 0 && !progressV2) {
-        // PATCH runs score the source diff. Before the first edit, build/test/read loops are useful
-        // evidence but not progress toward a patch; only an actual write should reset the no-edit
-        // watchdog. After the first edit, fall back to the normal progress definition so legitimate
-        // edit/build/test cycles still get room to converge.
-        wroteThisIter = calls.stream().anyMatch(tc -> isWriteTool(tc.name()));
+        // PATCH scores the diff: before the first edit only a SUCCESSFUL write resets the watchdog.
+        wroteThisIter = successfulEditsThisIter > 0;
       }
       if (progressV2) {
-        // v2 — novelty IS progress: any call whose (tool, normalized-args) signature is new this
-        // task resets the counter. Reads/searches/shell against NEW targets are investigation;
-        // only repetition accumulates. Writes/builds keep counting via the v1 definition too.
+        // v2 — novelty IS progress: a new (tool, normalized-args) signature resets the counter.
         boolean novelThisIter = false;
         for (AssistantMessage.ToolCall tc : calls) {
           if (seenCallSignatures.add(callSignature(tc))) novelThisIter = true;
@@ -1392,9 +1400,9 @@ public class WorkerAgent {
       }
       if (wroteThisIter) {
         itersSinceProgress = 0;
-        for (AssistantMessage.ToolCall tc : calls) {
-          if (isWriteTool(tc.name())) totalWriteCalls++;
-        }
+        // RR-259 — only SUCCESSFUL writes increment the total (else a failed write would disable
+        // zero-write Lever-B salvage).
+        totalWriteCalls += successfulEditsThisIter;
       } else {
         itersSinceProgress++;
       }
@@ -1793,7 +1801,7 @@ public class WorkerAgent {
     }
 
     if (wroteAnything) {
-      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED");
+      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED (unverified)");
       recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterOf(req));
       return WorkerResult.builder()
           .outcome(WorkerResult.Outcome.COMPLETED)
@@ -1802,6 +1810,9 @@ public class WorkerAgent {
           .completionSummary("salvage: best-guess edit produced after iter-limit")
           .toolCallLog(toolLog)
           .totalLatencyMs(System.currentTimeMillis() - start)
+          // RR-260 — this best-guess edit is NOT a verified completion; flag it so the executor
+          // routes it through the smoke gate instead of promoting "file changed" to SUCCESS.
+          .salvagedUnverified(true)
           .build();
     }
     return null;
@@ -2022,7 +2033,7 @@ public class WorkerAgent {
     List<String> requiredDeliverables =
         req.requiredDeliverablePaths() == null ? List.of() : req.requiredDeliverablePaths();
     if (!requiredDeliverables.isEmpty()) {
-      List<String> missing = missingDeliverables(req.context(), requiredDeliverables);
+      List<String> missing = missingDeliverables(req, requiredDeliverables);
       if (!missing.isEmpty()) {
         log.info(
             "WorkerAgent TERMINAL_FINALIZER deliverable gate blocked run={} task={} missing={}",
@@ -2299,9 +2310,14 @@ public class WorkerAgent {
    * a local product run (BUILD/PATCH workspace) or a remote Terminal-Bench run — so the stages live
    * in common space, not a TB fork. Returns the same {@code {ok,content}} envelope shape.
    */
-  private String dispatchToolDirect(ExecutionContext ctx, String toolName, String argsJson) {
+  private String dispatchToolDirect(WorkerTaskRequest req, String toolName, String argsJson) {
+    ExecutionContext ctx = req.context();
     if (toolRegistry.isRemoteRun(ctx)) {
-      return toolRegistry.dispatchRemote(ctx, toolName, argsJson);
+      // RR-591 — pass the task's IMMUTABLE absolute deadline (the no-deadline overload let a remote
+      // verification/critic call be renewed forever by reconnects); the dispatcher caps every
+      // reconnect renewal by it and can only shorten, never extend past it.
+      return toolRegistry.dispatchRemote(
+          ctx, toolName, argsJson, req.absoluteDeadlineEpochMs(), req.shutdownReserveMs());
     }
     Tool tool = toolRegistry.find(toolName);
     if (tool == null) return errEnvelope("INVALID_ARGS", "unknown tool: " + toolName);
@@ -2885,7 +2901,7 @@ public class WorkerAgent {
    * extractor returns. A bracketed {@code ESMISS[<path>]} marker is used so a path that is a prefix
    * of another can't false-match.
    */
-  private List<String> missingDeliverables(ExecutionContext ctx, List<String> paths) {
+  private List<String> missingDeliverables(WorkerTaskRequest req, List<String> paths) {
     List<String> safe =
         paths.stream()
             .filter(p -> p != null && p.matches("/[A-Za-z0-9._/-]+"))
@@ -2900,7 +2916,7 @@ public class WorkerAgent {
     try {
       ObjectNode args = objectMapper.createObjectNode();
       args.put("command", cmd.toString());
-      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      String envelope = dispatchToolDirect(req, "shell", objectMapper.writeValueAsString(args));
       if (envelope == null) return List.of();
       JsonNode env = objectMapper.readTree(envelope);
       if (!env.path("ok").asBoolean(false)) return List.of();
@@ -2908,7 +2924,9 @@ public class WorkerAgent {
       return safe.stream().filter(p -> content.contains("ESMISS[" + p + "]")).toList();
     } catch (Exception e) {
       log.debug(
-          "deliverable gate check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+          "deliverable gate check failed (fail-open) run={}: {}",
+          req.context().runId(),
+          e.getMessage());
       return List.of();
     }
   }
@@ -3028,20 +3046,23 @@ public class WorkerAgent {
   }
 
   /** Terminal visible-test gate — detect whether the remote sandbox exposes verifier files. */
-  private boolean visibleTestsExist(ExecutionContext ctx) {
+  private boolean visibleTestsExist(WorkerTaskRequest req) {
     try {
       ObjectNode args = objectMapper.createObjectNode();
       args.put(
           "command",
           "[ -d /tests ] && find /tests -maxdepth 2 -type f | head -1 | grep -q . && echo"
               + " TESTS_PRESENT || true");
-      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      String envelope = dispatchToolDirect(req, "shell", objectMapper.writeValueAsString(args));
       if (envelope == null) return false;
       JsonNode env = objectMapper.readTree(envelope);
       return env.path("ok").asBoolean(false)
           && env.path("content").asText("").contains("TESTS_PRESENT");
     } catch (Exception e) {
-      log.debug("visible-test check failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
+      log.debug(
+          "visible-test check failed (fail-open) run={}: {}",
+          req.context().runId(),
+          e.getMessage());
       return false;
     }
   }
@@ -3145,7 +3166,12 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     try {
       java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
       if (callTimeout.isEmpty()) return null;
-      String deliverable = readDeliverableContext(req.context(), paths);
+      String deliverable =
+          WorkerAgentSupport.readDeliverableContext(
+              argsJson -> dispatchToolDirect(req, "shell", argsJson),
+              objectMapper,
+              toolRegistry.isRemoteRun(req.context()),
+              paths);
       String userMsg =
           PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
               + "\n\n"
@@ -3182,65 +3208,6 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   /**
-   * RL-2026-06 — reads the candidate deliverable for the critic, workspace-agnostically via ONE
-   * {@code shell} dispatch (local or remote). For a remote TB run: an {@code /app} file listing +
-   * the (truncated) contents of the required paths. For a local product run (BUILD/PATCH): the
-   * worker's {@code git diff} (stat + patch) — the actual change set under review. Fail-soft:
-   * returns a placeholder string on any error so the critic still runs on the task text alone.
-   */
-  private String readDeliverableContext(ExecutionContext ctx, List<String> paths) {
-    boolean remote = toolRegistry.isRemoteRun(ctx);
-    List<String> safe =
-        paths.stream()
-            .filter(p -> p != null && p.matches("/[A-Za-z0-9._/-]+"))
-            .distinct()
-            .limit(8)
-            .toList();
-    StringBuilder cmd = new StringBuilder();
-    if (remote) {
-      cmd.append(
-          "echo '=== /app files ==='; find /app -maxdepth 3 -type f 2>/dev/null | head -40; ");
-      cmd.append(
-          "echo '=== /tests files ==='; find /tests -maxdepth 3 -type f 2>/dev/null | head -40; ");
-      cmd.append(
-          "if [ -f /tests/test.sh ]; then echo '=== /tests/test.sh ==='; head -c 4000"
-              + " /tests/test.sh; echo; fi; ");
-      if (safe.isEmpty()) {
-        cmd.append(
-            "echo '=== likely /app candidate contents ==='; "
-                + "find /app -maxdepth 3 -type f \\( -perm -111 -o -name '*.py' -o -name '*.sh'"
-                + " -o -name '*.js' -o -name '*.ts' -o -name '*.json' -o -name '*.txt'"
-                + " -o -name '*.csv' -o -name '*.out' -o -name '*.result' \\) 2>/dev/null"
-                + " | head -8 | while IFS= read -r f; do echo \"=== $f ===\"; head -c 2000"
-                + " \"$f\"; echo; done; ");
-      }
-    } else {
-      // Local product run: the deliverable is the worker's change set.
-      cmd.append("echo '=== git diff (stat) ==='; git diff --stat 2>/dev/null | head -40; ");
-      cmd.append("echo '=== git diff ==='; git diff 2>/dev/null | head -c 12000; echo; ");
-    }
-    for (String p : safe) {
-      cmd.append("echo '=== ")
-          .append(p)
-          .append(" ==='; cat '")
-          .append(p)
-          .append("' 2>/dev/null | head -c 4000; echo; ");
-    }
-    try {
-      ObjectNode args = objectMapper.createObjectNode();
-      args.put("command", cmd.toString());
-      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
-      if (envelope == null) return "(deliverable unavailable)";
-      JsonNode env = objectMapper.readTree(envelope);
-      String content = env.path("content").asText("");
-      if (content.length() > 12000) content = content.substring(0, 12000) + "\n…(truncated)";
-      return content.isEmpty() ? "(no deliverable found)" : content;
-    } catch (Exception e) {
-      return "(deliverable unavailable: " + e.getMessage() + ")";
-    }
-  }
-
-  /**
    * RL-2026-06 — wraps the critic's gap list as actionable, push-back-allowed completion feedback.
    */
   static String criticMessage(String gaps) {
@@ -3257,7 +3224,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
       String argsJson,
       String envelope,
       List<String> requiredDeliverables,
-      ExecutionContext ctx) {
+      WorkerTaskRequest req) {
     if (!terminalVerifierTool(toolName) || !isOkEnvelope(envelope)) return false;
     // RR-258 — `{"ok":true}` only means the TRANSPORT succeeded. ShellTool deliberately wraps
     // non-zero process exits in an Ok envelope so the model can read stderr, so a verifier command
@@ -3267,10 +3234,10 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     if (!envelopeProvesExitZero(toolName, envelope)) return false;
     String command = commandFromArgs(argsJson);
     if (!terminalVerifierCommand(toolName, command)) return false;
-    if (visibleTestsExist(ctx) && !terminalVisibleTestCommand(toolName, command)) return false;
+    if (visibleTestsExist(req) && !terminalVisibleTestCommand(toolName, command)) return false;
     return requiredDeliverables == null
         || requiredDeliverables.isEmpty()
-        || missingDeliverables(ctx, requiredDeliverables).isEmpty();
+        || missingDeliverables(req, requiredDeliverables).isEmpty();
   }
 
   private String terminalVerifierEvidence(String toolName, String argsJson) {
@@ -3371,7 +3338,8 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
   }
 
   private void snapshotTerminalVerifiedCandidate(
-      ExecutionContext ctx, List<String> requiredDeliverables) {
+      WorkerTaskRequest req, List<String> requiredDeliverables) {
+    ExecutionContext ctx = req.context();
     if (requiredDeliverables == null || requiredDeliverables.isEmpty()) return;
     List<String> safe =
         requiredDeliverables.stream()
@@ -3405,7 +3373,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
     try {
       ObjectNode args = objectMapper.createObjectNode();
       args.put("command", cmd.toString());
-      String envelope = dispatchToolDirect(ctx, "shell", objectMapper.writeValueAsString(args));
+      String envelope = dispatchToolDirect(req, "shell", objectMapper.writeValueAsString(args));
       if (envelope == null || !isOkEnvelope(envelope)) {
         log.debug("terminal verified-pass snapshot did not complete for run={}", ctx.runId());
       }

@@ -286,12 +286,17 @@ public class UiStyleResolver {
     int charLimit = designProps.getMaxTokens() * 4;
     String[] lines = content.split("\n");
     StringBuilder trimmed = new StringBuilder();
-    int sectionCount = 0;
 
     for (String line : lines) {
-      if (line.startsWith("## ")) sectionCount++;
-      if (trimmed.length() + line.length() > charLimit && sectionCount > 4) {
-        trimmed.append("\n<!-- Truncated: remaining sections omitted to fit token budget -->\n");
+      // RR-1054 (P1 availability/cost) — the char ceiling is a HARD limit, enforced independently
+      // of
+      // heading shape. The previous guard only truncated once BOTH the char limit was exceeded AND
+      // more than four `## ` sections had been seen, so a malformed or hostile DESIGN.md with four
+      // or fewer headings returned UNBOUNDED content despite maxTokens, inflating prompt cost and
+      // risking provider context-limit failures. Truncate on a line boundary the moment the ceiling
+      // is reached.
+      if (trimmed.length() + line.length() > charLimit) {
+        trimmed.append("\n<!-- Truncated: content exceeded token budget -->\n");
         break;
       }
       trimmed.append(line).append("\n");
