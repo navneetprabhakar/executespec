@@ -35,9 +35,11 @@ class FlywayMigrationInventoryTest {
     // already the applied head — an out-of-order V332 below V334 fails Flyway validation on any DB
     // that took V334 first. The billing-webhook temporal-correctness lane then added V336
     // (billing-activation idempotency + provider-event high-water mark, RR-054/RR-055/RR-056) for
-    // 322.
-    assertThat(migrations).hasSize(322);
-    assertThat(migrations.getLast().version()).isEqualTo("336");
+    // 322. The migration-safe additive-column P1 lane then added V337 (LLM-attempt role provenance,
+    // RR-430), V338 (agent_task plan_index, RR-1446) and V339 (code_review_scan coverage, RR-1696)
+    // for 325 — all nullable, additive columns, contiguous above the V336 head.
+    assertThat(migrations).hasSize(325);
+    assertThat(migrations.getLast().version()).isEqualTo("339");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

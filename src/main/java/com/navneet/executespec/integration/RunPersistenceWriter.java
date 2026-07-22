@@ -5,6 +5,7 @@ import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStat
 import static com.navneet.executespec.integration.RunPipelineSupport.shortMsg;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,7 +76,9 @@ class RunPersistenceWriter {
 
   void persistTasks(String runId, Plan plan) {
     String prefix = runId.substring(0, 8) + "_";
-    for (PlannedTask task : plan.tasks()) {
+    List<PlannedTask> tasks = plan.tasks();
+    for (int planIndex = 0; planIndex < tasks.size(); planIndex++) {
+      PlannedTask task = tasks.get(planIndex);
       String taskId = prefix + task.id();
       AgentTask row =
           AgentTask.builder()
@@ -84,6 +87,9 @@ class RunPersistenceWriter {
               .title(task.title())
               .complexity(task.complexity().name())
               .status("PENDING")
+              // RR-1446 — persist the planner-intent order so the approval gate renders the
+              // planner's sequence rather than the unspecified database row order.
+              .planIndex(planIndex)
               // v2.6.2 slice 5d — record the planner-shape metadata so
               // StartupRunResumer can tell EXPANDED vs PENDING tasks
               // apart on resume + a future auto-replay pass can skip

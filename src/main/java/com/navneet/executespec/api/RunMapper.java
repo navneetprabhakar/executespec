@@ -247,7 +247,10 @@ public class RunMapper {
         .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
         .tasks(
             tasks.stream()
-                .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
+                // RR-1446 — order by the persisted planner-intent index first so the approval gate
+                // shows the planner's sequence; status is a decoration-only tiebreaker (and the
+                // sole ordering for legacy rows that predate plan_index, which sort last).
+                .sorted(TASK_DISPLAY_ORDER)
                 .map(this::toTaskSummary)
                 .toList())
         .integrationSource(integrationSource)
@@ -340,6 +343,20 @@ public class RunMapper {
    * Sort order for tasks in the detail view: WORKING first (in-flight), then PENDING/LOCKED
    * (queued), then PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
    */
+  /**
+   * RR-1446 — task display order for the run detail view and the approval gate. The persisted
+   * planner-intent index is the primary key so the human sees the planner's sequence; status is a
+   * decoration-only tiebreaker, and it is the sole ordering for legacy rows that predate plan_index
+   * (they sort after every indexed task).
+   */
+  static final Comparator<AgentTask> TASK_DISPLAY_ORDER =
+      Comparator.comparingInt((AgentTask t) -> planOrder(t.getPlanIndex()))
+          .thenComparingInt(t -> taskStatusOrder(t.getStatus()));
+
+  private static int planOrder(Integer planIndex) {
+    return planIndex == null ? Integer.MAX_VALUE : planIndex;
+  }
+
   private static int taskStatusOrder(String status) {
     return switch (status != null ? status : "") {
       case "WORKING" -> 0;
