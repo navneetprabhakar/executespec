@@ -14,6 +14,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.TieredCodemapSelector;
@@ -258,10 +259,15 @@ class RunContextComposer {
         // from the selector (unparseable / blank spec) falls back to the original head-truncate.
         String body = tiered ? TieredCodemapSelector.select(content, specText, cap) : null;
         if (body == null) body = truncate(content, cap);
+        // RR-466 — the codemap is derived from untrusted repository names/symbols and prior LLM
+        // output. It is injected into imperative worker/planner context, so it must be delimited as
+        // project-controlled evidence (never followed as instructions) rather than concatenated raw
+        // into a higher-trust position.
+        String framedBody = PromptTrustBoundary.wrap("CODEMAP", body);
         sb.append("### Codemap — ")
             .append(lastPathSegment(r.getGithubRepoFullName()))
             .append("\n")
-            .append(body)
+            .append(framedBody)
             .append("\n\n");
         budget -= body.length();
       }
@@ -292,9 +298,12 @@ class RunContextComposer {
       }
       String body = truncate(doc.get().getContent(), ARCH_INJECT_CAP);
       if (body.isBlank()) return "";
+      // RR-466 — the architecture doc is prior LLM output over untrusted repository content. A
+      // poisoned architecture could otherwise steer later workers from a higher-trust prompt
+      // position; delimit it as project-controlled evidence.
       return "PROJECT ARCHITECTURE (high-level design — use to understand how modules/components"
           + " relate before editing):\n\n"
-          + body;
+          + PromptTrustBoundary.wrap("PROJECT_ARCHITECTURE", body);
     } catch (Exception e) {
       log.warn("buildArchitectureContext failed (continuing without arch): {}", e.getMessage());
       return "";
@@ -370,17 +379,20 @@ class RunContextComposer {
    * Previously a hardcoded switch returned Haiku/flash/mini even after YAML moved Anthropic
    * WORKHORSE to Sonnet (2026-04-19) and Gemini WORKHORSE to Pro (2026-05-04).
    *
-   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured), fall
-   * back to the historical Anthropic-Haiku default rather than NPE'ing the run.
+   * <p>RR-467 — fail CLOSED. The old net returned an Anthropic Haiku slug whenever the YAML lookup
+   * failed, regardless of the requested provider. A Gemini/OpenAI/DeepSeek configuration error
+   * would then silently cross providers to an unintended Anthropic route, making route pins, key
+   * ownership and billing evidence disagree. A missing model for the selected provider now blocks
+   * the run instead of routing it through a model another provider owns.
    */
   String defaultModelFor(String provider) {
     String model = modelRegistry.workhouseModelFor(provider);
     if (model != null && !model.isBlank()) return model;
-    log.warn(
-        "RunOrchestrator: no workhorse model in YAML matrix for provider '{}'; falling back to"
-            + " claude-haiku-4-5-20251001",
-        provider);
-    return "claude-haiku-4-5-20251001";
+    throw new IllegalStateException(
+        "No workhorse model configured for provider '"
+            + provider
+            + "'; refusing to fall back to a model owned by a different provider. Configure the"
+            + " model-matrix for this provider before selecting it.");
   }
 
   String buildMultiRepoSummary(String projectId, List<UUID> selectedRepoIds) {

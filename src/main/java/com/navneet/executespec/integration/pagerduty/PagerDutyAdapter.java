@@ -71,6 +71,14 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
   public String extractEventId(String rawBody) {
     try {
       PagerDutyWebhookPayload payload = mapper.readValue(rawBody, PagerDutyWebhookPayload.class);
+      // RR-639 — dedupe on the message this adapter will actually act on (the first
+      // trigger-matching
+      // one), not blindly on messages[0]. When no message triggers, fall back to messages[0].id so
+      // an ignored batch still dedupes on retry.
+      PagerDutyWebhookPayload.PdMessage selected = firstTriggerMessage(payload);
+      if (selected != null && selected.id() != null) {
+        return selected.id();
+      }
       if (payload.messages() != null && !payload.messages().isEmpty()) {
         return payload.messages().get(0).id();
       }
@@ -79,16 +87,46 @@ public class PagerDutyAdapter implements InboundAdapter, OutboundAdapter {
     return UUID.randomUUID().toString();
   }
 
+  /**
+   * RR-639 — a single PagerDuty webhook delivery can carry multiple messages. The old code
+   * inspected only {@code messages[0]}, so a batch whose first message was an ignored type silently
+   * discarded later trigger-matching incidents, and a trigger message in position 2+ was lost.
+   * Select the first message whose type is configured to trigger. (One delivery still produces at
+   * most one run — the idempotency model is one event id per delivery — but a trigger message is no
+   * longer buried behind a non-trigger first message; additional trigger-matching messages are
+   * logged as dropped.)
+   */
+  private PagerDutyWebhookPayload.PdMessage firstTriggerMessage(PagerDutyWebhookPayload payload) {
+    if (payload == null || payload.messages() == null) return null;
+    PagerDutyWebhookPayload.PdMessage first = null;
+    int additionalTriggers = 0;
+    for (PagerDutyWebhookPayload.PdMessage m : payload.messages()) {
+      if (m != null && m.type() != null && config.getTriggerTypes().contains(m.type())) {
+        if (first == null) {
+          first = m;
+        } else {
+          additionalTriggers++;
+        }
+      }
+    }
+    if (additionalTriggers > 0) {
+      log.warn(
+          "[PagerDuty] Batch delivery carried {} additional trigger-matching message(s) beyond the"
+              + " one processed; only the first is run (one run per delivery).",
+          additionalTriggers);
+    }
+    return first;
+  }
+
   @Override
   public Optional<IntegrationEvent> parseEvent(String rawBody) {
     try {
       PagerDutyWebhookPayload payload = mapper.readValue(rawBody, PagerDutyWebhookPayload.class);
       if (payload.messages() == null || payload.messages().isEmpty()) return Optional.empty();
 
-      PagerDutyWebhookPayload.PdMessage msg = payload.messages().get(0);
-
-      // Only trigger on configured event types
-      if (!config.getTriggerTypes().contains(msg.type())) return Optional.empty();
+      // RR-639 — find the first trigger-matching message across the whole batch, not just index 0.
+      PagerDutyWebhookPayload.PdMessage msg = firstTriggerMessage(payload);
+      if (msg == null) return Optional.empty();
 
       PagerDutyWebhookPayload.PdIncident inc = msg.incident();
       String goal =

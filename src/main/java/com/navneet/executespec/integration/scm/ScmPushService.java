@@ -243,20 +243,33 @@ public class ScmPushService {
   }
 
   private static boolean hasBitbucketConfiguration(PipelineRun run, AppUser user) {
-    boolean runConfigured =
-        StringUtils.hasText(run.getBitbucketUsername())
-            && StringUtils.hasText(run.getBitbucketWorkspace())
-            && StringUtils.hasText(run.getBitbucketAppPassword());
-    boolean userConfigured =
-        user != null
-            && StringUtils.hasText(user.getBitbucketUsername())
-            && StringUtils.hasText(user.getBitbucketWorkspace())
-            && StringUtils.hasText(user.getBitbucketAppPassword());
-    return runConfigured || userConfigured;
+    return bitbucketComplete(run) || bitbucketComplete(user);
+  }
+
+  /** A complete Bitbucket identity has all three of username, workspace and app password. */
+  private static boolean bitbucketComplete(PipelineRun run) {
+    return run != null
+        && StringUtils.hasText(run.getBitbucketUsername())
+        && StringUtils.hasText(run.getBitbucketWorkspace())
+        && StringUtils.hasText(run.getBitbucketAppPassword());
+  }
+
+  private static boolean bitbucketComplete(AppUser user) {
+    return user != null
+        && StringUtils.hasText(user.getBitbucketUsername())
+        && StringUtils.hasText(user.getBitbucketWorkspace())
+        && StringUtils.hasText(user.getBitbucketAppPassword());
   }
 
   private static void hydrateBitbucketCredentials(PipelineRun run, AppUser user) {
-    if (StringUtils.hasText(run.getBitbucketUsername()) || user == null) return;
+    // RR-867 — resolve ONE complete Bitbucket identity from ONE source. The old guard gated
+    // hydration on `run.getBitbucketUsername()` alone, so a run carrying only a username (a partial
+    // identity) suppressed a complete user credential and then push read a null workspace/password
+    // from the still-partial run. A run that already holds a COMPLETE identity is authoritative and
+    // untouched; a run with a partial (or empty) identity is replaced wholesale from the user's
+    // complete config — never mixed field-by-field between two identities.
+    if (bitbucketComplete(run)) return;
+    if (!bitbucketComplete(user)) return;
     run.setBitbucketUsername(user.getBitbucketUsername());
     run.setBitbucketAppPassword(user.getBitbucketAppPassword());
     run.setBitbucketWorkspace(user.getBitbucketWorkspace());
