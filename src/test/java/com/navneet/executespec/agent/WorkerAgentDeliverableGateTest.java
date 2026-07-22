@@ -78,9 +78,10 @@ class WorkerAgentDeliverableGateTest {
 
     lenient().when(registry.isRemoteRun(any())).thenReturn(remote);
     // The gate's existence check embeds "ESMISS" in its shell command; the worker's own tool calls
-    // do not. Route accordingly.
+    // do not. Route accordingly. RR-591 — the direct verification/critic path (and the worker's own
+    // remote dispatch) use the deadline-aware 5-arg dispatchRemote overload, so stub that one.
     lenient()
-        .when(registry.dispatchRemote(any(), anyString(), anyString()))
+        .when(registry.dispatchRemote(any(), anyString(), anyString(), any(), any()))
         .thenAnswer(
             inv -> {
               String args = inv.getArgument(2);

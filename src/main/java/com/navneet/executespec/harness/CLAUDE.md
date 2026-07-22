@@ -150,3 +150,44 @@ no longer falls back at all: an unidentifiable path yields `null`, the caller lo
 `isSafeVendoredRemovalTarget` re-checks every target (relative, traversal-free, non-option-looking,
 final segment itself vendored) before Git is invoked. Pathspecs are passed after `--`.
 **Refusing an ambiguous removal is the contract; never widen to a parent directory.**
+
+## P1 audit-remediation batch (harness lane, 2026-07-22)
+
+Fail-closed / evidence-honest corrections; no migration.
+
+- **RR-261** — `WorkerToolLogEvidence.countFileWrites` now excludes `-> ERR` / `→ REFUSED` entries,
+  so a worker that attempted only rejected edits counts zero delivered files and cannot be laundered
+  into a soft completion.
+- **RR-263** — `SequentialExecutor` failed-retry (`COMPLETED_WITH_WARNING`) return now calls
+  `persistTaskStatus(..., "PARTIAL", ...)` + emits the terminal SSE before constructing the outcome,
+  closing the WORKING-row window a crash could re-execute.
+- **RR-265** — continuation-action history append moved into
+  `TaskStatusPersistenceService.appendContinuationAction` (proxied `@Transactional`, row-locked,
+  recovery-generation fenced), mirroring `persistGoalDecisionJson`. The executor's inline
+  `findByIdForUpdate` (no ambient transaction, all-swallowing) is now the bounded-constructor fallback
+  only.
+- **RR-268** — `totalTrackedTokens` is a NON-overlapping physical total (`input + output +
+  cacheWrite`); `cacheRead` (OpenAI/Gemini prompt subset) and `reasoning` (output subset) are no
+  longer double-counted, so the `max-total-tokens` waste guard stops honestly.
+- **RR-269** — the legacy `maybeCrossProviderRetry` fallback lane is DELETED (per the finding's
+  recommendation). It dispatched the next YAML failover provider directly, consulting neither route
+  pins, org key policy, provider availability, strict mode nor benchmark/confirmation policy, with a
+  racy ceiling. Every provider/model change now flows through the single continuation-policy /
+  admission path; the orphaned `worker.cross-provider-fallback.enabled` flag (V220) is now unread.
+- **RR-271** — a cancelled run summarises as `ABORTED` (never `ALL_SUCCESS`), appends `SKIPPED`
+  outcomes for the un-run tasks, and preserves the thread interrupt.
+- **RR-650** — `VendoredPathGuard.ScrubResult` gained `committed`; a failed scrub commit (removals
+  staged only) is surfaced instead of reported as a durable success.
+- **RR-685** — `GateStore.openPlanGate` distinguishes a genuine duplicate-key race
+  (`DataIntegrityViolationException`, swallowed) from a real `DataAccessException` (rethrown), so a
+  run never enters `AWAITING_APPROVAL` with no durable continuation payload.
+- **RR-1054** — `UiStyleResolver.enforceTokenLimit` enforces the char ceiling independently of
+  heading shape; a DESIGN.md with ≤4 `##` sections is no longer returned unbounded.
+- **RR-152** — `WorkspaceInitService.runWorkspacePath` / `repoDirectoryName` validate the
+  caller-derived segment through `security.SafeWorkspacePath.requireSafeRelativePosixPath` (no
+  traversal/reserved/absolute), enforcing containment at the filesystem edge.
+- **RR-153** — `copyFromRun` fails closed: a `git ls-files` failure (or empty tracked set) no longer
+  triggers a full-directory copy of untracked spill/secrets; the target starts empty instead.
+- **RR-1563** — `seedInitialContinuationActionState` reconstructs consumed escalation counters from
+  durable `agent_task.continuation_actions_json` (EXECUTED/APPROVED rows) on every resume, so
+  crash-recovery no longer restores a fresh full escalation budget.

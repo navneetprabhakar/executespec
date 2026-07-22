@@ -206,6 +206,72 @@ class TaskStatusPersistenceServiceTest {
     assertEquals(TaskStatusPersistenceService.Result.ROW_NOT_FOUND, result);
   }
 
+  // RR-265 — the continuation-action append takes the pessimistic row lock inside the proxied
+  // transaction (previously the non-transactional executor called findByIdForUpdate directly and
+  // TransactionRequiredException was swallowed, silently dropping the audit row), appends
+  // atomically onto the existing array, and assigns the durable attempt index.
+  @Test
+  void continuationActionAppendRunsInsideProxiedTransactionAndPreservesHistory() {
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("PARTIAL")
+            .recoveryAttempt(3)
+            .continuationActionsJson(
+                "[{\"status\":\"EXECUTED\",\"decision\":\"CHANGE_PROVIDER\",\"attempt\":0}]")
+            .build();
+    AtomicBoolean transactionActiveAtLock = new AtomicBoolean();
+    when(repository.findByIdForUpdate("12345678_T1"))
+        .thenAnswer(
+            invocation -> {
+              transactionActiveAtLock.set(
+                  TransactionSynchronizationManager.isActualTransactionActive());
+              return Optional.of(task);
+            });
+
+    TaskStatusPersistenceService.Result result =
+        transactionalProxy(repository)
+            .appendContinuationAction(
+                task.getRunId(),
+                "T1",
+                "{\"status\":\"APPROVED\",\"decision\":\"STEP_UP_MODEL\"}",
+                3);
+
+    assertEquals(TaskStatusPersistenceService.Result.UPDATED, result);
+    assertTrue(transactionActiveAtLock.get(), "row lock must run in a transaction");
+    // Existing EXECUTED row preserved; the new APPROVED row appended with attempt index 1.
+    assertTrue(task.getContinuationActionsJson().contains("CHANGE_PROVIDER"));
+    assertTrue(task.getContinuationActionsJson().contains("STEP_UP_MODEL"));
+    assertTrue(task.getContinuationActionsJson().contains("\"attempt\":1"));
+    verify(repository).saveAndFlush(task);
+  }
+
+  // RR-265 — a stale executor (recovery generation mismatch) must not clobber a newer document.
+  @Test
+  void continuationActionAppendIsFencedByRecoveryGeneration() {
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("PARTIAL")
+            .recoveryAttempt(5)
+            .build();
+    when(repository.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
+
+    TaskStatusPersistenceService.Result result =
+        transactionalProxy(repository)
+            .appendContinuationAction(
+                task.getRunId(),
+                "T1",
+                "{\"status\":\"EXECUTED\",\"decision\":\"CHANGE_PROVIDER\"}",
+                2);
+
+    assertEquals(TaskStatusPersistenceService.Result.STALE_RECOVERY_ATTEMPT, result);
+  }
+
   private static TaskStatusPersistenceService transactionalProxy(AgentTaskRepository repository) {
     TaskStatusPersistenceService target = new TaskStatusPersistenceService(repository, null);
     ProxyFactory factory = new ProxyFactory(target);

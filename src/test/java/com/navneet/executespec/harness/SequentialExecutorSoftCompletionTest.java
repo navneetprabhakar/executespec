@@ -362,6 +362,19 @@ class SequentialExecutorSoftCompletionTest {
         .build();
   }
 
+  /** RR-260 — a COMPLETED result carrying the salvaged-unverified flag (one best-guess write). */
+  private static WorkerResult workerSalvaged() {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.COMPLETED)
+        .iterations(60)
+        .toolCallsDispatched(61)
+        .completionSummary("salvage: best-guess edit produced after iter-limit")
+        .toolCallLog(List.of("SALVAGE writeFile -> OK"))
+        .totalLatencyMs(120_000L)
+        .salvagedUnverified(true)
+        .build();
+  }
+
   private static ModelProviderScore candidate(String provider, String model) {
     return new ModelProviderScore(
         provider, model, "TASK_LOW", 91.0, 8.0, 1_000L, 2_000L, 70.0, List.of("test candidate"));
@@ -480,6 +493,38 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   // 4: zero file writes → FAILED (regression check)
+
+  // RR-260 — a best-guess salvage WRITE reports COMPLETED but is unverified. With smoke skipped a
+  // NORMAL completion is SUCCESS, but a salvaged completion must land COMPLETED_WITH_WARNING —
+  // never
+  // promoted straight to SUCCESS on "file changed".
+  @Test
+  void salvaged_unverified_completion_is_COMPLETED_WITH_WARNING_not_SUCCESS() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    TaskOutcome t1 = result.perTask().get(0);
+    assertEquals(
+        TaskOutcome.Status.COMPLETED_WITH_WARNING,
+        t1.status(),
+        "A salvage best-guess edit must not be promoted to SUCCESS without verification.");
+  }
+
+  // RR-260 control — a NORMAL COMPLETED with smoke skipped is a clean SUCCESS, proving the warning
+  // above is caused by the salvage flag and not by disabling smoke.
+  @Test
+  void normal_completion_with_smoke_skipped_is_SUCCESS() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(3));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+  }
 
   @Test
   void iter_limit_with_zero_writes_is_FAILED_regression_check() {
@@ -836,7 +881,10 @@ class SequentialExecutorSoftCompletionTest {
             new com.navneet.executespec.cost.RunCostTracker.Snapshot(100, 80, 10, 15, 0.01, 2));
 
     SequentialExecutor executor = newExecutor();
-    ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 200);
+    // RR-268 — the physical token total is now the NON-overlapping input + output + cacheWrite
+    // (100 + 80 + 10 = 190); the cacheRead (15) is an OpenAI/Gemini subset of input and reasoning
+    // (0) is a subset of output, so neither is re-added. Ceiling set below 190 so the guard fires.
+    ReflectionTestUtils.setField(executor, "maxGoalTotalTokens", 150);
     executor.execute(req(singleTaskPlan(), true));
 
     verify(broadcaster)
@@ -849,8 +897,8 @@ class SequentialExecutorSoftCompletionTest {
                         && String.valueOf(event.data().get("reason"))
                             .contains("configured total token ceiling reached")
                         && ((List<?>) event.data().get("evidence"))
-                            .contains("totalTrackedTokens=205")
-                        && Integer.valueOf(205).equals(event.data().get("totalTokens"))));
+                            .contains("totalTrackedTokens=190")
+                        && Integer.valueOf(190).equals(event.data().get("totalTokens"))));
   }
 
   @Test

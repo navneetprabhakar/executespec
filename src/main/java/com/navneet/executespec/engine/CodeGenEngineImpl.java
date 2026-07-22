@@ -124,6 +124,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .absoluteDeadlineEpochMs(
             request.budget() == null ? null : request.budget().absoluteDeadlineEpochMs())
         .shutdownReserveMs(request.budget() == null ? null : request.budget().shutdownReserveMs())
+        // RR-1562 — propagate the per-solve dollar ceiling onto the worker request. It was declared
+        // and documented on EngineBudget but silently dropped here, so a benchmark/customer caller
+        // pinning `dollarCap` got NO enforcement and, if it did not also persist a run-row hard
+        // cap,
+        // ran with no dollar cap at all.
+        .dollarCap(request.budget() == null ? null : request.budget().dollarCap())
         .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
         .verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
         // progress-v2 (V255, default OFF): novelty-based progress + repetition force + bounded
