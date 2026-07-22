@@ -30,12 +30,17 @@ public class UserRunsController {
   public ResponseEntity<UserRunsSummaryData> userRunsSummary(
       @RequestParam(defaultValue = "30") int days,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireAuthenticated(userDetails);
-    String orgId = guard.getOrgIdOrNull(userDetails);
-    if (orgId != null) {
-      return ResponseEntity.ok(stateStore.computeUserRunsSummary(orgId, days));
+    // RR-1191 — GLOBAL requires explicit SUPER_ADMIN authority; a null-org ordinary user is
+    // refused rather than silently widened to cross-tenant user display names/activity. `days`
+    // is bounded to avoid caller-controlled unbounded history scans.
+    if (days < 1 || days > 366) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.BAD_REQUEST, "days must be between 1 and 366.");
     }
-    // SUPER_ADMIN: global view
-    return ResponseEntity.ok(stateStore.computeUserRunsSummaryGlobal(days));
+    RunAccessGuard.AnalyticsScope scope = guard.resolveAnalyticsScope(userDetails);
+    if (scope.global()) {
+      return ResponseEntity.ok(stateStore.computeUserRunsSummaryGlobal(days));
+    }
+    return ResponseEntity.ok(stateStore.computeUserRunsSummary(scope.orgId(), days));
   }
 }
