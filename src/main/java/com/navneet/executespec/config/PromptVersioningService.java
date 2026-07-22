@@ -5,7 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 import com.navneet.executespec.state.entity.PromptAuditEntry;
 import com.navneet.executespec.state.repository.PromptAuditRepository;
@@ -82,38 +83,90 @@ public class PromptVersioningService {
                 log.warn(
                     "[PromptVersioning] Auto-rollback triggered for {} v{} — failure rate {:.0%}",
                     entry.getPromptFile(), entry.getVersion(), failureRate);
-                rollback(entry, "AUTO");
+                if (!restore(entry, "AUTO")) {
+                  log.error(
+                      "[PromptVersioning] Auto-rollback did NOT complete for {} v{} — live prompt"
+                          + " may still hold the degraded content",
+                      entry.getPromptFile(),
+                      entry.getVersion());
+                }
               }
             });
+  }
+
+  /** RR-1304 — a rollback either restored proven content, had nothing to restore, or FAILED. */
+  public enum RollbackOutcome {
+    /** No audit history for the prompt — nothing to roll back to. */
+    NO_HISTORY,
+    /**
+     * The atomic restore or its post-write hash verification failed — the endpoint must not 200.
+     */
+    RESTORE_FAILED,
+    /** The live prompt now provably holds the pre-optimisation content. */
+    ROLLED_BACK
   }
 
   /**
    * Reverts the named prompt to the content stored in its latest audit entry (i.e. the content
    * before the last optimisation was applied).
    *
+   * <p>RR-1304 — the previous implementation truncated the live file in place, swallowed any {@code
+   * IOException}, and returned {@code true} whenever an audit row merely existed, so a disk /
+   * permission / short-write failure was acknowledged as a successful rollback (HTTP 200) while the
+   * live prompt could be left truncated. The restore is now atomic (temp file in the same directory
+   * + atomic move) and is only reported successful after re-reading the file and proving its
+   * content hash matches the intended content.
+   *
    * @param promptFileName file name without directory (e.g. {@code "reviewer-v2.txt"})
-   * @return true if rollback was performed, false if no audit history found
+   * @return the typed rollback outcome
    */
-  public boolean rollback(String promptFileName) {
+  public RollbackOutcome rollback(String promptFileName) {
     return auditRepository
         .findTopByPromptFileOrderByVersionDesc(promptFileName)
         .map(
-            entry -> {
-              rollback(entry, "MANUAL");
-              return true;
-            })
-        .orElse(false);
+            entry ->
+                restore(entry, "MANUAL")
+                    ? RollbackOutcome.ROLLED_BACK
+                    : RollbackOutcome.RESTORE_FAILED)
+        .orElse(RollbackOutcome.NO_HISTORY);
   }
 
-  private void rollback(PromptAuditEntry entry, String trigger) {
+  /**
+   * Atomically writes {@code entry.getPreviousContent()} to the live prompt path and verifies the
+   * on-disk result by re-reading and hashing it. Returns true only when the file provably holds the
+   * intended content.
+   */
+  private boolean restore(PromptAuditEntry entry, String trigger) {
     Path promptPath = resolvePromptPath(entry.getPromptFile());
+    String intended = entry.getPreviousContent() == null ? "" : entry.getPreviousContent();
+    byte[] intendedBytes = intended.getBytes(StandardCharsets.UTF_8);
+    Path tmp = null;
     try {
-      Files.writeString(
-          promptPath,
-          entry.getPreviousContent(),
-          StandardCharsets.UTF_8,
-          StandardOpenOption.TRUNCATE_EXISTING,
-          StandardOpenOption.CREATE);
+      Path dir = promptPath.toAbsolutePath().getParent();
+      if (dir != null) Files.createDirectories(dir);
+      tmp = Files.createTempFile(dir, ".rollback-", ".tmp");
+      Files.write(tmp, intendedBytes);
+      try {
+        Files.move(
+            tmp, promptPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (java.nio.file.AtomicMoveNotSupportedException atomicUnsupported) {
+        // Fall back to a non-atomic replace when the filesystem cannot do an atomic move; the
+        // reread-and-hash proof below still guards against a short/partial write.
+        Files.move(tmp, promptPath, StandardCopyOption.REPLACE_EXISTING);
+      }
+      tmp = null; // moved
+
+      // Reread + hash proof — a truncated or otherwise corrupt write fails here instead of being
+      // reported as a successful rollback.
+      byte[] onDisk = Files.readAllBytes(promptPath);
+      if (!sha256(onDisk).equals(sha256(intendedBytes))) {
+        log.error(
+            "[PromptVersioning] Rollback verification MISMATCH for {} v{} — on-disk content does"
+                + " not match intended content",
+            entry.getPromptFile(),
+            entry.getVersion());
+        return false;
+      }
 
       Counter.builder("executespec.prompt.optimisation.rolledback")
           .tag("prompt", entry.getPromptFile())
@@ -127,12 +180,30 @@ public class PromptVersioningService {
           entry.getVersion(),
           entry.getVersion() - 1,
           trigger);
+      return true;
     } catch (IOException e) {
       log.error(
           "[PromptVersioning] Rollback failed for {} v{}: {}",
           entry.getPromptFile(),
           entry.getVersion(),
           e.getMessage());
+      return false;
+    } finally {
+      if (tmp != null) {
+        try {
+          Files.deleteIfExists(tmp);
+        } catch (IOException ignored) {
+          // best-effort cleanup of the temp file
+        }
+      }
+    }
+  }
+
+  private static String sha256(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
     }
   }
 

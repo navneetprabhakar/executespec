@@ -229,13 +229,36 @@ public class ConfigAdminController {
   }
 
   @PostMapping("/refresh")
-  public ResponseEntity<Map<String, Object>> refresh() {
+  public ResponseEntity<Map<String, Object>> refresh(@AuthenticationPrincipal AppUserDetails user) {
     ConfigRefreshService.RefreshResult result = configRefreshService.refresh();
+    // RR-533 — a refresh activates externally-edited routing/concurrency/continuation/tracing
+    // policy
+    // in the running JVM. Like the PUT/DELETE config and secret-version paths, it MUST leave a
+    // durable actor record so incident review can distinguish automatic startup state from a manual
+    // live policy change. Secret VALUES are never recorded — only the changed key NAMES.
+    recordRefreshAudit(user, result.changedKeys());
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("changedKeys", result.changedKeys());
     response.put("refreshedAt", result.refreshedAt().toString());
     response.put("totalChanged", result.changedKeys().size());
     return ResponseEntity.ok(response);
+  }
+
+  private void recordRefreshAudit(AppUserDetails user, List<String> changedKeys) {
+    String actorId = user == null || user.getUser() == null ? null : user.getUser().getId();
+    String keysJson =
+        changedKeys.stream()
+            .map(k -> "\"" + k.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+            .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("RUNTIME_CONFIG_REFRESHED")
+            .entityType("RUNTIME_CONFIG")
+            .entityId("refresh")
+            .actorId(actorId)
+            .newValue(
+                "{\"changedKeyCount\":" + changedKeys.size() + ",\"changedKeys\":" + keysJson + "}")
+            .build());
   }
 
   private static String extractSecretId(String fullName) {
