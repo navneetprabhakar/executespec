@@ -55,21 +55,35 @@ public class ContextSanitizer {
 
   // Secret patterns in LLM output
 
+  // RR-037 (2026-07-22, P1) — the redaction pattern set must not be materially narrower than
+  // GeneratedSecretScanner's provider coverage, since provider exceptions echoed into logs/tool
+  // envelopes carry the same formats. Additions below close the Stripe live/restricted, full GitHub
+  // token family, Slack, JWT, Basic-auth, AWS secret-key and credentials-in-URL gaps.
   private static final List<Pattern> SECRET_OUTPUT_PATTERNS =
       List.of(
           // API keys
-          Pattern.compile("\\bsk-[A-Za-z0-9\\-_]{20,}"), // OpenAI sk- keys
+          Pattern.compile("\\bsk-(?:proj-)?[A-Za-z0-9\\-_]{20,}"), // OpenAI / DeepSeek sk- keys
           Pattern.compile("\\bsk-ant-[A-Za-z0-9\\-_]{20,}"), // Anthropic sk-ant- keys
+          Pattern.compile("\\bsk_live_[A-Za-z0-9]{20,}"), // Stripe live secret keys
+          Pattern.compile("\\brk_live_[A-Za-z0-9]{20,}"), // Stripe live restricted keys
           Pattern.compile("\\bAIza[A-Za-z0-9\\-_]{30,}"), // Google API keys
           Pattern.compile("\\bes_pat_[A-Za-z0-9\\-_]{16,}"), // ExecuteSpec PATs
-          Pattern.compile("\\bghp_[A-Za-z0-9]{20,}"), // GitHub classic PATs
+          Pattern.compile(
+              "\\bgh[pousr]_[A-Za-z0-9]{20,}"), // GitHub token family (ghp/gho/ghu/ghs/ghr)
           Pattern.compile("\\bgithub_pat_[A-Za-z0-9_]{20,}"), // GitHub fine-grained PATs
+          Pattern.compile("\\bxox[baprs]-[A-Za-z0-9\\-]{10,}"), // Slack tokens
           Pattern.compile("\\bAKIA[0-9A-Z]{16}\\b"), // AWS access-key ids
           Pattern.compile(
               "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
+          // JSON Web Tokens (header.payload.signature)
+          Pattern.compile("\\beyJ[A-Za-z0-9\\-_]+\\.eyJ[A-Za-z0-9\\-_]+\\.[A-Za-z0-9\\-_]+"),
           // Authorization headers
           Pattern.compile("Bearer\\s+[A-Za-z0-9\\-_.~+/]{20,}"), // Bearer tokens
+          Pattern.compile("Basic\\s+[A-Za-z0-9+/]{16,}={0,2}"), // Basic-auth credentials
+          // Credentials embedded in a URL (scheme://user:pass@host)
+          Pattern.compile("\\b[a-zA-Z][a-zA-Z0-9+.\\-]*://[^\\s:@/]+:[^\\s:@/]+@"),
           // Generic secrets
+          Pattern.compile("(?i)aws_?secret_?access_?key\\s*[:=]\\s*['\"]?[A-Za-z0-9/+]{20,}"),
           Pattern.compile("(?i)api[_\\-]?key\\s*[:=]\\s*['\"]?[A-Za-z0-9\\-_]{16,}"),
           Pattern.compile("(?i)secret\\s*[:=]\\s*['\"]?[A-Za-z0-9\\-_]{16,}"),
           Pattern.compile("(?i)password\\s*[:=]\\s*['\"]?\\S{8,}"));

@@ -83,6 +83,11 @@ public class FeatureFlagService implements MessageListener {
         repository
             .findByFlagKey(key)
             .orElseThrow(() -> new IllegalArgumentException("Unknown feature flag: " + key));
+    // RR-063 (2026-07-22, P1) — validate the incoming value against the flag's declared type before
+    // persisting. Boolean/int readers silently coerce garbage to false / a caller default, so a
+    // malformed admin write could disable a capability or apply inconsistent per-caller behaviour
+    // with no error. Reject the write with a 400 (IllegalArgumentException) instead.
+    validateValueForType(key, flag.getValueType(), value);
     String previousValue = flag.getFlagValue();
     flag.setFlagValue(value);
     flag.setUpdatedBy(userId);
@@ -109,6 +114,51 @@ public class FeatureFlagService implements MessageListener {
 
     log.info("Feature flag updated: {} = {} (by userId={})", key, value, userId);
     return saved;
+  }
+
+  /**
+   * RR-063 — enforce the flag's declared {@link FeatureFlag.ValueType} at the write boundary.
+   * STRING accepts any non-null value; BOOLEAN must be {@code true}/{@code false}; INTEGER must
+   * parse as an int; PERCENTAGE must be an int in {@code [0, 100]}. A mismatch is a contract error,
+   * not a silently-coerced default.
+   */
+  static void validateValueForType(String key, FeatureFlag.ValueType type, String value) {
+    if (value == null) {
+      throw new IllegalArgumentException("Feature flag '" + key + "' value must not be null");
+    }
+    FeatureFlag.ValueType effective = type == null ? FeatureFlag.ValueType.STRING : type;
+    switch (effective) {
+      case BOOLEAN -> {
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+          throw new IllegalArgumentException(
+              "Feature flag '" + key + "' is BOOLEAN; value must be 'true' or 'false'");
+        }
+      }
+      case INTEGER -> {
+        try {
+          Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException(
+              "Feature flag '" + key + "' is INTEGER; value must be a whole number");
+        }
+      }
+      case PERCENTAGE -> {
+        int pct;
+        try {
+          pct = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException(
+              "Feature flag '" + key + "' is PERCENTAGE; value must be an integer 0-100");
+        }
+        if (pct < 0 || pct > 100) {
+          throw new IllegalArgumentException(
+              "Feature flag '" + key + "' is PERCENTAGE; value must be within 0-100");
+        }
+      }
+      case STRING -> {
+        /* any non-null value accepted */
+      }
+    }
   }
 
   private void upsertFlag(String key, String value, String description, String userId) {
