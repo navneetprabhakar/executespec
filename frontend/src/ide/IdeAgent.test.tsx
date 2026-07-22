@@ -251,7 +251,10 @@ describe('IdeAgent', () => {
     // Pending gate surfaces inline as an action card
     expect(host.textContent).toContain('Remote sandboxes waiting for your approval');
     expect(host.textContent).toContain('Add audit logs');
-    expect(host.textContent).toContain('Repo token scoped to selected project');
+    // RR-839 — the trust panel states only enforced properties, not an unproven
+    // credential-scope guarantee.
+    expect(host.textContent).toContain('Runs on a policy-guarded server workspace');
+    expect(host.textContent).not.toContain('Repo token scoped to selected project');
     // Internals are de-jargoned out of the main view
     expect(host.textContent).not.toContain('chat_answer');
     expect(host.textContent).not.toContain('ES AI credits');
@@ -396,8 +399,10 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('1 waiting approval');
     expect(host.textContent).toContain('Approval inbox');
     expect(host.textContent).toContain('2 credits');
-    expect(host.textContent).not.toContain('~$0.25');
-    expect(host.textContent).not.toContain('cap $5.00');
+    // RR-1489 — the drawer approval inbox must also disclose the USD estimate and
+    // the hard cap that bound the spend, not credits alone.
+    expect(host.textContent).toContain('~$0.25');
+    expect(host.textContent).toContain('cap $5.00');
     expect(host.textContent).toContain('low risk');
     expect(host.textContent).toContain('Approve & run');
     expect(host.textContent).toContain('Reject');
@@ -465,7 +470,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Create a remote sandbox to add audit logging');
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('remote clone');
-    expect(host.textContent).toContain('Run events stay in audit trail');
+    // RR-839 — honest trust copy: enforced properties only.
+    expect(host.textContent).toContain('Every run event is recorded in the audit trail');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
     expect(host.querySelectorAll('.agent-composer-contract').length).toBe(1);
@@ -1103,10 +1109,12 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('approval before credits');
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('Branch');
-    expect(host.textContent).toContain('Secrets are not displayed in chat');
-    // The trust panel must NOT claim an outbound-network policy: no such policy
-    // is enforced today. Re-add only when the strict sandbox runtime lands.
+    // RR-839 — the trust panel must NOT claim a secret-hiding or outbound-network
+    // policy: neither is enforced by the current policy-guarded host workspace.
+    // Re-add only when the strict sandbox runtime lands with a persisted isolation DTO.
+    expect(host.textContent).not.toContain('Secrets are not displayed in chat');
     expect(host.textContent).not.toContain('Outbound network');
+    expect(host.textContent).toContain('Approval required before any code runs');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
   });
 

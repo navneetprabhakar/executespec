@@ -744,6 +744,10 @@ export default function IdeBenchmark() {
   const [runs, setRuns] = useState<api.BenchmarkRun[] | null>(null);
   const [detail, setDetail] = useState<api.BenchmarkDetail | null>(null);
   const [err, setErr] = useState('');
+  // RR-1350 — the tracking controller only exists in local/dev/benchmark profiles.
+  // In production it returns 404, which the 5s poll would otherwise hit forever.
+  // Detect that once, stop polling, and say so instead of showing a sync error.
+  const [unavailable, setUnavailable] = useState(false);
   const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -758,6 +762,12 @@ export default function IdeBenchmark() {
       setErr('');
       setLastSuccessfulRefresh(Date.now());
     } catch (e: unknown) {
+      // RR-1350 — a 404 means this environment does not host the tracking controller.
+      if (Number((e as {status?: number}).status) === 404) {
+        setUnavailable(true);
+        setErr('');
+        return;
+      }
       setErr(e instanceof Error ? e.message : 'Failed to load benchmark runs.');
       // A transient telemetry failure must not replace the last known-good snapshot with an
       // authoritative-looking empty state.
@@ -774,6 +784,11 @@ export default function IdeBenchmark() {
       setErr('');
       setLastSuccessfulRefresh(Date.now());
     } catch (e: unknown) {
+      if (Number((e as {status?: number}).status) === 404) {
+        setUnavailable(true);
+        setErr('');
+        return;
+      }
       setErr(e instanceof Error ? e.message : 'Failed to refresh benchmark detail.');
       // Keep the last good detail, but make the failed refresh visible to the operator.
     } finally {
@@ -788,13 +803,13 @@ export default function IdeBenchmark() {
 
   // List: initial load + 5s poll (skipped when the tab is hidden).
   useEffect(() => {
-    if (!isAdmin || benchmarkId) return;
+    if (!isAdmin || benchmarkId || unavailable) return;
     void loadList();
     const t = setInterval(() => {
       if (!document.hidden) void loadList();
     }, 5000);
     return () => clearInterval(t);
-  }, [benchmarkId, isAdmin, loadList]);
+  }, [benchmarkId, isAdmin, loadList, unavailable]);
 
   // Detail route: load on open + 3s poll while selected (skipped when hidden).
   useEffect(() => {
@@ -802,12 +817,13 @@ export default function IdeBenchmark() {
       setDetail(null);
       return;
     }
+    if (unavailable) return;
     void loadDetail(benchmarkId);
     const t = setInterval(() => {
       if (!document.hidden) void loadDetail(benchmarkId);
     }, 3000);
     return () => clearInterval(t);
-  }, [benchmarkId, loadDetail]);
+  }, [benchmarkId, loadDetail, unavailable]);
 
   // Browser timers are throttled in background tabs. Refetch immediately when the operator
   // returns instead of waiting for the next polling interval and presenting an old snapshot.
@@ -862,6 +878,19 @@ export default function IdeBenchmark() {
       <div className='ide-pane' style={{maxWidth: 760}}>
         <h1 className='ide-h1'>{benchmarkId ? 'Benchmark Detail' : 'Benchmarks'}</h1>
         <EmptyCard>This is an operator-only surface (SUPER_ADMIN).</EmptyCard>
+      </div>
+    );
+  }
+
+  if (unavailable) {
+    // RR-1350 — the benchmark tracking backend is not deployed in this environment.
+    return (
+      <div className='ide-pane' style={{maxWidth: 760}}>
+        <h1 className='ide-h1'>Benchmarks</h1>
+        <EmptyCard>
+          Benchmark tracking is not available in this environment. The tracking backend runs only in
+          local, dev and dedicated benchmark deployments.
+        </EmptyCard>
       </div>
     );
   }

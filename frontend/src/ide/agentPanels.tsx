@@ -494,6 +494,9 @@ export function AgentChatsDrawer({
                     <button
                       className='ide-btn agent-btn-primary'
                       onClick={() => onApproveGate(gate)}
+                      // RR-1489 — no one-click approval while cost is unknown; a null
+                      // credit value also disables the server's stale-approval guard.
+                      disabled={gate.creditsRequired == null}
                     >
                       Approve &amp; run
                     </button>
@@ -564,9 +567,13 @@ function gateAge(gate: api.AgentGateDecisionCard): string {
   return relTime(gate.submittedAt);
 }
 
-function gateCostLabel(gate: api.AgentGateDecisionCard): string {
-  const parts = [];
+// RR-1489 — the gate authorizes provider spend, so the card must show the USD
+// estimate and the hard cap that bounds the run, not credits alone.
+export function gateCostLabel(gate: api.AgentGateDecisionCard): string {
+  const parts: string[] = [];
+  if (gate.estimatedCostUsd != null) parts.push(`~$${gate.estimatedCostUsd.toFixed(2)}`);
   if (gate.creditsRequired != null) parts.push(`${gate.creditsRequired} credits`);
+  if (gate.hardCapUsd != null) parts.push(`cap $${gate.hardCapUsd.toFixed(2)}`);
   return parts.length ? parts.join(' / ') : 'cost pending';
 }
 
@@ -935,11 +942,8 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
       // Keep the chat surface responsive even if a backend returns a very large file.
       const shaped = boundedInlineDiff(payload);
       setDiff({path, lines: shaped.lines});
-      setMessage(
-        shaped.truncated
-          ? 'Diff truncated to 2,500 lines. Open Changed files for the full result.'
-          : '',
-      );
+      // RR-1494 — surface the exact clip bound (source lines/chars or post-diff lines).
+      setMessage(shaped.truncated ? shaped.note : '');
     } catch {
       if (gen !== openGenRef.current) return;
       setDiff(null);
@@ -1254,11 +1258,20 @@ function GateCard({
       <div className='agent-card-consequence-row'>
         <span>{gate.projectName || 'standalone sandbox'}</span>
         {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
+        {/* RR-1489 — render the USD estimate and the hard cap that bound the spend. */}
+        {gate.estimatedCostUsd != null && <span>~${gate.estimatedCostUsd.toFixed(2)}</span>}
         {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
+        {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
         {gate.provider && <span>{gate.provider}</span>}
         {gateAge(gate) && <span>{gateAge(gate)}</span>}
         <span>opens a PR</span>
       </div>
+      {gate.creditsRequired == null && (
+        <div className='agent-card-sub' role='status'>
+          Cost is still being estimated. Approval is unavailable until the run credit count is
+          known.
+        </div>
+      )}
       {gate.summary && <div className='agent-card-sub'>{gate.summary}</div>}
       {gate.tasks.length > 0 && (
         <ul className='agent-card-tasks'>
@@ -1272,7 +1285,8 @@ function GateCard({
         <button
           className='ide-btn agent-btn-primary'
           onClick={() => onApprove(gate)}
-          disabled={busy}
+          // RR-1489 — cost must be known before spend is authorized.
+          disabled={busy || gate.creditsRequired == null}
         >
           Approve &amp; run
         </button>
@@ -1322,13 +1336,18 @@ function SandboxContractPanel() {
 }
 
 function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
+  // RR-839 — state only properties the runtime actually enforces. The prior
+  // "repo token scoped to selected project" and "secrets are not displayed in
+  // chat" lines asserted a credential/isolation boundary the current
+  // policy-guarded server workspace does not prove (RR-118..RR-120, RR-142), so
+  // they are removed rather than shown as a security guarantee.
   return (
     <div className={compact ? 'agent-trust-panel compact' : 'agent-trust-panel'}>
-      <span>Repo token scoped to selected project</span>
-      <span>Secrets are not displayed in chat</span>
-      <span>Run events stay in audit trail</span>
-      <span>Approval required before code execution</span>
-      <span>Retention follows workspace cleanup policy</span>
+      <span>Runs on a policy-guarded server workspace</span>
+      <span>Your local files are never touched</span>
+      <span>Approval required before any code runs</span>
+      <span>Every run event is recorded in the audit trail</span>
+      <span>Cost is capped before the run starts</span>
     </div>
   );
 }
