@@ -46,10 +46,15 @@ public class CloudRunClient {
   /** Read-only enumeration of the preview services this client deployed. */
   private final CloudRunServiceInventory inventory;
 
+  // RR-1000: the health probe hits a URL served by generated customer code. Following redirects let
+  // that code bounce the server-side probe onto loopback, RFC1918, link-local or the GCE metadata
+  // endpoint and observe reachability/timing (SSRF). Never follow redirects on the probe; a
+  // terminal
+  // 3xx is simply not a 2xx and reads as unhealthy.
   private final HttpClient httpClient =
       HttpClient.newBuilder()
           .connectTimeout(java.time.Duration.ofSeconds(10))
-          .followRedirects(HttpClient.Redirect.NORMAL)
+          .followRedirects(HttpClient.Redirect.NEVER)
           .build();
 
   public CloudRunClient(DeploymentProperties props, ObjectMapper objectMapper) {
@@ -449,13 +454,19 @@ public class CloudRunClient {
    *
    * <p>RR-1001: the old gate accepted any status below 500, so a service returning 401/403/404 —
    * broken auth/IAM, a missing app route, or an unpublished revision — read as "healthy" and the
-   * preview/deployment was marked RUNNING/LIVE while genuinely inaccessible. The client follows
-   * redirects (NORMAL), so a legitimate 3xx→2xx flow still resolves to 2xx; a terminal non-2xx now
+   * preview/deployment was marked RUNNING/LIVE while genuinely inaccessible. A terminal non-2xx now
    * fails the check.
+   *
+   * <p>RR-1000: the client no longer follows redirects and the target must be an HTTPS Cloud Run
+   * ({@code *.run.app}) origin, so generated code cannot redirect the probe onto internal networks.
    */
   public boolean healthCheck(String serviceUrl) {
     if (serviceUrl == null || serviceUrl.isBlank()) {
       log.error("Health check called with null/empty service URL");
+      return false;
+    }
+    if (!isTrustedCloudRunUrl(serviceUrl)) {
+      log.error("Health check refused non-Cloud-Run/non-HTTPS target (RR-1000): {}", serviceUrl);
       return false;
     }
     for (int attempt = 1; attempt <= 3; attempt++) {
@@ -491,6 +502,23 @@ public class CloudRunClient {
       }
     }
     return false;
+  }
+
+  /**
+   * RR-1000 — the probe target must be an HTTPS Cloud Run origin. Cloud Run public URLs are always
+   * {@code https://…​.run.app}; anything else (a plain-text scheme, an IP literal, an internal
+   * host) is refused so a compromised or redirect-influenced URL cannot steer the server-side probe
+   * at internal infrastructure.
+   */
+  static boolean isTrustedCloudRunUrl(String serviceUrl) {
+    try {
+      URI uri = URI.create(serviceUrl.trim());
+      if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
+      String host = uri.getHost();
+      return host != null && host.toLowerCase().endsWith(".run.app");
+    } catch (RuntimeException e) {
+      return false;
+    }
   }
 
   private void exec(String... cmd) throws IOException, InterruptedException {

@@ -22,6 +22,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EnvVarDetector {
 
+  private final EnvScanSafety scanSafety = new EnvScanSafety(); // RR-689 / RR-691
+
   /** Detected environment variable with classification metadata. */
   public record DetectedEnvVar(
       String name, // e.g., "STRIPE_SECRET_KEY"
@@ -387,9 +389,12 @@ public class EnvVarDetector {
       String value = matcher.group(2).trim();
       if (isExcluded(name)) continue;
 
+      EnvVarCategory category = classifyVar(name);
       // If value is empty or a placeholder, it's required
-      String defaultValue = (value.isEmpty() || isPlaceholder(value)) ? null : value;
-      addVar(result, name, classifyVar(name), source, defaultValue);
+      String raw = (value.isEmpty() || isPlaceholder(value)) ? null : value;
+      // RR-689 — never surface a real credential (secret-classified or scanner-recognised) default.
+      String safe = scanSafety.sanitizeDefault(category == EnvVarCategory.SECRET, raw);
+      addVar(result, name, category, source, safe);
     }
   }
 
@@ -579,7 +584,8 @@ public class EnvVarDetector {
     try {
       Path file = SafeWorkspacePath.resolveWithin(workspace, relativePath);
       if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
-      String content = Files.readString(file);
+      // RR-691 — bounded byte read (helper); then apply the 100k-character scan cap.
+      String content = scanSafety.readBoundedUtf8(file);
       return content.length() > 100_000 ? content.substring(0, 100_000) : content;
     } catch (SecurityException e) {
       // Deliberately does not log the resolved target: the repository chose where it pointed.

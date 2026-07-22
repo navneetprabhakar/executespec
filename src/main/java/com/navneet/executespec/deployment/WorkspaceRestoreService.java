@@ -173,17 +173,20 @@ public class WorkspaceRestoreService {
    * Re-initialises a git repository in the restored workspace. The archived zip excludes .git, so
    * we create a fresh repo with all files committed. This is required for apply-suggestion (which
    * creates branches off main).
+   *
+   * <p>RR-162: git reconstruction failure is FATAL, not swallowed. Apply, diff, sync and
+   * publication paths assume a valid git repository; the prior code caught every git error as
+   * "non-fatal" while {@code restoreFromGcs} still returned the directory as restored, so those
+   * consumers received a workspace that violated their invariants (partial commits, false diffs, or
+   * publication of unproven archive contents). A failure now propagates so the caller cleans up the
+   * partial extraction and returns a typed failure rather than a corrupt success.
    */
-  private void initGitRepo(Path workspace) {
-    try {
-      runGit(workspace, "git", "init", "-b", "main");
-      runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
-      runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
-      runGit(workspace, "git", "add", "-A");
-      runGit(workspace, "git", "commit", "--allow-empty", "-m", "restored from GCS archive");
-    } catch (Exception e) {
-      log.warn("[WorkspaceRestore] Git init failed (non-fatal): {}", e.getMessage());
-    }
+  private void initGitRepo(Path workspace) throws IOException {
+    runGit(workspace, "git", "init", "-b", "main");
+    runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
+    runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
+    runGit(workspace, "git", "add", "-A");
+    runGit(workspace, "git", "commit", "--allow-empty", "-m", "restored from GCS archive");
   }
 
   private void runGit(Path dir, String... cmd) throws IOException {

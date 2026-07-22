@@ -216,18 +216,28 @@ public class PreviewDeploymentService {
         .orElseThrow(() -> new PreviewDeploymentException("All preview VMs at capacity"));
   }
 
-  private String generatePreviewId(String projectName) {
+  // RR-1618 — package-private static so the entropy/format is directly unit-testable; uses no
+  // instance state.
+  static String generatePreviewId(String projectName) {
     String slug =
         projectName
             .toLowerCase()
             .replaceAll("[^a-z0-9]", "-")
             .replaceAll("-+", "-")
             .replaceAll("^-|-$", "");
-    if (slug.length() > 40) {
-      slug = slug.substring(0, 40);
+    // RR-1618: the id is the registry @Id (a merge, not an insert), the DNS label, the Caddy
+    // site-config filename and the remote /tmp dir. The prior 4-hex suffix carried only 16 bits of
+    // entropy over a caller-influenced project slug, so a same-named project collided with
+    // p≈1/65536
+    // per pair — and an attacker who can name a project could retry until a match and silently
+    // overwrite the victim's registry row. Use the full 128-bit UUID (32 hex chars). Cap the slug
+    // so
+    // the whole id stays within the 63-char DNS label limit (24 + '-' + 32 = 57).
+    if (slug.length() > 24) {
+      slug = slug.substring(0, 24).replaceAll("-$", "");
     }
-    String hash = UUID.randomUUID().toString().substring(0, 4);
-    return slug + "-" + hash;
+    String hash = UUID.randomUUID().toString().replace("-", "");
+    return slug.isEmpty() ? hash : slug + "-" + hash;
   }
 
   private void scpDirectory(Path localDir, String remotePath, String targetIp) {
