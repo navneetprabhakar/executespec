@@ -35,6 +35,12 @@
     <executespec.live-llm.enabled>false</executespec.live-llm.enabled>
     <executespec.live-llm.test-mode>false</executespec.live-llm.test-mode>
     <executespec.live-llm.reservation-id></executespec.live-llm.reservation-id>
+    <!-- CI-minutes (2026-07-22): JaCoCo instrumentation + report add real wall-clock to every
+         `mvn test`, but coverage is NOT a gate (there is no jacoco:check). Skip it by default so the
+         CI PR gate (`mvn spotless:check test`) runs uninstrumented; generate coverage on demand with
+         `-Pcoverage`. jacoco-maven-plugin honours the `jacoco.skip` property on both prepare-agent
+         and report goals. -->
+    <jacoco.skip>true</jacoco.skip>
   </properties>
 
   <dependencyManagement>
@@ -605,6 +611,14 @@
                keys; run via -Pintegration. Default Surefire run = fast unit tests
                only so CI's `mvn package` is bounded to a couple of minutes. -->
           <excludedGroups>e2e,integration,chaos</excludedGroups>
+          <!-- CI-minutes (2026-07-22): run test CLASSES across one JVM fork per core. The suite is
+               ~4,500 fast Mockito unit tests (only 5 @SpringBootTest, no shared DB/ports), so
+               process-level forking cuts wall-clock ~3-4x on the 4-core CI runner with zero tests
+               dropped. `1C` = one fork per available core (4 on ubuntu-latest). Locally override
+               with `-DforkCount=N` to cap RAM (each fork ~0.5-1GB). reuseForks avoids per-class JVM
+               startup. -->
+          <forkCount>1C</forkCount>
+          <reuseForks>true</reuseForks>
           <systemPropertyVariables>
             <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
             <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
@@ -694,6 +708,14 @@
   </build>
 
   <profiles>
+    <!-- CI-minutes (2026-07-22): coverage is off by default (see jacoco.skip in <properties>).
+         Run `mvn -Pcoverage test` to instrument + emit target/site/jacoco. -->
+    <profile>
+      <id>coverage</id>
+      <properties>
+        <jacoco.skip>false</jacoco.skip>
+      </properties>
+    </profile>
     <profile>
       <id>integration</id>
       <build>
