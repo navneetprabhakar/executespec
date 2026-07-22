@@ -213,9 +213,14 @@ public class ProjectLaunchController {
     double cost = 0;
     int prOpen = 0, prMerged = 0, prCount = 0;
     for (ExecutionRun r : allRuns.getContent()) {
-      switch (r.getStatus() == null ? "" : r.getStatus()) {
-        case "COMPLETE" -> complete++;
-        case "FAILED", "ABORTED" -> failed++;
+      // RR-693 — classify terminal states explicitly instead of counting everything that is not
+      // COMPLETE/FAILED/ABORTED as active. CANCELLED is terminal (it was inflating the active
+      // count,
+      // showing cancelled work as still running); PARTIAL (RR-345) is a terminal launch that raised
+      // a PR, so it counts as completed, not active.
+      switch (r.getStatus() == null ? "" : r.getStatus().toUpperCase()) {
+        case "COMPLETE", "PARTIAL" -> complete++;
+        case "FAILED", "ABORTED", "CANCELLED" -> failed++;
         default -> active++;
       }
       if (r.getTotalActualTokens() != null) tokens += r.getTotalActualTokens();
@@ -251,6 +256,13 @@ public class ProjectLaunchController {
     if (body == null || body.githubOwner() == null || body.githubOwner().isBlank()) {
       return ResponseEntity.ok(new ValidateOwnerResult(false, "Owner is required"));
     }
+    String owner = body.githubOwner().trim();
+    // RR-694 — validate owner syntax before it reaches a GitHub URL. A GitHub login is 1-39
+    // characters, alphanumeric or single hyphens, no leading/trailing hyphen. Rejecting malformed
+    // input up front stops a crafted owner from being interpolated into an API path.
+    if (!GITHUB_OWNER_PATTERN.matcher(owner).matches()) {
+      return ResponseEntity.ok(new ValidateOwnerResult(false, "Invalid GitHub owner name"));
+    }
     String pat = appUserRepo.findById(user.getId()).map(AppUser::getGithubPat).orElse(null);
     if (pat == null || pat.isBlank()) {
       return ResponseEntity.ok(
@@ -258,49 +270,85 @@ public class ProjectLaunchController {
               false, "Configure a GitHub PAT in your user settings before creating new repos"));
     }
 
+    // RR-694 — account EXISTENCE is not permission to CREATE. The previous implementation returned
+    // canCreate=true whenever GET /orgs/{owner} or GET /users/{owner} succeeded, i.e. for any
+    // public
+    // account, walking the user through a knowingly-invalid launch flow and feeding a false
+    // authority signal to the UI. Verify authoritatively instead, and fail closed to
+    // canCreate=false
+    // (there is no true-until-create middle ground): (1) the caller can always create in their OWN
+    // account; (2) for an org, the caller must be an ACTIVE ADMIN member. Anything unverifiable is
+    // false with an honest "checked on create" reason, never a green pre-flight.
+    String authenticatedLogin;
     try {
-      HttpHeaders h = new HttpHeaders();
-      h.set("Authorization", "Bearer " + pat);
-      h.set("Accept", "application/vnd.github+json");
-      // Try org scope first, fall back to user scope on 404.
-      var orgResp =
+      HttpHeaders h = ghHeaders(pat);
+      var meResp =
           integrationRestTemplate.exchange(
-              "https://api.github.com/orgs/" + body.githubOwner(),
+              "https://api.github.com/user",
               HttpMethod.GET,
               new org.springframework.http.HttpEntity<>(h),
               Map.class);
-      if (orgResp.getStatusCode().is2xxSuccessful()) {
-        return ResponseEntity.ok(new ValidateOwnerResult(true, "Org access verified"));
+      Object login = meResp.getBody() == null ? null : meResp.getBody().get("login");
+      authenticatedLogin = login == null ? null : login.toString();
+    } catch (Exception e) {
+      return ResponseEntity.ok(
+          new ValidateOwnerResult(
+              false, "Could not verify your GitHub identity: " + e.getClass().getSimpleName()));
+    }
+    if (authenticatedLogin != null && authenticatedLogin.equalsIgnoreCase(owner)) {
+      return ResponseEntity.ok(new ValidateOwnerResult(true, "Verified: your own GitHub account"));
+    }
+
+    // Org path — GET /user/memberships/orgs/{owner} is scoped to the PAT's identity and returns the
+    // caller's role/state in that org. Only an active admin can reliably create repositories.
+    try {
+      HttpHeaders h = ghHeaders(pat);
+      var memberResp =
+          integrationRestTemplate.exchange(
+              "https://api.github.com/user/memberships/orgs/" + owner,
+              HttpMethod.GET,
+              new org.springframework.http.HttpEntity<>(h),
+              Map.class);
+      if (memberResp.getStatusCode().is2xxSuccessful() && memberResp.getBody() != null) {
+        Object role = memberResp.getBody().get("role");
+        Object state = memberResp.getBody().get("state");
+        if ("admin".equalsIgnoreCase(String.valueOf(role))
+            && "active".equalsIgnoreCase(String.valueOf(state))) {
+          return ResponseEntity.ok(new ValidateOwnerResult(true, "Verified: organization admin"));
+        }
+        return ResponseEntity.ok(
+            new ValidateOwnerResult(
+                false,
+                "You are a member of "
+                    + owner
+                    + " but repository-create permission cannot be confirmed; it will be checked"
+                    + " on create"));
       }
     } catch (org.springframework.web.client.HttpClientErrorException.NotFound nf) {
-      // Not an org — try user scope.
+      // Not a member of this org (or the org does not exist) — cannot confirm create access.
     } catch (Exception e) {
       return ResponseEntity.ok(
           new ValidateOwnerResult(false, "GitHub error: " + e.getClass().getSimpleName()));
     }
+    return ResponseEntity.ok(
+        new ValidateOwnerResult(
+            false,
+            "Cannot confirm repository-create permission for "
+                + owner
+                + "; it will be checked on create"));
+  }
 
-    try {
-      HttpHeaders h = new HttpHeaders();
-      h.set("Authorization", "Bearer " + pat);
-      h.set("Accept", "application/vnd.github+json");
-      var userResp =
-          integrationRestTemplate.exchange(
-              "https://api.github.com/users/" + body.githubOwner(),
-              HttpMethod.GET,
-              new org.springframework.http.HttpEntity<>(h),
-              Map.class);
-      if (userResp.getStatusCode().is2xxSuccessful()) {
-        // The account exists, but if it's someone else's the PAT won't let us create.
-        // We defer that check until actual create; surface an informational pass here.
-        return ResponseEntity.ok(
-            new ValidateOwnerResult(
-                true, "User account exists — PAT permissions will be checked on create"));
-      }
-    } catch (Exception e) {
-      return ResponseEntity.ok(
-          new ValidateOwnerResult(false, "Owner not found under org or user scope"));
-    }
-    return ResponseEntity.ok(new ValidateOwnerResult(false, "Owner not found"));
+  /**
+   * RR-694 — GitHub login/org-name syntax (1-39 chars, alphanumeric with single interior hyphens).
+   */
+  private static final java.util.regex.Pattern GITHUB_OWNER_PATTERN =
+      java.util.regex.Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$");
+
+  private static HttpHeaders ghHeaders(String pat) {
+    HttpHeaders h = new HttpHeaders();
+    h.set("Authorization", "Bearer " + pat);
+    h.set("Accept", "application/vnd.github+json");
+    return h;
   }
 
   // Access + feature gating (mirror of ExecutionController)

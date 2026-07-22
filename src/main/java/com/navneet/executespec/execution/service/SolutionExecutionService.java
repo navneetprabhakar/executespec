@@ -128,14 +128,13 @@ public class SolutionExecutionService {
       solution.setPipelineRunId(pipelineRunId);
       solutionRepo.save(solution);
 
-      int attemptNumber = solutionRunRepo.countBySolutionId(solution.getId()) + 1;
-      attempt =
-          ExecutionSolutionRun.builder()
-              .solutionId(solution.getId())
-              .pipelineRunId(pipelineRunId)
-              .attemptNumber(attemptNumber)
-              .build();
-      attempt = solutionRunRepo.save(attempt);
+      // RR-532 — the attempt number was computed as countBySolutionId+1 and inserted against the
+      // V90 unique index (solution_id, attempt_number). If a concurrent/retried start selected the
+      // same number, one insert failed and the whole submission was reported as failed even though
+      // its paid child run already existed and kept executing — an untracked, uncancelled orphan.
+      // Reconcile the collision instead of orphaning: on the unique-constraint violation, recompute
+      // the next attempt number and retry so the already-submitted child run is always recorded.
+      attempt = saveAttemptWithUniqueRetry(solution.getId(), pipelineRunId);
     } catch (Exception e) {
       handleFailure(run, solution, "RUNNING", "V2 submit failed: " + shortMsg(e));
       return;
@@ -194,7 +193,17 @@ public class SolutionExecutionService {
     String handover = contextService.buildHandoverContext(solution);
     String fullRequest =
         solution.getDescription() == null ? solution.getTitle() : solution.getDescription();
-    if (!handover.isBlank()) fullRequest = fullRequest + "\n\n" + handover;
+    // RR-995 — the handover text is planner/model-derived upstream-solution title/description/PR
+    // content. Appended raw, an injected or malformed upstream string could rewrite the downstream
+    // planner/worker's instructions and repository targets. Delimit it as untrusted evidence via
+    // PromptTrustBoundary so it is treated as data, not as authoritative instructions.
+    if (!handover.isBlank()) {
+      fullRequest =
+          fullRequest
+              + "\n\n"
+              + com.navneet.executespec.agent.PromptTrustBoundary.wrap(
+                  "UPSTREAM_SOLUTION_CONTRACTS", handover);
+    }
 
     // Continue-on-PR: inject review comments into the worker's request so the
     // planner/worker knows what to fix.
@@ -217,19 +226,38 @@ public class SolutionExecutionService {
       }
     }
 
-    ExecutionSolutionRepo mapping =
-        solution.getRepoMappings() == null || solution.getRepoMappings().isEmpty()
-            ? null
-            : solution.getRepoMappings().iterator().next();
-    UUID repoId = mapping == null ? null : mapping.getRepoId();
-    String repoUrl = null;
-    if (repoId != null) {
-      repoUrl =
-          projectRepoRepo
-              .findById(repoId)
-              .map(r -> "https://github.com/" + r.getGithubRepoFullName())
-              .orElse(null);
+    // RR-529 — a solution's repo model is plural (cross-repo handover is a built feature), but this
+    // used to take only iterator().next() and silently drop every other mapping, so a planned
+    // multi-repo solution executed against one arbitrary set-order repository while the required
+    // changes in the others never ran — and the launch could still report success. Pass EVERY
+    // mapped
+    // repository, in a deterministic order, into the canonical multi-repo V2 request (repoUrl=null
+    // +
+    // EXISTING + selectedRepoIds), the same shape the unified dispatch path uses. An unknown mapped
+    // repo id is corruption/drift and fails closed rather than silently narrowing the scope.
+    List<UUID> mappedRepoIds =
+        (solution.getRepoMappings() == null
+                ? java.util.stream.Stream.<ExecutionSolutionRepo>empty()
+                : solution.getRepoMappings().stream())
+            .map(ExecutionSolutionRepo::getRepoId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .sorted(java.util.Comparator.comparing(UUID::toString))
+            .toList();
+    for (UUID id : mappedRepoIds) {
+      if (projectRepoRepo.findById(id).isEmpty()) {
+        throw new IllegalStateException(
+            "solution "
+                + solution.getId()
+                + " maps unknown repository "
+                + id
+                + " — refusing to execute against an unresolved target");
+      }
     }
+    boolean hasRepos = !mappedRepoIds.isEmpty();
+    // repoUrl stays null for the multi-repo/EXISTING path; the selected repo ids drive per-repo
+    // cloning. Only a solution with zero mapped repos falls back to a NEW repository.
+    String repoUrl = null;
     String githubPat =
         appUserRepo.findById(run.getCreatedBy()).map(u -> u.getGithubPat()).orElse(null);
 
@@ -247,7 +275,7 @@ public class SolutionExecutionService {
             // NOT skip the gate.
             "EXECUTION_VIEW_APPROVED",
             repoUrl,
-            repoUrl != null ? "EXISTING" : "NEW",
+            hasRepos ? "EXISTING" : "NEW",
             githubPat,
             null,
             true,
@@ -258,7 +286,7 @@ public class SolutionExecutionService {
             run.getOrgId(),
             run.getProjectId(),
             "PRODUCTION",
-            repoId == null ? List.of() : List.of(repoId),
+            mappedRepoIds,
             null,
             false,
             run.getBranch());
@@ -758,6 +786,30 @@ public class SolutionExecutionService {
   private void emit(String executionRunId, String type, String payload) {
     broadcaster.emit(
         "exec:" + executionRunId, new RunEvent(type, executionRunId, payload, null, Instant.now()));
+  }
+
+  /**
+   * RR-532 — allocate and persist the attempt row, reconciling the V90 unique-index collision
+   * (solution_id, attempt_number) so an already-submitted paid child run is always recorded rather
+   * than orphaned. {@code saveAndFlush} forces the constraint to fire now (a deferred {@code save}
+   * would only surface the violation at commit, outside this retry).
+   */
+  ExecutionSolutionRun saveAttemptWithUniqueRetry(String solutionId, String pipelineRunId) {
+    org.springframework.dao.DataIntegrityViolationException last = null;
+    for (int i = 0; i < 5; i++) {
+      int attemptNumber = solutionRunRepo.countBySolutionId(solutionId) + 1;
+      try {
+        return solutionRunRepo.saveAndFlush(
+            ExecutionSolutionRun.builder()
+                .solutionId(solutionId)
+                .pipelineRunId(pipelineRunId)
+                .attemptNumber(attemptNumber)
+                .build());
+      } catch (org.springframework.dao.DataIntegrityViolationException dup) {
+        last = dup; // a concurrent starter took this attempt number — recompute and retry
+      }
+    }
+    throw last;
   }
 
   private void recordAttemptTerminal(
