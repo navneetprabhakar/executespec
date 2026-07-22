@@ -1847,13 +1847,16 @@ export function IdeOrgSettings() {
       )}
 
       {/* ── Audit log ── */}
-      <div className='ide-h2'>Audit log</div>
+      {/* RR-743 — this panel loads only the latest 50 events and has no pagination, total or export.
+          Label it "Latest 50 events" so operators cannot mistake a partial sample for the complete
+          security trail. */}
+      <div className='ide-h2'>Audit log · latest 50 events</div>
       <div className='ide-card' style={{padding: 0}}>
         {!auditOpen ? (
           <div style={{padding: 16}}>
             <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
               Org-scoped audit trail — role changes, SSO, project-collaborator toggles, member
-              actions.
+              actions. Shows only the most recent 50 events; older entries are not paged here.
             </div>
             <button className='ide-btn ghost' onClick={loadAudit}>
               Load audit log
@@ -1899,23 +1902,31 @@ export function IdeOrgSettings() {
             </div>
           ))
         )}
+        {auditOpen && audit && audit.length >= 50 && (
+          <div style={{padding: '11px 16px', fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+            Showing the latest 50 events. Older audit history is not paginated here.
+          </div>
+        )}
       </div>
 
       {/* ── Compliance ── */}
-      <div className='ide-h2'>Compliance</div>
+      {/* RR-744 — do not assert org-wide compliance verdicts from static UI. The previous
+          hard-coded "SOC 2 · Type II ready" and "GDPR · Compliant" green badges were not sourced
+          from any certification, region, DPA or control-status data and could remain green even when
+          scope did not support the claim. Link to the authoritative documents instead of asserting a
+          certification state the product cannot prove here. */}
+      <div className='ide-h2'>Compliance &amp; data protection</div>
       <div className='ide-card'>
         <div className='ide-kv'>
-          <span>SOC 2</span>
-          <IdeBadge kind='ok'>Type II ready</IdeBadge>
-        </div>
-        <div className='ide-kv'>
-          <span>GDPR</span>
-          <IdeBadge kind='ok'>Compliant</IdeBadge>
-        </div>
-        <div className='ide-kv'>
-          <span>DPA</span>
+          <span>Data processing agreement</span>
           <a href='/dpa' style={{color: 'var(--ide-blue)'}}>
             View DPA
+          </a>
+        </div>
+        <div className='ide-kv'>
+          <span>Certifications &amp; controls</span>
+          <a href='/security' style={{color: 'var(--ide-blue)'}}>
+            View security &amp; compliance
           </a>
         </div>
         <div className='ide-kv' style={{borderBottom: 'none'}}>

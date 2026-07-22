@@ -73,6 +73,8 @@ async function renderProject() {
         <Routes>
           <Route path='/projects/:projectId' element={<IdeProject />} />
           <Route path='/live/:runId' element={<div>Live run</div>} />
+          {/* RR-1519 — PRODUCTION runs pause at the plan gate, so the composer routes there. */}
+          <Route path='/plan/:runId' element={<div>Plan gate</div>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -112,7 +114,9 @@ describe('IdeProject brownfield compose contract', () => {
         userRequest: 'Fix the failing repository test',
       }),
     );
-    expect(host.textContent).toContain('Live run');
+    // RR-1519 — the default project composer mode is PRODUCTION, which pauses at AWAITING_APPROVAL,
+    // so submission must land on the plan gate, not the live console.
+    expect(host.textContent).toContain('Plan gate');
   });
 
   it('shows a non-actionable not-found state when the project cannot be loaded', async () => {

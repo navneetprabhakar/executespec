@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
@@ -530,6 +530,10 @@ function MiniSelect({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  // RR-773 — always render the current value as a stable option even when it is not in the
+  // assignable list, so a legacy/unknown tier displays truthfully instead of the browser silently
+  // showing the first option (which a subsequent edit would then persist as a corruption).
+  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <select
       className='ide-select'
@@ -538,7 +542,7 @@ function MiniSelect({
       onChange={(e) => onChange(e.target.value)}
       style={{width: 'auto', padding: '3px 8px', fontSize: 12}}
     >
-      {options.map((o) => (
+      {opts.map((o) => (
         <option key={o} value={o}>
           {o}
         </option>
@@ -547,10 +551,13 @@ function MiniSelect({
   );
 }
 
-const USER_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+// RR-773 — PRO_PLUS and BYOK are first-class billing tiers in current backend policy. Omitting them
+// meant existing PRO+/BYOK values had no matching option (the select rendered blank, and any edit
+// could silently downgrade the entitlement) and operators could not assign them.
+const USER_TIERS = ['FREE', 'PRO', 'PRO_PLUS', 'BYOK', 'TEAM', 'ENTERPRISE'];
 const USER_ROLES = ['USER', 'FINANCE', 'SUPER_ADMIN'];
 const USER_STATUSES = ['ACTIVE', 'SUSPENDED'];
-const ORG_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+const ORG_TIERS = ['FREE', 'PRO', 'PRO_PLUS', 'BYOK', 'TEAM', 'ENTERPRISE'];
 const ORG_STATUSES = ['ACTIVE', 'SUSPENDED'];
 
 type PendingAdminWrite = {
@@ -1009,10 +1016,17 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [members, setMembers] = useState<api.MemberUsage[] | null>(null);
   const [orgs, setOrgs] = useState<api.OrgDto[]>([]);
+  // RR-774 — the analytics reads used allSettled but recorded only fulfilled values, so a rejected
+  // read silently vanished (its panel is simply not rendered) and the operator saw an apparently
+  // valid but empty page. Track per-resource failures and disclose them.
+  const [usageFailure, setUsageFailure] = useState<LoadFailure | null>(null);
+  const [billingFailure, setBillingFailure] = useState<LoadFailure | null>(null);
+  const [membersFailure, setMembersFailure] = useState<LoadFailure | null>(null);
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
   const [auditOrgId, setAuditOrgId] = useState(orgId ?? '');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadAnalytics = useCallback(() => {
     setLoading(true);
     if (orgId) {
       Promise.allSettled([
@@ -1021,9 +1035,18 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
         api.getAnalyticsMembers(orgId, 30),
       ])
         .then(([u, b, m]) => {
-          if (u.status === 'fulfilled') setUsage(u.value);
-          if (b.status === 'fulfilled') setBilling(b.value);
-          if (m.status === 'fulfilled') setMembers(m.value);
+          if (u.status === 'fulfilled') {
+            setUsage(u.value);
+            setUsageFailure(null);
+          } else setUsageFailure(toLoadFailure(u.reason));
+          if (b.status === 'fulfilled') {
+            setBilling(b.value);
+            setBillingFailure(null);
+          } else setBillingFailure(toLoadFailure(b.reason));
+          if (m.status === 'fulfilled') {
+            setMembers(m.value);
+            setMembersFailure(null);
+          } else setMembersFailure(toLoadFailure(m.reason));
         })
         .finally(() => setLoading(false));
     } else {
@@ -1033,10 +1056,18 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
       .adminListOrgs()
       .then((items) => {
         setOrgs(items);
+        setOrgsFailure(null);
         setAuditOrgId((current) => current || items[0]?.id || '');
       })
-      .catch(() => setOrgs([]));
+      .catch((e: unknown) => {
+        setOrgs([]);
+        setOrgsFailure(toLoadFailure(e));
+      });
   }, [orgId]);
+
+  useEffect(() => {
+    loadAnalytics();
+  }, [loadAnalytics]);
 
   if (loading) return <IdeLoader label='Loading analytics…' />;
 
@@ -1047,6 +1078,21 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
         <div className='ide-sub' style={{marginTop: -6}}>
           Scoped to your org · last 30d.
         </div>
+      )}
+
+      {/* RR-774 — disclose failed reads so a partial snapshot is never mistaken for a complete,
+          all-clear analytics page. */}
+      {usageFailure && (
+        <LoadError failure={usageFailure} what='usage metrics' onRetry={loadAnalytics} />
+      )}
+      {billingFailure && (
+        <LoadError failure={billingFailure} what='billing overview' onRetry={loadAnalytics} />
+      )}
+      {membersFailure && (
+        <LoadError failure={membersFailure} what='member usage' onRetry={loadAnalytics} />
+      )}
+      {orgsFailure && (
+        <LoadError failure={orgsFailure} what='organization list' onRetry={loadAnalytics} />
       )}
 
       {usage && (
