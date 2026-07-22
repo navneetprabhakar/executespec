@@ -16,6 +16,7 @@ import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.EmailToken;
 import com.navneet.executespec.auth.entity.OrgMember;
+import com.navneet.executespec.auth.oauth.OAuthEmailConflictException;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.EmailTokenRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
@@ -169,9 +170,13 @@ public class AuthService {
 
   @Transactional
   public void verifyEmail(String token) {
+    if (token == null || token.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
+    }
+    // RR-132 — the stored token is a SHA-256 digest; match on the hash of the presented value.
     EmailToken emailToken =
         emailTokenRepo
-            .findByTokenAndType(token, "EMAIL_VERIFICATION")
+            .findByTokenAndType(hashCapabilityToken(token), "EMAIL_VERIFICATION")
             .orElseThrow(
                 () ->
                     new ResponseStatusException(
@@ -223,9 +228,13 @@ public class AuthService {
    */
   @Transactional
   public LoginResponse verifyEmailAndAuthenticate(String token) {
+    if (token == null || token.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
+    }
+    // RR-132 — the stored token is a SHA-256 digest; match on the hash of the presented value.
     EmailToken emailToken =
         emailTokenRepo
-            .findByTokenAndType(token, "EMAIL_VERIFICATION")
+            .findByTokenAndType(hashCapabilityToken(token), "EMAIL_VERIFICATION")
             .orElseThrow(
                 () ->
                     new ResponseStatusException(
@@ -600,7 +609,12 @@ public class AuthService {
    */
   @Transactional
   public AppUser findOrCreateFromOAuth(
-      String provider, String oauthId, String email, String name, String avatarUrl) {
+      String provider,
+      String oauthId,
+      String email,
+      String name,
+      String avatarUrl,
+      boolean emailVerified) {
     // 1. Exact OAuth match
     var existing = userRepo.findByOauthProviderAndOauthId(provider, oauthId);
     if (existing.isPresent()) {
@@ -616,6 +630,18 @@ public class AuthService {
     var byEmail = userRepo.findByEmail(email.toLowerCase());
     if (byEmail.isPresent()) {
       AppUser user = byEmail.get();
+      // RR-131 — refuse to link a provider identity to an already-registered account (which may be
+      // a password account, or a different OAuth provider) unless the provider VERIFIED the email.
+      // Without this, a provider that returns an unverified/attacker-controlled email would
+      // silently
+      // link into someone else's account and mint a session for it.
+      if (!emailVerified) {
+        throw new OAuthEmailConflictException(
+            "This email is already registered. Sign in with your existing method, or verify the"
+                + " email with your "
+                + provider
+                + " account before linking.");
+      }
       assertOAuthLoginAllowed(user);
       user.setOauthProvider(provider);
       user.setOauthId(oauthId);
@@ -715,16 +741,21 @@ public class AuthService {
   }
 
   private String createEmailToken(String userId, String type, int expiryHours) {
-    String token = UUID.randomUUID().toString().replace("-", "");
+    // RR-132 — the plaintext token is the bearer credential emailed to the user; only its SHA-256
+    // digest reaches the database, exactly as the password-reset lane (forgotPassword) and PATs
+    // already do. A read-only DB leak therefore yields no usable activation capability.
+    // Verification
+    // hashes the presented token and matches on the digest.
+    String plaintext = randomCapabilityToken();
     emailTokenRepo.save(
         EmailToken.builder()
             .id(UUID.randomUUID().toString())
             .userId(userId)
-            .token(token)
+            .token(hashCapabilityToken(plaintext))
             .type(type)
             .expiresAt(Instant.now().plus(expiryHours, ChronoUnit.HOURS))
             .build());
-    return token;
+    return plaintext;
   }
 
   private void validatePasswordStrength(String password) {

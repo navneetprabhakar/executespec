@@ -598,19 +598,27 @@ public class OrgService {
       }
       org.setOpenRouterApiKey(openRouter);
     }
+    // RR-834 — DeepSeek and Fireworks are BYOK provider lanes (V237 documents them at both user AND
+    // org scope), and TEAM/BYOK/ENTERPRISE are exactly the tiers granted `canManageAiKeys`
+    // (TierPermissionService). Gating the ORG lane to ENTERPRISE-only contradicted both the
+    // documented contract and the personal-key path, so a Team/BYOK admin was shown key management
+    // yet could not configure these providers for the team — an availability difference by storage
+    // location. Allow the BYOK-capable tiers here so org and personal scope agree. OpenRouter stays
+    // Enterprise-only above: it is the gateway that AvailableProviderResolver treats as the
+    // Enterprise signal, not a direct BYOK provider lane.
     String deepSeek = blankToNull(deepSeekKey);
     if (deepSeek != null) {
-      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      if (!isByokCapableTier(org.getTier())) {
         throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN, "DeepSeek native keys are an Enterprise-tier feature");
+            HttpStatus.FORBIDDEN, "DeepSeek native keys require a TEAM, BYOK or Enterprise tier");
       }
       org.setDeepSeekApiKey(deepSeek);
     }
     String fireworks = blankToNull(fireworksKey);
     if (fireworks != null) {
-      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      if (!isByokCapableTier(org.getTier())) {
         throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN, "Fireworks is an Enterprise-tier feature");
+            HttpStatus.FORBIDDEN, "Fireworks requires a TEAM, BYOK or Enterprise tier");
       }
       org.setFireworksApiKey(fireworks);
     }
@@ -846,6 +854,17 @@ public class OrgService {
 
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
+  }
+
+  /**
+   * RR-834 — the tiers entitled to configure BYOK provider keys, matching {@code
+   * TierPermissionService}'s {@code canManageAiKeys} grant (TEAM/BYOK/ENTERPRISE). Used to gate the
+   * DeepSeek/Fireworks org lanes consistently with the personal-key path.
+   */
+  private static boolean isByokCapableTier(String tier) {
+    if (tier == null) return false;
+    String t = tier.toUpperCase();
+    return t.equals("TEAM") || t.equals("BYOK") || t.equals("ENTERPRISE");
   }
 
   private void auditOrgEvent(String eventType, String orgId, String actorId, Object newValue) {

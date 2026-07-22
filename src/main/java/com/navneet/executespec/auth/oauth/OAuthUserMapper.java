@@ -46,7 +46,11 @@ public class OAuthUserMapper {
     String email = user.getAttribute("email");
     String name = user.getAttribute("name");
     String picture = user.getAttribute("picture");
-    return new OAuthProfile("google", oauthId, email, name, picture);
+    // RR-131 — carry Google's explicit email_verified claim. A Google account can carry an
+    // unverified email (a hosted-domain admin can pre-provision one); linking on an unverified
+    // claim is the account-takeover vector this closes.
+    boolean emailVerified = Boolean.TRUE.equals(user.getAttribute("email_verified"));
+    return new OAuthProfile("google", oauthId, email, name, picture, emailVerified);
   }
 
   private OAuthProfile mapGitHub(OAuth2User user, OAuth2AuthorizedClient authorizedClient) {
@@ -63,19 +67,30 @@ public class OAuthUserMapper {
       name = login;
     }
 
-    // GitHub may not include email in profile — fetch from /user/emails API
-    if ((email == null || email.isBlank()) && authorizedClient != null) {
-      email = fetchGitHubPrimaryEmail(authorizedClient);
+    // RR-131 — the profile `email` attribute is user-controlled and NOT a verification signal, so
+    // it cannot be trusted to link an existing account. Establish verification only from the
+    // authoritative /user/emails list: cross-check a supplied profile email against it, or fall
+    // back to a fetched primary-verified address. No authorized client (no way to check) means
+    // unverified.
+    boolean emailVerified = false;
+    java.util.Set<String> verifiedEmails =
+        authorizedClient != null ? fetchGitHubVerifiedEmails(authorizedClient) : java.util.Set.of();
+    if (email != null && !email.isBlank()) {
+      emailVerified = verifiedEmails.contains(email.toLowerCase());
+    } else {
+      email = verifiedEmails.stream().findFirst().orElse(null);
+      emailVerified = email != null;
     }
 
-    return new OAuthProfile("github", oauthId, email, name, avatarUrl);
+    return new OAuthProfile("github", oauthId, email, name, avatarUrl, emailVerified);
   }
 
   /**
-   * Calls GET https://api.github.com/user/emails with the user's access token to retrieve their
-   * primary verified email address.
+   * Calls GET https://api.github.com/user/emails with the user's access token and returns the set
+   * of the account's VERIFIED emails, lower-cased, primary-verified first (RR-131). Only these are
+   * trusted for account linking. Any error yields an empty set (fail closed — unverified).
    */
-  private String fetchGitHubPrimaryEmail(OAuth2AuthorizedClient authorizedClient) {
+  private java.util.Set<String> fetchGitHubVerifiedEmails(OAuth2AuthorizedClient authorizedClient) {
     try {
       String accessToken = authorizedClient.getAccessToken().getTokenValue();
 
@@ -88,25 +103,25 @@ public class OAuthUserMapper {
               .retrieve()
               .body(new ParameterizedTypeReference<>() {});
 
-      if (emails == null) return null;
+      if (emails == null) return java.util.Set.of();
 
-      // Find primary verified email
-      return emails.stream()
+      // Insertion-ordered: primary-verified addresses first, then any other verified address.
+      java.util.LinkedHashSet<String> verified = new java.util.LinkedHashSet<>();
+      emails.stream()
           .filter(
               e -> Boolean.TRUE.equals(e.get("primary")) && Boolean.TRUE.equals(e.get("verified")))
           .map(e -> (String) e.get("email"))
-          .findFirst()
-          // Fallback: any verified email
-          .or(
-              () ->
-                  emails.stream()
-                      .filter(e -> Boolean.TRUE.equals(e.get("verified")))
-                      .map(e -> (String) e.get("email"))
-                      .findFirst())
-          .orElse(null);
+          .filter(java.util.Objects::nonNull)
+          .forEach(e -> verified.add(e.toLowerCase()));
+      emails.stream()
+          .filter(e -> Boolean.TRUE.equals(e.get("verified")))
+          .map(e -> (String) e.get("email"))
+          .filter(java.util.Objects::nonNull)
+          .forEach(e -> verified.add(e.toLowerCase()));
+      return verified;
     } catch (Exception e) {
       log.warn("Failed to fetch GitHub user emails: {}", e.getMessage());
-      return null;
+      return java.util.Set.of();
     }
   }
 }

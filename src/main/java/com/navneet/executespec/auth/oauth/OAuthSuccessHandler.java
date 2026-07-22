@@ -103,7 +103,8 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
               profile.oauthId(),
               profile.email(),
               profile.name(),
-              profile.avatarUrl());
+              profile.avatarUrl(),
+              profile.emailVerified());
 
       // RR-130 / RR-1334: no credential ever goes in the redirect URL. Query parameters land in
       // browser history, referrers, reverse-proxy and access logs, and screenshots — an
