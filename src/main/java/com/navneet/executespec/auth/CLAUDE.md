@@ -13,6 +13,14 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   neither `type` nor `scope`. A legacy refresh or SSE token is still rejected as a bearer.
 - Reason: a refresh cookie value, and a 5-minute SSE token deliberately designed to be safe in URLs
   and logs, were both accepted as full-authority `Authorization: Bearer` credentials.
+- Browser logout blocklists the presented refresh JTI and advances the user's
+  `tokenInvalidatedAt`, invalidating both access and refresh JWTs minted before logout. Refresh
+  rotation uses the narrower JTI-only revocation path so it does not invalidate the newly issued
+  session.
+- Newly minted JWTs also carry the additive ISO-8601 `issued_at` claim because JWT NumericDate
+  `iat` is whole-second precision. Invalidation comparisons prefer `issued_at` and fall back to
+  `iat` for legacy tokens, so a re-login in the logout second works without allowing an older token
+  through the epoch.
 
 ## Signing-secret boot gate (RR-858)
 

@@ -86,7 +86,7 @@ public class AuthController {
     LoginResponse loginResp = authService.refresh(refreshToken);
     // Rotate refresh token
     String newRefreshToken = authService.generateRefreshToken(loginResp.user().id());
-    authService.logout(refreshToken);
+    authService.revokeRefreshToken(refreshToken);
     setRefreshCookie(response, newRefreshToken);
     return ResponseEntity.ok(loginResp);
   }

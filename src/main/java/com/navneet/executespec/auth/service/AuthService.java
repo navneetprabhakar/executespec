@@ -372,6 +372,9 @@ public class AuthService {
             .findById(userId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+    if (!jwtUtil.isRefreshTokenValid(refreshToken, user.getTokenInvalidatedAt())) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token revoked");
+    }
     assertActiveForSession(user);
     OrgMember orgMember = null;
     if (user.getOrgId() != null) {
@@ -398,9 +401,26 @@ public class AuthService {
     return UserDto.from(user, orgMember, tierEnforcementService.resolveUserTier(user.getId()));
   }
 
-  /** Revoke a refresh token. */
+  /** End the browser session represented by this refresh token. */
   @Transactional
   public void logout(String refreshToken) {
+    if (refreshToken == null || !jwtUtil.isRefreshTokenValid(refreshToken)) return;
+    String userId = jwtUtil.extractUserId(refreshToken);
+    revokeRefreshToken(refreshToken);
+    userRepo
+        .findById(userId)
+        .ifPresent(
+            user -> {
+              Instant now = Instant.now();
+              user.setTokenInvalidatedAt(now);
+              user.setUpdatedAt(now);
+              userRepo.save(user);
+            });
+  }
+
+  /** Revoke one refresh grant without invalidating the newly rotated session. */
+  @Transactional
+  public void revokeRefreshToken(String refreshToken) {
     if (refreshToken == null || !jwtUtil.isRefreshTokenValid(refreshToken)) return;
     String jti = jwtUtil.extractJti(refreshToken);
     Instant exp = jwtUtil.extractExpiry(refreshToken);

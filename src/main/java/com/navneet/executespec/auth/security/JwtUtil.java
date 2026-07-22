@@ -1,6 +1,7 @@
 package com.navneet.executespec.auth.security;
 
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
@@ -38,6 +39,8 @@ public class JwtUtil {
    * Access tokens are short-lived, so this tolerance drains on its own.
    */
   public static final String TOKEN_USE_CLAIM = "token_use";
+
+  static final String PRECISE_ISSUED_AT_CLAIM = "issued_at";
 
   public static final String TOKEN_USE_ACCESS = "access";
   public static final String TOKEN_USE_REFRESH = "refresh";
@@ -78,6 +81,7 @@ public class JwtUtil {
             .claim("globalRole", user.getGlobalRole())
             .claim("tier", user.getTier())
             .claim(TOKEN_USE_CLAIM, TOKEN_USE_ACCESS)
+            .claim(PRECISE_ISSUED_AT_CLAIM, now.toString())
             .issuedAt(Date.from(now))
             .expiration(Date.from(exp))
             .signWith(secretKey);
@@ -101,6 +105,7 @@ public class JwtUtil {
         .id(jti)
         .claim("type", "refresh")
         .claim(TOKEN_USE_CLAIM, TOKEN_USE_REFRESH)
+        .claim(PRECISE_ISSUED_AT_CLAIM, now.toString())
         .issuedAt(Date.from(now))
         .expiration(Date.from(exp))
         .signWith(secretKey)
@@ -119,6 +124,7 @@ public class JwtUtil {
         .claim("scope", "sse")
         .claim("runId", runId)
         .claim(TOKEN_USE_CLAIM, TOKEN_USE_SSE)
+        .claim(PRECISE_ISSUED_AT_CLAIM, now.toString())
         .issuedAt(Date.from(now))
         .expiration(Date.from(exp))
         .signWith(secretKey)
@@ -137,7 +143,7 @@ public class JwtUtil {
       if (tokenUse != null && !TOKEN_USE_SSE.equals(tokenUse)) return null;
       if (!runId.equals(claims.get("runId", String.class))) return null;
       return claims.getSubject();
-    } catch (JwtException | IllegalArgumentException e) {
+    } catch (JwtException | IllegalArgumentException | DateTimeException e) {
       return null;
     }
   }
@@ -161,15 +167,16 @@ public class JwtUtil {
     try {
       Claims claims = parseToken(token);
       Date issuedAt = claims.getIssuedAt();
+      Instant preciseIssuedAt = preciseIssuedAt(claims, issuedAt);
 
       // Global force-logout check: reject tokens issued before the logout epoch
       String epoch = featureFlagService.getString("force_logout_epoch", null);
       if (epoch != null) {
         Instant logoutEpoch = Instant.parse(epoch);
-        if (issuedAt != null && issuedAt.toInstant().isBefore(logoutEpoch)) {
+        if (preciseIssuedAt != null && preciseIssuedAt.isBefore(logoutEpoch)) {
           log.debug(
               "JWT rejected: issued before force_logout_epoch (iat={}, epoch={})",
-              issuedAt.toInstant(),
+              preciseIssuedAt,
               logoutEpoch);
           return false;
         }
@@ -177,20 +184,28 @@ public class JwtUtil {
 
       // Per-user invalidation check: reject tokens issued before the user's invalidation timestamp
       if (userTokenInvalidatedAt != null
-          && issuedAt != null
-          && issuedAt.toInstant().isBefore(userTokenInvalidatedAt)) {
+          && preciseIssuedAt != null
+          && preciseIssuedAt.isBefore(userTokenInvalidatedAt)) {
         log.debug(
             "JWT rejected: issued before per-user token_invalidated_at (iat={}, invalidatedAt={})",
-            issuedAt.toInstant(),
+            preciseIssuedAt,
             userTokenInvalidatedAt);
         return false;
       }
 
       return true;
-    } catch (JwtException | IllegalArgumentException e) {
+    } catch (JwtException | IllegalArgumentException | DateTimeException e) {
       log.debug("JWT validation failed: {}", e.getMessage());
       return false;
     }
+  }
+
+  private Instant preciseIssuedAt(Claims claims, Date legacyIssuedAt) {
+    String precise = claims.get(PRECISE_ISSUED_AT_CLAIM, String.class);
+    if (precise != null) {
+      return Instant.parse(precise);
+    }
+    return legacyIssuedAt == null ? null : legacyIssuedAt.toInstant();
   }
 
   /**
@@ -219,7 +234,12 @@ public class JwtUtil {
    * at the rotation endpoint is rejected.
    */
   public boolean isRefreshTokenValid(String token) {
-    if (!isTokenValid(token, null)) return false;
+    return isRefreshTokenValid(token, null);
+  }
+
+  /** Refresh validator with the same per-user session-epoch check used by access tokens. */
+  public boolean isRefreshTokenValid(String token, Instant userTokenInvalidatedAt) {
+    if (!isTokenValid(token, userTokenInvalidatedAt)) return false;
     try {
       Claims claims = parseToken(token);
       String tokenUse = claims.get(TOKEN_USE_CLAIM, String.class);

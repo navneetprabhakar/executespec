@@ -64,6 +64,8 @@ Each run costs 1–N run credits proportional to estimated LLM cost: `credits = 
 
 ### Auth + RBAC
 
+Browser logout blocklists the presented refresh JTI and advances the user's per-user token invalidation epoch, so access and refresh JWTs issued before logout are both rejected. Refresh rotation uses JTI-only revocation so it does not invalidate the replacement session. New JWTs carry an additive full-precision `issued_at` claim (with legacy NumericDate `iat` fallback), allowing an immediate same-second re-login without reopening the prior session.
+
 PAT capabilities are enforced at the authentication boundary. Legacy `full` rows remain
 compatible; omitted-scope and Web device-login tokens default to
 `api:read,runs:write,projects:write,agent:write,settings:write`, excluding billing, token
