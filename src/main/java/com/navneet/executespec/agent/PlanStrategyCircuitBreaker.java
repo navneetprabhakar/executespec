@@ -1,8 +1,12 @@
 package com.navneet.executespec.agent;
 
 import java.time.Duration;
+import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -40,7 +44,40 @@ public class PlanStrategyCircuitBreaker {
   private static final String OPEN_PREFIX = "planner:strategy:open:";
   private static final String FAIL_PREFIX = "planner:strategy:fail:";
 
+  /**
+   * RR-1152 — atomic failure transition. Previously {@code recordFailure} issued INCR, then a
+   * separate EXPIRE, then a separate SET-open; a success delete could interleave and the counter
+   * could be left without a TTL. This single Lua script increments, sets the window TTL ONLY on the
+   * first failure (a FIXED rolling window rather than an inactivity window that a steady trickle of
+   * failures could hold open forever), and opens the breaker when the threshold is crossed — all in
+   * one round trip. Returns 1 when the breaker opened, 0 otherwise.
+   */
+  private static final RedisScript<Long> FAILURE_SCRIPT =
+      new DefaultRedisScript<>(
+          """
+          local fails = redis.call('INCR', KEYS[1])
+          if fails == 1 then
+            redis.call('PEXPIRE', KEYS[1], ARGV[2])
+          end
+          if fails >= tonumber(ARGV[1]) then
+            redis.call('SET', KEYS[2], '1', 'PX', ARGV[3])
+            return 1
+          end
+          return 0
+          """,
+          Long.class);
+
   private final StringRedisTemplate redis;
+
+  /**
+   * RR-1151 — a deployment namespace on every breaker key so a shared Redis (dev/prod/benchmark on
+   * one instance without explicit DB separation) cannot let one environment's planning failures
+   * open another environment's breaker. Set {@code executespec.planner.circuit-breaker.namespace}
+   * per environment. The remaining RR-1151 dimensions (provider/model/org/prompt-version) require
+   * threading that context from the orchestrator and are tracked separately.
+   */
+  @Value("${executespec.planner.circuit-breaker.namespace:default}")
+  private String namespace = "default";
 
   /**
    * @return the strategy to actually use. Equals the requested strategy when healthy; degrades by
@@ -77,8 +114,8 @@ public class PlanStrategyCircuitBreaker {
   public void recordSuccess(PlanStrategy strategy) {
     if (strategy == null) return;
     try {
-      redis.delete(failKey(strategy));
-      redis.delete(openKey(strategy));
+      // Single DEL of both keys — atomic, so a success cannot leave a half-cleared state.
+      redis.delete(List.of(failKey(strategy), openKey(strategy)));
     } catch (Exception e) {
       log.debug("PlanStrategyCircuitBreaker.recordSuccess Redis error: {}", e.getMessage());
     }
@@ -91,14 +128,19 @@ public class PlanStrategyCircuitBreaker {
   public void recordFailure(PlanStrategy strategy) {
     if (strategy == null) return;
     try {
-      Long failures = redis.opsForValue().increment(failKey(strategy));
-      redis.expire(failKey(strategy), FAILURE_WINDOW);
-      if (failures != null && failures >= FAILURE_THRESHOLD) {
-        redis.opsForValue().set(openKey(strategy), "1", OPEN_TTL);
+      Long opened =
+          redis.execute(
+              FAILURE_SCRIPT,
+              List.of(failKey(strategy), openKey(strategy)),
+              String.valueOf(FAILURE_THRESHOLD),
+              String.valueOf(FAILURE_WINDOW.toMillis()),
+              String.valueOf(OPEN_TTL.toMillis()));
+      if (Long.valueOf(1L).equals(opened)) {
         log.warn(
-            "PlanStrategyCircuitBreaker: {} OPENED after {} consecutive failures (TTL {}m)",
+            "PlanStrategyCircuitBreaker: {} OPENED after >= {} failures within {}m (open TTL {}m)",
             strategy,
-            failures,
+            FAILURE_THRESHOLD,
+            FAILURE_WINDOW.toMinutes(),
             OPEN_TTL.toMinutes());
       }
     } catch (Exception e) {
@@ -132,11 +174,11 @@ public class PlanStrategyCircuitBreaker {
     };
   }
 
-  private static String openKey(PlanStrategy s) {
-    return OPEN_PREFIX + s.name();
+  String openKey(PlanStrategy s) {
+    return OPEN_PREFIX + namespace + ':' + s.name();
   }
 
-  private static String failKey(PlanStrategy s) {
-    return FAIL_PREFIX + s.name();
+  String failKey(PlanStrategy s) {
+    return FAIL_PREFIX + namespace + ':' + s.name();
   }
 }

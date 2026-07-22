@@ -1,5 +1,7 @@
 package com.navneet.executespec.agent;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,7 +49,21 @@ public class PromptResourceVerifier {
           "prompts/codereview/pr-review-agent.md",
           "prompts/execution_planner.txt",
           "prompts/memory-compaction.txt",
-          "prompts/run-ledger.txt");
+          "prompts/run-ledger.txt",
+          // RR-1131 — mandatory SECURITY fragments transitively assembled into the planner/worker
+          // prompts via {{include:security-rules:...}}. The role overlays are loaded through
+          // PromptAssembler.loadFileSafe, which SUPPRESSES a missing-file exception and silently
+          // yields a weaker prompt; the base fragment carries the exact-tool / invalid-request /
+          // unsafe-task BLOCKED rules. Verifying them at boot turns that silent degradation into a
+          // loud startup failure.
+          "prompts/fragments/security-rules.md",
+          "prompts/fragments/security-rules-planner.md",
+          "prompts/fragments/security-rules-worker.md",
+          // RR-1131 — active worker/preview prompts that were omitted from the manifest even though
+          // their features are wired.
+          "prompts/preview-render.md",
+          "prompts/tool-output-compactor.md",
+          "prompts/worker-history-compactor.md");
 
   // Migration-recipe prompts (e.g. {@code prompts/migrations/*-fallback.md}) intentionally not
   // verified here — their paths are stored per-recipe in the database and loaded on demand;
@@ -55,20 +71,32 @@ public class PromptResourceVerifier {
 
   @PostConstruct
   public void verify() {
-    List<String> missing = new ArrayList<>();
+    // RR-1131 — verify existence AND non-blank content. A zero-byte or whitespace-only prompt file
+    // previously passed the existence-only check, so a truncated build artefact could certify boot
+    // and then degrade the agent under first traffic. Unreadable/empty is a boot failure.
+    List<String> broken = new ArrayList<>();
     for (String path : CRITICAL_PROMPTS) {
       ClassPathResource res = new ClassPathResource(path);
       if (!res.exists()) {
-        missing.add(path);
+        broken.add(path + " (missing)");
+        continue;
+      }
+      try {
+        String content = res.getContentAsString(StandardCharsets.UTF_8);
+        if (content == null || content.isBlank()) {
+          broken.add(path + " (empty)");
+        }
+      } catch (IOException e) {
+        broken.add(path + " (unreadable)");
       }
     }
-    if (!missing.isEmpty()) {
+    if (!broken.isEmpty()) {
       String msg =
           "[PromptResourceVerifier] BOOT FAIL — "
-              + missing.size()
-              + " critical prompt file(s) missing from classpath. "
-              + "JAR is broken / build artefact incomplete. Missing: "
-              + String.join(", ", missing);
+              + broken.size()
+              + " critical prompt file(s) missing/empty/unreadable on classpath. "
+              + "JAR is broken / build artefact incomplete. Affected: "
+              + String.join(", ", broken);
       log.error(msg);
       throw new IllegalStateException(msg);
     }
