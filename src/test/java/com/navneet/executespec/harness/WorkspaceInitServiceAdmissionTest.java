@@ -88,6 +88,31 @@ class WorkspaceInitServiceAdmissionTest {
                 null));
   }
 
+  // RR-152 — the checkout directory is a single contained segment; a repository full name whose
+  // last
+  // segment is a traversal / reserved token must be rejected before it becomes a directory name.
+  @Test
+  void repoDirectoryNameRejectsTraversalAndReservedSegments() {
+    assertEquals("repo", WorkspaceInitService.repoDirectoryName("owner/repo"));
+    assertEquals("my.repo", WorkspaceInitService.repoDirectoryName("owner/my.repo"));
+    assertThrows(SecurityException.class, () -> WorkspaceInitService.repoDirectoryName("owner/.."));
+    assertThrows(SecurityException.class, () -> WorkspaceInitService.repoDirectoryName("owner/."));
+  }
+
+  // RR-152 — the run id is the only caller-derived segment appended to the workspace root; a
+  // traversal id must be refused at the filesystem edge, while a normal UUID resolves under the
+  // root.
+  @Test
+  void runWorkspacePathRejectsTraversalRunIds() {
+    WorkspaceInitService service = service();
+    Path resolved = service.runWorkspacePath("11111111-2222-3333-4444-555555555555");
+    assertTrue(resolved.startsWith(workspace.toAbsolutePath().normalize()));
+    // Traversal escapes are refused; a multi-segment id that stays UNDER the root is fine (still
+    // contained), so only the traversal cases must throw.
+    assertThrows(SecurityException.class, () -> service.runWorkspacePath("../escape"));
+    assertThrows(SecurityException.class, () -> service.runWorkspacePath("a/../../etc"));
+  }
+
   private WorkspaceInitService service() {
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.toString());

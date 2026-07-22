@@ -47,8 +47,11 @@ class GodClassLineCeilingTest {
   private static Map<String, Integer> ceilings() {
     Map<String, Integer> ceilings = new LinkedHashMap<>();
     ceilings.put("src/main/java/com/navneet/executespec/integration/RunOrchestrator.java", 4322);
-    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 5037);
-    ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3453);
+    // Lowered 2026-07-22 (P1 audit-remediation): SequentialExecutor shed the legacy cross-provider
+    // retry lane (RR-269) and WorkerAgent extracted helpers into ContinuationEscalationBudget /
+    // WorkerAgentSupport. The ratchet only moves DOWN — these are the new measured line counts.
+    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 4936);
+    ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3415);
     ceilings.put("frontend/src/lib/api/core.ts", 1803);
     ceilings.put("frontend/src/ide/agentPanels.tsx", 1780);
     return Map.copyOf(ceilings);
