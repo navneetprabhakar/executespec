@@ -80,6 +80,22 @@ class PrReviewServiceRepositoryIdentityTest {
     verify(reviewRepo, never()).save(org.mockito.ArgumentMatchers.any());
   }
 
+  // RR-660 — a PR whose snapshot has no resolvable head SHA must be rejected, not persisted against
+  // a fabricated "unknown-<millis>" marker that makes every retry a distinct billable review tied
+  // to no immutable source.
+  @Test
+  void submitRejectsPrWithNoResolvableHeadSha() {
+    UUID repoId = UUID.randomUUID();
+    AppUser user = AppUser.builder().id("user-1").build();
+    when(github.getPullRequestSnapshot("org/repo", 7, null, 200_000)).thenReturn(snapshot(null));
+
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalStateException.class,
+        () -> service.submitReview("project-1", repoId, "org/repo", 7, user));
+
+    verify(reviewRepo, never()).save(org.mockito.ArgumentMatchers.any());
+  }
+
   @Test
   void historyLookupUsesDurableRepoId() {
     UUID repoId = UUID.randomUUID();

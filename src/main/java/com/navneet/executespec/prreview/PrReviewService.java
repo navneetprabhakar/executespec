@@ -203,9 +203,17 @@ public class PrReviewService {
     }
     String headSha = snap.headSha();
     if (headSha == null || headSha.isBlank()) {
-      // Fall back to a synthetic SHA marker so we still persist a row but the cross-SHA dedup
-      // doesn't confuse it with a different commit.
-      headSha = "unknown-" + Instant.now().toEpochMilli();
+      // RR-660 — never convert a missing head SHA into a unique "unknown-<millis>" marker. Doing so
+      // made every retry a distinct billable review whose result could not be tied to immutable
+      // source, yet the product presented it as review evidence for that PR. Reject until an
+      // immutable commit SHA is available and record the retrieval gap separately, rather than
+      // reviewing mutable/unidentified content.
+      throw new IllegalStateException(
+          "PR "
+              + repoFullName
+              + "#"
+              + prNumber
+              + " has no resolvable head commit SHA — retry once GitHub returns the PR head.");
     }
 
     // Idempotency — if a recent review exists for this exact head SHA, return it.
