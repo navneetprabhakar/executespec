@@ -195,7 +195,7 @@ public class GeminiNativeToolClient {
     String prefixKey = null;
     String cacheName = null;
     if (explicitCacheEligible(request)) {
-      prefixKey = explicitCachePrefixKey(request);
+      prefixKey = explicitCachePrefixKey(request, apiKey);
       cacheName = explicitCacheNameByPrefix.getIfPresent(prefixKey);
       log.info(
           "Gemini cache lookup key8={} model={} sysChars={} toolN={} hit={} cacheSize={}",
@@ -751,15 +751,41 @@ public class GeminiNativeToolClient {
     return !systemTextOf(request.messages()).isBlank();
   }
 
-  /** Cache key = SHA-256(model + systemText + toolsJson); an identical prefix shares one cache. */
-  private String explicitCachePrefixKey(GeminiToolCallRequest request) {
+  /**
+   * Cache key = SHA-256(model + systemText + toolsJson + toolMode + credentialFingerprint); an
+   * identical prefix under the same tool-call mode and credential scope shares one cache.
+   *
+   * <p>RR-509 — the tool-call MODE (ANY when forced, AUTO otherwise) is baked into the minted
+   * {@code cachedContents} resource, so it MUST be part of the cache identity. Otherwise a
+   * forced-ANY and an automatic-AUTO request that share model+system+tools collide on one JVM cache
+   * entry, and whichever mints first silently controls the other's tool-call behaviour (a planner
+   * stops forcing submission, or an ordinary agent is forced to call a tool and cannot return
+   * text).
+   *
+   * <p>RR-510 — partition by a stable, non-reversible credential fingerprint so a cached resource
+   * minted with one API key (e.g. a BYOK tenant) is never referenced in a request authenticated
+   * with a different key, which would thrash tenants against inaccessible Google resources. The raw
+   * key never enters the cache key or any log line — only its SHA-256 digest does.
+   */
+  private String explicitCachePrefixKey(GeminiToolCallRequest request, String effectiveApiKey) {
     String tools;
     try {
       tools = objectMapper.writeValueAsString(buildToolsArray(request.tools()));
     } catch (Exception e) {
       tools = String.valueOf(request.tools().size());
     }
-    return sha256(request.model() + "\u0000" + systemTextOf(request.messages()) + "\u0000" + tools);
+    String toolMode = Boolean.TRUE.equals(request.forceToolCall()) ? "ANY" : "AUTO";
+    String credentialFingerprint = sha256(effectiveApiKey == null ? "" : effectiveApiKey);
+    return sha256(
+        request.model()
+            + "\u0000"
+            + systemTextOf(request.messages())
+            + "\u0000"
+            + tools
+            + "\u0000"
+            + toolMode
+            + "\u0000"
+            + credentialFingerprint);
   }
 
   /**

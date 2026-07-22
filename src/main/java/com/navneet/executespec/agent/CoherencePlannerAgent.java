@@ -168,6 +168,17 @@ public class CoherencePlannerAgent {
       String kind = patch.path("kind").asText("").trim();
       String taskId = patch.path("taskId").asText("").trim();
       String reason = patch.path("reason").asText("").trim();
+      // RR-1194 — the schema requires a `reason` key but did not require it to be non-blank, so a
+      // blank-reason patch could still mutate the plan and be surfaced with no provenance. The
+      // prompt promises reviewers read these reasons; a blank one violates that contract. Fail
+      // closed: a patch with no explanation does not mutate the plan.
+      if (reason.isEmpty()) {
+        log.warn(
+            "CoherencePlanner: patch kind={} task={} has a blank reason — skipping (RR-1194)",
+            kind,
+            taskId);
+        continue;
+      }
       MutableTask task = byId.get(taskId);
       if (task == null) {
         log.warn(
@@ -220,12 +231,31 @@ public class CoherencePlannerAgent {
             String from = patch.path("from").asText("").trim();
             String to = patch.path("to").asText("").trim();
             if (from.isEmpty() || to.isEmpty()) break;
-            boolean changed = task.touchesFiles.remove(from);
-            if (!task.touchesFiles.contains(to)) task.touchesFiles.add(to);
-            if (changed) {
-              applied++;
-              summaries.add(taskId + " moved file " + from + " → " + to + " · " + reason);
+            // RR-1192 — apply the move ATOMICALLY and only when the exact source is present and the
+            // target is a distinct path. Previously `to` was added unconditionally, so an
+            // absent-source patch silently injected an undisclosed model-authored path into the
+            // task's file hints WITHOUT appearing in the applied count/summary, and a from==to
+            // no-op still incremented the count. Now: same path is a no-op, absent source is
+            // rejected, and only a real move mutates the map and is ledgered.
+            if (from.equals(to)) {
+              log.warn(
+                  "CoherencePlanner: MOVE_FILE from==to ({}) on task {} — no-op, skipping",
+                  from,
+                  taskId);
+              break;
             }
+            if (!task.touchesFiles.contains(from)) {
+              log.warn(
+                  "CoherencePlanner: MOVE_FILE source {} not present on task {} — skipping (no"
+                      + " unrelated target injection)",
+                  from,
+                  taskId);
+              break;
+            }
+            task.touchesFiles.remove(from);
+            if (!task.touchesFiles.contains(to)) task.touchesFiles.add(to);
+            applied++;
+            summaries.add(taskId + " moved file " + from + " → " + to + " · " + reason);
           }
           default -> log.warn("CoherencePlanner: unknown patch kind '{}' — skipping", kind);
         }
