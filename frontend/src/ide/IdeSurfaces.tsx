@@ -592,11 +592,25 @@ export function IdeCompose() {
 
   const selectableProviders = useMemo(() => {
     const options = providerOptions.length > 0 ? providerOptions : FALLBACK_PROVIDER_OPTIONS;
+    // RR-786 — an own-keys tier (BYOK/TEAM/ENTERPRISE) or a user who has stored
+    // the provider's own key is entitled to select it; hard-hiding Fireworks
+    // from every non-Enterprise account contradicts the BYOK/Team own-key lanes
+    // and can leave the select with no option matching a saved preference.
+    // Actual dispatchability is still enforced separately by provider readiness.
+    const ownKeysTier = tier === 'BYOK' || tier === 'TEAM' || tier === 'ENTERPRISE';
+    const providerEntitled = (id: string): boolean => {
+      const up = id.toUpperCase();
+      if (!ENTERPRISE_PROVIDER_IDS.has(up)) return true;
+      if (tier === 'ENTERPRISE') return true;
+      if (up === 'FIREWORKS') return ownKeysTier || !!user?.hasFireworksKey;
+      // OpenRouter is an org gateway with no per-user key lane → own-keys tiers only.
+      return ownKeysTier;
+    };
     return options
       .filter((p) => tier !== 'FREE' || p.id.toUpperCase() === 'DEEPSEEK')
-      .filter((p) => tier === 'ENTERPRISE' || !ENTERPRISE_PROVIDER_IDS.has(p.id.toUpperCase()))
+      .filter((p) => providerEntitled(p.id))
       .map((p) => ({...p, id: p.id.toUpperCase()}));
-  }, [providerOptions, tier]);
+  }, [providerOptions, tier, user?.hasFireworksKey]);
   const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
   const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
 

@@ -1,4 +1,4 @@
-import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
+import {useRef, useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {
   providerIsDispatchable,
@@ -874,7 +874,18 @@ function SandboxRunCard({
       </div>
       {prog.total > 0 && (
         <div className='agent-runcard-bar'>
-          <span style={{width: `${terminal && !failed && !cancelled ? 100 : prog.pct}%`}} />
+          {/* RR-1492 — the fill reflects the measured succeeded-task percentage.
+              It is never forced to 100% on a terminal run, so a PARTIAL run with
+              failed tasks does not render as fully done. Failed/blocked tasks are
+              shown as a distinct trailing segment rather than counted as progress. */}
+          <span style={{width: `${prog.pct}%`}} />
+          {prog.failed > 0 && (
+            <span
+              className='agent-runcard-bar-failed'
+              style={{width: `${Math.round((prog.failed / prog.total) * 100)}%`}}
+              title={`${prog.failed} failed or blocked`}
+            />
+          )}
         </div>
       )}
       <div className='agent-runcard-actions'>
@@ -923,7 +934,11 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState<api.FileWithStatus[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [diff, setDiff] = useState<DiffLine[] | null>(null);
+  // RR-624 — the rendered diff carries the path it was fetched for, so a slower
+  // earlier response can never be shown (and reverted) under a later selection.
+  const [diff, setDiff] = useState<{path: string; lines: DiffLine[]} | null>(null);
+  // Monotonic request generation; only the newest `open()` may commit its result.
+  const openGenRef = useRef(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [pendingRevert, setPendingRevert] = useState<{
@@ -961,20 +976,25 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
   }
 
   async function open(path: string) {
+    const gen = ++openGenRef.current;
     setSelected(path);
     setDiff(null);
     setMessage('Loading diff…');
     try {
       const payload = await api.getFileDiff(runId, path);
+      // RR-624 — a superseded request (the user clicked another file, or an
+      // earlier fetch resolved after a later one) must not publish its result.
+      if (gen !== openGenRef.current) return;
       // Keep the chat surface responsive even if a backend returns a very large file.
       const shaped = boundedInlineDiff(payload);
-      setDiff(shaped.lines);
+      setDiff({path, lines: shaped.lines});
       setMessage(
         shaped.truncated
           ? 'Diff truncated to 2,500 lines. Open Changed files for the full result.'
           : '',
       );
     } catch {
+      if (gen !== openGenRef.current) return;
       setDiff(null);
       setMessage('This file diff is unavailable. Open Changed files for the full result.');
     }
@@ -1040,13 +1060,16 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
                 ))}
               </div>
               <div className='agent-inline-diff-view'>
-                {selected && diff ? (
+                {/* RR-624 — render only when the loaded diff matches the current
+                    selection, and bind the viewer + revert target to the diff's
+                    own path so a hunk revert can never capture the wrong file. */}
+                {diff && diff.path === selected ? (
                   <IdeCodeViewer
-                    filename={selected}
-                    content={diff.map((line) => line.text).join('\n')}
-                    diff={diff}
+                    filename={diff.path}
+                    content={diff.lines.map((line) => line.text).join('\n')}
+                    diff={diff.lines}
                     onRevertHunk={(hunkIndex, request) =>
-                      setPendingRevert({filePath: selected, hunkIndex, request})
+                      setPendingRevert({filePath: diff.path, hunkIndex, request})
                     }
                   />
                 ) : (

@@ -119,9 +119,13 @@ export default function IdeRunResult() {
   const [files, setFiles] = useState<string[]>([]);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
-  const [cache, setCache] = useState<Record<string, {content: string; diff: DiffLine[] | null}>>(
-    {},
-  );
+  // RR-767 — a cache entry is either loaded source (`content`/`diff`) or an
+  // explicit `failure`. A failed read must NOT be stored as diagnostic prose in
+  // `content`, which the code viewer would render indistinguishably from real
+  // workspace source (copyable, reviewable, revertable).
+  const [cache, setCache] = useState<
+    Record<string, {content: string; diff: DiffLine[] | null; failure?: LoadFailure}>
+  >({});
   const [filesWidth, setFilesWidth] = useState(240);
   const [tab, setTab] = useState<Tab>('Overview');
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
@@ -284,13 +288,34 @@ export default function IdeRunResult() {
 
     const poll = async () => {
       polls += 1;
-      const [nextTests, nextPlan] = await Promise.all([
-        api.getTestReport(runId),
-        api.getTestPlan(runId),
-      ]);
+      // RR-758 — a single rejected read used to escape as an unhandled rejection
+      // that never scheduled another timer and never cleared `testRunPending`,
+      // leaving a permanent "Tests running" banner + disabled rerun. Handle the
+      // failure: keep polling within the budget, then terminate into an explicit
+      // recoverable failure state rather than spinning forever.
+      let nextTests: Awaited<ReturnType<typeof api.getTestReport>> | null = null;
+      let nextPlan: Awaited<ReturnType<typeof api.getTestPlan>> | null = null;
+      try {
+        [nextTests, nextPlan] = await Promise.all([
+          api.getTestReport(runId),
+          api.getTestPlan(runId),
+        ]);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        if (polls >= TEST_EXECUTION_MAX_POLLS) {
+          setTestRunPending(false);
+          setTestsFailure(toLoadFailure(e));
+          return;
+        }
+        timer = setTimeout(poll, TEST_EXECUTION_POLL_INTERVAL_MS);
+        return;
+      }
       if (cancelled) return;
       if (nextTests) setTests(nextTests);
       if (nextPlan) setTestPlan(nextPlan);
+      // A recovered poll clears any earlier failure so a stale error cannot keep
+      // hiding a now-successful result.
+      setTestsFailure(null);
 
       const status = nextTests?.status || nextPlan?.status;
       if (isTestExecutionTerminal(status)) {
@@ -401,10 +426,21 @@ export default function IdeRunResult() {
       try {
         const content = await api.getFile(runId, path);
         setCache((c) => ({...c, [path]: {content, diff: null}}));
-      } catch {
-        setCache((c) => ({...c, [path]: {content: '// could not load', diff: null}}));
+      } catch (e: unknown) {
+        // RR-767 — record a typed failure, not fabricated source content.
+        setCache((c) => ({...c, [path]: {content: '', diff: null, failure: toLoadFailure(e)}}));
       }
     }
+  }
+
+  // RR-767 — drop a failed entry and re-read the file for the Retry button.
+  function retryOpenFile(path: string) {
+    setCache((c) => {
+      const next = {...c};
+      delete next[path];
+      return next;
+    });
+    void openFile(path);
   }
   function closeFile(path: string, e?: React.MouseEvent) {
     e?.stopPropagation();
@@ -1632,7 +1668,15 @@ export default function IdeRunResult() {
                   ))}
                 </div>
               )}
-              {active ? (
+              {active?.failure ? (
+                // RR-767 — the file could not be read; show a retryable failure
+                // rather than fabricated "// could not load" source text.
+                <LoadError
+                  failure={active.failure}
+                  what='this file'
+                  onRetry={() => activeFile && retryOpenFile(activeFile)}
+                />
+              ) : active ? (
                 <IdeCodeViewer
                   filename={activeFile || ''}
                   content={active.content}

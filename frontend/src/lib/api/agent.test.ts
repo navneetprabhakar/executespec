@@ -154,6 +154,40 @@ describe('agent API SSE helpers', () => {
     });
   });
 
+  it('RR-1344 — throws on a terminal error frame instead of resolving as success', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    const onErrorEvent = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode('event: ack\ndata: {"session_id":"s1","turn_id":"t1"}\n\n'),
+                );
+                controller.enqueue(
+                  encoder.encode('event: error\ndata: {"message":"provider exploded"}\n\n'),
+                );
+                controller.close();
+              },
+            }),
+            {status: 200},
+          ),
+      ),
+    );
+
+    await expect(streamAgentTurn('s1', {message: 'hello'}, {onErrorEvent})).rejects.toMatchObject({
+      status: 502,
+      message: 'provider exploded',
+    });
+    // The error callback still fires so live UI can react, but the promise
+    // rejects so the caller never dispatches a "done"/idle after the failure.
+    expect(onErrorEvent).toHaveBeenCalledWith({message: 'provider exploded'});
+  });
+
   it('confirms a stored cloud-run proposal through the orchestrator endpoint', async () => {
     localStorage.setItem('access_token', 'test-token');
     const fetchMock = vi.fn(async () => {

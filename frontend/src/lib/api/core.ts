@@ -635,9 +635,13 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  // Tier-coherence: 4-tier ladder. Legacy MAX was renamed to TEAM in V141
-  // and the JAR no longer emits MAX. Type narrowed to match backend reality.
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  // RR-167 / RR-1338 — canonical tier ladder. The active backend ladder is
+  // FREE → PRO → PRO_PLUS → BYOK → TEAM → ENTERPRISE (V253). The union
+  // previously stopped at ENTERPRISE, which (a) hid PRO_PLUS/BYOK cases from
+  // exhaustive `tier ===` switches and (b) let BYOK fall through to the
+  // cost-cap default. Legacy MAX was renamed to TEAM in V141 and is no longer
+  // emitted. Keep this in sync with the server tier enum.
+  tier: 'FREE' | 'PRO' | 'PRO_PLUS' | 'BYOK' | 'TEAM' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
