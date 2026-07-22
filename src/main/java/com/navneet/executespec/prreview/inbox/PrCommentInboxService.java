@@ -157,6 +157,26 @@ public class PrCommentInboxService {
   }
 
   /**
+   * RR-195 — atomically claim a PENDING comment for apply (PENDING -> APPLY_QUEUED). Returns true
+   * only for the single caller that won the transition, so repeated apply requests cannot each
+   * enqueue a duplicate workspace mutation. A false result means the comment is not this run's, is
+   * not PENDING, or was already claimed.
+   */
+  @Transactional
+  public boolean claimForApply(Long id, String runId) {
+    return inboxRepo.claimForApply(id, runId, Instant.now()) == 1;
+  }
+
+  /**
+   * RR-195 — revert a claim back to PENDING so it can be retried, used when the bounded apply queue
+   * rejects the work or the apply run fails. Idempotent: only a still-claimed row is reverted.
+   */
+  @Transactional
+  public void releaseApplyClaim(Long id, String runId) {
+    inboxRepo.releaseApplyClaim(id, runId, Instant.now());
+  }
+
+  /**
    * Phase P2 — called by {@link com.navneet.executespec.chat.ApplyService} after the apply flow has
    * pushed a fix to the PR's branch. Stamps the new run id so the UI can deep-link from the inbox
    * row to the apply run that addressed it.

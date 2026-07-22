@@ -2,10 +2,10 @@ package com.navneet.executespec.prreview.inbox;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -52,10 +52,20 @@ public class PrCommentInboxController {
    * synchronous worker loops (~30-90s); we want to return 202 to the UI immediately and let the
    * existing {@code GET /api/runs/{id}/apply/status} polling endpoint surface progress. PR-comment
    * apply throughput is much lower than chat (typically 1–5 per PR), so a 2-thread pool is enough.
+   *
+   * <p>RR-195 — the queue is BOUNDED and the rejection policy is AbortPolicy, so a flood of apply
+   * requests cannot grow memory without limit; over-capacity work is refused with 503 and the
+   * comment's claim is released for retry rather than silently queued forever.
    */
-  private final ExecutorService applyDispatch =
-      Executors.newFixedThreadPool(
+  private static final int APPLY_QUEUE_CAPACITY = 64;
+
+  private final ThreadPoolExecutor applyDispatch =
+      new ThreadPoolExecutor(
           2,
+          2,
+          0L,
+          TimeUnit.MILLISECONDS,
+          new ArrayBlockingQueue<>(APPLY_QUEUE_CAPACITY),
           new ThreadFactory() {
             private final AtomicInteger seq = new AtomicInteger();
 
@@ -65,7 +75,8 @@ public class PrCommentInboxController {
               t.setDaemon(true);
               return t;
             }
-          });
+          },
+          new ThreadPoolExecutor.AbortPolicy());
 
   @PreDestroy
   void shutdownApplyDispatch() {
@@ -127,10 +138,15 @@ public class PrCommentInboxController {
                 () ->
                     new ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "comment not found"));
-    if (!"PENDING".equals(comment.getStatus())) {
+
+    // RR-195 — claim the comment atomically BEFORE enqueuing. Only the request that wins the
+    // PENDING -> APPLY_QUEUED transition may dispatch, so repeated clicks/requests cannot each
+    // enqueue a duplicate mutation against the same run workspace. A lost race (already claimed,
+    // addressed or dismissed) is a 409.
+    if (!service.claimForApply(commentId, runId)) {
       throw new ResponseStatusException(
           org.springframework.http.HttpStatus.CONFLICT,
-          "comment already " + comment.getStatus().toLowerCase());
+          "comment already claimed or " + comment.getStatus().toLowerCase());
     }
 
     String suggestion = buildSuggestion(comment);
@@ -139,21 +155,31 @@ public class PrCommentInboxController {
         runId,
         commentId,
         comment.getAuthor());
-    CompletableFuture.runAsync(
-        () -> {
-          try {
-            applyService.apply(runId, suggestion, "PR_COMMENT");
-            service.markAddressed(commentId, runId);
-          } catch (Exception e) {
-            log.error(
-                "PrCommentInbox apply run={} comment={} failed: {}",
-                runId,
-                commentId,
-                e.getMessage(),
-                e);
-          }
-        },
-        applyDispatch);
+    try {
+      applyDispatch.execute(
+          () -> {
+            try {
+              applyService.apply(runId, suggestion, "PR_COMMENT");
+              service.markAddressed(commentId, runId);
+            } catch (Exception e) {
+              log.error(
+                  "PrCommentInbox apply run={} comment={} failed: {}",
+                  runId,
+                  commentId,
+                  e.getMessage(),
+                  e);
+              // RR-195 — release the claim so a failed apply is retryable rather than stuck queued.
+              service.releaseApplyClaim(commentId, runId);
+            }
+          });
+    } catch (RejectedExecutionException saturated) {
+      // RR-195 — bounded queue is full. Refuse with backpressure and release the claim so the
+      // work is not lost; the user can retry once capacity frees.
+      service.releaseApplyClaim(commentId, runId);
+      throw new ResponseStatusException(
+          org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+          "apply queue is full — retry shortly");
+    }
     return ResponseEntity.accepted().body(new ApplyResponse(runId));
   }
 
