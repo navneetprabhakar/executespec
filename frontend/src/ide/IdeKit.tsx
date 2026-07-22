@@ -305,13 +305,21 @@ export function IdeCommandPalette({
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // RR-794: restore focus to whatever the user was on before the palette opened.
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
+      restoreFocusRef.current = document.activeElement as HTMLElement | null;
       setQ('');
       setSel(0);
       setTimeout(() => inputRef.current?.focus(), 10);
+      return () => {
+        // Return focus on close so keyboard users are not stranded.
+        restoreFocusRef.current?.focus?.();
+      };
     }
+    return undefined;
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -320,12 +328,28 @@ export function IdeCommandPalette({
   }, [q, commands]);
 
   if (!open) return null;
+  // RR-794: accessible dialog + combobox/listbox pattern. The input keeps DOM
+  // focus and uses aria-activedescendant to point at the highlighted option, so
+  // screen readers announce the active command and Tab cannot escape the modal.
+  const activeOptionId = filtered[sel] ? `ide-palette-opt-${filtered[sel].id}` : undefined;
   return (
-    <div className='ide-palette-backdrop' onClick={onClose}>
-      <div className='ide-palette' onClick={(e) => e.stopPropagation()}>
+    <div className='ide-palette-backdrop' role='presentation' onClick={onClose}>
+      <div
+        className='ide-palette'
+        role='dialog'
+        aria-modal='true'
+        aria-label='Command palette'
+        onClick={(e) => e.stopPropagation()}
+      >
         <input
           ref={inputRef}
           placeholder='Go to or run a command…'
+          aria-label='Search for a command'
+          role='combobox'
+          aria-expanded
+          aria-controls='ide-palette-listbox'
+          aria-autocomplete='list'
+          aria-activedescendant={activeOptionId}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -338,13 +362,21 @@ export function IdeCommandPalette({
               filtered[sel]?.run();
               onClose();
             } else if (e.key === 'Escape') onClose();
+            else if (e.key === 'Tab') e.preventDefault(); // trap focus in the dialog
           }}
         />
-        <div className='ide-palette-list'>
-          {filtered.length === 0 && <div className='ide-palette-item'>No matches</div>}
+        <div className='ide-palette-list' role='listbox' id='ide-palette-listbox'>
+          {filtered.length === 0 && (
+            <div className='ide-palette-item' role='status'>
+              No matches
+            </div>
+          )}
           {filtered.map((c, idx) => (
             <div
               key={c.id}
+              id={`ide-palette-opt-${c.id}`}
+              role='option'
+              aria-selected={idx === sel}
               className={`ide-palette-item${idx === sel ? ' active' : ''}`}
               onMouseEnter={() => setSel(idx)}
               onClick={() => {

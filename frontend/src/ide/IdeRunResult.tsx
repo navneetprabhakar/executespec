@@ -165,37 +165,71 @@ export default function IdeRunResult() {
     setEventLog(replay.events);
   }
 
+  // RR-757 — the [runId] load effect launches run/report/files requests. Without a request
+  // generation it can commit run A's response under run B's URL after navigation or out-of-order
+  // completion — an evidence-integrity issue that can also surface stale data across project
+  // contexts. `loadGen` is bumped per load; every commit checks it, and openFile() captures it too.
+  const loadGen = useRef(0);
+
   // D4 — extracted so the Overview and Evidence failure states can offer Retry.
   function reloadReport() {
     if (!runId) return;
+    const gen = loadGen.current;
     api
       .getValidationReport(runId)
       .then((r) => {
+        if (gen !== loadGen.current) return;
         setReport(r);
         setReportFailure(null);
       })
-      .catch((e: unknown) => setReportFailure(toLoadFailure(e)));
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        setReportFailure(toLoadFailure(e));
+      });
   }
 
   useEffect(() => {
     if (!runId) return;
+    const gen = ++loadGen.current;
+    // Reset run-scoped state synchronously so the previous run's data is never shown under the new
+    // URL while requests are in flight (RR-757).
+    setRun(null);
+    setReport(null);
+    setReportFailure(null);
+    setFiles([]);
+    setFilesFailure(null);
+    setOpenFiles([]);
+    setActiveFile(null);
+    setCache({});
+    setLoadError(null);
+    setLoading(true);
     api
       .getRun(runId)
-      .then(setRun)
+      .then((r) => {
+        if (gen !== loadGen.current) return;
+        setRun(r);
+      })
       .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
         const status = typeof e === 'object' && e ? Number((e as {status?: number}).status) : 0;
         setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (gen === loadGen.current) setLoading(false);
+      });
     reloadReport();
     api
       .getFiles(runId)
       .then((f) => {
+        if (gen !== loadGen.current) return;
         setFiles(f);
         setFilesFailure(null);
         if (f.length) openFile(f[0]);
       })
-      .catch((e: unknown) => setFilesFailure(toLoadFailure(e)));
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        setFilesFailure(toLoadFailure(e));
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
@@ -410,8 +444,10 @@ export default function IdeRunResult() {
     setActiveFile(path);
     setOpenFiles((o) => (o.includes(path) ? o : [...o, path]));
     if (cache[path]) return;
+    const gen = loadGen.current; // RR-757: discard reads that resolve after a run change.
     try {
       const d = await api.getFileDiff(runId, path);
+      if (gen !== loadGen.current) return;
       // ADDED → every head line is an addition. MODIFIED → real LCS diff over
       // base (old) + head (new). UNCHANGED/other → no diff toggle.
       let diff: DiffLine[] | null = null;
@@ -424,8 +460,10 @@ export default function IdeRunResult() {
     } catch {
       try {
         const content = await api.getFile(runId, path);
+        if (gen !== loadGen.current) return;
         setCache((c) => ({...c, [path]: {content, diff: null}}));
       } catch (e: unknown) {
+        if (gen !== loadGen.current) return;
         // RR-767 — record a typed failure, not fabricated source content.
         setCache((c) => ({...c, [path]: {content: '', diff: null, failure: toLoadFailure(e)}}));
       }
@@ -460,6 +498,43 @@ export default function IdeRunResult() {
       setMsg(e instanceof Error ? e.message : 'Failed.');
     } finally {
       setBusy('');
+    }
+  }
+
+  // RR-762 — human label for the SCM provider that opened the PR; falls back to the neutral "SCM".
+  function scmProviderLabel(provider?: string | null): string {
+    switch ((provider || '').toUpperCase()) {
+      case 'GITHUB':
+        return 'GitHub';
+      case 'BITBUCKET':
+        return 'Bitbucket';
+      default:
+        return 'SCM';
+    }
+  }
+
+  // RR-897 — /push-scm returns HTTP 200 for logical FAILED / NO_CONFIGURATION / PARTIAL / NO_CHANGES
+  // outcomes, so an unconditional "Pushed — PR opening." success message hid missing credentials, an
+  // empty diff, total failure and partial multi-repo failure. Map the logical status to honest copy;
+  // only a real success claims a PR is opening.
+  function pushOutcomeMessage(r: unknown): string {
+    const res = (r ?? {}) as {status?: string; repoUrl?: string};
+    const status = (res.status || '').toUpperCase();
+    switch (status) {
+      case 'SUCCESS':
+      case 'OK':
+      case 'PUSHED':
+        return res.repoUrl ? `Pushed — PR opening at ${res.repoUrl}` : 'Pushed — PR opening.';
+      case 'NO_CHANGES':
+        return 'Nothing to push — the workspace has no changes.';
+      case 'NO_CONFIGURATION':
+        return 'No repository provider is configured for this run — connect one under Integrations first.';
+      case 'PARTIAL':
+        return 'Partial push — some repositories failed. Check the PR tab for per-repo status.';
+      case 'FAILED':
+        return 'Push failed — no pull request was opened.';
+      default:
+        return status ? `Push result: ${status}` : 'Push complete.';
     }
   }
 
@@ -1162,15 +1237,9 @@ export default function IdeRunResult() {
                   <button
                     className='ide-btn'
                     disabled={busy === 'push'}
-                    onClick={() =>
-                      action(
-                        'push',
-                        () => api.pushToScm(runId),
-                        () => 'Pushed — PR opening.',
-                      )
-                    }
+                    onClick={() => action('push', () => api.pushToScm(runId), pushOutcomeMessage)}
                   >
-                    {busy === 'push' ? 'Pushing…' : '⤴ Push to GitHub'}
+                    {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                   </button>
                 ) : (
                   <button className='ide-btn' onClick={() => setTab('Chat')}>
@@ -2588,17 +2657,20 @@ export default function IdeRunResult() {
                 {msg}
               </div>
             )}
-            {run?.githubPrUrl ? (
+            {/* RR-762 — consume the provider-neutral SCM PR URL (scmPrUrl || githubPrUrl) and label
+                by the actual provider, so Bitbucket/provider-neutral runs are not shown as having no
+                PR and prompted to configure GitHub. */}
+            {prUrl ? (
               <>
                 <div className='ide-card'>
                   <div
                     className='ide-mono'
                     style={{fontSize: 12, wordBreak: 'break-all', marginBottom: 10}}
                   >
-                    {run.githubPrUrl}
+                    {prUrl}
                   </div>
-                  <a className='ide-btn' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
-                    ↗ Open on GitHub
+                  <a className='ide-btn' href={prUrl} target='_blank' rel='noreferrer'>
+                    ↗ Open on {scmProviderLabel(run?.scmProvider)}
                   </a>
                 </div>
                 <PrCommentInbox runId={runId} variant='ide' />
@@ -2607,20 +2679,14 @@ export default function IdeRunResult() {
               <div className='ide-card'>
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
                   No pull request yet. Push the generated changes when you are ready to open one.
-                  Pushing requires a GitHub token under Integrations.
+                  Pushing requires a connected repository provider under Integrations.
                 </div>
                 <button
                   className='ide-btn'
                   disabled={busy === 'push'}
-                  onClick={() =>
-                    action(
-                      'push',
-                      () => api.pushToScm(runId),
-                      () => 'Pushed — PR opening.',
-                    )
-                  }
+                  onClick={() => action('push', () => api.pushToScm(runId), pushOutcomeMessage)}
                 >
-                  {busy === 'push' ? 'Pushing…' : '⤴ Push to GitHub'}
+                  {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                 </button>
               </div>
             )}
@@ -2821,7 +2887,13 @@ export default function IdeRunResult() {
                 {/* Per-test result rows + mark-invalid on failed/error rows. */}
                 {(tests.results?.length ?? 0) > 0 && (
                   <>
-                    <div className='ide-h2'>All tests · {tests.results.length}</div>
+                    {/* RR-765 — the list renders at most 60 rows; do not claim "All tests" when the
+                        set is larger, or failures beyond row 60 look like they do not exist. */}
+                    <div className='ide-h2'>
+                      {tests.results.length > 60
+                        ? `Tests · showing first 60 of ${tests.results.length}`
+                        : `All tests · ${tests.results.length}`}
+                    </div>
                     <div className='ide-card' style={{padding: 0}}>
                       {tests.results.slice(0, 60).map((r, i) => {
                         const st = (r.status || 'UNKNOWN').toUpperCase();
@@ -2894,6 +2966,19 @@ export default function IdeRunResult() {
                         );
                       })}
                     </div>
+                    {tests.results.length > 60 && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--ide-fg-muted)',
+                          marginTop: 8,
+                        }}
+                      >
+                        {tests.results.length - 60} more result
+                        {tests.results.length - 60 === 1 ? '' : 's'} not shown. Download the full
+                        test report to inspect every result.
+                      </div>
+                    )}
                   </>
                 )}
               </>

@@ -35,6 +35,15 @@
   --ide-add: rgba(74, 129, 5, 0.32);
   --ide-del: rgba(128, 23, 23, 0.4);
   --ide-shadow: rgba(0, 0, 0, 0.46);
+  /* RR-792: semantic aliases for tokens that inline styles referenced without a
+     declaration (`--ide-surface-2/3`, `--ide-muted`, `--ide-text`,
+     `--ide-bg-hover`). Defined once here as `var()` references to theme-aware
+     canonical tokens, so they resolve correctly under both dark and light. */
+  --ide-surface-2: var(--ide-bg-widget);
+  --ide-surface-3: var(--ide-list-inactive);
+  --ide-muted: var(--ide-fg-muted);
+  --ide-text: var(--ide-fg);
+  --ide-bg-hover: var(--ide-hover);
 
   position: fixed;
   inset: 0;
@@ -290,6 +299,18 @@
   margin: 8px;
   border-radius: 6px;
   border: 1px solid var(--ide-border-strong);
+}
+/* RR-794: restore a visible focus indicator for keyboard users. The input is
+   programmatically focused on open, so the removed default outline left no cue. */
+.ide-palette input:focus-visible {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: 1px;
+  border-color: var(--ide-accent);
+}
+.ide-palette-item.active,
+.ide-palette-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ide-accent);
 }
 .ide-palette-list {
   overflow-y: auto;
@@ -4641,4 +4662,22 @@
   height: 320px;
   border: 0;
   background: #fff;
+}
+
+/*
+ * RR-793: honour the OS reduced-motion preference. The IDE chrome ships seven
+ * indefinite animations (global spinner, gate/timeline pulses, typing dots,
+ * upload spinner, waiting status, live-run pulses). Under reduced-motion we
+ * collapse looping animation to a single static frame and shorten transitions,
+ * so loading/approval/run-status surfaces stop moving indefinitely.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ide-root *,
+  .ide-root *::before,
+  .ide-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

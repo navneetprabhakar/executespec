@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Link, useLocation, useParams} from 'react-router-dom';
+import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import type {ProjectCodeIndexStatus, ProjectRepo, ProjectRepoLink} from '@/types/project';
 import Crumbs from '@/ide/Crumbs';
@@ -18,6 +18,7 @@ import {
   sourceReadinessBadge,
   syncBadge,
 } from '@/ide/projectRepoUi';
+import {openPrsFromDashboard} from '@/ide/projectMoreUtils';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -358,20 +359,21 @@ export function IdeProjectPulse() {
     return () => window.clearInterval(id);
   }, [hasLiveRun, refreshRuns]);
 
-  const avgScore = dash ? (numOf(dash, 'recencyAvgScore') ?? numOf(dash, 'avgScore')) : undefined;
+  // RR-1483 — read only fields DashboardDto actually returns. `recencyAvgScore`, `avgDurationMs`,
+  // `totalSpent30d`, `mergedPrs30d` and `prsMerged30d` are all phantom keys the server never sends,
+  // so the old fallbacks either produced a permanently dead tile or a headline number under a label
+  // (`· 30d`) the data does not support. avgScore shows `—` for an unscored project rather than 0%;
+  // spend is the all-time `totalCostUsd` (relabelled below); merged PRs are counted from the
+  // recent-PR list (relabelled "recent", since the list is capped, not a 30-day window).
+  const completedRuns = dash ? (numOf(dash, 'completedRuns') ?? 0) : 0;
+  const rawAvgScore = dash ? numOf(dash, 'avgScore') : undefined;
+  const avgScore = completedRuns > 0 ? rawAvgScore : undefined;
   const excludedScoreReports = dash ? (numOf(dash, 'excludedScoreReports') ?? 0) : 0;
-  const dur = dash ? numOf(dash, 'avgDurationMs') : undefined;
-  const runTime = dur ? `${Math.floor(dur / 60000)}m ${Math.floor((dur % 60000) / 1000)}s` : '—';
-  const spent = dash ? (numOf(dash, 'totalSpent30d') ?? numOf(dash, 'totalCostUsd')) : undefined;
-  // Signal uses `mergedPrs30d`; the IDE page previously read the wrong key
-  // (`prsMerged30d`). Read both with a fallback, then a final fallback that
-  // counts MERGED entries in the dashboard's recentPrs list.
+  const spent = dash ? numOf(dash, 'totalCostUsd') : undefined;
   const merged = dash
-    ? (numOf(dash, 'mergedPrs30d') ??
-      numOf(dash, 'prsMerged30d') ??
-      ((dash.recentPrs as unknown[]) || []).filter(
+    ? ((dash.recentPrs as unknown[]) || []).filter(
         (p) => ((p as {status?: string}).status || '').toUpperCase() === 'MERGED',
-      ).length)
+      ).length
     : undefined;
   // BUG-FIX (RL-2026-05-038): the dashboard returns `recentPrs`, not `openPrs` — so the
   // "Open pull requests" section was permanently empty. Derive open PRs from recentPrs.
@@ -411,14 +413,13 @@ export function IdeProjectPulse() {
               label='Avg score · internal'
               value={avgScore != null ? `${Math.round(avgScore)}% · review evidence` : '—'}
             />
-            <Metric label='Avg work time' value={runTime} />
             {isSuperAdmin && (
               <Metric
-                label='Model spend · 30d'
+                label='Model spend · all-time'
                 value={spent != null ? `$${spent.toFixed(4)}` : '—'}
               />
             )}
-            <Metric label='PRs merged · 30d' value={merged != null ? String(merged) : '—'} />
+            <Metric label='PRs merged · recent' value={merged != null ? String(merged) : '—'} />
           </div>
           {excludedScoreReports > 0 && (
             <div style={{marginTop: 6, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
@@ -805,6 +806,7 @@ export function IdeProjectRuns() {
 
 function IdeProjectRunsInner() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const navigate = useNavigate();
   const {projectId = ''} = useParams();
   const [sub, setSub] = useState<Sub>('runs');
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
@@ -844,8 +846,8 @@ function IdeProjectRunsInner() {
       .catch((e: unknown) => setRunsFailure(toLoadFailure(e)));
   }, [projectId]);
 
-  // Load PR list lazily when the PRs sub-tab is opened. The dashboard endpoint
-  // already returns openPrs[] — cheaper than per-repo PR walks.
+  // Load PR list lazily when the PRs sub-tab is opened. Derive open PRs from the dashboard's
+  // recentPrs (RR-747) rather than the non-existent openPrs field.
   useEffect(() => {
     if (!projectId || sub !== 'prs') return;
     let cancelled = false;
@@ -854,11 +856,7 @@ function IdeProjectRunsInner() {
         .getProjectDashboard(projectId)
         .then((d) => {
           if (cancelled) return;
-          setPrs(
-            ((d as unknown as {openPrs?: unknown[]}).openPrs || []) as Array<
-              Record<string, unknown>
-            >,
-          );
+          setPrs(openPrsFromDashboard(d));
         })
         .catch(() => {
           if (!cancelled) setPrs([]);
@@ -926,9 +924,7 @@ function IdeProjectRunsInner() {
     try {
       await api.refreshProjectPrs(projectId);
       const d = await api.getProjectDashboard(projectId);
-      setPrs(
-        ((d as unknown as {openPrs?: unknown[]}).openPrs || []) as Array<Record<string, unknown>>,
-      );
+      setPrs(openPrsFromDashboard(d));
       setMsg('PR snapshot refreshed.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'PR refresh failed.');
@@ -944,16 +940,27 @@ function IdeProjectRunsInner() {
     setErr('');
     setMsg('');
     try {
-      // Pull PR review comments; the response is { comments: string }.
-      const res = await api.fetchPrReviewComments(projectId, prNumber, repoId, repoFullName);
-      const text = (res?.comments || '').trim();
+      // RR-746 — the old flow only fetched read-only comments and falsely claimed "autofix will be
+      // dispatched" without creating a run. Resolve a COMPLETE PrReview for this PR and call the
+      // canonical autofix POST, which actually dispatches a patch-mode run. If no completed review
+      // exists, say so instead of confirming a dispatch that never happens.
+      const reviews = await api.listPrReviewsForPr(projectId, repoId, repoFullName, prNumber);
+      const completed = reviews
+        .filter((r) => r.status === 'COMPLETE')
+        .sort((a, b) => (b.finishedAt || '').localeCompare(a.finishedAt || ''))[0];
+      if (!completed) {
+        setErr('No completed PR review yet. Run a PR review first, then dispatch autofix.');
+        return;
+      }
+      const res = await api.dispatchPrReviewAutofix(completed.id);
       setMsg(
-        text
-          ? 'PR review comments found — autofix will be dispatched.'
-          : 'No actionable PR comments.',
+        res.outcome === 'REUSED_ACTIVE'
+          ? `Autofix already running — R-${res.runId.slice(0, 6)}.`
+          : `Autofix run dispatched — R-${res.runId.slice(0, 6)}.`,
       );
+      navigate(`/runs/${res.runId}`);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to fetch PR comments.');
+      setErr(e instanceof Error ? e.message : 'Failed to dispatch autofix.');
     } finally {
       setPrBusy(null);
     }
