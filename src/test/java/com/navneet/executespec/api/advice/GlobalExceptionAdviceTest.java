@@ -6,8 +6,24 @@ import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class GlobalExceptionAdviceTest {
+
+  // RR-1119 — the status-derived error code uses the underscore convention CLI/core classifiers
+  // recognize, matching onNoResource ("not_found") — not the old hyphenated "not-found".
+  @Test
+  void statusDerivedErrorCodeUsesUnderscoreNotHyphen() {
+    var response =
+        new GlobalExceptionAdvice()
+            .onErrorResponse(new ResponseStatusException(HttpStatus.NOT_FOUND, "missing"));
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(response.getBody())
+        .containsEntry("error", "not_found")
+        .containsEntry("status", 404)
+        .containsEntry("message", "missing");
+  }
 
   @Test
   void boundedSubagentBudgetIsAClientCorrectable422() {

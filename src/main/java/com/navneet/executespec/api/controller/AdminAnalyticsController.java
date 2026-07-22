@@ -62,7 +62,8 @@ public class AdminAnalyticsController {
 
     String normalizedType = normalizeEntityType(entityType);
     assertAnalyticsAccess(normalizedType, entityId, userDetails, false);
-    return ResponseEntity.ok(analyticsService.getUsageMetrics(normalizedType, entityId, period));
+    return ResponseEntity.ok(
+        analyticsService.getUsageMetrics(normalizedType, entityId, boundedPeriod(period)));
   }
 
   /** GET /api/admin/analytics/members?orgId={}&period=30 */
@@ -73,7 +74,7 @@ public class AdminAnalyticsController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
 
     assertAnalyticsAccess("ORG", orgId, userDetails, false);
-    return ResponseEntity.ok(analyticsService.getMemberUsage(orgId, period));
+    return ResponseEntity.ok(analyticsService.getMemberUsage(orgId, boundedPeriod(period)));
   }
 
   /** GET /api/admin/analytics/billing?entityType={USER|ORG}&entityId={id} */
@@ -102,7 +103,7 @@ public class AdminAnalyticsController {
       @RequestParam(defaultValue = "30") int period,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     assertAnalyticsAccess("ORG", orgId, userDetails, true);
-    return ResponseEntity.ok(analyticsService.getCostBreakdown(orgId, period));
+    return ResponseEntity.ok(analyticsService.getCostBreakdown(orgId, boundedPeriod(period)));
   }
 
   /**
@@ -238,5 +239,24 @@ public class AdminAnalyticsController {
           HttpStatus.BAD_REQUEST, "Invalid entityType: " + entityType + ". Must be USER or ORG.");
     }
     return normalized;
+  }
+
+  /** The largest history window these synchronous aggregate scans will accept: one year of days. */
+  static final int MAX_ANALYTICS_PERIOD_DAYS = 366;
+
+  /**
+   * RR-243 — the raw {@code period} integer flowed unbounded into {@code Instant.minus(period,
+   * DAYS)} behind several synchronous aggregate queries over the run/execution tables. A negative
+   * value produced a future range (or date-arithmetic failure); an enormous value drove broad
+   * repeated scans an own-org admin could trigger at will. Bound it to a small positive maximum at
+   * the request boundary and reject anything outside it with a 400.
+   */
+  static int boundedPeriod(int period) {
+    if (period < 1 || period > MAX_ANALYTICS_PERIOD_DAYS) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "period must be between 1 and " + MAX_ANALYTICS_PERIOD_DAYS + " days.");
+    }
+    return period;
   }
 }

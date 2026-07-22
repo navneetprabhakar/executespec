@@ -146,12 +146,34 @@ public class RunAccessGuard {
     throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Org-admin access required");
   }
 
-  /** Returns the caller's org ID, or {@code null} for SUPER_ADMIN (global scope). */
-  public String getOrgIdOrNull(AppUserDetails userDetails) {
+  /**
+   * RR-1191 — resolves the tenant scope for own-org analytics rollups.
+   *
+   * <p>The prior {@code getOrgIdOrNull} returned {@code null} both for SUPER_ADMIN (intended global
+   * scope) AND for an ordinary account whose {@code orgId} was null (legacy/imported/restored or
+   * drifted). Callers treated any null as "global", so a null-org ordinary user could enumerate
+   * cross-tenant activity and global provider/task usage. This resolver keeps GLOBAL gated behind
+   * explicit SUPER_ADMIN authority and refuses a tenant caller who has no org rather than silently
+   * widening them to global.
+   */
+  public AnalyticsScope resolveAnalyticsScope(AppUserDetails userDetails) {
     requireAuthenticated(userDetails);
-    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) return null;
-    return userDetails.getUser().getOrgId();
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return new AnalyticsScope(true, null);
+    }
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null || orgId.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN, "No organization scope is available for analytics.");
+    }
+    return new AnalyticsScope(false, orgId);
   }
+
+  /**
+   * A resolved analytics scope: either GLOBAL (SUPER_ADMIN only, {@code orgId == null}) or a
+   * concrete tenant org ({@code global == false}, non-null {@code orgId}).
+   */
+  public record AnalyticsScope(boolean global, String orgId) {}
 
   private boolean isOwner(AppUser user, PipelineRun run) {
     return user.getId() != null && user.getId().equals(run.getCreatedByUserId());

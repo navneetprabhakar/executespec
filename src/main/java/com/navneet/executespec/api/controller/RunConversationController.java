@@ -38,6 +38,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunConversationController {
 
+  /**
+   * RR-599 — upper bound on a single run-chat turn. The endpoint had no request-length contract, so
+   * a run writer could submit very large turns; the 50-message cap bounds count, not size.
+   */
+  static final int MAX_CHAT_MESSAGE_CHARS = 24_000;
+
   private final RunAccessGuard guard;
   private final ChatService chatService;
   private final ApplyService applyService;
@@ -121,6 +127,13 @@ public class RunConversationController {
     guard.requireRunWriteAccess(runId, userDetails);
     if (body == null || body.message() == null || body.message().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message is required");
+    }
+    // RR-599 — reject an oversize turn at the boundary; deeper history-byte compaction inside
+    // ChatService remains tracked separately.
+    if (body.message().length() > MAX_CHAT_MESSAGE_CHARS) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          "message exceeds the " + MAX_CHAT_MESSAGE_CHARS + "-character limit.");
     }
     try {
       ChatService.SendResult r = chatService.send(runId, body.message());
