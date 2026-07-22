@@ -88,6 +88,11 @@ public class StateStore {
   public void savePlan(String runId, TaskPlan plan) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
 
+    // RR-073: reject a structurally invalid graph (null/blank/duplicate ids, dependencies on
+    // unknown tasks, cycles) BEFORE rewriting anything, so a plan that cannot execute never reaches
+    // the database. Validation is pure and runs on the planner-local ids.
+    PlanGraphValidator.validate(plan);
+
     // Make task IDs globally unique
     // agent_task PK is task_id alone (not composite with run_id).
     // Planner generates predictable IDs like "project_setup", "readme" — if
@@ -95,9 +100,11 @@ public class StateStore {
     // overwrite run B's tasks.  Prefixing with the run hash prevents this.
     String prefix = runId.substring(0, 8) + "_";
 
-    // Build old→new ID mapping so we can rewrite depends_on references
+    // Build old→new ID mapping so we can rewrite depends_on references.
+    // RR-073: prefixing is idempotent — an id already carrying the run prefix (a re-saved/retried
+    // plan object) is left as-is instead of being prefixed a second time.
     Map<String, String> idMap = new java.util.HashMap<>();
-    plan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefix + t.getTaskId()));
+    plan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefixOnce(prefix, t.getTaskId())));
 
     // Rewrite task IDs and dependency references in-place
     plan.getTasks()
@@ -106,7 +113,7 @@ public class StateStore {
               if (t.getDependsOn() != null) {
                 t.setDependsOn(
                     t.getDependsOn().stream()
-                        .map(dep -> idMap.getOrDefault(dep, prefix + dep))
+                        .map(dep -> idMap.getOrDefault(dep, prefixOnce(prefix, dep)))
                         .toList());
               }
               t.setTaskId(idMap.get(t.getTaskId()));
@@ -138,6 +145,11 @@ public class StateStore {
                         .build()));
 
     savePlanVersion(runId, "PLANNER", null);
+  }
+
+  /** Idempotent run-prefixing (RR-073): never double-prefixes an already-namespaced id. */
+  static String prefixOnce(String prefix, String id) {
+    return id != null && id.startsWith(prefix) ? id : prefix + id;
   }
 
   public void markApproved(String runId) {
@@ -233,21 +245,32 @@ public class StateStore {
   }
 
   /**
-   * Marks the run complete. If any non-gap worker tasks are BLOCKED or PARTIAL, the run is marked
-   * PARTIAL (merged but incomplete) rather than COMPLETE so the UI reflects reality. Gap-closing
-   * tasks (_gap_ in taskId) are excluded — they run after the ≥85% threshold path and their
-   * failures should not downgrade an otherwise-successful run.
+   * Task statuses that count as a clean success. Any non-gap task NOT in this set downgrades a
+   * {@link #markComplete} to PARTIAL. RR-072: the previous check only looked for BLOCKED/PARTIAL,
+   * so a FAILED (or CANCELLED / still-active) non-gap task let the run be reported COMPLETE with
+   * failed work. This is an exhaustive allowlist so any new persisted status defaults to "not
+   * clean" rather than silently passing.
+   */
+  private static final Set<String> CLEAN_SUCCESS_TASK_STATUSES =
+      Set.of("COMPLETE", "SKIPPED", "DONE");
+
+  /**
+   * Marks the run complete. If any non-gap worker task is not in a clean-success state (COMPLETE /
+   * SKIPPED / DONE) — which now includes FAILED, BLOCKED, PARTIAL, CANCELLED and any still-active
+   * status — the run is marked PARTIAL (merged but incomplete) rather than COMPLETE so the UI
+   * reflects reality. Gap-closing tasks (_gap_ in taskId) are excluded — they run after the ≥85%
+   * threshold path and their failures should not downgrade an otherwise-successful run.
    */
   public void markComplete(String runId) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     boolean hasIncomplete =
         taskRepo.findByRunId(runId).stream()
             .filter(t -> !t.getTaskId().contains("_gap_"))
-            .anyMatch(t -> "BLOCKED".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
+            .anyMatch(t -> !CLEAN_SUCCESS_TASK_STATUSES.contains(t.getStatus()));
     finaliseRun(
         run,
         hasIncomplete ? "PARTIAL" : "COMPLETE",
-        hasIncomplete ? "Merged with incomplete tasks (BLOCKED/PARTIAL)" : null);
+        hasIncomplete ? "Merged with incomplete tasks (non-success task status)" : null);
   }
 
   public void markFailed(String runId, String reason) {
@@ -319,6 +342,11 @@ public class StateStore {
   public void markRetryingWithFeedback(String runId, String taskId, String reworkFeedback) {
     taskRepo
         .findById(taskId)
+        // RR-074: agent_task is keyed by task_id alone, so a mismatched (runId, taskId) pair would
+        // reset one run's task while subtracting its tokens from a *different* run — corrupting two
+        // runs at once. Constrain the mutation to the task actually owned by the supplied run; the
+        // full relational fix (composite (run_id, task_id) key) is deferred to a migration lane.
+        .filter(task -> runId.equals(task.getRunId()))
         .ifPresent(
             task -> {
               // Subtract old token counts from run totals before resetting (prevents
@@ -1121,6 +1149,25 @@ public class StateStore {
 
   // Tier 4: Timeline and model comparison
 
+  /** Provider bucket for tasks with no recorded provider (RR-076). */
+  static final String UNKNOWN_PROVIDER = "UNKNOWN";
+
+  /** Model bucket for tasks with no recorded model (RR-076). */
+  static final String UNATTRIBUTED_MODEL = "UNATTRIBUTED";
+
+  /**
+   * Grouping key for provider/model comparison. RR-076: a null provider/model used to be relabeled
+   * as {@code anthropic/<current workhorse>}, presenting legacy or unknown usage as real Anthropic
+   * performance and corrupting provider comparisons. Missing attribution is now its own first-class
+   * {@code UNKNOWN/UNATTRIBUTED} bucket — historical provider identity is never inferred from
+   * current defaults.
+   */
+  static String modelComparisonKey(AgentTask t) {
+    String provider = t.getProvider() != null ? t.getProvider() : UNKNOWN_PROVIDER;
+    String model = t.getModel() != null ? t.getModel() : UNATTRIBUTED_MODEL;
+    return provider + "/" + model;
+  }
+
   public TimelineData buildTimeline(String runId) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     List<AgentTask> tasks = taskRepo.findByRunIdOrderByStartedAtAsc(runId);
@@ -1138,12 +1185,7 @@ public class StateStore {
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
-      String key =
-          (t.getProvider() != null ? t.getProvider() : "anthropic")
-              + "/"
-              + (t.getModel() != null
-                  ? t.getModel()
-                  : modelRegistry.workhouseModelFor("anthropic"));
+      String key = modelComparisonKey(t);
       grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
     }
 
@@ -1199,12 +1241,7 @@ public class StateStore {
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
-      String key =
-          (t.getProvider() != null ? t.getProvider() : "anthropic")
-              + "/"
-              + (t.getModel() != null
-                  ? t.getModel()
-                  : modelRegistry.workhouseModelFor("anthropic"));
+      String key = modelComparisonKey(t);
       grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
     }
 
@@ -1549,11 +1586,17 @@ public class StateStore {
       String parentTaskId, String runId, List<TaskDefinition> subtaskDefs, String tenantId) {
     int total = subtaskDefs.size();
     List<AgentTask> rows = new ArrayList<>();
+    // RR-075: planner-supplied subtask IDs were saved directly as the global agent_task primary
+    // key, unlike savePlan's run-prefixing, so two runs whose planners emit a common subtask id
+    // (e.g. "setup") overwrote each other's rows. Namespace each subtask under its parent task id,
+    // which is itself already globally unique (savePlan run-prefixes it), and skip re-prefixing an
+    // id that already carries the namespace so a retry is idempotent.
     for (int i = 0; i < total; i++) {
       TaskDefinition def = subtaskDefs.get(i);
+      String subtaskId = namespacedSubtaskId(parentTaskId, def.getTaskId());
       AgentTask st =
           AgentTask.builder()
-              .taskId(def.getTaskId())
+              .taskId(subtaskId)
               .runId(runId)
               .title(def.getTitle())
               .complexity(def.getComplexity())
@@ -1569,6 +1612,19 @@ public class StateStore {
     }
     log.info("Created {} subtasks for parent task {}", total, parentTaskId);
     return rows;
+  }
+
+  /**
+   * Run-scoped subtask identity factory (RR-075). Namespaces a planner-local subtask id under its
+   * globally-unique parent task id. Idempotent: an id already carrying the namespace is returned
+   * unchanged so recovery/retry does not double-prefix.
+   */
+  static String namespacedSubtaskId(String parentTaskId, String plannerSubtaskId) {
+    String prefix = parentTaskId + "::";
+    if (plannerSubtaskId == null || plannerSubtaskId.isBlank()) {
+      throw new IllegalArgumentException("subtask id must not be null/blank");
+    }
+    return plannerSubtaskId.startsWith(prefix) ? plannerSubtaskId : prefix + plannerSubtaskId;
   }
 
   /** Returns subtasks for a parent task, ordered by subtask index. */
