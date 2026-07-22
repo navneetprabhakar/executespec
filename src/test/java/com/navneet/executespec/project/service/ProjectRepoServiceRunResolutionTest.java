@@ -20,6 +20,7 @@ import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.GitHubScmRepositoryClient;
+import com.navneet.executespec.repo.ScmCapability;
 import com.navneet.executespec.repo.ScmCredentialResolver;
 import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
@@ -106,6 +107,96 @@ class ProjectRepoServiceRunResolutionTest {
             () -> service.resolveForRunStrict("project-1", List.of(repoId)));
 
     assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void resolveForRunStrictRejectsBlockedSourceReadiness() { // RR-313
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .sourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name())
+            .sourceReadinessReason("EMPTY_REPOSITORY")
+            .build();
+    linkAndResolve(repoId, repo);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.resolveForRunStrict("project-1", List.of(repoId)));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void resolveForRunStrictAdmitsReadySource() { // RR-313
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .sourceReadinessStatus(ProjectRepo.SourceReadiness.READY.name())
+            .build();
+    linkAndResolve(repoId, repo);
+
+    assertEquals(List.of(repo), service.resolveForRunStrict("project-1", List.of(repoId)));
+  }
+
+  @Test
+  void requireProjectCapabilityRejectsProjectWithNoRepositories() { // RR-315
+    when(linkRepo.findByProjectId("project-1")).thenReturn(List.of());
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.requireProjectCapability(
+                    "project-1", ScmCapability.CLOUD_RUN, "regenerate architecture"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void requireProjectCapabilityRejectsLocalOnlyProject() { // RR-315
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo local =
+        ProjectRepo.builder().id(repoId).sourceType(ProjectRepo.SourceType.LOCAL.name()).build();
+    linkAndResolve(repoId, local);
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.requireProjectCapability(
+                    "project-1", ScmCapability.CLOUD_RUN, "regenerate architecture"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void requireProjectCapabilityRejectsDanglingLink() { // RR-315
+    UUID repoId = UUID.randomUUID();
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(List.of(ProjectRepoLink.builder().repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(Optional.empty());
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                service.requireProjectCapability(
+                    "project-1", ScmCapability.CLOUD_RUN, "regenerate architecture"));
+
+    assertEquals(422, error.getStatusCode().value());
+  }
+
+  @Test
+  void requireProjectCapabilityPassesForCapableScmRepository() { // RR-315
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo = ProjectRepo.builder().id(repoId).build();
+    linkAndResolve(repoId, repo);
+
+    service.requireProjectCapability(
+        "project-1", ScmCapability.CLOUD_RUN, "regenerate architecture");
   }
 
   @Test

@@ -111,19 +111,7 @@ public class EmbeddingService {
             requireSource(sourceId),
             PROVIDER,
             actorUserId);
-    LlmExecutionDispatchGuard.ResolvedDispatch dispatch;
-    try {
-      dispatch = dispatchGuard.authorizeProviderCapability(reference, PROVIDER);
-    } catch (LlmDispatchPolicyException rejected) {
-      throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
-    }
-    String key = dispatch.apiKey();
-    if (key == null || key.isBlank()) {
-      throw new EmbeddingUnavailableException("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
-    }
-
     String runId = usageRunId(sourceId);
-    RunKeyContext managedKeys = managedAiContext(dispatch);
 
     List<float[]> vectors = new ArrayList<>(texts.size());
     int batchNumber = 0;
@@ -131,8 +119,28 @@ public class EmbeddingService {
       batchNumber++;
       List<String> batch = texts.subList(from, Math.min(from + BATCH_SIZE, texts.size()));
       String taskId = "embedding.batch." + batchNumber;
-      // Each batch is a distinct provider charge. Re-authorize immediately before every physical
-      // attempt so a large document cannot spend N batches under one stale admission decision.
+      // RR-915 (2026-07-22) — resolve durable dispatch authorization and the provider key INSIDE
+      // the
+      // batch loop, not once before it. A large document embeds across many batches; resolving the
+      // guard a single time and caching the key/source meant cancellation, context expiry, an
+      // org-provider disablement, a key-source change or a credential rotation between batches did
+      // not stop subsequent physical provider calls. Re-authorizing per batch fails closed the
+      // moment
+      // authority is revoked and picks up a rotated key.
+      LlmExecutionDispatchGuard.ResolvedDispatch dispatch;
+      try {
+        dispatch = dispatchGuard.authorizeProviderCapability(reference, PROVIDER);
+      } catch (LlmDispatchPolicyException rejected) {
+        throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
+      }
+      String key = dispatch.apiKey();
+      if (key == null || key.isBlank()) {
+        throw new EmbeddingUnavailableException("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
+      }
+      RunKeyContext managedKeys = managedAiContext(dispatch);
+      // Each batch is a distinct provider charge. Re-authorize managed credit immediately before
+      // every physical attempt so a large document cannot spend N batches under one stale admission
+      // decision.
       managedAiUsageService.authorizeFixedCapabilityCall(
           runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
       var attempt =

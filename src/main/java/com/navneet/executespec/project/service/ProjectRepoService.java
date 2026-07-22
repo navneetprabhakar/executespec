@@ -505,6 +505,28 @@ public class ProjectRepoService {
     for (ProjectRepo repo : resolved) {
       requireCapability(repo, ScmCapability.CLOUD_RUN, "run in the cloud execution pipeline");
     }
+    // RR-313 (2026-07-22) — attach/sync persist an explicit source-readiness verdict (BLOCKED when
+    // the branch is unreadable, the source inventory failed, or the repository is empty), but run
+    // admission previously checked only link + LOCAL + CLOUD_RUN capability and never consulted it.
+    // A known-unreadable source therefore passed submission, charged quota/credits, and only failed
+    // later during clone/planning. Refuse a repo whose last readiness check concluded BLOCKED so
+    // the
+    // failure surfaces as an actionable preflight error before any spend. Null/legacy readiness
+    // (rows that predate the readiness contract) is left permissive here; requiring positive READY
+    // evidence for freshly created sources is tracked separately (RR-318).
+    for (ProjectRepo repo : resolved) {
+      if (ProjectRepo.SourceReadiness.BLOCKED.name().equals(repo.getSourceReadinessStatus())) {
+        String reason =
+            repo.getSourceReadinessReason() == null ? "UNKNOWN" : repo.getSourceReadinessReason();
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Repository "
+                + repo.getGithubRepoFullName()
+                + " is not ready for execution ("
+                + reason
+                + "). Re-sync the source before submitting.");
+      }
+    }
     return resolved;
   }
 
@@ -781,11 +803,24 @@ public class ProjectRepoService {
 
   public void requireProjectCapability(
       String projectId, ScmCapability capability, String operation) {
+    // RR-315 (2026-07-22) — this is the admission gate for provider-backed project actions
+    // (architecture regeneration, confirmed chat actions). It previously returned normally when the
+    // project had no repos, only LOCAL repos, or dangling links, so an action requiring an SCM
+    // capability advanced vacuously past the check and then failed later or operated against an
+    // empty source boundary. Require at least one non-LOCAL, resolvable linked repository that
+    // actually carries the capability.
+    int capableScmRepos = 0;
     for (ProjectRepoLink link : linkRepo.findByProjectId(projectId)) {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo != null && !ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
-        requireCapability(repo, capability, operation);
-      }
+      if (repo == null) continue; // dangling link — a missing repo cannot vouch for the capability
+      if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) continue;
+      requireCapability(repo, capability, operation);
+      capableScmRepos++;
+    }
+    if (capableScmRepos == 0) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "No linked SCM repository can " + operation + "; link a supported repository first.");
     }
   }
 

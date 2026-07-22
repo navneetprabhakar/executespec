@@ -129,6 +129,53 @@ class ProjectDocumentServiceSecurityTest {
   }
 
   @Test
+  void inFlightIndexerRemovesTheWorkspaceCopyWhenTheDocumentIsDeletedMidProcessing(
+      @TempDir Path tempDir) { // RR-812
+    ProjectDocument pending =
+        ProjectDocument.builder()
+            .id("d-race")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-race.bin")
+            .mimeType("text/plain")
+            .status(ProjectDocument.Status.UPLOADED)
+            .processingAttempt(0)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+    // A concurrent delete tombstones the document between the pre-extraction heartbeat and the
+    // post-write fence; the third lease read returns the deleted snapshot so heartbeat #2 fails.
+    ProjectDocument deletedSnapshot =
+        ProjectDocument.builder()
+            .id("d-race")
+            .projectId("p1")
+            .pathRelative("docs/.uploads/d-race.bin")
+            .status(ProjectDocument.Status.EXTRACTING)
+            .deletedAt(OffsetDateTime.now())
+            .build();
+    when(repo.findByIdForUpdate("d-race"))
+        .thenReturn(Optional.of(pending)) // claim
+        .thenReturn(Optional.of(pending)) // pre-extraction heartbeat
+        .thenReturn(Optional.of(deletedSnapshot)); // RR-812 post-write fence sees the deletion
+    when(blobRepo.findById("d-race"))
+        .thenReturn(
+            Optional.of(
+                ProjectDocumentBlob.builder()
+                    .documentId("d-race")
+                    .contentBytes("enterprise notes".getBytes(StandardCharsets.UTF_8))
+                    .createdAt(OffsetDateTime.now())
+                    .build()));
+    Path target = tempDir.resolve("docs/.uploads/d-race.bin");
+    when(workspace.resolve("p1", "docs/.uploads/d-race.bin")).thenReturn(target);
+
+    service.processDocument("d-race");
+
+    // The copy the indexer wrote must not survive the deletion it raced.
+    assertThat(java.nio.file.Files.exists(target)).isFalse();
+    verify(chunkStore, never()).insertLexicalAll(any(), any());
+    verify(chunkStore, never()).insertAll(any(), any(), any());
+  }
+
+  @Test
   void normalisesUnicodeTraversalAndControlCharactersForDisplayOnly() {
     String normalized = ProjectDocumentService.safeDisplayName("../../ｅｖｉｌ\u202E.pdf");
     assertThat(normalized).isEqualTo("evil.pdf").doesNotContain("/").doesNotContain("\\");
