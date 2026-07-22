@@ -182,8 +182,10 @@ public class PersonalAccessTokenService {
       return; // throttled — avoid a DB write on every authenticated request
     }
     try {
-      token.setLastUsedAt(now);
-      repo.save(token);
+      // RR-139 — narrow conditional update: stamp last_used_at only while the row is still active
+      // and never write revoked_at. A whole-entity save() here could overwrite a revocation that
+      // committed between the resolver's read and this write, resurrecting a revoked credential.
+      repo.stampLastUsedIfActive(token.getId(), now);
     } catch (Exception e) {
       log.debug(
           "[PAT] lastUsedAt stamp failed for {} errorClass={}",

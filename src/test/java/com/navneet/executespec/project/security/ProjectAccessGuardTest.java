@@ -278,6 +278,39 @@ class ProjectAccessGuardTest {
     assertEquals(400, ex.getStatusCode().value());
   }
 
+  // RR-832 — a soft-deleted (tombstoned) project must fail closed for write and admin access, even
+  // for an otherwise-authorized same-org ORG_ADMIN. Only assertCanRestore may load it.
+  @Test
+  void softDeletedProject_failsWrite_with404() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", admin));
+    assertEquals(404, ex.getStatusCode().value());
+  }
+
+  @Test
+  void softDeletedProject_failsAdmin_with404() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanAdmin("p1", admin));
+    assertEquals(404, ex.getStatusCode().value());
+  }
+
+  @Test
+  void softDeletedProject_isLoadableForRestore() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    assertSame(p, guard.assertCanRestore("p1", admin));
+  }
+
   private static Project project(String id, String orgId) {
     Project p = new Project();
     p.setId(id);

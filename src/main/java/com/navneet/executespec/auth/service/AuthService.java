@@ -503,9 +503,15 @@ public class AuthService {
       }
     }
     validatePasswordStrength(req.newPassword());
+    Instant now = Instant.now();
     user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
     user.setMustChangePassword(false);
-    user.setUpdatedAt(Instant.now());
+    // RR-134 — a credential change ends every session minted before it. The password reset path
+    // already advances the per-user session epoch; a change must do the same, otherwise an attacker
+    // holding an access/refresh token stays authenticated after the owner rotates a compromised
+    // password. JwtAuthenticationFilter enforces tokenInvalidatedAt on every request.
+    user.setTokenInvalidatedAt(now);
+    user.setUpdatedAt(now);
     userRepo.save(user);
 
     auditService.record(
@@ -746,7 +752,11 @@ public class AuthService {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Password must contain at least one special character");
     }
-    if (password.contains(" ")) {
+    // RR-603 — the previous check only looked for a literal space, so the "no whitespace"
+    // guarantee was false for tabs, newlines and every other Unicode whitespace codepoint. Reject
+    // any whitespace codepoint so the advertised policy is actually enforced across register, reset
+    // and change.
+    if (password.codePoints().anyMatch(Character::isWhitespace)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Password must not contain whitespace");
     }

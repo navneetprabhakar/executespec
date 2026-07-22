@@ -30,6 +30,13 @@ public interface OrgInvitationRepository extends JpaRepository<OrgInvitation, St
 
   List<OrgInvitation> findByOrgIdAndStatus(String orgId, String status);
 
+  /**
+   * RR-1291 — count outstanding invitations for a given org, role and status so the PRO
+   * single-ORG_ADMIN invariant also accounts for a pending (not-yet-accepted) admin invite, closing
+   * the invite-bypass of the direct role-change guard.
+   */
+  long countByOrgIdAndOrgRoleAndStatus(String orgId, String orgRole, String status);
+
   List<OrgInvitation> findByStatus(String status);
 
   List<OrgInvitation> findByInvitedEmail(String email);

@@ -3,6 +3,7 @@ package com.navneet.executespec.auth.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -157,8 +158,12 @@ class PersonalAccessTokenServiceTest {
         .thenReturn(Optional.of(row));
 
     assertThat(svc.resolveUserId(plaintext)).isEqualTo("user-9");
-    verify(repo, times(1)).save(row); // stamped because lastUsedAt was null
-    assertThat(row.getLastUsedAt()).isNotNull();
+    // RR-139 — the last-use stamp is now a narrow conditional update that only touches an ACTIVE
+    // row and never writes revoked_at, instead of a whole-entity save() that could resurrect a
+    // concurrently-revoked token. Assert the conditional update fires (stale => stamped) and that
+    // the resurrection-prone whole-entity save is never used on this path.
+    verify(repo, times(1)).stampLastUsedIfActive(eq("t1"), any(Instant.class));
+    verify(repo, never()).save(any(PersonalAccessToken.class));
   }
 
   @Test
