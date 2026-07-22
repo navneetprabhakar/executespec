@@ -249,6 +249,48 @@ class PreviewHardeningTest {
   }
 
   @Nested
+  @DisplayName("RR-384 — credential exclusions apply at every depth, not just the context root")
+  class DockerIgnoreDepth {
+
+    /**
+     * A {@code .dockerignore} pattern is matched against the whole path relative to the build
+     * context, so a bare {@code .env} excludes ONLY the root-level file while {@code backend/.env}
+     * is still copied by {@code COPY . .}. Every security family must therefore also be emitted in
+     * its {@code **&#47;} form — asserted over the WHOLE list, so a pattern added later cannot
+     * quietly ship root-only.
+     */
+    @Test
+    @DisplayName("every security pattern is emitted both at the root and recursively")
+    void everySecurityPatternIsAlsoRecursive() {
+      String ignore = new DevDockerfileGenerator().dockerIgnore();
+
+      for (var family : DevDockerfileGenerator.SECURITY_EXCLUSIONS.entrySet()) {
+        for (String pattern : family.getValue()) {
+          assertThat(ignore.lines().anyMatch(l -> l.equals(pattern)))
+              .as("root-anchored exclusion for " + pattern)
+              .isTrue();
+          assertThat(ignore.lines().anyMatch(l -> l.equals("**/" + pattern)))
+              .as("recursive exclusion for " + pattern + " (nested secrets were being copied)")
+              .isTrue();
+        }
+      }
+    }
+
+    @Test
+    @DisplayName("the nested credential paths the finding named are covered")
+    void namedNestedPathsAreCovered() {
+      String ignore = new DevDockerfileGenerator().dockerIgnore();
+      assertThat(ignore)
+          .contains("**/.env")
+          .contains("**/.npmrc")
+          .contains("**/id_rsa")
+          .contains("**/*.pem")
+          .contains("**/.agent-context")
+          .contains("**/.executespec");
+    }
+  }
+
+  @Nested
   @DisplayName("RR-384 — a customer's .dockerignore is merged, not clobbered")
   class DockerIgnoreMerge {
 

@@ -106,7 +106,7 @@ class AnonymousRunSessionStoreTest {
   @Test
   void legacy_bound_session_without_a_claim_key_is_still_protected() {
     store.save(session("u-alice"));
-    redisData.remove("v3:anon-run:claim:" + TOKEN);
+    redisData.remove("v3:anon-run:claim:" + AnonymousRunSessionStore.keyHash(TOKEN));
 
     Optional<AnonymousRunSession> bob = store.bindToUser(TOKEN, "u-bob");
     assertEquals("u-alice", bob.orElseThrow().boundUserId());
@@ -171,5 +171,53 @@ class AnonymousRunSessionStoreTest {
     assertFalse(TOKEN.contains(fp), "fingerprint must not be a substring of the bearer");
     assertNotEquals(fp, AnonymousRunSessionStore.fingerprint(TOKEN + "x"));
     assertEquals("none", AnonymousRunSessionStore.fingerprint(null));
+  }
+
+  /**
+   * RR-665 remainder — the bearer must not be recoverable from Redis itself. Neither any KEY nor
+   * any stored VALUE may contain the token: a keyspace listing, a SCAN/MONITOR trace or a snapshot
+   * handed to an operator must not yield a working credential.
+   */
+  @Test
+  void redis_contains_the_bearer_neither_as_a_key_nor_in_a_stored_value() {
+    store.bindToUser(TOKEN, "u-alice");
+
+    assertFalse(redisData.isEmpty(), "the session and its claim must actually be stored");
+    for (Map.Entry<String, String> entry : redisData.entrySet()) {
+      assertFalse(entry.getKey().contains(TOKEN), "Redis key leaks the bearer: " + entry.getKey());
+      assertFalse(
+          entry.getValue().contains(TOKEN), "Redis value leaks the bearer: " + entry.getKey());
+    }
+    // ...and the store is still fully usable through the caller's own token.
+    AnonymousRunSession found = store.find(TOKEN).orElseThrow();
+    assertEquals(TOKEN, found.token(), "the caller's token is re-attached on read");
+    assertEquals("u-alice", found.boundUserId());
+    assertEquals("anon-run-1", found.runId());
+  }
+
+  /** A session written under the pre-RR-665 raw-token key must stay readable across the deploy. */
+  @Test
+  void legacy_raw_token_key_is_still_readable_and_is_rewritten_hashed() throws Exception {
+    redisData.clear();
+    ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    redisData.put(
+        "v3:anon-run:sess:" + TOKEN, mapper.writeValueAsString(session("u-legacy"))); // legacy blob
+
+    AnonymousRunSession found = store.find(TOKEN).orElseThrow();
+    assertEquals(TOKEN, found.token());
+    assertEquals("u-legacy", found.boundUserId());
+
+    store.save(found);
+    assertTrue(
+        redisData.containsKey("v3:anon-run:sess:" + AnonymousRunSessionStore.keyHash(TOKEN)),
+        "the next write must land under the hashed key");
+  }
+
+  /** A tokenless record has no addressable key; persisting it would create an unreachable row. */
+  @Test
+  void a_session_without_a_token_is_refused_rather_than_written_under_an_empty_digest() {
+    AnonymousRunSession tokenless = session("u-alice").withToken(null);
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> store.save(tokenless));
   }
 }
