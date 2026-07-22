@@ -46,6 +46,42 @@ class AdminAnalyticsControllerTest {
         .hasMessageContaining("403");
   }
 
+  // RR-243 — the caller-controlled period must be bounded to a small positive maximum.
+  @Test
+  void usageRejectsNonPositivePeriod() {
+    AppUserDetails principal = principal("user-1", "org-a", "USER", "ORG_ADMIN");
+
+    assertThatThrownBy(() -> controller.usage("ORG", "org-a", 0, principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+    assertThatThrownBy(() -> controller.usage("ORG", "org-a", -5, principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+  }
+
+  @Test
+  void usageRejectsPeriodBeyondMaximum() {
+    AppUserDetails principal = principal("user-1", "org-a", "USER", "ORG_ADMIN");
+
+    assertThatThrownBy(
+            () ->
+                controller.usage(
+                    "ORG",
+                    "org-a",
+                    AdminAnalyticsController.MAX_ANALYTICS_PERIOD_DAYS + 1,
+                    principal))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+  }
+
+  @Test
+  void boundedPeriodAcceptsTheInclusiveMaximum() {
+    org.assertj.core.api.Assertions.assertThat(
+            AdminAnalyticsController.boundedPeriod(
+                AdminAnalyticsController.MAX_ANALYTICS_PERIOD_DAYS))
+        .isEqualTo(AdminAnalyticsController.MAX_ANALYTICS_PERIOD_DAYS);
+  }
+
   @Test
   void invalidEntityTypeFailsBeforeServiceCall() {
     AppUserDetails principal = principal("user-1", "org-a", "USER", "ORG_ADMIN");

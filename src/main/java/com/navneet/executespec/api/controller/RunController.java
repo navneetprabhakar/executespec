@@ -33,6 +33,7 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRecovery;
+import com.navneet.executespec.state.entity.RunRepo;
 import com.navneet.executespec.state.repository.AgentMessageRepository;
 import com.navneet.executespec.state.repository.RunRecoveryRepository;
 
@@ -491,11 +492,24 @@ public class RunController {
   }
 
   /**
-   * Live cost cache: runId → [costUsd, computedAtMillis]. Completed runs cached forever,
-   * in-progress cached 15s.
+   * Live cost cache: runId → [costUsd, computedAtMillis].
+   *
+   * <p>RR-238 — this used to be an unbounded process-wide map that retained terminal legacy-run
+   * entries forever, so querying distinct historical run costs grew JVM heap monotonically for the
+   * lifetime of the process. It is now a bounded access-order LRU: the eldest entry is evicted once
+   * {@link #COST_CACHE_MAX_ENTRIES} is reached. Terminal entries are still preferred (never TTL-
+   * expired) but are no longer immortal — under cache pressure they fall out and recompute.
    */
-  private final java.util.concurrent.ConcurrentHashMap<String, double[]> costCache =
-      new java.util.concurrent.ConcurrentHashMap<>();
+  private static final int COST_CACHE_MAX_ENTRIES = 2_000;
+
+  private final Map<String, double[]> costCache =
+      java.util.Collections.synchronizedMap(
+          new java.util.LinkedHashMap<String, double[]>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, double[]> eldest) {
+              return size() > COST_CACHE_MAX_ENTRIES;
+            }
+          });
 
   private static final long COST_CACHE_TTL_MS = 30_000;
   private static final java.util.Set<String> TERMINAL_STATUSES =
@@ -562,19 +576,23 @@ public class RunController {
       return ResponseEntity.ok(body);
     }
 
-    double[] cached =
-        costCache.compute(
-            runId,
-            (k, existing) -> {
-              if (existing != null) {
-                boolean isTerminal = TERMINAL_STATUSES.contains(run.getStatus());
-                if (isTerminal || (System.currentTimeMillis() - existing[1]) < COST_CACHE_TTL_MS) {
-                  return existing;
-                }
-              }
-              double cost = costEstimator.computeCostForRun(runId);
-              return new double[] {cost, System.currentTimeMillis()};
-            });
+    // RR-238 — the bounded LRU is not a ConcurrentMap, so the read/compute/insert is done under
+    // one lock. removeEldestEntry (fired on put) and access-order both need the whole sequence to
+    // be atomic; cost estimation is best-effort so a rare concurrent recompute is acceptable.
+    double[] cached;
+    synchronized (costCache) {
+      double[] existing = costCache.get(runId);
+      boolean fresh =
+          existing != null
+              && (TERMINAL_STATUSES.contains(run.getStatus())
+                  || (System.currentTimeMillis() - existing[1]) < COST_CACHE_TTL_MS);
+      if (fresh) {
+        cached = existing;
+      } else {
+        cached = new double[] {costEstimator.computeCostForRun(runId), System.currentTimeMillis()};
+        costCache.put(runId, cached);
+      }
+    }
     Map<String, Object> body = baseCostBody(runId, cached[0]);
     body.put("inputTokens", safeTok(run.getTotalInputTokens()));
     body.put("outputTokens", safeTok(run.getTotalOutputTokens()));
@@ -609,6 +627,27 @@ public class RunController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,
           "Repository destination is bound to the run and cannot be overridden during push.");
+    }
+  }
+
+  /**
+   * RR-1671 — parse the untyped {@code repoMode} request parameter to the canonical {@link
+   * RunRepo.RepoMode} at the controller boundary and reject an unknown value with a 400. This was
+   * previously written straight onto the run and only refused late at the service publication
+   * chokepoint (RR-900); an unparseable value is a client error, not a deferred publication
+   * failure.
+   */
+  static String parseRepoMode(String repoMode) {
+    if (repoMode == null || repoMode.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "repoMode is required. Must be NEW, EXISTING, or NONE.");
+    }
+    try {
+      return RunRepo.RepoMode.valueOf(repoMode.trim().toUpperCase(java.util.Locale.ROOT)).name();
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Invalid repoMode: " + repoMode + ". Must be NEW, EXISTING, or NONE.");
     }
   }
 
@@ -1019,10 +1058,13 @@ public class RunController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String runId,
       @RequestParam(required = false) String repoUrl,
-      @RequestParam(required = false, defaultValue = "NEW") String repoMode) {
+      @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     rejectRepositoryDestinationOverride(repoUrl);
-    log.info("POST /api/runs/{}/push-github — repoMode={}", runId, repoMode);
+    // RR-1671 — validate the mode at the boundary, and default the deprecated compatibility route
+    // to EXISTING rather than the destructive create-a-repository NEW mode.
+    String parsedMode = parseRepoMode(repoMode);
+    log.info("POST /api/runs/{}/push-github — repoMode={}", runId, parsedMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
@@ -1030,7 +1072,7 @@ public class RunController {
               + run.getStatus()
               + ")");
     }
-    run.setRepoMode(repoMode);
+    run.setRepoMode(parsedMode);
     // Ensure PAT is available (from user or run or system)
     if (run.getGithubPat() == null || run.getGithubPat().isBlank()) {
       run.setGithubPat(userDetails.getUser().getGithubPat());
@@ -1186,13 +1228,15 @@ public class RunController {
       @RequestParam(required = false, defaultValue = "EXISTING") String repoMode) {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     rejectRepositoryDestinationOverride(repoUrl);
-    log.info("POST /api/runs/{}/push-scm — repoMode={}", runId, repoMode);
+    // RR-1671 — validate the mode at the boundary; an unknown value is a 400, not a late failure.
+    String parsedMode = parseRepoMode(repoMode);
+    log.info("POST /api/runs/{}/push-scm — repoMode={}", runId, parsedMode);
     if (!List.of("COMPLETE", "PARTIAL").contains(run.getStatus())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT,
           "Only COMPLETE or PARTIAL runs can be pushed to SCM (current: " + run.getStatus() + ")");
     }
-    run.setRepoMode(repoMode);
+    run.setRepoMode(parsedMode);
 
     var user = userDetails.getUser();
 
@@ -1245,12 +1289,32 @@ public class RunController {
     PipelineRun run = guard.requireRunWriteAccess(runId, userDetails);
     String newProjectId = body.get("projectId");
     if (newProjectId != null && !newProjectId.isBlank()) {
-      projectAccessGuard.assertCanWrite(newProjectId, userDetails);
+      var project = projectAccessGuard.assertCanWrite(newProjectId, userDetails);
+      // RR-237 — write access to the run and independent write access to the host project were
+      // both satisfiable across orgs (external ProjectMember). Injecting a home-org run into a
+      // foreign host project corrupts that tenant's memory/analytics/evidence ownership. Run
+      // ownership is not authority to reassign the run into another org's project; refuse the
+      // cross-org move. A supported transfer would need an explicit audited command that
+      // re-authorizes every dependent owner atomically.
+      assertSameOrgReassignment(project.getOrgId(), run.getOrgId());
     }
     run.setProjectId(newProjectId != null && !newProjectId.isBlank() ? newProjectId : null);
     stateStore.save(run);
     log.info("PATCH /api/runs/{}/project — projectId={}", runId, run.getProjectId());
     return ResponseEntity.ok(mapper.toSummary(run));
+  }
+
+  /**
+   * RR-237 — refuse a cross-org run→project reassignment. When both orgs are known and differ, the
+   * move is a tenant-boundary violation (409). Unknown orgs on either side are permitted (legacy
+   * rows), preserving the prior un-assign / same-org behavior.
+   */
+  static void assertSameOrgReassignment(String projectOrgId, String runOrgId) {
+    if (projectOrgId != null && runOrgId != null && !projectOrgId.equals(runOrgId)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Cannot reassign a run into a project owned by a different organization.");
+    }
   }
 
   /** Cancel a run. */

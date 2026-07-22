@@ -78,14 +78,7 @@ public class DeploymentController {
     // permission map (which post-F-03 reads tier_config) and 403s
     // on canDeploy=false. Quota enforcement stays in DeploymentService
     // (per-user maxDeployments check).
-    if (userDetails != null) {
-      var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
-      if (!perms.canDeploy()) {
-        throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN,
-            "Deployment is not available on your current tier. Upgrade to enable.");
-      }
-    }
+    requireDeployEntitlement(userDetails);
     try {
       RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(request.repoMode().toUpperCase());
       Deployment d =
@@ -213,18 +206,10 @@ public class DeploymentController {
     // RR-571: analyse restores the run workspace from GCS onto local disk before inspecting it,
     // so it is a state-changing precondition of deploy, not a pure read.
     guard.requireRunWriteAccess(runId, userDetails);
-
-    PipelineRun run =
-        stateStore
-            .findRun(runId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
-    if (!"COMPLETE".equals(run.getStatus()) && !"FAILED".equals(run.getStatus())) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST,
-          "Run must be complete before analyzing for deployment. Current status: "
-              + run.getStatus());
-    }
+    // RR-572 — analyse is a deployment-creation precondition; enforce the tier entitlement here.
+    requireDeployEntitlement(userDetails);
+    // RR-573 — a FAILED run is not a deployable candidate; require COMPLETE.
+    requireDeployableRun(runId);
 
     // Ensure workspace is available (restore from GCS if needed)
     Path workspace;
@@ -262,6 +247,10 @@ public class DeploymentController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     requireDeploymentCreationEnabled();
     guard.requireRunWriteAccess(request.runId(), userDetails);
+    // RR-572 — the confirm path went straight to DeployEngineOrchestrator with no tier gate.
+    requireDeployEntitlement(userDetails);
+    // RR-573 — refuse to build/release a non-COMPLETE (e.g. FAILED) run through the normal API.
+    requireDeployableRun(request.runId());
     String userId = userDetails.getUser().getId();
 
     try {
@@ -360,5 +349,48 @@ public class DeploymentController {
           HttpStatus.SERVICE_UNAVAILABLE,
           "Deployment creation is disabled until durable recovery is configured.");
     }
+  }
+
+  /**
+   * RR-572 — the tier {@code canDeploy} entitlement gate, shared by EVERY deployment-creation path.
+   * The legacy {@code POST /api/deployments} path enforced it, but {@code /analyze} and {@code
+   * /confirm} reached {@link DeployEngineOrchestrator} after only run access + release-policy
+   * checks, so a user whose tier forbids deployments could still drive Cloud Build/Artifact
+   * Registry/Cloud Run work through the confirm endpoint. UI gating does not protect the API.
+   */
+  private void requireDeployEntitlement(AppUserDetails userDetails) {
+    if (userDetails == null) {
+      return;
+    }
+    var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+    if (!perms.canDeploy()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Deployment is not available on your current tier. Upgrade to enable.");
+    }
+  }
+
+  /**
+   * RR-573 — only a COMPLETE run is a deployable candidate. Analyze/confirm previously accepted a
+   * FAILED run and described it as ready for deployment, so a run that failed build, tests,
+   * reviewer or execution could be built and released to Cloud Run as if it were an approved
+   * candidate — bypassing the platform's verification and human-release claims at the final
+   * external side-effect boundary. Deploying a failed/partial run must go through a separately
+   * named break-glass workflow, not the normal deploy API.
+   */
+  private PipelineRun requireDeployableRun(String runId) {
+    PipelineRun run =
+        stateStore
+            .findRun(runId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
+    if (!"COMPLETE".equals(run.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Only a COMPLETE run can be deployed (current: "
+              + run.getStatus()
+              + "). Failed/partial runs are not deployable through this endpoint.");
+    }
+    return run;
   }
 }

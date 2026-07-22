@@ -28,9 +28,11 @@ import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RunMapper {
 
   private final IntegrationRunRepository integrationRunRepository;
@@ -242,7 +244,7 @@ public class RunMapper {
         .statusReason(r.getStatusReason())
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
-        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson()))
+        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
         .tasks(
             tasks.stream()
                 .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
@@ -366,9 +368,9 @@ public class RunMapper {
         t.getStartedAt(),
         t.getCompletedAt(),
         extractFailureReason(t),
-        parseJson(t.getGoalDonenessJson()),
-        parseJson(t.getContinuationDecisionJson()),
-        parseJson(t.getContinuationActionsJson()),
+        parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId()),
+        parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
+        parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),
@@ -382,15 +384,35 @@ public class RunMapper {
     try {
       return objectMapper.readTree(taskJson).path("objective").asText(null);
     } catch (Exception e) {
+      // RR-1124 — a non-blank but malformed taskJson is corruption/schema drift, not "no
+      // objective". Emit a repair signal instead of swallowing it.
+      log.warn(
+          "RR-1124 malformed persisted taskJson while extracting objective: {}", e.getMessage());
       return null;
     }
   }
 
   private JsonNode parseJson(String json) {
+    return parseJson(json, "unknown", "unknown");
+  }
+
+  /**
+   * RR-1124 — this used to catch every parse failure and return null with no log or metric, so a
+   * corrupted/schema-drifted proof field looked identical to "never measured" and the UI silently
+   * omitted mandatory proof and controls with no repair signal. The DTO contract is unchanged
+   * (still null on failure), but a non-blank field that fails to parse now logs a warning carrying
+   * the owning entity id and field so corruption is visible and diagnosable.
+   */
+  private JsonNode parseJson(String json, String field, String entityId) {
     if (json == null || json.isBlank()) return null;
     try {
       return objectMapper.readTree(json);
     } catch (Exception e) {
+      log.warn(
+          "RR-1124 malformed persisted JSON: field={} id={} — proof rendered absent ({})",
+          field,
+          entityId,
+          e.getMessage());
       return null;
     }
   }
@@ -421,7 +443,14 @@ public class RunMapper {
           String selfReview = report.path("self_review").asText("");
           if (!selfReview.isBlank()) return selfReview;
         }
-      } catch (Exception ignored) {
+      } catch (Exception e) {
+        // RR-1124 — a non-blank but malformed worker report is corruption, not "no failure
+        // reason". Log a repair signal; the lastLlmFailure fallback below still applies.
+        log.warn(
+            "RR-1124 malformed persisted workerReportJson: taskId={} — failure reason from report"
+                + " unavailable ({})",
+            t.getTaskId(),
+            e.getMessage());
       }
     }
     // Fallback: lastLlmFailure (set by blockTask / recovery)

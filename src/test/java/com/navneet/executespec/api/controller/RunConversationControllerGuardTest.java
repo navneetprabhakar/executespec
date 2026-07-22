@@ -34,4 +34,27 @@ class RunConversationControllerGuardTest {
     verify(guard).requireRunWriteAccess("run-1", user);
     verify(guard, never()).requireRunAccess("run-1", user);
   }
+
+  // RR-599 — an oversize chat turn is rejected at the boundary before it reaches ChatService.
+  @Test
+  void sendMessageRejectsOversizeTurn() {
+    RunAccessGuard guard = mock(RunAccessGuard.class);
+    ChatService chat = mock(ChatService.class);
+    RunConversationController controller =
+        new RunConversationController(
+            guard, chat, mock(ApplyService.class), mock(ApplyResultStore.class));
+    AppUserDetails user = mock(AppUserDetails.class);
+    String big = "x".repeat(RunConversationController.MAX_CHAT_MESSAGE_CHARS + 1);
+
+    assertThatThrownBy(
+            () ->
+                controller.sendMessage(
+                    "run-1", new RunConversationController.ChatMessageBody(big), user))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("413");
+
+    verify(guard).requireRunWriteAccess("run-1", user);
+    verify(chat, never())
+        .send(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+  }
 }

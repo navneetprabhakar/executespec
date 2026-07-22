@@ -80,23 +80,57 @@ public class PricingController {
       @RequestBody PricingUpdateRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireSuperAdmin(userDetails);
+
+    // RR-962 — validate finite, non-negative rates. Omitted required rates are null (boxed
+    // Double), not a silent 0 that would understate cost, managed-credit debit and spend caps.
+    double inputRate = requireRate(req.inputCostPer1m(), "inputCostPer1m");
+    double outputRate = requireRate(req.outputCostPer1m(), "outputCostPer1m");
+
+    // Preserve the existing cache rate when the request omits it; nulling it forced a generic
+    // 10%-of-input runtime fallback for providers whose cache economics differ.
+    ModelPricingId id = new ModelPricingId(provider, model);
+    Double existingCached =
+        pricingRepo
+            .findByIdProviderAndIdModel(provider, model)
+            .map(ModelPricing::getCachedInputCostPer1m)
+            .orElse(null);
+    Double cachedRate =
+        req.cachedInputCostPer1m() != null
+            ? requireRate(req.cachedInputCostPer1m(), "cachedInputCostPer1m")
+            : existingCached;
+
     log.info(
-        "PUT /api/pricing/{}/{} — input=${}/1M output=${}/1M",
+        "PUT /api/pricing/{}/{} — input=${}/1M output=${}/1M cached=${}/1M",
         provider,
         model,
-        req.inputCostPer1m(),
-        req.outputCostPer1m());
+        inputRate,
+        outputRate,
+        cachedRate);
 
     ModelPricing saved =
         pricingRepo.save(
             ModelPricing.builder()
-                .id(new ModelPricingId(provider, model))
-                .inputCostPer1m(req.inputCostPer1m())
-                .outputCostPer1m(req.outputCostPer1m())
+                .id(id)
+                .inputCostPer1m(inputRate)
+                .outputCostPer1m(outputRate)
+                .cachedInputCostPer1m(cachedRate)
                 .notes(req.notes())
                 .updatedAt(Instant.now())
                 .build());
 
     return ResponseEntity.ok(toRow(saved));
+  }
+
+  /**
+   * RR-962 — a rate must be present, finite and non-negative. A missing (null), NaN, infinite or
+   * negative value is a 400 rather than a persisted figure that understates cost downstream.
+   */
+  private static double requireRate(Double value, String field) {
+    if (value == null || !Double.isFinite(value) || value < 0) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.BAD_REQUEST,
+          field + " must be a finite, non-negative number.");
+    }
+    return value;
   }
 }
