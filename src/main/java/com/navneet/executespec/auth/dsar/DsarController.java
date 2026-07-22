@@ -5,10 +5,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.PaymentAudit;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.notification.Notification;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -16,6 +18,8 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -72,12 +76,13 @@ public class DsarController {
   private final PipelineRunRepository runRepo;
   private final NotificationRepository notifRepo;
   private final com.navneet.executespec.auth.repository.PaymentAuditRepository paymentRepo;
+  private final ActivityAuditService auditService;
 
   @GetMapping(value = "/me", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Map<String, Object>> exportSelf(
       @AuthenticationPrincipal AppUserDetails principal) {
     if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-    return ResponseEntity.ok(buildExport(principal.getUser().getId()));
+    return sensitiveExport(buildExport(principal.getUser().getId()));
   }
 
   @GetMapping(value = "/users/{userId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -86,7 +91,49 @@ public class DsarController {
       @AuthenticationPrincipal AppUserDetails admin, @PathVariable String userId) {
     log.warn(
         "[DSAR] act-on-behalf export by admin={} for user={}", admin.getUser().getId(), userId);
-    return ResponseEntity.ok(buildExport(userId));
+    // RR-232 — a privileged act-on-behalf personal-data export must leave a durable,
+    // tenant-queryable
+    // accountability trail, not just a log line that disappears with log retention. Record an
+    // immutable ActivityAudit intent BEFORE the export is built, and fail closed if the audit store
+    // is unavailable — an unaudited access to another subject's data is refused, not silently
+    // served.
+    AppUser subject = userRepo.findById(userId).orElse(null);
+    try {
+      auditService.record(
+          ActivityAudit.builder()
+              .eventType("DSAR_ADMIN_EXPORT")
+              .entityType("USER")
+              .entityId(userId)
+              .actorId(admin.getUser().getId())
+              .orgId(subject != null ? subject.getOrgId() : null)
+              .newValue("{\"purpose\":\"act-on-behalf DSAR export\"}")
+              .build());
+    } catch (RuntimeException e) {
+      log.error(
+          "[DSAR] refusing admin export — durable audit could not be established for user={} by"
+              + " admin={} errorClass={}",
+          userId,
+          admin.getUser().getId(),
+          e.getClass().getSimpleName());
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Export refused: the access-audit record could not be established.");
+    }
+    return sensitiveExport(buildExport(userId));
+  }
+
+  /**
+   * RR-231 — a DSAR bundle carries identity, complete specs/prompts, financial ids and notification
+   * content, so it must never be cached by browsers, shared-device history or debugging proxies.
+   * Return it as a short-lived, non-cacheable attachment with nosniff.
+   */
+  private static ResponseEntity<Map<String, Object>> sensitiveExport(Map<String, Object> body) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore().cachePrivate())
+        .header(HttpHeaders.PRAGMA, "no-cache")
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"dsar-export.json\"")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(body);
   }
 
   /**

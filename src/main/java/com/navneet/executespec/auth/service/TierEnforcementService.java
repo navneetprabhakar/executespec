@@ -332,8 +332,24 @@ public class TierEnforcementService {
     if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
 
     String tier = resolveTierForLimitCheck(user, orgId);
-    int limit = tierConfigRepo.findById(tier).map(TierConfig::getMaxProjectsPerOrg).orElse(-1);
-    if (limit < 0) return; // unlimited
+    // RR-830 — distinguish a MISSING tier_config row from an explicit unlimited (-1) policy. A
+    // deleted/mistyped/undermigrated row previously mapped to -1 and silently upgraded the account
+    // to unlimited projects — a fail-OPEN entitlement bug in an otherwise fail-closed billing
+    // model.
+    // Fail closed with a typed availability error instead.
+    int limit =
+        tierConfigRepo
+            .findById(tier)
+            .map(TierConfig::getMaxProjectsPerOrg)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "Tier configuration for '"
+                            + tier
+                            + "' is unavailable; project creation cannot be admitted. Contact"
+                            + " support."));
+    if (limit < 0) return; // explicit unlimited (Enterprise)
 
     // Project.org_id is non-nullable in the schema, so org-level count
     // is the only meaningful scope. If orgId is null we conservatively
@@ -384,8 +400,20 @@ public class TierEnforcementService {
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
 
     String tier = resolveTierForLimitCheck(user, project.getOrgId());
-    int limit = tierConfigRepo.findById(tier).map(TierConfig::getMaxReposPerProject).orElse(-1);
-    if (limit < 0) return; // unlimited
+    // RR-830 — fail closed on a missing tier_config row rather than treating it as unlimited.
+    int limit =
+        tierConfigRepo
+            .findById(tier)
+            .map(TierConfig::getMaxReposPerProject)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "Tier configuration for '"
+                            + tier
+                            + "' is unavailable; repository linking cannot be admitted. Contact"
+                            + " support."));
+    if (limit < 0) return; // explicit unlimited (Enterprise)
 
     long current = projectRepoLinkRepo.countByProjectId(projectId);
     if (current >= limit) {

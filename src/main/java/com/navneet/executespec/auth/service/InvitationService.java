@@ -112,6 +112,19 @@ public class InvitationService {
             .findById(orgId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
 
+    // RR-824 — a personal org is a single-person workspace, not a business-billable scope; the
+    // entity/service contract says these cannot be invited into and must be converted through
+    // POST /api/org first. Enforce it here (the invite chokepoint), not just in the UI: forwarding
+    // the caller's current org straight to createInvitation previously let a paid personal-org
+    // owner
+    // add members with no conversion, no seat initialization and no business billing.
+    if (org.isPersonal()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "This is a personal workspace. Convert it to an organization (POST /api/org) before"
+              + " inviting members.");
+    }
+
     String email = req.email().trim().toLowerCase();
     String orgRole =
         req.orgRole() == null || req.orgRole().isBlank()
@@ -119,6 +132,23 @@ public class InvitationService {
             : req.orgRole().trim().toUpperCase(java.util.Locale.ROOT);
     if (!Set.of("ORG_ADMIN", "DEVELOPER", "BILLING_ADMIN").contains(orgRole)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid organization role");
+    }
+
+    // RR-1291 — the PRO single-ORG_ADMIN invariant is enforced on the direct role-change path
+    // (OrgController.changeMemberRole) but was bypassable by inviting a second ORG_ADMIN. Apply the
+    // same rule at the invite chokepoint: a PRO org that already has an admin (or a pending
+    // ORG_ADMIN
+    // invite) cannot mint another. ENTERPRISE allows multiple admins.
+    if ("ORG_ADMIN".equals(orgRole) && "PRO".equals(org.getTier())) {
+      long existingAdmins = orgMemberRepo.countByOrgIdAndOrgRole(orgId, "ORG_ADMIN");
+      long pendingAdminInvites =
+          invitationRepo.countByOrgIdAndOrgRoleAndStatus(orgId, "ORG_ADMIN", "PENDING");
+      if (existingAdmins + pendingAdminInvites >= 1) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN,
+            "PRO organizations can only have one ORG_ADMIN. Upgrade to ENTERPRISE for multiple"
+                + " administrators.");
+      }
     }
     List<String> projectIds = validateProjectAssignments(orgId, req.projectIds());
     String projectIdsStr = projectIds.isEmpty() ? null : String.join(",", projectIds);
@@ -558,12 +588,21 @@ public class InvitationService {
    * invitations (re-activates expired ones).
    */
   @Transactional
-  public void resendInvitation(String invitationId, String actorUserId) {
+  public void resendInvitation(String orgId, String invitationId, String actorUserId) {
     OrgInvitation invitation =
         invitationRepo
             .findById(invitationId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+    // RR-224 — tenant isolation: an invitation is only resendable by an admin of the org that owns
+    // it. cancelInvitation already enforced this; resend previously loaded by global id alone, so
+    // an
+    // ORG_ADMIN could reactivate/extend and mail another tenant's invitation. Return 404 (not 403)
+    // so a foreign UUID cannot be confirmed to exist.
+    if (!invitation.getOrgId().equals(orgId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found");
+    }
 
     if ("ACCEPTED".equals(invitation.getStatus())) {
       throw new ResponseStatusException(

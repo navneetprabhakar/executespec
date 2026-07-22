@@ -173,7 +173,11 @@ public class OrgController {
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<Map<String, String>> resendInvitation(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
-    invitationService.resendInvitation(id, userDetails.getUser().getId());
+    // RR-224 — pass the caller's org so the service can authorize on (id, orgId). Without it an
+    // ORG_ADMIN who learns another tenant's invitation UUID could reactivate/extend and resend it.
+    String orgId = userDetails.getUser().getOrgId();
+    if (orgId == null) return ResponseEntity.badRequest().build();
+    invitationService.resendInvitation(orgId, id, userDetails.getUser().getId());
     return ResponseEntity.ok(Map.of("message", "Invitation resent successfully"));
   }
 

@@ -126,18 +126,19 @@ public class ProjectController {
    * Status field is not touched — a project that was archived-then-deleted comes back archived, not
    * active.
    *
-   * <p>Tenant safety: {@link ProjectAccessGuard#assertCanRead} uses {@code projectRepo.findById}
+   * <p>Tenant safety: {@link ProjectAccessGuard#assertCanRestore} uses {@code projectRepo.findById}
    * which is the standard JPA finder and DOES return soft-deleted rows (no {@code @Where} clause on
    * the entity). The guard's org-membership check therefore runs correctly on a tombstoned project
-   * — exactly what we need for the restore-by-id flow. The {@link
-   * com.navneet.executespec.auth.service.ProjectService#getProject} 404-on-deleted path does not
-   * affect this guard.
+   * — exactly what we need for the restore-by-id flow. RR-832 — {@code assertCanRestore} is the
+   * single guard method that admits a soft-deleted row; {@code assertCanWrite}/{@code
+   * assertCanAdmin} now fail closed on a tombstone, so this is the only legitimate entry point that
+   * can load one.
    */
   @PostMapping("/{id}/restore")
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<ProjectDto> restoreProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
-    projectAccessGuard.assertCanWrite(id, userDetails);
+    projectAccessGuard.assertCanRestore(id, userDetails);
     return ResponseEntity.ok(projectService.restoreProject(id, userDetails.getUser().getId()));
   }
 

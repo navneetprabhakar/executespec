@@ -41,6 +41,14 @@ public class AdminReminderController {
 
   public record ReminderRequest(String subject, String body) {}
 
+  // RR-368 — bound the accepted message size at the application boundary regardless of edge
+  // configuration. A leaked/replayed scheduler token can otherwise drive arbitrary oversized-body
+  // allocation and provider spend through this relay. These caps cover the amplification-by-size
+  // vector; timestamped-signed-request + nonce/idempotency + an app-level volume quota remain a
+  // tracked follow-up.
+  static final int MAX_SUBJECT_CHARS = 300;
+  static final int MAX_BODY_CHARS = 20_000;
+
   @PostMapping("/send")
   public ResponseEntity<Map<String, Object>> send(
       @RequestHeader(value = "X-Admin-Reminder-Token", required = false) String token,
@@ -62,6 +70,16 @@ public class AdminReminderController {
         || req.body() == null
         || req.body().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "subject and body are required");
+    }
+    // RR-368 — reject oversized subject/body before allocation/provider dispatch.
+    if (req.subject().length() > MAX_SUBJECT_CHARS || req.body().length() > MAX_BODY_CHARS) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          "subject must be <= "
+              + MAX_SUBJECT_CHARS
+              + " chars and body <= "
+              + MAX_BODY_CHARS
+              + " chars");
     }
 
     String to = mailService.getAdminAddress();
