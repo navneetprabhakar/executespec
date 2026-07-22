@@ -70,7 +70,7 @@ public class Deployment {
   @Column(name = "actual_cost_usd")
   private Double actualCostUsd;
 
-  @Column(name = "error_message")
+  @Column(name = "error_message", length = ERROR_MESSAGE_MAX)
   private String errorMessage;
 
   @Column(name = "dockerfile_path")
@@ -227,8 +227,27 @@ public class Deployment {
     this.status = DeployStatus.LIVE;
   }
 
+  /**
+   * Persisted {@code error_message} is {@code VARCHAR(2048)} (V1 baseline). RR-699: raw provider /
+   * build failures routinely carry long command output and JSON, so assigning {@code
+   * e.getMessage()} verbatim could exceed the column and make the FAILED transition itself throw a
+   * length violation — leaving the deployment stuck in an in-flight state. Bound the stored text so
+   * the terminal transition always succeeds. Full sanitized operator diagnostics belong in a
+   * separately access-controlled artifact (deferred — needs schema).
+   */
+  static final int ERROR_MESSAGE_MAX = 2048;
+
+  private static final String TRUNCATION_MARKER = "…[truncated]";
+
+  static String boundErrorMessage(String error) {
+    if (error == null) return null;
+    if (error.length() <= ERROR_MESSAGE_MAX) return error;
+    int keep = ERROR_MESSAGE_MAX - TRUNCATION_MARKER.length();
+    return error.substring(0, keep) + TRUNCATION_MARKER;
+  }
+
   public void markFailed(String error) {
-    this.errorMessage = error;
+    this.errorMessage = boundErrorMessage(error);
     this.status = DeployStatus.FAILED;
   }
 
