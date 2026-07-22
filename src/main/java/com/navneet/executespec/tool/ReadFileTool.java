@@ -199,16 +199,23 @@ public class ReadFileTool implements Tool {
         return ToolResult.err(
             ToolResult.ErrorKind.INVALID_ARGS, "path is a directory, not a file: " + path);
       }
-      // Record the read (full file content hash) so editFile can enforce read-before-write +
-      // staleness. Covers both range + full reads — any read grounds the worker on this file.
-      readState.recordReadFromDisk(ctx.runId(), resolved);
+      ToolResult result;
       if (start != null || end != null) {
         int s = start == null ? 1 : start;
         // Range reads are byte-exact and untruncated — this is how the model pages through a file
         // too large to return whole, and the slice it sees is exactly editable via editFile.
-        return safeContentResult(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
+        result = safeContentResult(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
+      } else {
+        result = safeContentResult(readFullCapped(resolved));
       }
-      return safeContentResult(readFullCapped(resolved));
+      // RR-1024 — record the read (full file content hash) for editFile's read-before-write +
+      // staleness gate ONLY when the content was actually returned to the model. A read the secret
+      // scanner FORBID (or any error) must not authorize a later full-file edit/overwrite of a file
+      // the worker never successfully observed.
+      if (result instanceof ToolResult.Ok) {
+        readState.recordReadFromDisk(ctx.runId(), resolved);
+      }
+      return result;
     } catch (NoSuchFileException nsfe) {
       return ToolResult.err(ToolResult.ErrorKind.NOT_FOUND, "file not found: " + path);
     } catch (SecurityException se) {
