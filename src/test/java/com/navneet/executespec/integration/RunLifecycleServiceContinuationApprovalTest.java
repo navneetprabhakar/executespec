@@ -367,6 +367,74 @@ class RunLifecycleServiceContinuationApprovalTest {
         RunContinuationDecision.STEP_UP_MODEL, "anthropic", "claude-sonnet-4-6");
   }
 
+  // RR-1564: seeded escalation counters must ACCUMULATE prior EXECUTED/APPROVED continuation-action
+  // rows from the durable ledger, not restart at a constant 1 on every human approval.
+  @Test
+  void approveContinuation_seedsAccumulatedPriorLedgerUsage() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "planSummary": "",
+                  "tasks": [{"id": "T1", "title": "Fix build", "description": ""}]
+                }
+                """)
+            .aiProvider("anthropic")
+            .workerModel("claude-haiku-4-5-20251001")
+            .build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            // Two prior provider switches already burned before this proposal was blocked.
+            .continuationActionsJson(
+                """
+                [
+                  {"status": "EXECUTED", "decision": "CHANGE_PROVIDER"},
+                  {"status": "APPROVED", "decision": "CHANGE_PROVIDER"}
+                ]
+                """)
+            .continuationDecisionJson(
+                """
+{
+  "decision": "STOP_BLOCKED",
+  "selectedCandidate": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6"
+  },
+  "policy": {"requireConfirmationBeforeExpensiveContinuation": true},
+  "reasons": [
+    "expensive continuation requires user confirmation before more spend; proposed action STEP_UP_MODEL -> anthropic/claude-sonnet-4-6"
+  ]
+}
+""")
+            .build();
+
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
+    verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
+    // 2 prior provider switches carried forward (not reset), STEP_UP_MODEL adds 1 step-up.
+    assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(2);
+    assertThat(request.getValue().initialModelStepUpsUsed()).isEqualTo(1);
+    assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
+  }
+
   @Test
   void approveContinuation_postReviewProposalRerunsReviewerAndValidation() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));

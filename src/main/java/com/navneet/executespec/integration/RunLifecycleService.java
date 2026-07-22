@@ -1072,6 +1072,10 @@ public class RunLifecycleService {
     }
 
     var task = findTask(runId, taskId);
+    // RR-1564: snapshot the run's already-consumed continuation ledger BEFORE the approved retry is
+    // appended, so the seeded escalation counters accumulate prior usage instead of resetting to a
+    // constant 1 on every human approval.
+    final String priorContinuationActionsJson = task.getContinuationActionsJson();
 
     java.nio.file.Path workspace =
         java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
@@ -1138,7 +1142,8 @@ public class RunLifecycleService {
                 if (row != null && row.getCreatedByUserId() != null) {
                   keyContextStore.resolveAndPut(runId, row.getCreatedByUserId());
                 }
-                ContinuationUsage approvedUsage = continuationUsageFor(row, override);
+                ContinuationUsage approvedUsage =
+                    continuationUsageFor(row, override, priorContinuationActionsJson);
                 if (localRun) {
                   remoteToolDispatcher.registerAfterWorkerRestart(runId);
                   log.info(
@@ -1512,11 +1517,55 @@ public class RunLifecycleService {
     }
   }
 
-  private static ContinuationUsage continuationUsageFor(
-      PipelineRun row, RetryProviderOverride override) {
+  /**
+   * RR-1564: seed the resumed executor's escalation counters from the run's already-consumed
+   * continuation usage in the durable {@code continuation_actions_json} ledger, THEN add the newly
+   * approved action's own contribution. Returning a constant {@code (1,0,0)}/{@code (0,1,0)}/{@code
+   * (0,0,1)} from the action kind alone reset the escalation budget on every human approval — an
+   * unbounded approve-loop spend path the moment an operator raises the per-run
+   * switch/step-up/step-down limits above 1. {@code priorActionsJson} is snapshotted before the
+   * approved row is appended, so the approved action is counted exactly once.
+   */
+  private ContinuationUsage continuationUsageFor(
+      PipelineRun row, RetryProviderOverride override, String priorActionsJson) {
     if (override == null) {
       return ContinuationUsage.none();
     }
+    return priorLedgerUsage(priorActionsJson).plus(usageForApprovedAction(row, override));
+  }
+
+  private ContinuationUsage priorLedgerUsage(String priorActionsJson) {
+    int switches = 0;
+    int stepUps = 0;
+    int stepDowns = 0;
+    try {
+      ArrayNode actions = readContinuationActions(priorActionsJson);
+      for (JsonNode node : actions) {
+        String status = node.path("status").asText("");
+        if (!"EXECUTED".equalsIgnoreCase(status) && !"APPROVED".equalsIgnoreCase(status)) {
+          continue;
+        }
+        RunContinuationDecision decision =
+            parseContinuationAction(node.path("decision").asText(""));
+        if (decision == RunContinuationDecision.CHANGE_PROVIDER) {
+          switches++;
+        } else if (decision == RunContinuationDecision.STEP_UP_MODEL) {
+          stepUps++;
+        } else if (decision == RunContinuationDecision.STEP_DOWN_MODEL) {
+          stepDowns++;
+        }
+      }
+    } catch (Exception e) {
+      // A corrupt ledger must not under-count the escalation budget; fail closed by treating the
+      // prior usage as unknown-nonzero only where we can, but at minimum log and continue with 0 so
+      // the approved action still adds its own contribution.
+      log.warn("RR-1564: failed to read prior continuation ledger for seeding: {}", e.getMessage());
+    }
+    return new ContinuationUsage(switches, stepUps, stepDowns);
+  }
+
+  private static ContinuationUsage usageForApprovedAction(
+      PipelineRun row, RetryProviderOverride override) {
     RunContinuationDecision action = override.proposedAction();
     if (action == RunContinuationDecision.CHANGE_PROVIDER) {
       return new ContinuationUsage(1, 0, 0);
@@ -1560,6 +1609,13 @@ public class RunLifecycleService {
   private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
     static ContinuationUsage none() {
       return new ContinuationUsage(0, 0, 0);
+    }
+
+    ContinuationUsage plus(ContinuationUsage other) {
+      return new ContinuationUsage(
+          providerSwitches + other.providerSwitches,
+          modelStepUps + other.modelStepUps,
+          modelStepDowns + other.modelStepDowns);
     }
   }
 
