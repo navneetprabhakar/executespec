@@ -292,10 +292,10 @@ public class BenchmarkTrackingService {
         run.setSubmissionStatus("SUBMITTED");
         run.setSubmissionReadiness("SUBMITTED");
         run.setSubmissionReadinessReason(null);
-        String url = extractField(payloadJson, "url");
-        if (url != null) {
-          run.setLeaderboardUrl(url.length() > 300 ? url.substring(0, 300) : url);
-        }
+        // RR-1356 — the leaderboard URL comes from the (potentially compromised) publisher and is
+        // rendered as a clickable new-tab anchor to a SUPER_ADMIN operator. Persist it only when it
+        // is a well-formed https URL with a host; reject javascript:/data:/http and lookalikes.
+        run.setLeaderboardUrl(sanitizeLeaderboardUrl(extractField(payloadJson, "url")));
       }
       case "SUBMISSION_FAILED" -> {
         run.setSubmissionStatus("FAILED");
@@ -337,12 +337,19 @@ public class BenchmarkTrackingService {
         taskResults.findByBenchmarkRunIdOrderByTaskNameAscAttemptAsc(runId);
     int updated = 0;
     long calls = 0;
+    // RR-1595 — count, rather than silently skip, the two conditions that make repair impossible.
+    // An all-unlinked campaign previously returned updatedTasks=0/HTTP 200, indistinguishable from
+    // a campaign that was already correct.
+    int unlinked = 0;
+    int noLedgerRows = 0;
     for (BenchmarkTaskResult result : results) {
       if (result.getEsRunId() == null || result.getEsRunId().isBlank()) {
+        unlinked++;
         continue;
       }
       List<RunStepUsage> rows = usage.findByRunIdOrderByCreatedAtAsc(result.getEsRunId());
       if (rows.isEmpty()) {
+        noLedgerRows++;
         continue;
       }
       long input = rows.stream().mapToLong(RunStepUsage::getInputTokens).sum();
@@ -380,6 +387,8 @@ public class BenchmarkTrackingService {
       payload.put("source", "run_step_usage");
       payload.put("updatedTasks", updated);
       payload.put("providerCalls", calls);
+      payload.put("unlinkedAttempts", unlinked);
+      payload.put("attemptsWithNoLedgerRows", noLedgerRows);
       payload.put("inputTokens", run.getInputTokens());
       payload.put("outputTokens", run.getOutputTokens());
       payload.put("costUsd", run.getCostUsd());
@@ -392,11 +401,21 @@ public class BenchmarkTrackingService {
           null,
           null);
     }
-    return new UsageReconciliation(run, results.size(), updated, calls);
+    return new UsageReconciliation(run, results.size(), updated, calls, unlinked, noLedgerRows);
   }
 
+  /**
+   * RR-1595 — {@code unlinkedAttempts} (no esRunId) and {@code attemptsWithNoLedgerRows} (linked
+   * but no canonical usage) are reported separately so an operator can tell "nothing to fix" from
+   * "nothing could be fixed because attempts were never linked to a run".
+   */
   public record UsageReconciliation(
-      BenchmarkRun run, int taskResults, int updatedTasks, long providerCalls) {}
+      BenchmarkRun run,
+      int taskResults,
+      int updatedTasks,
+      long providerCalls,
+      int unlinkedAttempts,
+      int attemptsWithNoLedgerRows) {}
 
   /** Idempotent on (run, task, attempt) — a re-published score for the same attempt is a no-op. */
   private void upsertTaskResult(
@@ -426,14 +445,20 @@ public class BenchmarkTrackingService {
             .benchmarkRunId(runId)
             .taskName(taskName)
             .attempt(att)
-            .reward(reward == null ? 0 : Math.max(0, reward))
+            // RR-1355 — reward is a binary resolved flag. Clamp any out-of-band value (a
+            // compromised
+            // or faulty harness sending 2, 5, …) to {0,1} so it cannot poison resolved% or route
+            // comparison. resolved% counts reward>0, so >1 could never mean "more resolved".
+            .reward(reward != null && reward > 0 ? 1 : 0)
             .esRunId(esRunId)
             .outcome(truncate(outcome, 40))
             .reason(truncate(reason, 500))
             .failureClassification(classifyFailure(reward, failureClassification, outcome, reason))
             .trajectoryLocation(truncate(trajectoryLocation, 1000))
             .trajectorySha256(normalizeSha(trajectorySha256))
-            .costUsd(cost == null ? BigDecimal.ZERO : cost)
+            // RR-1355 — official spend must be finite and non-negative; a negative cost would
+            // subtract from the headline. Reject rather than silently store it.
+            .costUsd(validCost(cost))
             .inputTokens(inputTokens == null ? 0L : Math.max(0L, inputTokens))
             .outputTokens(outputTokens == null ? 0L : Math.max(0L, outputTokens))
             .createdAt(Instant.now())
@@ -442,6 +467,15 @@ public class BenchmarkTrackingService {
     // truthful without needing a later repair pass. Never read a route off the client event.
     applyRoute(row, routeFor(esRunId));
     taskResults.save(row);
+  }
+
+  /** RR-1355 — a persisted attempt cost must be a finite, non-negative, bounded-precision value. */
+  private static BigDecimal validCost(BigDecimal cost) {
+    if (cost == null) return BigDecimal.ZERO;
+    if (cost.signum() < 0) {
+      throw new IllegalArgumentException("cost must be non-negative");
+    }
+    return cost.setScale(6, RoundingMode.HALF_UP);
   }
 
   /** Server-side route projection for one attempt; empty/unknown links stay UNATTRIBUTED. */
@@ -635,6 +669,28 @@ public class BenchmarkTrackingService {
 
   private String normalizeSha(String sha256) {
     return sha256 == null ? null : sha256.trim().toLowerCase();
+  }
+
+  /**
+   * RR-1356 — allowlist an https leaderboard URL. Any non-https scheme (javascript:, data:, http),
+   * missing host, or unparseable value is dropped so it cannot be stored and surfaced as an
+   * operator link. The frontend independently re-validates and applies noopener/noreferrer.
+   */
+  static String sanitizeLeaderboardUrl(String url) {
+    if (url == null || url.isBlank()) return null;
+    String value = url.trim();
+    if (value.length() > 300) value = value.substring(0, 300);
+    try {
+      java.net.URI uri = java.net.URI.create(value);
+      if (!"https".equalsIgnoreCase(uri.getScheme())
+          || uri.getHost() == null
+          || uri.getHost().isBlank()) {
+        return null;
+      }
+      return value;
+    } catch (RuntimeException e) {
+      return null;
+    }
   }
 
   // ── Event persistence + SSE re-broadcast ────────────────────────────────

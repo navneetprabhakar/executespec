@@ -90,7 +90,12 @@ public final class ProviderHandoffFixtureHarness {
       int iterations,
       int toolCalls,
       boolean evaluatorPassed,
-      String evaluatorReason) {}
+      String evaluatorReason,
+      // RR-1591 — each pass runs in its own freshly-prepared workspace. The baseline (pre-pass) and
+      // result (post-pass) fingerprints prove the pass's own mutation, so a fallback pass can no
+      // longer inherit and be credited for the primary pass's fix.
+      String baselineFingerprint,
+      String resultFingerprint) {}
 
   public record Evidence(
       String runId,
@@ -120,7 +125,14 @@ public final class ProviderHandoffFixtureHarness {
     validateRoute(request);
     String effectiveRunId = require(runId, "runId");
     Files.createDirectories(workspace);
-    fixture.prepare().accept(workspace);
+
+    // RR-1591 — isolate each pass in its own freshly-prepared subdirectory. Previously both passes
+    // shared one workspace prepared once, so the evaluator (a grep of the shared file) reported a
+    // fallback pass as passing whenever the primary had already fixed the file, regardless of what
+    // the fallback actually did.
+    Path primaryWorkspace = workspace.resolve("primary");
+    Files.createDirectories(primaryWorkspace);
+    fixture.prepare().accept(primaryWorkspace);
 
     authorizer.authorize(
         request.primaryReservationId(),
@@ -134,12 +146,15 @@ public final class ProviderHandoffFixtureHarness {
             request.primaryProvider(),
             request.primaryModel(),
             effectiveRunId,
-            workspace,
+            primaryWorkspace,
             false,
             request.primaryReservationId());
     boolean handoff = shouldHandoff(request.handoffTrigger(), primary.outcome());
     PassEvidence fallback = null;
     if (handoff) {
+      Path fallbackWorkspace = workspace.resolve("fallback");
+      Files.createDirectories(fallbackWorkspace);
+      fixture.prepare().accept(fallbackWorkspace);
       authorizer.authorize(
           request.fallbackReservationId(),
           request.fallbackProvider(),
@@ -152,7 +167,7 @@ public final class ProviderHandoffFixtureHarness {
               request.fallbackProvider(),
               request.fallbackModel(),
               effectiveRunId + "-handoff",
-              workspace,
+              fallbackWorkspace,
               true,
               request.fallbackReservationId());
     }
@@ -187,7 +202,10 @@ public final class ProviderHandoffFixtureHarness {
       String runId,
       Path workspace,
       boolean handoff,
-      String reservationId) {
+      String reservationId)
+      throws IOException {
+    // RR-1591 — snapshot the prepared workspace BEFORE the pass so the mutation is attributable.
+    String baselineFingerprint = fingerprintWorkspace(workspace);
     WorkerResult result =
         worker.run(
             WorkerTaskRequest.builder()
@@ -210,6 +228,7 @@ public final class ProviderHandoffFixtureHarness {
                 .strictProvider(true)
                 .build());
     Evaluation evaluation = fixture.evaluate().apply(workspace);
+    String resultFingerprint = fingerprintWorkspace(workspace);
     return new PassEvidence(
         provider,
         model,
@@ -218,7 +237,9 @@ public final class ProviderHandoffFixtureHarness {
         result.iterations(),
         result.toolCallsDispatched(),
         evaluation.passed(),
-        evaluation.reason());
+        evaluation.reason(),
+        baselineFingerprint,
+        resultFingerprint);
   }
 
   private static Fixture fixture(Request request) {

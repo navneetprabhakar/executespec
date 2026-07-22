@@ -44,10 +44,19 @@ public class TestPlannerAgent {
   private final TestTaskRepository testTaskRepository;
   private final ObjectMapper objectMapper;
   private final ApiSurfaceExtractor apiSurfaceExtractor;
+  private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
 
   // Caps to keep test runs lean and prevent LLM from generating excessive test surface.
   private static final int MAX_TEST_CLASSES = 6;
   private static final int MAX_METHODS_PER_CLASS = 8;
+
+  /**
+   * RR-968 — the accepted plan is at most {@code MAX_TEST_CLASSES}×{@code MAX_METHODS_PER_CLASS}
+   * tiny JSON objects, but the planner used the no-cap text seam and could emit (and be billed for)
+   * a workhorse model's full 128k output window twice. Bound the output so a small plan cannot
+   * consume an unbounded generation.
+   */
+  private static final int MAX_PLAN_OUTPUT_TOKENS = 8_000;
 
   @Value("classpath:prompts/test-planner.txt")
   private Resource promptResource;
@@ -78,6 +87,42 @@ public class TestPlannerAgent {
             .build();
     testPlan = testPlanRepository.save(testPlan);
 
+    // RR-967 — a plan row now exists. EVERY post-creation failure (run/router load, null LLM
+    // output, validation, persistence, serialization) must transition it to FAILED; only the second
+    // JSON parse failure did so before, leaving the plan permanently stuck in PLANNING and
+    // confusing
+    // the rerun/report UI. The inner JSON-retry handler still fails fast; this is the universal
+    // net.
+    try {
+      return planTestsInternal(runId, userRequest, conventionsDoc, isCli, isStaticHtml, testPlan);
+    } catch (RuntimeException e) {
+      markPlanFailed(testPlan);
+      throw e;
+    } catch (Exception e) {
+      markPlanFailed(testPlan);
+      throw new RuntimeException("Test planning failed for run " + runId, e);
+    }
+  }
+
+  private void markPlanFailed(TestPlan testPlan) {
+    try {
+      testPlan.setStatus(TestPlanStatus.FAILED);
+      testPlanRepository.save(testPlan);
+    } catch (Exception persistFailure) {
+      log.warn(
+          "[TestPlanner] Could not mark plan {} FAILED: {}",
+          testPlan.getId(),
+          persistFailure.getMessage());
+    }
+  }
+
+  private TestPlan planTestsInternal(
+      String runId,
+      String userRequest,
+      String conventionsDoc,
+      boolean isCli,
+      boolean isStaticHtml,
+      TestPlan testPlan) {
     String testingContext;
     if (isStaticHtml) {
       testingContext =
@@ -96,10 +141,13 @@ public class TestPlannerAgent {
               + " tests.";
     }
 
-    // Extract actual API surface from generated workspace
+    // Extract actual API surface from generated workspace.
+    // RR-969 — resolve the run workspace through the single canonical resolver; the previous
+    // hardcoded Path.of("workspace", runId) diverged from the configured workspace the admission
+    // service validates, so planning saw no API surface and guessed routes.
     String apiSurface = "";
     try {
-      Path workspace = Path.of("workspace", runId);
+      Path workspace = workspaceInitService.runWorkspacePath(runId);
       apiSurface = apiSurfaceExtractor.extract(workspace);
     } catch (Exception e) {
       log.debug(
@@ -233,7 +281,8 @@ public class TestPlannerAgent {
         chatPrompt.getInstructions(),
         runId,
         "TestPlannerAgent",
-        "test-plan");
+        "test-plan",
+        MAX_PLAN_OUTPUT_TOKENS); // RR-968 — bound a tiny plan's output window
   }
 
   /** Strips markdown code fences (```json ... ``` or ``` ... ```) from LLM responses. */
