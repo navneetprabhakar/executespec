@@ -1,7 +1,6 @@
 package com.navneet.executespec.agentsession;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 
 import java.util.Map;
 
@@ -25,7 +24,8 @@ class AgentEventRecorderTest {
   @BeforeEach
   void setUp() {
     recorder = new AgentEventRecorder(eventRepo, new ObjectMapper());
-    when(eventRepo.save(org.mockito.Mockito.any(AgentActionEvent.class)))
+    org.mockito.Mockito.lenient()
+        .when(eventRepo.save(org.mockito.Mockito.any(AgentActionEvent.class)))
         .thenAnswer(inv -> inv.getArgument(0));
   }
 
@@ -53,6 +53,19 @@ class AgentEventRecorderTest {
     assertThat(event.getActionId()).isEqualTo("a1");
     assertThat(event.getType()).isEqualTo("PERMISSION_REQUESTED");
     assertThat(event.getPayloadJson()).contains("\"tool\":\"shell\"");
+  }
+
+  // RR-888 — an unserializable payload must NOT be laundered into a valid-looking event row (which
+  // would consume the unique terminal ACTION_RESULT slot). The recorder fails before any insert.
+  @Test
+  void unserializablePayloadThrowsAndDoesNotInsert() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                recorder.appendAction(
+                    "s1", "a1", "ACTION_RESULT", Map.of("verification", new Object())))
+        .isInstanceOf(AgentEventRecorder.PayloadSerializationException.class);
+    org.mockito.Mockito.verify(eventRepo, org.mockito.Mockito.never())
+        .save(org.mockito.Mockito.any(AgentActionEvent.class));
   }
 
   @Test

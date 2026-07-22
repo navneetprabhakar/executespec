@@ -61,6 +61,39 @@ class AgentStreamTurnLifecycleTest {
         .contains("\"model\":\"deepseek-v4-flash-native\"");
   }
 
+  // RR-489 — a repeated complete() (callback/retry/race) must settle usage at most once: the second
+  // call sees a non-STREAMING turn and appends no further usage-ledger row.
+  @Test
+  void completeIsIdempotentAndDoesNotDuplicateUsage() {
+    AgentTurn turn = turn("t1", "STREAMING");
+    when(turnRepo.findById("t1")).thenReturn(Optional.of(turn));
+    var cost = new RunCostTracker.Snapshot(10, 4, 3, 1, 0.012, 1, 2);
+    AgentStreamTurnLifecycle lifecycle = lifecycle();
+
+    lifecycle.complete(ctx("t1"), "final answer", cost, "OK");
+    lifecycle.complete(ctx("t1"), "final answer again", cost, "OK");
+
+    // exactly one usage row across both invocations
+    verify(usageRepo).save(any(AgentUsageLedger.class));
+    assertThat(turn.getStatus()).isEqualTo("OK");
+  }
+
+  // RR-1453 — a paid failure settles this turn's usage instead of recording zero.
+  @Test
+  void failWithCostPersistsUsageLedgerRow() {
+    AgentTurn turn = turn("t2", "STREAMING");
+    when(turnRepo.findById("t2")).thenReturn(Optional.of(turn));
+    var cost = new RunCostTracker.Snapshot(120, 8, 0, 0, 0.0004, 1, 0);
+
+    lifecycle().fail(ctx("t2"), "provider timeout", cost);
+
+    assertThat(turn.getStatus()).isEqualTo("ERROR");
+    assertThat(turn.getCostUsd()).isEqualTo(0.0004);
+    var usage = ArgumentCaptor.forClass(AgentUsageLedger.class);
+    verify(usageRepo).save(usage.capture());
+    assertThat(usage.getValue().getCostUsd()).isEqualTo(0.0004);
+  }
+
   @Test
   void failMarksTurnErrorAndRecordsFailureEvent() {
     AgentTurn turn = turn("t2", "STREAMING");

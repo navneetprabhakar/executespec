@@ -24,6 +24,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.specchat.SpecChatService;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -64,6 +65,7 @@ public class ImplementerExecutionService {
   private final ToolRegistry toolRegistry;
   private final SpecChatService specChatService;
   private final ObjectMapper objectMapper;
+  private final ModelAccessService modelAccessService;
 
   public ExecutionResult execute(
       String parentSessionId,
@@ -106,6 +108,16 @@ public class ImplementerExecutionService {
     // Validate before any model call. Every mutation callback repeats this check.
     protocolService.authorizeWriter(
         parentSessionId, reservationId, root.toString(), session.getUserId(), orgId);
+
+    // RR-497 — the writer-execute path forwarded caller provider/model straight to the model loop,
+    // skipping the account/org model entitlement checks the normal stream startup enforces. Resolve
+    // the effective route and validate it so a PAT user cannot drive a model outside their picker
+    // entitlement or an impossible provider/model pair. A null (tier-routed) model is a no-op.
+    String effectiveProvider =
+        provider == null || provider.isBlank() ? session.getDefaultProvider() : provider;
+    String effectiveModel = model == null || model.isBlank() ? session.getDefaultModel() : model;
+    modelAccessService.assertModelAllowed(String.valueOf(user.getUser().getId()), effectiveModel);
+    modelAccessService.assertProviderModelPair(effectiveProvider, effectiveModel);
     int rounds = Math.max(1, Math.min(MAX_ROUNDS, maxRounds <= 0 ? MAX_ROUNDS : maxRounds));
     String turnId = UUID.randomUUID().toString();
     checkpoint(parentSessionId, turnId, reservationId, root, "PREPARED", objective);
@@ -126,8 +138,8 @@ public class ImplementerExecutionService {
           parentSessionId,
           orgId,
           List.of(Map.of("role", "user", "content", objective)),
-          provider == null || provider.isBlank() ? session.getDefaultProvider() : provider,
-          model == null || model.isBlank() ? session.getDefaultModel() : model,
+          effectiveProvider,
+          effectiveModel,
           AgentTier.WORKHORSE,
           "ImplementerExecutionService",
           systemPrompt,
