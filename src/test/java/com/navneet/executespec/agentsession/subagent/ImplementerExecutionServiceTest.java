@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -46,6 +47,9 @@ class ImplementerExecutionServiceTest {
       org.mockito.Mockito.mock(SubagentProtocolService.class);
   private final ToolRegistry tools = org.mockito.Mockito.mock(ToolRegistry.class);
   private final SpecChatService chat = org.mockito.Mockito.mock(SpecChatService.class);
+  // RR-497 — model entitlement is validated in execute(); the mock's void asserts are no-ops.
+  private final com.navneet.executespec.router.ModelAccessService modelAccess =
+      org.mockito.Mockito.mock(com.navneet.executespec.router.ModelAccessService.class);
   private final AppUserDetails user =
       new AppUserDetails(
           AppUser.builder().id("u1").email("u@example.com").status("ACTIVE").build(), null);
@@ -140,6 +144,41 @@ class ImplementerExecutionServiceTest {
         ArgumentCaptor.forClass(com.navneet.executespec.agentsession.entity.AgentActionEvent.class);
     verify(events, org.mockito.Mockito.atLeast(2)).save(captured.capture());
     assertThat(captured.getAllValues()).extracting("type").contains("IMPLEMENTER_CHECKPOINT");
+  }
+
+  // RR-497 — a disallowed provider/model must be rejected before any provider work; the writer
+  // execute path can no longer bypass the account/org model entitlement checks.
+  @Test
+  void rejectsModelOutsideEntitlementBeforeProviderCall() {
+    when(sessions.findById("session")).thenReturn(Optional.of(session("CLI")));
+    when(protocol.authorizeWriter(
+            eq("session"), eq("reservation"), eq(root.toString()), eq("u1"), eq("org")))
+        .thenReturn(activeReservation());
+    doThrow(
+            new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "not entitled"))
+        .when(modelAccess)
+        .assertModelAllowed(eq("u1"), eq("premium-model"));
+
+    assertThatThrownBy(
+            () ->
+                service()
+                    .execute(
+                        "session",
+                        "reservation",
+                        null,
+                        "change it",
+                        "ANTHROPIC",
+                        "premium-model",
+                        2,
+                        null,
+                        user,
+                        "org"))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    verify(chat, never())
+        .runTurnBoundedWithTools(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            anyInt(), any(), any());
   }
 
   @Test
@@ -290,7 +329,8 @@ class ImplementerExecutionServiceTest {
         protocol,
         tools,
         chat,
-        new ObjectMapper());
+        new ObjectMapper(),
+        modelAccess);
   }
 
   private AgentSession session(String surface) {

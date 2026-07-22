@@ -281,7 +281,8 @@ public class AgentIntentService {
                 provider,
                 model,
                 messages,
-                "intent-routing-" + Integer.toHexString(message.hashCode()),
+                "intent-routing-"
+                    + turnDigest(request == null ? null : request.sessionId(), message),
                 ROUTING_ROLE,
                 ROUTING_STEP,
                 400);
@@ -289,16 +290,16 @@ public class AgentIntentService {
         if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
           return java.util.Optional.empty();
         }
+        String digest = turnDigest(request.sessionId(), message);
         var executionReference =
-            executionPolicyFactory.forAgentSession(
-                request.sessionId(), "intent-" + Integer.toHexString(message.hashCode()));
+            executionPolicyFactory.forAgentSession(request.sessionId(), "intent-" + digest);
         attribution[0] = RouteAttribution.deterministic(true);
         response =
             llmRouter.callText(
                 provider,
                 model,
                 messages,
-                "intent-routing-" + Integer.toHexString(message.hashCode()),
+                "intent-routing-" + digest,
                 ROUTING_ROLE,
                 ROUTING_STEP,
                 400,
@@ -320,6 +321,32 @@ public class AgentIntentService {
       // Routing is advisory. The deterministic fallback below remains the source of truth when a
       // provider, prompt resource, serializer, or transport is unavailable.
       return java.util.Optional.empty();
+    }
+  }
+
+  /**
+   * RR-667 — a collision-resistant per-turn execution/step identity. The prior key was {@code
+   * Integer.toHexString(message.hashCode())}: a 32-bit hash with trivial chosen collisions, so two
+   * different messages in one session could share the same {@code intent-<id>} execution reference
+   * and {@code intent-routing-<id>} usage attribution. The digest binds the session to the message
+   * under SHA-256, so distinct turns never share attribution. A missing session id still yields a
+   * stable per-message digest rather than a colliding hash.
+   */
+  static String turnDigest(String sessionId, String message) {
+    String seed = (sessionId == null ? "" : sessionId) + "|" + (message == null ? "" : message);
+    try {
+      byte[] hash =
+          java.security.MessageDigest.getInstance("SHA-256")
+              .digest(seed.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder(16);
+      for (int i = 0; i < 8; i++) {
+        sb.append(Character.forDigit((hash[i] >> 4) & 0xF, 16));
+        sb.append(Character.forDigit(hash[i] & 0xF, 16));
+      }
+      return sb.toString();
+    } catch (java.security.NoSuchAlgorithmException e) {
+      // SHA-256 is always present on a supported JRE; degrade to a unique, non-colliding token.
+      return java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
   }
 

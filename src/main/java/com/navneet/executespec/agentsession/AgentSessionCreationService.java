@@ -24,6 +24,15 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 class AgentSessionCreationService {
 
+  /**
+   * RR-487 — session id prefixes reserved for server-minted, local/dev-only fixtures. The
+   * provider-free Web QA fixture stream in {@code AgentStreamTurnRunner} activates purely on the
+   * {@code web-qa-} prefix, so a customer must never be able to mint an id that carries it. These
+   * ids are created directly by the {@code @Profile("local","dev")} {@code WebQaFixtureController},
+   * never through this admission path.
+   */
+  private static final java.util.List<String> RESERVED_ID_PREFIXES = java.util.List.of("web-qa-");
+
   private final AgentSessionRepository sessionRepo;
   private final ProjectAccessGuard projectAccessGuard;
   private final RunAccessGuard runAccessGuard;
@@ -38,6 +47,15 @@ class AgentSessionCreationService {
             : request;
     String requestedId = AgentText.blankToNull(req.id());
     if (requestedId != null) {
+      // RR-487 — refuse a caller-supplied id that collides with a reserved fixture namespace before
+      // any lookup or persistence. Otherwise a customer could create `web-qa-*` and receive the
+      // fake, provider-free scripted stream instead of a real model turn.
+      String lowerId = requestedId.toLowerCase(Locale.ROOT);
+      for (String reserved : RESERVED_ID_PREFIXES) {
+        if (lowerId.startsWith(reserved)) {
+          throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reserved session id");
+        }
+      }
       var existing = sessionRepo.findById(requestedId);
       if (existing.isPresent()) {
         AgentSession session = existing.get();

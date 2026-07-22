@@ -138,7 +138,10 @@ class AgentStreamTurnRunnerTest {
 
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 
-    verify(sessionService).failStreamTurn(ctx, "IllegalStateException: provider unavailable");
+    // RR-1453 — failure settles this turn's usage (null cost when no cost tracker is wired).
+    verify(sessionService)
+        .failStreamTurn(
+            ctx, "IllegalStateException: provider unavailable", (RunCostTracker.Snapshot) null);
     verify(emitter).complete();
     verify(emitter, never()).completeWithError(any());
   }
@@ -311,7 +314,8 @@ class AgentStreamTurnRunnerTest {
         .failStreamTurn(
             ctx,
             "anthropic authentication failed. Check the provider key in Settings > Provider keys,"
-                + " switch to a configured provider, or use managed AI credits before retrying.");
+                + " switch to a configured provider, or use managed AI credits before retrying.",
+            (RunCostTracker.Snapshot) null);
     verify(emitter).complete();
     verify(emitter, never()).completeWithError(any());
   }

@@ -188,7 +188,12 @@ public class AgentSessionService {
 
   @Transactional
   public void failStreamTurn(StreamTurnContext ctx, String message) {
-    streamTurnLifecycle.fail(ctx, message);
+    streamTurnLifecycle.fail(ctx, message, null);
+  }
+
+  @Transactional
+  public void failStreamTurn(StreamTurnContext ctx, String message, RunCostTracker.Snapshot cost) {
+    streamTurnLifecycle.fail(ctx, message, cost);
   }
 
   @Transactional
