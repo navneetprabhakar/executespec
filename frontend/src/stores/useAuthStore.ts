@@ -18,6 +18,12 @@ interface AuthStore {
   permissions: TierPermissions | null;
   /** RR-198 — lifecycle of the permissions fetch. `error` ≠ empty permissions. */
   permissionsStatus: PermissionsStatus;
+  /**
+   * RR-196 — set when a user-initiated logout could NOT be confirmed by the server. The HttpOnly
+   * refresh cookie cannot be cleared from JavaScript, so an unconfirmed logout means the seven-day
+   * session may still be live. The UI must not report a clean sign-out in that case.
+   */
+  logoutError: string | null;
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -29,6 +35,13 @@ interface AuthStore {
     attribution?: {signupSource?: string; utmSource?: string; utmCampaign?: string},
   ) => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
+  /**
+   * RR-1335 — adopt a login-shaped session returned outside the normal login form (e.g. the
+   * email-verification endpoint, which sets the refresh cookie and returns an access token + user).
+   * Mirrors `login`'s post-steps so a just-verified user lands authenticated instead of being sent
+   * back to re-enter credentials while a valid refresh cookie is discarded.
+   */
+  adoptSession: (accessToken: string, user: api.AuthUser) => void;
   loadMe: () => Promise<void>;
   /** RR-198 — (re)fetch tier permissions, tracking loading/ready/error state. */
   loadPermissions: () => Promise<void>;
@@ -43,10 +56,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isLoading: false,
   permissions: null,
   permissionsStatus: 'idle',
+  logoutError: null,
 
   login: async (email, password) => {
     const resp = await api.authLogin({email, password});
     localStorage.setItem('access_token', resp.accessToken);
+    // RR-196 — an explicit successful login clears any prior unconfirmed-logout marker so
+    // cookie-based auto-refresh is allowed again for this deliberately re-authenticated session.
+    localStorage.removeItem('es:logout_unconfirmed');
     // R-190 — normalize legacy 'vibe' viewMode at the parse boundary.
     set({
       accessToken: resp.accessToken,
@@ -58,18 +75,36 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   logout: async () => {
-    try {
-      await api.authLogout();
-    } catch {
-      /* ignore */
+    // RR-196 — logout is a server-side revocation, not a local token delete. Attempt it (with one
+    // retry for a transient blip) and record whether the server actually confirmed. Local access
+    // state is always cleared, but if the revocation was NOT confirmed we (a) surface `logoutError`
+    // so the UI never claims a clean sign-out and (b) set a durable marker that blocks cookie-based
+    // auto-refresh in `loadMe` — otherwise the next visitor on a shared machine could be silently
+    // reauthenticated from the still-live refresh cookie.
+    let confirmed = false;
+    for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
+      try {
+        await api.authLogout();
+        confirmed = true;
+      } catch {
+        /* retry once, then give up */
+      }
     }
     localStorage.removeItem('access_token');
+    if (confirmed) {
+      localStorage.removeItem('es:logout_unconfirmed');
+    } else {
+      localStorage.setItem('es:logout_unconfirmed', '1');
+    }
     set({
       accessToken: null,
       user: null,
       isAuthenticated: false,
       permissions: null,
       permissionsStatus: 'idle',
+      logoutError: confirmed
+        ? null
+        : 'Sign-out could not be confirmed with the server — your session may still be active. Retry or close this browser.',
     });
   },
 
@@ -102,9 +137,26 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
+  adoptSession: (accessToken, user) => {
+    localStorage.setItem('access_token', accessToken);
+    // RR-196 — a freshly adopted session is a deliberate authentication; clear any stale marker.
+    localStorage.removeItem('es:logout_unconfirmed');
+    set({
+      accessToken,
+      user: api.normalizeAuthUser(user),
+      isAuthenticated: true,
+      logoutError: null,
+    });
+    void get().loadPermissions();
+  },
+
   loadMe: async () => {
     const token = localStorage.getItem('access_token');
     if (!token) {
+      // RR-196 — do NOT resurrect a session the user explicitly (if unconfirmably) logged out of.
+      // The marker is cleared only by a deliberate login, so a shared machine cannot silently
+      // reauthenticate the next visitor from the still-live refresh cookie.
+      if (localStorage.getItem('es:logout_unconfirmed')) return;
       // Try refresh via cookie
       const ok = await get().refreshAccessToken();
       if (!ok) return;

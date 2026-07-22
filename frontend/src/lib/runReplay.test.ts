@@ -1,6 +1,27 @@
 import {describe, expect, it} from 'vitest';
 
-import {mergeRunEntries, replayEntry, replayNotice, runEventKey} from './runReplay';
+import {
+  mergeRunEntries,
+  normalizeEventTimestamp,
+  replayEntry,
+  replayNotice,
+  runEventKey,
+} from './runReplay';
+
+describe('RR-1381 — replay timestamp normalization', () => {
+  it('parses an ISO-8601 string (the persisted replay shape) instead of dropping it to 1970', () => {
+    const iso = '2026-07-21T10:15:30Z';
+    expect(normalizeEventTimestamp(iso)).toBe(Date.parse(iso));
+    expect(replayEntry({type: 'LOG', timestamp: iso}).timestamp).toBe(Date.parse(iso));
+  });
+
+  it('passes a finite epoch number through and rejects unparseable/absent values as 0', () => {
+    expect(normalizeEventTimestamp(1200)).toBe(1200);
+    expect(normalizeEventTimestamp('not-a-date')).toBe(0);
+    expect(normalizeEventTimestamp(undefined)).toBe(0);
+    expect(normalizeEventTimestamp(Number.NaN)).toBe(0);
+  });
+});
 
 describe('run replay reconciliation', () => {
   it('uses the server sequence to dedupe a replay row and its live duplicate', () => {

@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
@@ -69,6 +69,25 @@ export function IdeProjectMembers() {
   const [revokeInviteFor, setRevokeInviteFor] = useState<string | null>(null);
   const [removeFor, setRemoveFor] = useState<string | null>(null);
 
+  // RR-1332 — the authoritative "which project is mounted now" for guarding in-flight async writes.
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  // RR-1332 — React reuses this route component across `/projects/:projectId` navigations, so
+  // project A's one-time share bearer (and its audit / revoke / status message) would remain
+  // visible and copyable under project B, contradicting the shown-once semantics and misattributing
+  // authority. Clear every scope-bound bit of state when the project changes.
+  useEffect(() => {
+    setNewShareUrl('');
+    setShareAuditLinkId(null);
+    setShareAudit(null);
+    setRevokeFor(null);
+    setRevokeInviteFor(null);
+    setRemoveFor(null);
+    setMsg('');
+    setErr('');
+  }, [projectId]);
+
   function load() {
     membersState.reload();
     shareLinksState.reload();
@@ -131,20 +150,27 @@ export function IdeProjectMembers() {
     setBusy('share');
     setErr('');
     setMsg('');
+    // RR-1332 — pin the project this credential belongs to. If the user navigates to another
+    // project while the create is in flight, discard the result rather than rendering project A's
+    // one-time bearer under project B.
+    const forProject = projectId;
     try {
-      const created = await api.createShareLink(projectId, {
+      const created = await api.createShareLink(forProject, {
         surface: 'PROJECT_OVERVIEW',
         expiresInDays: 30,
       });
+      if (forProject !== projectIdRef.current) return;
       if (!created.token) throw new Error('Server did not return the one-time share credential.');
       setNewShareUrl(api.shareLinkPublicUrl(created.token));
       setMsg('Share link created. Copy it now; the credential will not be shown again.');
-      const r = await api.listShareLinks(projectId);
+      const r = await api.listShareLinks(forProject);
+      if (forProject !== projectIdRef.current) return;
       setShareLinks(r.links ?? []);
     } catch (e: unknown) {
+      if (forProject !== projectIdRef.current) return;
       setErr(e instanceof Error ? e.message : 'Create failed.');
     } finally {
-      setBusy('');
+      if (forProject === projectIdRef.current) setBusy('');
     }
   }
 
