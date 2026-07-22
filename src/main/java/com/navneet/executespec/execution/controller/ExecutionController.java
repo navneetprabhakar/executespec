@@ -86,39 +86,10 @@ public class ExecutionController {
       @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
     Project project = projectAccessGuard.assertCanWrite(projectId, principal);
-    var activeRuns = execRunRepo.findActiveByProjectId(projectId);
-    if (!activeRuns.isEmpty()) {
-      ExecutionRun active = activeRuns.get(0);
-      String reason;
-      String status = active.getStatus() == null ? "" : active.getStatus().toUpperCase();
-      switch (status) {
-        case "PAUSED" ->
-            reason =
-                "Previous execution is paused awaiting a user decision on a failed solution. "
-                    + "Resolve it (retry / skip / fix manually) or abort it to start a new one.";
-        case "AWAITING_APPROVAL", "ARCH_REVIEW" ->
-            reason =
-                "Previous execution is waiting for your approval ("
-                    + status
-                    + "). "
-                    + "Approve it or abort it to start a new one.";
-        case "EXECUTING", "PLANNING", "ANALYSING", "SETUP" ->
-            reason =
-                "Previous execution is still running (status="
-                    + status
-                    + "). "
-                    + "Wait for it to finish or abort it to start a new one.";
-        default ->
-            reason =
-                "Previous execution has not finished or been cancelled (status="
-                    + status
-                    + "). "
-                    + "Finish it or abort it to start a new one.";
-      }
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, reason + " [execution id: " + active.getId() + "]");
-    }
-    ExecutionRun run = orchestrator.createExecution(project, user, req);
+    // RR-527 — the active-run exclusion + create is now one atomic, advisory-lock-serialized
+    // transaction inside the orchestrator, so two concurrent creates for the same project cannot
+    // both pass the check. A blocked admission is rejected with a 409 naming the active run.
+    ExecutionRun run = orchestrator.admitAndCreateExecution(project, user, req);
     return ResponseEntity.status(HttpStatus.CREATED).body(ExecutionRunDto.from(run, null));
   }
 
@@ -300,8 +271,9 @@ public class ExecutionController {
   }
 
   /** RR-351 — launch states from which no recovery action is legal. */
+  // RR-345 — PARTIAL is terminal; a PARTIAL launch cannot be resumed.
   private static final java.util.Set<String> EXECUTION_TERMINAL =
-      java.util.Set.of("COMPLETE", "FAILED", "CANCELLED", "ABORTED");
+      java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
 
   @PostMapping("/api/executions/{id}/abort")
   public ResponseEntity<Void> abort(
