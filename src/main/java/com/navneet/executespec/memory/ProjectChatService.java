@@ -334,16 +334,16 @@ public class ProjectChatService {
           projectId,
           contextSanitizer.sanitizeException(e));
     }
-    // Deterministic fallback — concatenate the last user message + last assistant.
-    ProjectChatMessage lastUser = null, lastAsst = null;
+    // RR-655 — user-authored-only fallback. When the grounding compiler is unavailable we must not
+    // promote assistant prose into an executable spec: a prior hallucination, a rejected proposal,
+    // or a merely exploratory suggestion would become requirements without the user ever agreeing.
+    // Emit the user's last explicit ask only; the caller reviews/edits before launching.
+    ProjectChatMessage lastUser = null;
     for (ProjectChatMessage m : messages) {
       if ("USER".equals(m.getRole())) lastUser = m;
-      else lastAsst = m;
     }
-    StringBuilder fb = new StringBuilder();
-    if (lastUser != null) fb.append(lastUser.getContent().trim());
-    if (lastAsst != null) fb.append("\n\nAssistant's take: ").append(lastAsst.getContent().trim());
-    return contextSanitizer.sanitizeOutput(fb.toString());
+    String userAuthored = lastUser == null ? "" : lastUser.getContent().trim();
+    return contextSanitizer.sanitizeOutput(userAuthored);
   }
 
   /**
@@ -437,7 +437,7 @@ public class ProjectChatService {
             readOnlyModelTools(
                 projectChatTools.bind(
                     new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
-                        projectId, principal, callerPat))));
+                        projectId, principal, callerPat, orgId)))); // RR-375 host org for audit
 
     StringBuilder finalText = new StringBuilder();
     int totalTokensIn = 0, totalTokensOut = 0;

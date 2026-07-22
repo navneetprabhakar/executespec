@@ -49,6 +49,71 @@ class ChatSecurityAuditServiceTest {
         .doesNotContain("args", "result", "prompt", "secret");
   }
 
+  /**
+   * RR-375 — the host-org overload attributes the event to the project owner org, not the actor.
+   */
+  @Test
+  void recordAttributesToHostOrgWhenProvided() {
+    ActivityAuditService activity = mock(ActivityAuditService.class);
+    ChatSecurityAuditService audit = new ChatSecurityAuditService(activity);
+    AppUserDetails collaborator =
+        new AppUserDetails(
+            AppUser.builder()
+                .id("user-collab")
+                .orgId("collaborator-org")
+                .email("collab@example.com")
+                .globalRole("USER")
+                .status("ACTIVE")
+                .build(),
+            null);
+
+    audit.record(
+        "CHAT_TOOL_ALLOWED",
+        "project-1",
+        "project-1",
+        collaborator,
+        "search_code",
+        ChatToolPolicy.Capability.PROJECT_READ,
+        "ALLOWED",
+        "host-org");
+
+    ArgumentCaptor<ActivityAudit> row = ArgumentCaptor.forClass(ActivityAudit.class);
+    verify(activity).record(row.capture());
+    assertThat(row.getValue().getOrgId()).isEqualTo("host-org");
+    assertThat(row.getValue().getActorId()).isEqualTo("user-collab");
+  }
+
+  /** RR-375 — a null host org falls back to the actor's home org (session-scoped callers). */
+  @Test
+  void recordFallsBackToActorOrgWhenHostOrgAbsent() {
+    ActivityAuditService activity = mock(ActivityAuditService.class);
+    ChatSecurityAuditService audit = new ChatSecurityAuditService(activity);
+    AppUserDetails principal =
+        new AppUserDetails(
+            AppUser.builder()
+                .id("user-1")
+                .orgId("actor-org")
+                .email("user@example.com")
+                .globalRole("USER")
+                .status("ACTIVE")
+                .build(),
+            null);
+
+    audit.record(
+        "CHAT_TOOL_ALLOWED",
+        "session-1",
+        "project-1",
+        principal,
+        "search_code",
+        ChatToolPolicy.Capability.PROJECT_READ,
+        "ALLOWED",
+        null);
+
+    ArgumentCaptor<ActivityAudit> row = ArgumentCaptor.forClass(ActivityAudit.class);
+    verify(activity).record(row.capture());
+    assertThat(row.getValue().getOrgId()).isEqualTo("actor-org");
+  }
+
   @Test
   void auditMetadataCannotBeBrokenByControlCharactersAndMissingIdentityFailsClosed()
       throws Exception {
