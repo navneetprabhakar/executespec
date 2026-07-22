@@ -42,6 +42,17 @@ public class ArtifactPublicationGuard {
   private static final long MAX_ARCHIVE_TOTAL_BYTES = 2L * 1024 * 1024 * 1024;
   private static final long GIT_ENUMERATION_TIMEOUT_SECONDS = 15;
 
+  /**
+   * RR-084 — wall-clock ceiling for a single synchronous archive scan. The per-entry / per-member /
+   * total-inflated byte caps still apply, but a crafted archive (deep compression, many members)
+   * can monopolize a request or background worker for a long time before it reaches any nominal
+   * byte limit. This deadline bounds the total time the byte-by-byte / regex-streaming scan may run
+   * and fails closed when exceeded, so a single publication cannot pin a worker indefinitely.
+   * Smaller product byte limits, compressed-size/ratio budgets, cancellable isolated scanning and
+   * an asynchronous status channel for large governed exports remain a deeper follow-up.
+   */
+  private static final long MAX_ARCHIVE_SCAN_MILLIS = 120_000;
+
   private final AgentProperties properties;
   private final GeneratedSecretScanner scanner;
 
@@ -135,9 +146,11 @@ public class ArtifactPublicationGuard {
       throws IOException {
     int entries = 0;
     long[] totalBytes = {0L};
+    long deadline = scanDeadline();
     try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
       ZipEntry entry;
       while ((entry = zip.getNextEntry()) != null) {
+        assertScanWithinBudget(deadline);
         entries++;
         if (entries > maxEntries) {
           throw new PublicationBlockedException("ARCHIVE_ENTRY_LIMIT_EXCEEDED", "(archive)");
@@ -163,21 +176,23 @@ public class ArtifactPublicationGuard {
   public void assertTarGzipSafe(Path archive) throws IOException {
     int entries = 0;
     long totalBytes = 0;
+    long deadline = scanDeadline();
     try (InputStream file = Files.newInputStream(archive);
         GZIPInputStream gzip = new GZIPInputStream(file)) {
       byte[] header = new byte[512];
       while (true) {
-        readFully(gzip, header);
-        if (allZero(header)) return;
-        validateTarHeader(header);
+        assertScanWithinBudget(deadline);
+        UstarTarReader.readFully(gzip, header);
+        if (UstarTarReader.allZero(header)) return;
+        UstarTarReader.validateTarHeader(header);
         entries++;
         if (entries > MAX_ARCHIVE_ENTRIES) {
           throw new PublicationBlockedException("ARCHIVE_ENTRY_LIMIT_EXCEEDED", "(archive)");
         }
-        String name = tarName(header);
+        String name = UstarTarReader.tarName(header);
         assertArchiveEntryNameSafe(name);
         assertLabelSafe(name);
-        long size = parseTarOctal(header, 124, 12);
+        long size = UstarTarReader.parseTarOctal(header, 124, 12);
         if (size > MAX_ARCHIVE_ENTRY_BYTES) {
           throw new PublicationBlockedException("ARCHIVE_MEMBER_TOO_LARGE", safePath(name));
         }
@@ -194,7 +209,7 @@ public class ArtifactPublicationGuard {
         } else {
           throw new PublicationBlockedException("UNSUPPORTED_TAR_ENTRY_TYPE", "(archive member)");
         }
-        skipFully(gzip, (512 - (size % 512)) % 512);
+        UstarTarReader.skipFully(gzip, (512 - (size % 512)) % 512);
       }
     }
   }
@@ -259,6 +274,18 @@ public class ArtifactPublicationGuard {
     }
   }
 
+  /** RR-084 — nanoTime deadline for one archive scan. */
+  private static long scanDeadline() {
+    return System.nanoTime() + MAX_ARCHIVE_SCAN_MILLIS * 1_000_000L;
+  }
+
+  /** RR-084 — fail closed when the scan has run past its wall-clock budget. */
+  private static void assertScanWithinBudget(long deadlineNanos) throws IOException {
+    if (System.nanoTime() > deadlineNanos) {
+      throw new PublicationBlockedException("ARCHIVE_SCAN_TIME_BUDGET_EXCEEDED", "(archive)");
+    }
+  }
+
   static List<byte[]> nulSeparated(byte[] bytes) {
     List<byte[]> records = new ArrayList<>();
     int start = 0;
@@ -320,83 +347,6 @@ public class ArtifactPublicationGuard {
       if (!hex) return false;
     }
     return true;
-  }
-
-  private static void validateTarHeader(byte[] header) throws IOException {
-    String magic = new String(header, 257, 5, StandardCharsets.US_ASCII);
-    if (!"ustar".equals(magic)) {
-      throw new PublicationBlockedException("INVALID_TAR_HEADER", "(archive)");
-    }
-    long expected = parseTarOctal(header, 148, 8);
-    long actual = 0;
-    for (int i = 0; i < header.length; i++) {
-      actual += i >= 148 && i < 156 ? ' ' : header[i] & 0xff;
-    }
-    if (expected != actual) {
-      throw new PublicationBlockedException("INVALID_TAR_CHECKSUM", "(archive)");
-    }
-  }
-
-  private static String tarName(byte[] header) throws IOException {
-    String name = tarString(header, 0, 100);
-    String prefix = tarString(header, 345, 155);
-    String combined = prefix.isBlank() ? name : prefix + "/" + name;
-    if (combined.isBlank()) {
-      throw new PublicationBlockedException("INVALID_ARCHIVE_PATH", "(archive member)");
-    }
-    return combined;
-  }
-
-  private static String tarString(byte[] header, int offset, int length) {
-    int end = offset;
-    int limit = offset + length;
-    while (end < limit && header[end] != 0) end++;
-    return new String(header, offset, end - offset, StandardCharsets.UTF_8);
-  }
-
-  private static long parseTarOctal(byte[] header, int offset, int length) throws IOException {
-    long value = 0;
-    boolean digitSeen = false;
-    for (int i = offset; i < offset + length; i++) {
-      byte current = header[i];
-      if (current == 0 || current == ' ') continue;
-      if (current < '0' || current > '7') {
-        throw new PublicationBlockedException("INVALID_TAR_HEADER", "(archive)");
-      }
-      digitSeen = true;
-      if (value > (Long.MAX_VALUE - (current - '0')) / 8) {
-        throw new PublicationBlockedException("INVALID_TAR_HEADER", "(archive)");
-      }
-      value = value * 8 + (current - '0');
-    }
-    return digitSeen ? value : 0;
-  }
-
-  private static boolean allZero(byte[] bytes) {
-    for (byte value : bytes) if (value != 0) return false;
-    return true;
-  }
-
-  private static void readFully(InputStream input, byte[] bytes) throws IOException {
-    int offset = 0;
-    while (offset < bytes.length) {
-      int read = input.read(bytes, offset, bytes.length - offset);
-      if (read < 0) throw new EOFException("archive ended before a complete header");
-      offset += read;
-    }
-  }
-
-  private static void skipFully(InputStream input, long bytes) throws IOException {
-    long remaining = bytes;
-    while (remaining > 0) {
-      long skipped = input.skip(remaining);
-      if (skipped > 0) {
-        remaining -= skipped;
-        continue;
-      }
-      if (input.read() < 0) throw new EOFException("archive ended before member padding");
-      remaining--;
-    }
   }
 
   private static String safePath(String path) {

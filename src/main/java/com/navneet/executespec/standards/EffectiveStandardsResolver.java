@@ -196,6 +196,66 @@ public class EffectiveStandardsResolver {
     };
   }
 
+  /**
+   * RR-596 — write-time validation for a project-level exception on an org-level standard. The
+   * override endpoint used to persist any {@code standardId} + any {@code newSeverity} and report
+   * success (with an audit event) for changes the resolver would later silently ignore — an
+   * org-locked standard, an unknown id, or a "downgrade" that was actually an upgrade. Callers must
+   * run this BEFORE persisting so the API/audit surface reflects the effective policy.
+   *
+   * @param orgId the project's owning org
+   * @param standardId the standard the exception targets
+   * @param type NOT_APPLICABLE or SEVERITY_DOWNGRADE
+   * @param newSeverity requested severity (only consulted for SEVERITY_DOWNGRADE)
+   */
+  public ExceptionWriteCheck validateProjectException(
+      String orgId,
+      String standardId,
+      ProjectStandardOverride.OverrideType type,
+      String newSeverity) {
+    OrgStandard os = orgStandardRepo.findByOrgIdAndStandardId(orgId, standardId).orElse(null);
+    if (os == null) {
+      return new ExceptionWriteCheck(ExceptionWriteCheck.Result.STANDARD_NOT_FOUND, null);
+    }
+    if (os.isOrgLevelLocked()) {
+      return new ExceptionWriteCheck(ExceptionWriteCheck.Result.STANDARD_LOCKED, null);
+    }
+    Standard.Severity currentSeverity;
+    try {
+      List<Standard> parsed = parser.parse(os.getStandardYaml());
+      if (parsed.isEmpty()) {
+        return new ExceptionWriteCheck(ExceptionWriteCheck.Result.STANDARD_INVALID, null);
+      }
+      currentSeverity = parsed.get(0).severity();
+    } catch (Exception ex) {
+      return new ExceptionWriteCheck(ExceptionWriteCheck.Result.STANDARD_INVALID, null);
+    }
+    if (type == ProjectStandardOverride.OverrideType.SEVERITY_DOWNGRADE) {
+      Standard.Severity requested = parseSeverity(newSeverity);
+      if (requested == null) {
+        return new ExceptionWriteCheck(
+            ExceptionWriteCheck.Result.INVALID_SEVERITY, currentSeverity);
+      }
+      if (severityRank(requested) >= severityRank(currentSeverity)) {
+        // Equal or higher is not a downgrade — the resolver rejects it, so the write must too.
+        return new ExceptionWriteCheck(ExceptionWriteCheck.Result.NOT_A_DOWNGRADE, currentSeverity);
+      }
+    }
+    return new ExceptionWriteCheck(ExceptionWriteCheck.Result.OK, currentSeverity);
+  }
+
+  /** RR-596 — outcome of {@link #validateProjectException}. */
+  public record ExceptionWriteCheck(Result result, Standard.Severity currentSeverity) {
+    public enum Result {
+      OK,
+      STANDARD_NOT_FOUND,
+      STANDARD_LOCKED,
+      STANDARD_INVALID,
+      INVALID_SEVERITY,
+      NOT_A_DOWNGRADE
+    }
+  }
+
   static int severityRank(Standard.Severity sev) {
     return switch (sev) {
       case BLOCKING -> 3;

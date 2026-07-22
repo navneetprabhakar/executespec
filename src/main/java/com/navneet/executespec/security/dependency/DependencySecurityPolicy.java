@@ -171,6 +171,7 @@ public class DependencySecurityPolicy {
     if (requireIgnoreScripts && !hasIgnoreScripts(inv)) {
       return block(
           effective,
+          "MISSING_IGNORE_SCRIPTS",
           "Dependency install requires "
               + ignoreScriptsHint(inv.tool)
               + " under guardrail "
@@ -182,6 +183,7 @@ public class DependencySecurityPolicy {
     if (requireLockfile && !isLockfileMode(segment, inv)) {
       return block(
           effective,
+          "MISSING_LOCKFILE_MODE",
           "Dependency install requires lockfile mode under guardrail "
               + effective
               + " — use "
@@ -193,6 +195,7 @@ public class DependencySecurityPolicy {
     if (containsOffRegistrySource(segment)) {
       return block(
           effective,
+          "OFF_REGISTRY_SOURCE",
           "Off-registry dependency source (git+, github tarball, http URL, file://) blocked at"
               + " guardrail "
               + effective
@@ -204,6 +207,7 @@ public class DependencySecurityPolicy {
       if (requireAudit && !hasAuditCoverage(fullCommand, inv.tool)) {
         return block(
             effective,
+            "MISSING_AUDIT",
             "HIGH guardrail requires the install to gate on a vulnerability audit — append "
                 + auditHint(inv.tool)
                 + " to the chained command, OR add "
@@ -214,6 +218,7 @@ public class DependencySecurityPolicy {
       if (!allowPrerelease && PRERELEASE.matcher(segment).find()) {
         return block(
             effective,
+            "PRERELEASE_VERSION",
             "Pre-release dependency version (alpha/beta/rc/canary/nightly) blocked at HIGH —"
                 + " supply-chain attackers commonly publish through these channels. Pin to a"
                 + " stable release. Got: "
@@ -433,6 +438,7 @@ public class DependencySecurityPolicy {
     if (isAllowedRegistry(supplied, allowed)) return ValidationResult.allow();
     return block(
         GuardrailLevel.HIGH,
+        "REGISTRY_NOT_ALLOWLISTED",
         "Registry "
             + supplied
             + " not in agent.security.deps.allowed-registries allowlist ("
@@ -507,8 +513,16 @@ public class DependencySecurityPolicy {
     };
   }
 
-  private ValidationResult block(GuardrailLevel level, String message) {
-    log.warn("DEP-SECURITY BLOCKED guardrail={} — {}", level, message);
+  /**
+   * RR-251 — the block MESSAGE embeds the raw command segment (and, for a registry block, the
+   * supplied registry URL), which routinely carries auth tokens or credential-bearing URLs. Logging
+   * that message verbatim at WARN leaked secrets into persistent application logs and downstream
+   * observability. The message is still RETURNED to the worker (its own command, echoed back so it
+   * can self-correct), but the log line now records only a stable rule id and the guardrail level —
+   * never the raw command.
+   */
+  private ValidationResult block(GuardrailLevel level, String ruleId, String message) {
+    log.warn("DEP-SECURITY BLOCKED guardrail={} rule={}", level, ruleId);
     if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("deps");
     return ValidationResult.block(message);
   }
