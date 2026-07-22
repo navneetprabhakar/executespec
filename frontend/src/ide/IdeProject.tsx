@@ -137,7 +137,11 @@ export default function IdeProject() {
       }
       if (selected.length) body.selectedRepoIds = selected;
       const res = await api.createRun(body);
-      navigate(`/live/${res.runId}`);
+      // RR-1519 — a PRODUCTION run pauses at AWAITING_APPROVAL, and IdeLive has no plan-gate
+      // handling, so sending it to /live stranded the user on a live console for a run that is not
+      // running and shows no approve/reject control. Route PRODUCTION to the plan gate (which owns
+      // the tested approve/cancel flow and forwards already-approved runs), PROTOTYPE to /live.
+      navigate(mode === 'PRODUCTION' ? `/plan/${res.runId}` : `/live/${res.runId}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Submit failed.');
       setBusy(false);

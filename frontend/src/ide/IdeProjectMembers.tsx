@@ -13,6 +13,7 @@ import {
   canManageShareLinks,
   isExternalProjectMember,
   memberDisplayName,
+  shareLinkStatus,
 } from '@/ide/projectMoreUtils';
 import {ProjectBanner as Banner} from '@/ide/projectUi';
 
@@ -516,7 +517,12 @@ export function IdeProjectMembers() {
         </>
       )}
 
-      <div className='ide-h2'>Share links{shareLinks ? ` · ${shareLinks.length}` : ''}</div>
+      <div className='ide-h2'>
+        Share links
+        {shareLinks
+          ? ` · ${shareLinks.filter((s) => shareLinkStatus(s) === 'Active').length} active`
+          : ''}
+      </div>
       {newShareUrl && (
         <div className='ide-card' style={{marginBottom: 10}} role='status'>
           <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
@@ -563,7 +569,19 @@ export function IdeProjectMembers() {
                 }}
               >
                 <div style={{flex: 1, minWidth: 0}}>
-                  <div style={{fontWeight: 600}}>{s.surface}</div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <span style={{fontWeight: 600}}>{s.surface}</span>
+                    {/* RR-1511 — an explicit per-row state so a revoked/expired link is not shown
+                        as if it still grants access. */}
+                    {(() => {
+                      const st = shareLinkStatus(s);
+                      return (
+                        <IdeBadge kind={st === 'Active' ? 'ok' : st === 'Revoked' ? 'bad' : 'warn'}>
+                          {st}
+                        </IdeBadge>
+                      );
+                    })()}
+                  </div>
                   <div
                     className='ide-mono'
                     style={{
@@ -578,6 +596,9 @@ export function IdeProjectMembers() {
                       ? `Credential ${s.tokenPrefix}… · URL hidden after creation`
                       : 'Share link details are managed by project writers.'}
                     {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
+                    {` · ${s.views} view${s.views === 1 ? '' : 's'}`}
+                    {s.lastViewedAt &&
+                      ` · last viewed ${new Date(s.lastViewedAt).toLocaleDateString()}`}
                   </div>
                 </div>
                 {canManageShares && (
@@ -589,13 +610,16 @@ export function IdeProjectMembers() {
                     >
                       {shareAuditLinkId === s.id ? 'Hide audit' : 'Audit'}
                     </button>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                      onClick={() => setRevokeFor(s.id)}
-                    >
-                      Revoke
-                    </button>
+                    {/* RR-1511 — Revoke only makes sense on a still-active link. */}
+                    {shareLinkStatus(s) === 'Active' && (
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '3px 8px', color: 'var(--ide-red)'}}
+                        onClick={() => setRevokeFor(s.id)}
+                      >
+                        Revoke
+                      </button>
+                    )}
                   </>
                 )}
               </div>

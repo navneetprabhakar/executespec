@@ -3215,3 +3215,22 @@ body {
 .signal-file-tree-status.lavender {
   background: var(--signal-lavender, #c4b8e0);
 }
+
+/*
+ * RR-799: honour the OS reduced-motion preference on the public/shared/auth
+ * surfaces. signal.css ships nine indefinite animations (live dots, status
+ * pills, hero/auth progress bars, task spinners) plus sidebar/modal
+ * transitions. Unauthenticated visitors reach these before any account setting,
+ * so the preference must be respected here too: looping animation collapses to a
+ * single static frame and transitions snap to their end state.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .signal-app *,
+  .signal-app *::before,
+  .signal-app *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
