@@ -147,4 +147,25 @@ class EditFileToolTest {
     assertThat(((ToolResult.Err) r).message()).doesNotContain(credential);
     assertThat(Files.readString(f)).isEqualTo("API_KEY=replace_me\n");
   }
+
+  @Test
+  @DisplayName("RR-1023: replaceAll=true AND occurrence set → rejected, nothing written")
+  void replaceAll_and_occurrence_are_mutually_exclusive() throws IOException {
+    Path f = writeAndRead("a.txt", "x\nx\nx\n");
+    ObjectNode node = om.createObjectNode();
+    node.put("path", "a.txt");
+    ArrayNode arr = node.putArray("edits");
+    ObjectNode e = arr.addObject();
+    e.put("oldStr", "x");
+    e.put("newStr", "y");
+    e.put("replaceAll", true);
+    e.put("occurrence", 2);
+
+    ToolResult r = tool.execute(node, ctx);
+
+    assertThat(r).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) r).kind()).isEqualTo(ToolResult.ErrorKind.INVALID_ARGS);
+    // No change written — the ambiguous selector is refused, not guessed.
+    assertThat(Files.readString(f)).isEqualTo("x\nx\nx\n");
+  }
 }

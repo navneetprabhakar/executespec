@@ -353,12 +353,13 @@ public class ShellSandboxPolicy {
 
     String trimmed = command.trim();
     String normalized = trimmed.toLowerCase();
+    String fp = ShellCommandFingerprint.of(trimmed); // RR-121 — keyed log id
 
     // MEDIUM+: additional deny patterns
     if (effective.atLeastMedium()) {
       for (Pattern p : MEDIUM_ADDITIONAL_PATTERNS) {
         if (p.matcher(normalized).find()) {
-          log.warn("SHELL BLOCKED (guardrail={} extra-pattern): {}", effective, trimmed);
+          log.warn("SHELL BLOCKED (guardrail={} extra-pattern): {}", effective, fp);
           if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("shell");
           return ValidationResult.block(
               "Command matches a guardrail " + effective + " denied pattern");
@@ -368,11 +369,11 @@ public class ShellSandboxPolicy {
 
     // Block subshell/backtick injection — $(...) and `...` can embed arbitrary commands
     if (SUBSHELL_PATTERN.matcher(normalized).find()) {
-      log.warn("SHELL BLOCKED (subshell $()): {}", trimmed);
+      log.warn("SHELL BLOCKED (subshell $()): {}", fp);
       return ValidationResult.block("Subshell expansion $(...) is not allowed");
     }
     if (BACKTICK_PATTERN.matcher(normalized).find()) {
-      log.warn("SHELL BLOCKED (backtick subshell): {}", trimmed);
+      log.warn("SHELL BLOCKED (backtick subshell): {}", fp);
       return ValidationResult.block("Backtick subshell expansion is not allowed");
     }
 
@@ -380,27 +381,27 @@ public class ShellSandboxPolicy {
     // (catches cross-segment patterns like "curl ... | bash")
     for (String blocked : BLOCKED_COMMANDS) {
       if (normalized.contains(blocked)) {
-        log.warn("SHELL BLOCKED (explicit): {}", trimmed);
+        log.warn("SHELL BLOCKED (explicit): {}", fp);
         return ValidationResult.block("Command contains blocked operation: " + blocked);
       }
     }
     for (Pattern pattern : BLOCKED_PATTERNS) {
       if (pattern.matcher(normalized).find()) {
-        log.warn("SHELL BLOCKED (pattern): {}", trimmed);
+        log.warn("SHELL BLOCKED (pattern): {}", fp);
         return ValidationResult.block("Command matches blocked pattern");
       }
     }
 
     // Block absolute path navigation (cd /) — prevents jumping to system dirs.
     if (normalized.matches(".*\\bcd\\s+/(?!\\.).*")) {
-      log.warn("SHELL BLOCKED (absolute cd): {}", trimmed);
+      log.warn("SHELL BLOCKED (absolute cd): {}", fp);
       return ValidationResult.block("Absolute directory navigation blocked (cd /)");
     }
 
     // Block relative parent directory traversal (cd ..) — prevents escaping workspace.
     if (normalized.matches(".*\\bcd\\s+\\.\\.[/\\s].*")
         || normalized.matches(".*\\bcd\\s+\\.\\.\\s*$")) {
-      log.warn("SHELL BLOCKED (relative cd ..): {}", trimmed);
+      log.warn("SHELL BLOCKED (relative cd ..): {}", fp);
       return ValidationResult.block("Relative parent directory navigation blocked (cd ..)");
     }
 
@@ -491,6 +492,7 @@ public class ShellSandboxPolicy {
   private ValidationResult validateSegment(
       String segment, String originalCommand, GuardrailLevel level, String workspacePath) {
     String[] tokens = segment.trim().split("\\s+");
+    String cmdFp = ShellCommandFingerprint.of(originalCommand); // RR-121 — keyed log id
 
     // 2026-07-20 (RR-833) — resolve the EXECUTABLE ORIGIN, not just the basename. The old code
     // stripped every directory prefix and authorized the remainder, so `./git` / `/tmp/npm`
@@ -500,18 +502,23 @@ public class ShellSandboxPolicy {
     ShellCommandConfinement.CommandOrigin origin =
         ShellCommandConfinement.resolveCommandName(tokens[0]);
     if (origin.isRejected()) {
-      log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], originalCommand);
+      log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], cmdFp);
       return ValidationResult.block(origin.rejection());
     }
     String firstToken = origin.commandName();
 
     if (!ALLOWED_PREFIXES.contains(firstToken)) {
-      log.warn(
-          "SHELL BLOCKED (chained command not in allowlist): '{}' in: {}",
-          firstToken,
-          originalCommand);
+      log.warn("SHELL BLOCKED (chained command not in allowlist): '{}' in: {}", firstToken, cmdFp);
       return ValidationResult.block(
           "Chained command '" + firstToken + "' is not in the allowed command list");
+    }
+
+    // RR-853 — deny networked EAS build/submit/OTA at EVERY level; bypasses deployment authz.
+    String externalSideEffect = ShellGuardrailVerbs.externalSideEffectReason(tokens);
+    if (externalSideEffect != null) {
+      log.warn("SHELL BLOCKED (external side effect): {}", cmdFp);
+      if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("shell");
+      return ValidationResult.block(externalSideEffect);
     }
 
     // 2026-07-20 (RR-118) — the policy previously ignored `workspacePath` entirely, so allowed
@@ -521,7 +528,7 @@ public class ShellSandboxPolicy {
     // ShellCommandConfinement's javadoc for what it cannot see.
     String unconfined = ShellCommandConfinement.rejectUnconfinedAbsolutePath(tokens, workspacePath);
     if (unconfined != null) {
-      log.warn("SHELL BLOCKED (workspace confinement): {}", originalCommand);
+      log.warn("SHELL BLOCKED (workspace confinement): {}", cmdFp);
       return ValidationResult.block(unconfined);
     }
 
@@ -540,7 +547,7 @@ public class ShellSandboxPolicy {
     if ("docker".equals(firstToken) && tokens.length >= 2) {
       String subcommand = tokens[1];
       if (!ALLOWED_DOCKER_SUBCOMMANDS.contains(subcommand)) {
-        log.warn("SHELL BLOCKED (docker subcommand): {} in {}", subcommand, originalCommand);
+        log.warn("SHELL BLOCKED (docker subcommand): {} in {}", subcommand, cmdFp);
         return ValidationResult.block("Docker subcommand '" + subcommand + "' is not allowed");
       }
     }
@@ -554,7 +561,7 @@ public class ShellSandboxPolicy {
             "SHELL BLOCKED (guardrail=HIGH strict verb): {} {} in {}",
             firstToken,
             tokens[1],
-            originalCommand);
+            cmdFp);
         if (guardrailLevelResolver != null) guardrailLevelResolver.recordBlock("shell");
         return ValidationResult.block(
             firstToken

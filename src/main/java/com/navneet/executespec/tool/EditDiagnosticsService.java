@@ -49,6 +49,24 @@ public class EditDiagnosticsService {
   private static final int TIMEOUT_SECONDS = 15;
   private static final int MAX_LINES = 6;
 
+  /**
+   * RR-578 — a pure read-only syntax check. {@code python3 -m py_compile} WRITES compiled bytecode
+   * under {@code __pycache__}, mutating the candidate tree after an otherwise deterministic edit
+   * (untracked files, changed fingerprints/diffs). Parsing with {@code ast.parse} validates syntax
+   * without emitting any artifact, and on failure prints the same {@code File "...", line N} +
+   * {@code <Error>: <msg>} shape {@link #formatPyCompile} already recognizes. Exit 1 on a syntax
+   * error, exit 0 when clean.
+   */
+  static final String AST_SYNTAX_CHECK =
+      "import ast, sys\n"
+          + "try:\n"
+          + "    src = open(sys.argv[1], encoding='utf-8').read()\n"
+          + "    ast.parse(src, sys.argv[1])\n"
+          + "except SyntaxError as e:\n"
+          + "    print('File \"%s\", line %s' % (e.filename, e.lineno))\n"
+          + "    print('%s: %s' % (type(e).__name__, e.msg))\n"
+          + "    sys.exit(1)\n";
+
   private final FeatureFlagService flags;
   private final ProgramBenchContainerStore programBenchContainers;
   private final SwebenchContainerStore swebenchContainers;
@@ -107,10 +125,20 @@ public class EditDiagnosticsService {
       pb =
           new ProcessBuilder(
               List.of(
-                  "docker", "exec", "-w", workdir, cid, "python3", "-m", "py_compile", relPath));
+                  "docker",
+                  "exec",
+                  "-w",
+                  workdir,
+                  cid,
+                  "python3",
+                  "-c",
+                  AST_SYNTAX_CHECK,
+                  relPath));
     } else {
-      pb = new ProcessBuilder(List.of("python3", "-m", "py_compile", relPath));
+      pb = new ProcessBuilder(List.of("python3", "-c", AST_SYNTAX_CHECK, relPath));
       pb.directory(ctx.workspaceRoot().toFile());
+      // RR-578 — belt-and-suspenders: never let this diagnostic import machinery write .pyc.
+      pb.environment().put("PYTHONDONTWRITEBYTECODE", "1");
     }
     pb.redirectErrorStream(true);
     Process proc = pb.start();
@@ -151,7 +179,7 @@ public class EditDiagnosticsService {
     if (keep.isEmpty()) {
       return "";
     }
-    return "⚠ post-edit syntax check (py_compile) failed for "
+    return "⚠ post-edit syntax check (ast.parse) failed for "
         + relPath
         + ":\n  "
         + String.join("\n  ", keep)

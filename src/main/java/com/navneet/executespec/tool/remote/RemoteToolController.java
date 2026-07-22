@@ -122,7 +122,12 @@ public class RemoteToolController {
       @PathVariable String runId,
       HttpServletRequest request) {
     requirePatLocalHands(request);
-    guard.requireRunAccess(runId, userDetails);
+    // RR-575 — a PendingCall carries the model's tool name + verbatim arguments (command text,
+    // filenames, patches — potentially secret-bearing). Run READ access extends beyond the owner to
+    // same-org roles and external project members, so a read-only collaborator could poll another
+    // user's active local execution. Bind this recovery read to run WRITE authority, matching every
+    // sibling tool-session transport endpoint above (reconnect / status / disconnect / results).
+    guard.requireRunWriteAccess(runId, userDetails);
     return ResponseEntity.ok(dispatcher.pendingCalls(runId));
   }
 

@@ -116,9 +116,16 @@ public class FileSystemTool {
         }
       }
     } catch (IOException e) {
-      // toRealPath failure (e.g. workspace deleted mid-flight) — fall through to the lexical
-      // check we already passed; this is a degraded state but the lexical guard still holds.
-      log.debug("safeResolve toRealPath failed for {}: {}", resolved, e.getMessage());
+      // RR-643 — FAIL CLOSED. A toRealPath failure (workspace deleted mid-flight, permission fault,
+      // a concurrent process removing an ancestor) means the symlink-containment layer could NOT
+      // run. Returning the lexically-contained path anyway leaves a check/use window in which an
+      // existing ancestor can be swapped for a symlink and a write redirected outside the
+      // workspace.
+      // A degraded filesystem state is a refusal, not a silent downgrade to the lexical guard
+      // alone.
+      log.warn("safeResolve real-path check failed for {} — refusing (fail-closed)", resolved);
+      throw new SecurityException(
+          "workspace path could not be verified against its real path: " + relativePath);
     }
     return resolved;
   }
