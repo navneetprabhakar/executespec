@@ -76,14 +76,33 @@ public class BitbucketAdapter implements InboundAdapter, OutboundAdapter {
     }
   }
 
+  /** The only Bitbucket PR event key that triggers a run — a newly opened PR to implement. */
+  private static final String TRIGGER_EVENT_KEY = "pullrequest:created";
+
   @Override
   public String extractEventId(String rawBody) {
+    return extractEventId(Map.of(), rawBody);
+  }
+
+  @Override
+  public String extractEventId(Map<String, String> headers, String rawBody) {
+    // RR-638 — prefer Bitbucket's stable per-delivery id (X-Request-UUID) so distinct PR lifecycle
+    // events (created / updated / approved / merged) are NOT collapsed onto one id, which the old
+    // "bb-pr-<id>" scheme did — permanently discarding every event after the first for a PR.
+    // Retries
+    // of the SAME delivery reuse the UUID and dedupe correctly.
+    String deliveryId = headers == null ? null : headers.get("x-request-uuid");
+    if (deliveryId != null && !deliveryId.isBlank()) {
+      return "bb-" + deliveryId.trim();
+    }
     try {
       JsonNode root = mapper.readTree(rawBody);
-      // Bitbucket webhooks include a request UUID header; fallback to PR id
       JsonNode pr = root.path("pullrequest");
+      String eventKey = headers == null ? "" : headers.getOrDefault("x-event-key", "");
       if (pr.has("id")) {
-        return "bb-pr-" + pr.get("id").asText();
+        // No delivery UUID available: qualify by event key so at least distinct lifecycle events
+        // for one PR are distinguishable rather than all sharing the PR id.
+        return "bb-pr-" + pr.get("id").asText() + (eventKey.isBlank() ? "" : "-" + eventKey);
       }
       return UUID.randomUUID().toString();
     } catch (Exception e) {
@@ -93,12 +112,24 @@ public class BitbucketAdapter implements InboundAdapter, OutboundAdapter {
 
   @Override
   public Optional<IntegrationEvent> parseEvent(String rawBody) {
+    return parseEvent(Map.of(), rawBody);
+  }
+
+  @Override
+  public Optional<IntegrationEvent> parseEvent(Map<String, String> headers, String rawBody) {
     try {
       JsonNode root = mapper.readTree(rawBody);
 
-      // Determine event type from the payload structure
-      // Bitbucket webhook event key is passed via X-Event-Key header,
-      // but we also infer from payload for robustness
+      // RR-638 — honour the authoritative X-Event-Key header. The old code accepted ANY payload
+      // containing a pullrequest node, so an update / approval / merge webhook could trigger a run.
+      // When the header is present it must be the exact trigger key; when it is absent (older proxy
+      // that strips it) we fall back to the legacy structural acceptance below.
+      String eventKey = headers == null ? "" : headers.getOrDefault("x-event-key", "");
+      if (!eventKey.isBlank() && !TRIGGER_EVENT_KEY.equalsIgnoreCase(eventKey.trim())) {
+        log.debug("[Bitbucket] Ignoring non-trigger event key '{}'", eventKey);
+        return Optional.empty();
+      }
+
       JsonNode pr = root.path("pullrequest");
       if (pr.isMissingNode() || !pr.has("id")) {
         log.debug("[Bitbucket] Ignoring event — no pullrequest in payload");

@@ -194,7 +194,14 @@ public final class RunPipelineSupport {
     List<String> out = new java.util.ArrayList<>();
     try (var stream = Files.walk(workspace)) {
       stream
-          .filter(Files::isRegularFile)
+          // RR-405 — NOFOLLOW_LINKS so a symlink inside the workspace pointing at an external file
+          // is NOT counted as generated code. A symlink is not a regular file under NOFOLLOW, so it
+          // is excluded here; Files.walk itself does not descend symlinked directories
+          // (FOLLOW_LINKS
+          // is not passed), so a symlinked subtree is likewise never enumerated. This keeps the
+          // generated-file/language evidence and nonzero score floor to files the run actually
+          // created inside its own workspace boundary.
+          .filter(p -> Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
           .filter(
               p -> {
                 for (Path part : workspace.relativize(p)) {

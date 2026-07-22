@@ -83,8 +83,23 @@ public class ConfluenceClient {
 
   private String markdownToConfluenceStorage(String md) {
     if (md == null) return "";
-    // Minimal conversion: wrap in Confluence XHTML paragraph blocks
-    return "<p>" + md.replace("\n\n", "</p><p>").replace("\n", "<br/>") + "</p>";
+    // RR-640 — the content may be untrusted or LLM-generated. It is submitted as
+    // representation=storage (Confluence XHTML), so raw `<`, `>`, `&`, quotes would let the text
+    // break the page structure or inject storage-format elements/macros. XML-escape the text FIRST,
+    // then insert only the server-owned <p>/<br/> structure tags. This is a bounded escape, not a
+    // full Markdown renderer — no Markdown syntax is interpreted, which is the safe default here.
+    String escaped = xmlEscape(md);
+    return "<p>" + escaped.replace("\n\n", "</p><p>").replace("\n", "<br/>") + "</p>";
+  }
+
+  /** XML-escape text for safe inclusion in Confluence storage-format XHTML (RR-640). */
+  static String xmlEscape(String s) {
+    if (s == null) return "";
+    return s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;");
   }
 
   private <T> HttpEntity<T> authenticatedRequest(T body) {
