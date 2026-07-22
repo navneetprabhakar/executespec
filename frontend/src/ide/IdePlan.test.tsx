@@ -279,14 +279,16 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
     await act(async () => {
       button('Approve and start work')?.click();
     });
-    expect(api.approveRun).toHaveBeenCalledWith(
-      'run-a',
-      true,
-      3,
-      undefined,
-      await sha256Hex('{"tasks":["a"]}'),
-      undefined,
-    );
+    await vi.waitFor(async () => {
+      expect(api.approveRun).toHaveBeenCalledWith(
+        'run-a',
+        true,
+        3,
+        undefined,
+        await sha256Hex('{"tasks":["a"]}'),
+        undefined,
+      );
+    });
   });
 
   it('drops the acknowledgement when the route moves to another run', async () => {
