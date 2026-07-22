@@ -318,7 +318,34 @@ public class BenchmarkGenerationService {
     } finally {
       run("docker rm -f " + containerName, 30);
       containerStore.remove(runId);
+      // RR-951 — the per-run checkout under <outputBase>/ws/<runId> was never reclaimed, so every
+      // generation (including setup failures) monotonically filled the benchmark VM. The scored
+      // artifacts (submission.patch, preds) live under outputDir and are retained; only the bulky
+      // working checkout is deleted, no-follow, on every terminal and setup path.
+      deleteWorkspaceQuietly(workspace);
       releaseGenerationSlot();
+    }
+  }
+
+  /**
+   * RR-951 — recursively delete a benchmark working checkout without following symbolic links.
+   * {@link Files#walk(Path, java.nio.file.FileVisitOption...)} does not follow links by default, so
+   * a planted symlink is removed as a link and its target is never traversed.
+   */
+  private void deleteWorkspaceQuietly(Path workspace) {
+    if (workspace == null || !Files.exists(workspace)) return;
+    try (var walk = Files.walk(workspace)) {
+      walk.sorted(java.util.Comparator.reverseOrder())
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                  // best-effort; a leftover file is preferable to failing the terminal path
+                }
+              });
+    } catch (IOException e) {
+      log.warn("benchmark-gen: failed to reclaim workspace {}: {}", workspace, e.getMessage());
     }
   }
 
@@ -657,8 +684,13 @@ public class BenchmarkGenerationService {
           .findById(runId)
           .ifPresent(
               pr -> {
-                pr.setStatus(patchLen > 0 ? "COMPLETE" : "PARTIAL");
-                String reason = "BENCH_GEN:" + outcome.name();
+                // RR-953 — COMPLETE only when the engine actually asserted completion AND produced
+                // a patch. A non-empty patch from an iteration/budget/wall-clock/stopped/error
+                // non-completion is partial evidence, not a completed run; recording it COMPLETE
+                // corrupted operator status, analytics and recovery assumptions.
+                boolean complete = outcome == EngineOutcome.COMPLETED && patchLen > 0;
+                pr.setStatus(complete ? "COMPLETE" : "PARTIAL");
+                String reason = "BENCH_GEN:" + outcome.name() + ":" + patchLen + "B";
                 pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
                 pr.setCompletedAt(Instant.now());
                 runRepo.save(pr);
@@ -694,13 +726,27 @@ public class BenchmarkGenerationService {
    * Overridable per request via {@code modelName}; this only sets the default when none is given so
    * the service stays dependency-light.
    */
-  private static String defaultPlanningModel(String provider) {
-    if (provider == null) return "claude-sonnet-5";
+  static String defaultPlanningModel(String provider) {
+    // RR-954 — never silently pair a non-Anthropic provider with an Anthropic model. The previous
+    // default fell every unrecognised provider (including OpenRouter/Fireworks, which YAML assigns
+    // DeepSeek models) through to claude-sonnet-5, so an omitted-model run failed or recorded an
+    // invalid cross-provider comparison. Map each supported provider to its PLANNING-tier default
+    // (mirror application.yml model-matrix) and fail closed on anything else.
+    if (provider == null || provider.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "aiProvider is required to resolve a default model");
+    }
     return switch (provider.toLowerCase()) {
+      case "anthropic" -> "claude-sonnet-5";
       case "openai" -> "gpt-5.4";
       case "gemini", "google" -> "gemini-3.5-flash";
       case "deepseek" -> "deepseek-v4-flash-native";
-      default -> "claude-sonnet-5";
+      case "openrouter" -> "deepseek-v4-pro";
+      case "fireworks" -> "deepseek-v4-pro-fw";
+      default ->
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST,
+              "no default model for provider '" + provider + "'; supply modelName explicitly");
     };
   }
 
