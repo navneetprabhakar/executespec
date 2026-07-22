@@ -100,6 +100,16 @@ public class StaleScmCleanupJob {
         skippedActive++;
         continue;
       }
+      // RR-894 (2026-07-22) — the createdAt candidate query is only a coarse bound. The documented
+      // grace is measured from when the RUN became terminal, not when the PR was opened: a run that
+      // was still executing for two weeks and only failed today must not have its PR closed
+      // immediately. Age from the run's completedAt (fall back to createdAt when unknown, which is
+      // always <= the terminal time so this only tightens).
+      Instant terminalAt = run.getCompletedAt() != null ? run.getCompletedAt() : pr.getCreatedAt();
+      if (terminalAt != null && terminalAt.isAfter(cutoff)) {
+        skippedActive++;
+        continue;
+      }
       Optional<AppUser> user =
           run.getCreatedByUserId() != null
               ? userRepo.findById(run.getCreatedByUserId())
@@ -155,6 +165,17 @@ public class StaleScmCleanupJob {
 
     int deleted = 0;
     for (PullRequestRecord pr : candidates) {
+      // RR-894 (2026-07-22) — the branch-delete grace is measured from the PR's terminal transition
+      // (merged/closed), not from when the row was created. A PR that stayed open for a month and
+      // merged today must keep its branch through the post-terminal window. Age from mergedAt or
+      // closedAt; only fall back to createdAt for legacy rows that predate those timestamps.
+      Instant terminalAt =
+          pr.getMergedAt() != null
+              ? pr.getMergedAt()
+              : (pr.getClosedAt() != null ? pr.getClosedAt() : pr.getCreatedAt());
+      if (terminalAt != null && terminalAt.isAfter(cutoff)) {
+        continue;
+      }
       PipelineRun run = pr.getRunId() != null ? runRepo.findById(pr.getRunId()).orElse(null) : null;
       String pat = null;
       if (run != null && run.getCreatedByUserId() != null) {

@@ -184,6 +184,16 @@ public class ProjectDocumentService {
       enforcePerFileExtractionLimits(extraction);
       enforceCredentialContentPolicy(extraction);
       persistOpaqueWorkspaceCopy(claimed, bytes);
+      // RR-812 (2026-07-22) — delete() purges the workspace copy, then a still-running indexer that
+      // cloned the source bytes before deletion writes the copy back above and (before this fence)
+      // never rechecked ownership, resurrecting a supposedly purged file on disk until unrelated
+      // cleanup. Re-fence immediately after the write: heartbeat proves we still hold a live lease
+      // (a delete invalidates it, a takeover bumps the fence token); if we have lost it, remove the
+      // copy we just recreated and stop rather than proceed against a deleted/taken-over document.
+      if (!heartbeat(lease)) {
+        deleteWorkspaceCopy(claimed.getProjectId(), claimed.getPathRelative(), documentId);
+        return;
+      }
       List<ChunkingService.Chunk> chunks = chunker.chunk(extraction.text());
       if (chunks.isEmpty()) {
         failTerminal(lease, "NO_EXTRACTABLE_TEXT", "No readable text was found.");
