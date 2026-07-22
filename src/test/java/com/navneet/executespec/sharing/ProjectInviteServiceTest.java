@@ -81,12 +81,64 @@ class ProjectInviteServiceTest {
   void revokeMarksSameProjectInviteRevoked() {
     ProjectInvite invite = invite("project-a");
     when(inviteRepo.findById(invite.getId())).thenReturn(Optional.of(invite));
+    // RR-974 — revoke now requires host invite-admin authority; the actor is the host org's admin.
+    hostProjectExists();
+    when(orgMemberRepo.findByOrgIdAndUserId(HOST_ORG, "actor-1"))
+        .thenReturn(Optional.of(orgAdmin(HOST_ORG, "actor-1")));
 
     service.revoke("project-a", invite.getId(), actor());
 
     assertEquals("REVOKED", invite.getStatus());
     assertEquals("actor-1", invite.getRevokedByUserId());
     verify(inviteRepo).save(invite);
+  }
+
+  /** RR-974 — a caller with project write but no host-admin standing cannot revoke a grant. */
+  @Test
+  void revokeIsRefusedForNonHostAdmin() {
+    ProjectInvite invite = invite(PROJECT_ID);
+    when(inviteRepo.findById(invite.getId())).thenReturn(Optional.of(invite));
+    hostProjectExists();
+    when(orgMemberRepo.findByOrgIdAndUserId(HOST_ORG, "actor-1")).thenReturn(Optional.empty());
+
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.revoke(PROJECT_ID, invite.getId(), actor()));
+
+    assertEquals(403, ex.getStatusCode().value());
+    verify(inviteRepo, never()).save(invite);
+  }
+
+  /** RR-974 — listing invitee PII requires host-admin authority, not plain project read. */
+  @Test
+  void listPendingIsRefusedForNonHostAdmin() {
+    hostProjectExists();
+    when(orgMemberRepo.findByOrgIdAndUserId(HOST_ORG, "actor-1")).thenReturn(Optional.empty());
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> service.listPending(PROJECT_ID, actor()));
+
+    assertEquals(403, ex.getStatusCode().value());
+    verify(inviteRepo, never()).findByProjectIdAndStatusOrderByCreatedAtDesc(any(), any());
+  }
+
+  /** RR-979 — an expired-but-still-PENDING row is filtered out of the host admin's live list. */
+  @Test
+  void listPendingHidesExpiredPendingRows() {
+    hostProjectExists();
+    when(orgMemberRepo.findByOrgIdAndUserId(HOST_ORG, "actor-1"))
+        .thenReturn(Optional.of(orgAdmin(HOST_ORG, "actor-1")));
+    ProjectInvite live = invite(PROJECT_ID); // expiresAt now+3600s
+    ProjectInvite expired = invite(PROJECT_ID);
+    expired.setExpiresAt(Instant.now().minusSeconds(3600));
+    when(inviteRepo.findByProjectIdAndStatusOrderByCreatedAtDesc(PROJECT_ID, "PENDING"))
+        .thenReturn(java.util.List.of(live, expired));
+
+    java.util.List<ProjectInvite> result = service.listPending(PROJECT_ID, actor());
+
+    assertEquals(1, result.size());
+    assertEquals(live.getId(), result.get(0).getId());
   }
 
   // RR-973 — authority for an external invite belongs to the org that OWNS the project.

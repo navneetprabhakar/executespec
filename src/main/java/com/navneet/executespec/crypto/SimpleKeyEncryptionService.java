@@ -81,9 +81,31 @@ public class SimpleKeyEncryptionService {
             ? "1"
             : cryptoProperties.getKeyVersion().trim();
 
-    // Priority 1: local key (dev)
     String localKey = cryptoProperties.getLocalKey();
-    if (localKey != null && !localKey.isBlank()) {
+    String gcpSecretName = cryptoProperties.getGcpSecretName();
+    boolean hasLocalKey = localKey != null && !localKey.isBlank();
+    boolean hasGcpSecret = gcpSecretName != null && !gcpSecretName.isBlank();
+
+    // RR-124 — reject an ambiguous key origin before any key is selected.
+    //
+    // The documented priority put the LOCAL key ahead of Secret Manager and applied the
+    // immutable-resource validation only to the GCP branch, so an accidentally inherited
+    // CRYPTO_LOCAL_KEY silently overrode the governed Secret Manager key/rotation resource whenever
+    // BOTH were configured — the concrete split-key vector, where credentials encrypt under the
+    // local key but production expects the governed resource. Configuring both primary sources at
+    // once is now a fail-closed boot error rather than a silent local-key win. (Forbidding a
+    // local-key-only override in a shared profile without any governed resource is a separate,
+    // profile-aware check deferred to a follow-up; there is no governed resource to override in
+    // that state, and it would require threading the active Spring profile into this service.)
+    if (hasLocalKey && hasGcpSecret) {
+      throw new IllegalStateException(
+          "[Crypto] Both executespec.crypto.local-key and a GCP Secret Manager resource are"
+              + " configured — remove one so the primary key source is unambiguous. A local key"
+              + " must never silently override the governed Secret Manager resource.");
+    }
+
+    // Priority 1: local key (dev)
+    if (hasLocalKey) {
       log.warn("[Crypto] Using local crypto key — NOT for production");
       this.secretKey = toAesKey(Base64.getDecoder().decode(localKey));
       registerDecryptKeys();
@@ -91,8 +113,7 @@ public class SimpleKeyEncryptionService {
     }
 
     // Priority 2: GCP Secret Manager (prod)
-    String gcpSecretName = cryptoProperties.getGcpSecretName();
-    if (gcpSecretName != null && !gcpSecretName.isBlank()) {
+    if (hasGcpSecret) {
       if (cryptoProperties.isRequireEncryption()
           && !gcpSecretName.matches("^projects/[^/]+/secrets/[^/]+/versions/[0-9]+$")) {
         throw new IllegalStateException(

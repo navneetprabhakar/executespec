@@ -29,6 +29,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
@@ -98,75 +100,78 @@ public class ProjectInviteService {
   private String appBaseUrl;
 
   /**
-   * Validate that the inviter is allowed to create an external invite <b>into this project</b>.
+   * RR-974 — the host-side admin authority that every invite management operation (create / list /
+   * revoke) requires, independent of the flag + entitlement gates that only creation adds. Read or
+   * write access to a project is not authority to see pending-recipient PII or to revoke standing
+   * grants: an external project VIEWER could enumerate invitee emails/roles, and a project
+   * DEVELOPER/external writer could revoke invitations they lack the authority to create. The
+   * decision is an <b>org-level</b> one about the HOST org whose resources are being shared, so it
+   * demands ORG_ADMIN of the host org (or SUPER_ADMIN). PROJECT_ADMIN is deliberately insufficient,
+   * and being an org admin of a <i>different</i> tenant carries no weight here.
    *
-   * <p><b>RR-973 (2026-07-21) — the host project's org decides, not the inviter's.</b> This method
-   * previously accepted {@code projectId} and never read it: authority came entirely from the
-   * inviter's OWN home-org role and their OWN {@code external_sharing_enabled} flag. An external
-   * collaborator who happened to be ORG_ADMIN of their own paid, sharing-enabled org could
-   * therefore hand arbitrary outsiders — up to PROJECT_ADMIN — access to <i>another tenant's</i>
-   * project. Project write access got them past {@link
-   * com.navneet.executespec.project.security.ProjectAccessGuard#assertCanWrite}, and nothing after
-   * that ever looked at the host org. Read/write visibility of a project is not authority to
-   * delegate access to it; the grant is against the host, so the host's policy governs.
+   * <p>Deliberately does NOT require the {@code external_sharing_enabled} flag or a paid tier:
+   * disabling sharing or letting entitlement lapse must not strand existing invites — a host admin
+   * still needs to list and revoke them.
    *
-   * <p>Gates, all evaluated against the <b>host</b> org that owns the project:
-   *
-   * <ol>
-   *   <li><b>Host resolution</b> — the project must exist and must have an owning org. A project
-   *       with no resolvable org has no policy to consult, so the invite is refused rather than
-   *       defaulted.
-   *   <li><b>Role gate</b> — the inviter must hold ORG_ADMIN <i>in the host org</i> (or be
-   *       SUPER_ADMIN). PROJECT_ADMIN is deliberately not sufficient, and neither is being an org
-   *       admin somewhere else: adding outsiders is an org-level decision because the outsider sees
-   *       code / runs / cost belonging to the host org.
-   *   <li><b>Host-org-flag gate (V198)</b> — the HOST org must have {@code external_sharing_enabled
-   *       = true}. Default is false; SUPER_ADMIN or that org's own ORG_ADMIN flips it via {@code
-   *       PUT /api/org/me/settings/external-sharing}.
-   *   <li><b>Entitlement gate</b> — external collaboration is a paid feature. Evaluated on the host
-   *       org's tier, taking the inviter's own personal tier into account only because the role
-   *       gate has already proven they are an admin of that same host org (this keeps a solo
-   *       customer whose personal-org row still carries its signup-time FREE tier from being
-   *       refused). Entitlement is never borrowed from a foreign org.
-   * </ol>
-   *
-   * <p>SUPER_ADMIN bypasses the role and flag gates — support/ops provisioning a cross-org
-   * collaborator without waiting on the host admin.
+   * @return the resolved host {@link Project} so callers can reuse it without a second lookup.
    */
-  void assertCanInvite(AppUser inviter, String projectId) {
-    if (inviter == null) {
+  Project assertHostInviteAdmin(AppUser actor, String projectId) {
+    if (actor == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    // Resolve the HOST first — every gate below is a question about the host org.
+    // Resolve the HOST first — the authority question is about the host org.
     Project project =
         projectRepo
             .findById(projectId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    String hostOrgId = project.getOrgId();
-
-    boolean isSuperAdmin = "SUPER_ADMIN".equals(inviter.getGlobalRole());
-    if (isSuperAdmin) {
-      // SUPER_ADMIN bypasses role + org-flag — handled centrally by ops/support.
-      return;
+    if ("SUPER_ADMIN".equals(actor.getGlobalRole())) {
+      return project;
     }
-
+    String hostOrgId = project.getOrgId();
     if (hostOrgId == null || hostOrgId.isBlank()) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
           "This project has no owning organisation, so external collaborator policy can't be"
               + " resolved for it.");
     }
-
     // Role gate — ORG_ADMIN of the HOST org. orgRole lives on OrgMember, not AppUser.
     OrgMember membership =
-        orgMemberRepo.findByOrgIdAndUserId(hostOrgId, inviter.getId()).orElse(null);
+        orgMemberRepo.findByOrgIdAndUserId(hostOrgId, actor.getId()).orElse(null);
     if (membership == null || !"ORG_ADMIN".equals(membership.getOrgRole())) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "Only an admin of the organisation that owns this project can invite external"
-              + " collaborators to it.");
+          "Only an admin of the organisation that owns this project can manage its external"
+              + " collaborator invitations.");
     }
+    return project;
+  }
+
+  /**
+   * Validate that the inviter is allowed to create an external invite <b>into this project</b>.
+   *
+   * <p><b>RR-973 (2026-07-21) — the host project's org decides, not the inviter's.</b> Authority
+   * previously came entirely from the inviter's OWN home-org role and their OWN {@code
+   * external_sharing_enabled} flag. An external collaborator who happened to be ORG_ADMIN of their
+   * own paid, sharing-enabled org could therefore hand arbitrary outsiders — up to PROJECT_ADMIN —
+   * access to <i>another tenant's</i> project. Read/write visibility of a project is not authority
+   * to delegate access to it; the grant is against the host, so the host's policy governs.
+   *
+   * <p>Gates, all evaluated against the <b>host</b> org that owns the project: the shared {@link
+   * #assertHostInviteAdmin} role + host-resolution gate, then the HOST org's V198 {@code
+   * external_sharing_enabled} flag, then the paid-entitlement gate judged on the host org (with the
+   * proven host admin's own personal tier admitted only as a floor). SUPER_ADMIN bypasses the flag
+   * and entitlement gates — support/ops provisioning a cross-org collaborator.
+   */
+  void assertCanInvite(AppUser inviter, String projectId) {
+    // Role + host-resolution gate (shared with list/revoke). SUPER_ADMIN passes the role gate here
+    // and the org-flag + entitlement gates below are skipped for it.
+    Project project = assertHostInviteAdmin(inviter, projectId);
+    if ("SUPER_ADMIN".equals(inviter.getGlobalRole())) {
+      // SUPER_ADMIN bypasses the org-flag + entitlement gates — handled centrally by ops/support.
+      return;
+    }
+    String hostOrgId = project.getOrgId();
 
     // Org-flag gate — the HOST org must allow project-only external collaborators.
     Org hostOrg = orgRepo.findById(hostOrgId).orElse(null);
@@ -280,44 +285,74 @@ public class ProjectInviteService {
               .createdAt(Instant.now())
               .build();
     }
-    invite = inviteRepo.save(invite);
+    final ProjectInvite savedInvite = inviteRepo.save(invite);
+    final String token = savedInvite.getToken();
+    final Optional<AppUser> recipientUser = existingUser;
 
-    // Best-effort email — never fail the create if the mailer is down.
-    try {
-      mailService.sendProjectInviteEmail(
-          normalizedEmail,
-          project.getName(),
-          inviter.getEmail(),
-          appBaseUrl + "/invites/accept?token=" + invite.getToken(),
-          DEFAULT_EXPIRY_DAYS);
-    } catch (Exception e) {
-      log.warn("ProjectInvite email send failed for {}: {}", normalizedEmail, e.getMessage());
-    }
+    // RR-977 — the emailed link and the in-app notification are external, irreversible side effects
+    // that must not be published until this transaction actually commits. Dispatching them inline
+    // meant a recipient could receive a working link (or an in-app notification) for an invite that
+    // subsequently rolled back. Defer both to after-commit; when there is no active transaction
+    // (e.g. a direct service-layer call) run inline so behaviour is unchanged.
+    runAfterCommit(
+        () -> {
+          // Best-effort email — never surface a mailer outage as an invite failure.
+          try {
+            mailService.sendProjectInviteEmail(
+                normalizedEmail,
+                project.getName(),
+                inviter.getEmail(),
+                appBaseUrl + "/invites/accept?token=" + token,
+                DEFAULT_EXPIRY_DAYS);
+          } catch (Exception e) {
+            log.warn("ProjectInvite email send failed for {}: {}", normalizedEmail, e.getMessage());
+          }
 
-    // RL-2026-05-066 — in-app notification when the invitee already has an account, so the invite
-    // isn't only discoverable via email. existingUser is, at this point, either empty (no account
-    // yet — they get the email + sign up) or present-and-not-yet-a-member (the already-member case
-    // threw CONFLICT above). Best-effort: never fail the invite on a notification write. The link
-    // matches the email + the /invites/accept SPA route.
-    if (existingUser.isPresent()) {
-      try {
-        notificationService.create(
-            existingUser.get().getId(),
-            "PROJECT_INVITE",
-            "Invited to " + project.getName(),
-            (inviter.getEmail() == null ? "A teammate" : inviter.getEmail())
-                + " invited you to "
-                + project.getName()
-                + " as "
-                + resolvedRole
-                + ".",
-            "/invites/accept?token=" + invite.getToken());
-      } catch (Exception e) {
-        log.warn(
-            "ProjectInvite in-app notification failed for {}: {}", normalizedEmail, e.getMessage());
-      }
+          // RL-2026-05-066 — in-app notification when the invitee already has an account, so the
+          // invite isn't only discoverable via email. recipientUser is either empty (no account
+          // yet — they get the email + sign up) or present-and-not-yet-a-member (the already-member
+          // case threw CONFLICT above). Best-effort. The link matches the email + /invites/accept.
+          if (recipientUser.isPresent()) {
+            try {
+              notificationService.create(
+                  recipientUser.get().getId(),
+                  "PROJECT_INVITE",
+                  "Invited to " + project.getName(),
+                  (inviter.getEmail() == null ? "A teammate" : inviter.getEmail())
+                      + " invited you to "
+                      + project.getName()
+                      + " as "
+                      + resolvedRole
+                      + ".",
+                  "/invites/accept?token=" + token);
+            } catch (Exception e) {
+              log.warn(
+                  "ProjectInvite in-app notification failed for {}: {}",
+                  normalizedEmail,
+                  e.getMessage());
+            }
+          }
+        });
+    return savedInvite;
+  }
+
+  /**
+   * Run an irreversible external side effect only after the surrounding transaction commits (RR-977
+   * / RL-2026-05-041). With no active transaction — a direct service call or a unit test — the
+   * action runs inline so behaviour is identical for non-transactional callers.
+   */
+  private void runAfterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              action.run();
+            }
+          });
+    } else {
+      action.run();
     }
-    return invite;
   }
 
   /** Accept an invite. Returns the project id the caller now has access to. */
@@ -376,8 +411,10 @@ public class ProjectInviteService {
     inviteRepo.save(invite);
 
     // RL-2026-05-041 (audit #11) — record the external member joining on the project activity feed.
+    // RR-977 — defer to after-commit so the feed never claims a membership that rolled back.
     if (memberAdded) {
-      emitMemberAdded(invite, caller);
+      final ProjectInvite acceptedInvite = invite;
+      runAfterCommit(() -> emitMemberAdded(acceptedInvite, caller));
     }
     return invite.getProjectId();
   }
@@ -411,6 +448,8 @@ public class ProjectInviteService {
     if (!invite.getProjectId().equals(projectId)) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Invite not found");
     }
+    // RR-974 — revoking a standing cross-org grant is host-admin authority, not mere project write.
+    assertHostInviteAdmin(actor, projectId);
     if (!"PENDING".equals(invite.getStatus())) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Invite is not pending");
     }
@@ -449,8 +488,22 @@ public class ProjectInviteService {
     }
   }
 
-  public List<ProjectInvite> listPending(String projectId) {
-    return inviteRepo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, "PENDING");
+  /**
+   * List still-actionable pending invites for a project.
+   *
+   * <p>RR-974 — the rows carry recipient PII (email / role / inviter / expiry), so listing requires
+   * host invite-admin authority rather than plain project read access.
+   *
+   * <p>RR-979 — a row whose {@code expiresAt} has passed is no longer a live grant, but the status
+   * column only flips to EXPIRED lazily on an accept attempt. Filter expired rows out here so an
+   * admin's pending list reflects what is actually still acceptable instead of stale phantoms.
+   */
+  public List<ProjectInvite> listPending(String projectId, AppUser actor) {
+    assertHostInviteAdmin(actor, projectId);
+    Instant now = Instant.now();
+    return inviteRepo.findByProjectIdAndStatusOrderByCreatedAtDesc(projectId, "PENDING").stream()
+        .filter(i -> i.getExpiresAt() == null || i.getExpiresAt().isAfter(now))
+        .toList();
   }
 
   public Optional<ProjectInvite> findByToken(String token) {
