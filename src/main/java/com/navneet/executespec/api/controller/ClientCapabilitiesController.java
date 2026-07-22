@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.servlet.http.HttpServletRequest;
+
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,19 +27,27 @@ public class ClientCapabilitiesController {
   private final FeatureFlagService featureFlagService;
 
   @GetMapping("/client-capabilities")
-  public ClientCapabilities capabilities() {
+  public ClientCapabilities capabilities(HttpServletRequest request) {
     boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+    // RR-646 — resolve the ACTUAL request auth source instead of hard-coding "authenticated" with
+    // currentAuthSourceAllowed=true. Local-hands run submission is PAT-only (RunController rejects
+    // localExecution=true for browser/JWT). A JWT/browser caller previously received machine-
+    // readable authorization saying its current request could submit local execution, which the
+    // run endpoint then rejected — capability-driven clients read that as server drift.
+    String authSource = resolveAuthSource(request);
+    boolean pat = JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(authSource);
+    boolean currentRequestCanSubmitLocalHands = pat && localHandsEnabled;
     return new ClientCapabilities(
         1,
         "agent-protocol-v2",
         Instant.now(),
-        "authenticated",
+        authSource,
         new LocalHands(
             true,
             localHandsEnabled,
             "PAT",
-            true,
-            localHandsEnabled,
+            pat,
+            currentRequestCanSubmitLocalHands,
             "/api/runs",
             "/api/runs/{runId}/tool-results",
             List.of(
@@ -70,6 +81,18 @@ public class ClientCapabilitiesController {
                 + " authority."),
         new Governance(true, "/api/v3/governance-policy"),
         new ManagedAi(true, "/api/billing/managed-ai/balance", "/api/billing/managed-ai/policy"));
+  }
+
+  /**
+   * The auth source stamped by {@link JwtAuthenticationFilter} ("PAT" or "JWT"), or "anonymous"
+   * when no credential was resolved for this request.
+   */
+  private static String resolveAuthSource(HttpServletRequest request) {
+    Object source =
+        request == null
+            ? null
+            : request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE);
+    return source instanceof String s && !s.isBlank() ? s : "anonymous";
   }
 
   public record ClientCapabilities(
