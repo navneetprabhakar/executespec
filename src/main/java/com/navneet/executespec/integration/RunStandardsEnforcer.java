@@ -98,8 +98,12 @@ class RunStandardsEnforcer {
     }
     java.util.List<String> repoFilePaths = new java.util.ArrayList<>();
     java.util.List<Path> sourceFiles = new java.util.ArrayList<>();
-    collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
-    var report = standardsRunner.run(runId, effective, workspaceRoot, repoFilePaths, sourceFiles);
+    // RR-1612 — track whether the walk saw the WHOLE tree. A capped or pruned walk cannot soundly
+    // assert a required file is absent, so the runner suppresses that direction.
+    boolean inventoryComplete = collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
+    var report =
+        standardsRunner.run(
+            runId, effective, workspaceRoot, repoFilePaths, sourceFiles, inventoryComplete);
     java.util.List<com.navneet.executespec.standards.StandardsViolation> rows =
         toStandardsViolationRows(runUuid, projectId, report, STANDARDS_MAX_VIOLATIONS_PERSIST);
     int persisted = 0;
@@ -246,10 +250,18 @@ class RunStandardsEnforcer {
     return out;
   }
 
-  /** Bounded, pruned workspace walk for standards enforcement. */
-  private void collectWorkspaceFiles(
+  /**
+   * Bounded, pruned workspace walk for standards enforcement.
+   *
+   * @return true only when the walk saw the COMPLETE tree — i.e. it neither hit {@link
+   *     #STANDARDS_WALK_FILE_CAP} nor pruned a {@link #STANDARDS_SKIP_DIRS} subtree nor failed to
+   *     read a file. Any incompleteness means a {@code required_patterns} "missing" assertion is
+   *     unsound (RR-1612).
+   */
+  private boolean collectWorkspaceFiles(
       Path root, java.util.List<String> relPaths, java.util.List<Path> sourceFiles) {
-    if (root == null || !java.nio.file.Files.isDirectory(root)) return;
+    if (root == null || !java.nio.file.Files.isDirectory(root)) return false;
+    boolean[] incomplete = {false};
     try {
       java.nio.file.Files.walkFileTree(
           root,
@@ -258,6 +270,7 @@ class RunStandardsEnforcer {
             public java.nio.file.FileVisitResult preVisitDirectory(
                 Path dir, java.nio.file.attribute.BasicFileAttributes attrs) {
               if (!dir.equals(root) && STANDARDS_SKIP_DIRS.contains(dir.getFileName().toString())) {
+                incomplete[0] = true; // a pruned subtree may hold a required file
                 return java.nio.file.FileVisitResult.SKIP_SUBTREE;
               }
               return java.nio.file.FileVisitResult.CONTINUE;
@@ -267,6 +280,7 @@ class RunStandardsEnforcer {
             public java.nio.file.FileVisitResult visitFile(
                 Path file, java.nio.file.attribute.BasicFileAttributes attrs) {
               if (relPaths.size() >= STANDARDS_WALK_FILE_CAP) {
+                incomplete[0] = true; // hit the file cap — the rest of the tree is unseen
                 return java.nio.file.FileVisitResult.TERMINATE;
               }
               relPaths.add(root.relativize(file).toString());
@@ -276,11 +290,14 @@ class RunStandardsEnforcer {
 
             @Override
             public java.nio.file.FileVisitResult visitFileFailed(Path file, java.io.IOException e) {
+              incomplete[0] = true; // an unreadable entry means the inventory is not provably whole
               return java.nio.file.FileVisitResult.CONTINUE;
             }
           });
     } catch (Exception e) {
       log.debug("collectWorkspaceFiles walk failed: {}", e.getMessage());
+      return false;
     }
+    return !incomplete[0];
   }
 }

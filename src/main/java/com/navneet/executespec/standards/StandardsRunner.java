@@ -62,6 +62,22 @@ public class StandardsRunner {
       Path repoRoot,
       List<String> repoFilePaths,
       List<Path> sourceFiles) {
+    // Back-compat: callers that own a complete inventory get the previous behaviour.
+    return run(runId, effective, repoRoot, repoFilePaths, sourceFiles, true);
+  }
+
+  /**
+   * @param inventoryComplete RR-1612 — false when the workspace file walk hit its cap or pruned a
+   *     subtree, so a {@code required_patterns} "missing" assertion is unsound and is surfaced as
+   *     verifier-unavailable instead of a false BLOCKING violation.
+   */
+  public RunReport run(
+      String runId,
+      List<EffectiveStandardsResolver.Effective> effective,
+      Path repoRoot,
+      List<String> repoFilePaths,
+      List<Path> sourceFiles,
+      boolean inventoryComplete) {
     List<AggregatedViolation> all = new ArrayList<>();
     if (effective == null) return new RunReport(List.of(), Map.of());
 
@@ -103,7 +119,7 @@ public class StandardsRunner {
         }
         case Standard.FilePatternEnforcement fpe -> {
           FilePatternEnforcer.FilePatternOutcome outcome =
-              filePatternEnforcer.evaluate(fpe, repoFilePaths);
+              filePatternEnforcer.evaluate(fpe, repoFilePaths, inventoryComplete);
           evaluationStatuses.put(s.id(), outcome.status());
           for (FilePatternEnforcer.Violation v : outcome.violations()) {
             all.add(
@@ -116,24 +132,104 @@ public class StandardsRunner {
           }
         }
         case Standard.AstCheckEnforcement ace -> {
-          AstCheckEnforcer.AstOutcome outcome = astCheckEnforcer.evaluate(ace, sourceFiles);
-          evaluationStatuses.put(s.id(), outcome.status());
-          for (AstCheckEnforcer.AstViolation v : outcome.violations()) {
-            all.add(
-                new AggregatedViolation(
-                    s.id(),
-                    s.severity(),
-                    "AST_CHECK",
-                    v.file() + ":" + v.line(),
-                    v.ruleKind() + ": " + v.message()));
+          // RR-1052 / RR-1632 — apply the standard's declared scope (languages / paths) before the
+          // AST check runs, so a Java-scoped or path-scoped policy no longer gates unrelated files.
+          List<Path> scoped = scopeFilter(sourceFiles, s.scope());
+          if (!sourceFiles.isEmpty() && scoped.isEmpty()) {
+            // The scope legitimately excludes every file in the workspace — nothing in scope can
+            // violate the rule. That is a clean, evaluated pass, NOT an unavailable check.
+            evaluationStatuses.put(s.id(), EvaluationStatus.EVALUATED);
+          } else {
+            AstCheckEnforcer.AstOutcome outcome = astCheckEnforcer.evaluate(ace, scoped);
+            evaluationStatuses.put(s.id(), outcome.status());
+            for (AstCheckEnforcer.AstViolation v : outcome.violations()) {
+              all.add(
+                  new AggregatedViolation(
+                      s.id(),
+                      s.severity(),
+                      "AST_CHECK",
+                      v.file() + ":" + v.line(),
+                      v.ruleKind() + ": " + v.message()));
+            }
           }
         }
         case Standard.LlmReviewEnforcement ignored -> {
-          /* handled in reviewer prompt */
+          // RR-860 — llm-review is NOT executed as a structured gate here (it only ever contributed
+          // advisory prompt text). A BLOCKING semantic standard that no deterministic stage can
+          // verify must not read as a clean pass: surface it as verifier-unavailable so the gate
+          // forces PARTIAL/STANDARDS_ENFORCEMENT_UNAVAILABLE rather than silently certifying it.
+          // WARNING/ADVISORY llm-review standards stay advisory (they do not gate).
+          if (s.severity() == Standard.Severity.BLOCKING) {
+            evaluationStatuses.put(s.id(), EvaluationStatus.UNAVAILABLE);
+          }
         }
       }
     }
     return new RunReport(all, lintResults, evaluationStatuses);
+  }
+
+  /**
+   * RR-1052 / RR-1632 — restrict the AST source-file set to the standard's declared scope. A null
+   * or empty scope means "applies everywhere" (no filtering). {@code languages} filters by file
+   * extension; {@code paths} filters by repo-relative glob. Both act as an AND filter. {@code
+   * repos} (monorepo-only) is not applied here — that requires repo-boundary metadata the runner
+   * does not receive — and is tracked as residual.
+   */
+  static List<Path> scopeFilter(List<Path> files, Standard.Scope scope) {
+    if (files == null || files.isEmpty() || scope == null || scope.isEmpty()) {
+      return files == null ? List.of() : files;
+    }
+    List<String> languages = scope.languages();
+    List<String> paths = scope.paths();
+    boolean filterLang = languages != null && !languages.isEmpty();
+    boolean filterPaths = paths != null && !paths.isEmpty();
+    if (!filterLang && !filterPaths) return files;
+    List<Path> out = new ArrayList<>();
+    for (Path p : files) {
+      String rel = p.toString();
+      if (filterLang && !matchesAnyLanguage(rel, languages)) continue;
+      if (filterPaths && !matchesAnyGlob(rel, paths)) continue;
+      out.add(p);
+    }
+    return out;
+  }
+
+  private static boolean matchesAnyGlob(String path, List<String> globs) {
+    for (String g : globs) {
+      if (g != null
+          && !g.isBlank()
+          && com.navneet.executespec.contracts.detection.DetectorUtils.matchesGlob(path, g)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean matchesAnyLanguage(String path, List<String> languages) {
+    String lang = languageOf(path);
+    for (String l : languages) {
+      if (l != null && l.trim().equalsIgnoreCase(lang)) return true;
+    }
+    return false;
+  }
+
+  /** Map a file path to a coarse language token matching the {@code scope.languages} vocabulary. */
+  private static String languageOf(String path) {
+    String p = path.toLowerCase();
+    if (p.endsWith(".java")) return "java";
+    if (p.endsWith(".ts") || p.endsWith(".tsx")) return "typescript";
+    if (p.endsWith(".js") || p.endsWith(".jsx") || p.endsWith(".mjs") || p.endsWith(".cjs"))
+      return "javascript";
+    if (p.endsWith(".py")) return "python";
+    if (p.endsWith(".go")) return "go";
+    if (p.endsWith(".rb")) return "ruby";
+    if (p.endsWith(".rs")) return "rust";
+    if (p.endsWith(".kt") || p.endsWith(".kts")) return "kotlin";
+    if (p.endsWith(".cs")) return "csharp";
+    if (p.endsWith(".php")) return "php";
+    if (p.endsWith(".swift")) return "swift";
+    if (p.endsWith(".scala")) return "scala";
+    return "other";
   }
 
   /**

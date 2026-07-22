@@ -9,6 +9,9 @@ import java.util.stream.Collectors;
 
 import jakarta.annotation.PostConstruct;
 
+import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.auth.service.ActivityAuditService;
+
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -33,6 +36,15 @@ public class FeatureFlagService implements MessageListener {
   private final FeatureFlagRepository repository;
   private final StringRedisTemplate redisTemplate;
   private final RedisMessageListenerContainer redisMessageListenerContainer;
+
+  /**
+   * RR-1032 — global feature-flag mutation is a security/billing/execution policy change and must
+   * carry an immutable, actor-attributed before/after record. Reuse the hash-chained {@code
+   * activity_audit} surface (same one {@code ConfigAdminController} writes to); the record joins
+   * {@link #update}'s transaction so a rolled-back flag change leaves no orphan audit row and a
+   * committed one is always accompanied by its audit.
+   */
+  private final ActivityAuditService activityAuditService;
 
   private final AtomicReference<Map<String, String>> cache = new AtomicReference<>(Map.of());
 
@@ -71,16 +83,22 @@ public class FeatureFlagService implements MessageListener {
         repository
             .findByFlagKey(key)
             .orElseThrow(() -> new IllegalArgumentException("Unknown feature flag: " + key));
+    String previousValue = flag.getFlagValue();
     flag.setFlagValue(value);
     flag.setUpdatedBy(userId);
     flag.setUpdatedAt(Instant.now());
     FeatureFlag saved = repository.save(flag);
 
-    // Update local cache immediately
-    putCacheValue(key, value);
-    // Publish only after commit. Publishing inside the transaction lets this JVM (or another
-    // subscriber) reload the still-old DB row and overwrite the write-through cache immediately.
-    publishAfterCommit(key);
+    // RR-1032 — immutable, actor-attributed before/after audit, written INSIDE this transaction so
+    // it commits or rolls back atomically with the flag row itself.
+    recordFlagAudit(key, previousValue, value, userId);
+
+    // RR-062 — apply the write-through cache AND publish only after commit. Applying the cache
+    // eagerly inside the transaction meant a later rollback left this JVM serving a value that was
+    // never committed (until the 60s scheduled reload), and could diverge security/routing/billing
+    // behaviour per replica. On rollback the afterCommit callback never fires, so the prior
+    // in-memory snapshot is retained untouched.
+    applyAfterCommit(key, value);
 
     // When force_logout is enabled, stamp the epoch so all existing JWTs are invalidated
     if ("force_logout".equals(key) && "true".equalsIgnoreCase(value)) {
@@ -108,8 +126,28 @@ public class FeatureFlagService implements MessageListener {
     flag.setUpdatedBy(userId);
     flag.setUpdatedAt(Instant.now());
     repository.save(flag);
-    putCacheValue(key, value);
-    publishAfterCommit(key);
+    // RR-062 — defer the cache write-through to afterCommit for the same reason as update().
+    applyAfterCommit(key, value);
+  }
+
+  /** RR-1032 — best-effort immutable audit; a hash-chain failure must not fail the flag write. */
+  private void recordFlagAudit(String key, String previousValue, String newValue, String userId) {
+    try {
+      activityAuditService.record(
+          ActivityAudit.builder()
+              .eventType("FEATURE_FLAG_UPDATED")
+              .entityType("FEATURE_FLAG")
+              .entityId(key)
+              .actorId(userId)
+              .oldValue(previousValue)
+              .newValue(newValue)
+              .build());
+    } catch (Exception e) {
+      log.warn(
+          "[FeatureFlag] audit record failed for key={} type={}",
+          key,
+          e.getClass().getSimpleName());
+    }
   }
 
   public List<FeatureFlag> listAll() {
@@ -153,8 +191,14 @@ public class FeatureFlagService implements MessageListener {
         });
   }
 
-  private void publishAfterCommit(String key) {
+  /**
+   * RR-062 — apply the write-through cache AND publish the cross-instance invalidation only once
+   * the DB transaction commits. When no transaction is active (non-transactional caller) both
+   * happen immediately, preserving the prior contract for that path.
+   */
+  private void applyAfterCommit(String key, String value) {
     if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      putCacheValue(key, value);
       redisTemplate.convertAndSend(REDIS_CHANNEL, key);
       return;
     }
@@ -162,6 +206,7 @@ public class FeatureFlagService implements MessageListener {
         new TransactionSynchronization() {
           @Override
           public void afterCommit() {
+            putCacheValue(key, value);
             redisTemplate.convertAndSend(REDIS_CHANNEL, key);
           }
         });

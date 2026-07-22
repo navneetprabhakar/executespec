@@ -344,6 +344,99 @@ class StandardsRunnerTest {
         .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
   }
 
+  // RR-860 — a BLOCKING llm-review standard is not executed as a structured gate; it must surface
+  // as
+  // verifier-unavailable, never a silent clean pass.
+  @Test
+  void blockingLlmReviewStandard_surfacedUnavailableNotSilentPass() {
+    Standard s =
+        new Standard(
+            "no-pii-in-logs",
+            null,
+            Standard.Severity.BLOCKING,
+            "no PII in logs",
+            new Standard.LlmReviewEnforcement("Check the diff never logs PII."),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
+    assertThat(r.evaluationStatuses().get("no-pii-in-logs"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.UNAVAILABLE);
+  }
+
+  // RR-860 — a WARNING/ADVISORY llm-review standard stays advisory (does not gate → no
+  // unavailable).
+  @Test
+  void advisoryLlmReviewStandard_staysAdvisory() {
+    Standard s =
+        new Standard(
+            "prefer-clear-names",
+            null,
+            Standard.Severity.ADVISORY,
+            "prefer clear names",
+            new Standard.LlmReviewEnforcement("Prefer descriptive identifiers."),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
+    assertThat(r.evaluationStatuses().get("prefer-clear-names")).isNull();
+  }
+
+  // RR-1052 / RR-1632 — scope.languages restricts the AST source set; non-matching files drop out.
+  @Test
+  void scopeFilter_byLanguage_keepsOnlyMatchingExtensions() {
+    List<Path> files =
+        List.of(Path.of("src/A.java"), Path.of("src/b.py"), Path.of("docs/readme.md"));
+    Standard.Scope javaOnly = new Standard.Scope(List.of("java"), null, null, null);
+    List<Path> scoped = StandardsRunner.scopeFilter(files, javaOnly);
+    assertThat(scoped).containsExactly(Path.of("src/A.java"));
+  }
+
+  // RR-1052 — a null/empty scope means "applies everywhere" (no filtering).
+  @Test
+  void scopeFilter_nullScope_passesAllFiles() {
+    List<Path> files = List.of(Path.of("src/A.java"), Path.of("src/b.py"));
+    assertThat(StandardsRunner.scopeFilter(files, null)).isEqualTo(files);
+  }
+
+  // RR-1632 — a naming-pattern standard scoped to [java] no longer flags a .py file.
+  @Test
+  void namingPatternScopedToJava_excludesPythonFile() {
+    Standard s =
+        new Standard(
+            "class-name-service",
+            new Standard.Scope(List.of("java"), null, null, null),
+            Standard.Severity.BLOCKING,
+            "class names end with Service",
+            new Standard.AstCheckEnforcement(
+                "naming-pattern",
+                java.util.Map.of("regex", ".*Service", "declaration", "class"),
+                null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    // A Python file whose "class" content would otherwise be irrelevant — scope excludes it, so the
+    // in-scope set is empty and the check is a clean evaluated pass with no violations.
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1",
+            List.of(effective(s)),
+            Path.of("."),
+            List.of(),
+            List.of(Path.of("service.py")));
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("class-name-service"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED);
+  }
+
   private EffectiveStandardsResolver.Effective effective(Standard s) {
     return new EffectiveStandardsResolver.Effective(
         s, EffectiveStandardsResolver.Source.ORG, false, s.severity(), false);

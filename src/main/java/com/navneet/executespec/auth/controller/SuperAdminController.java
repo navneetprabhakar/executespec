@@ -255,12 +255,18 @@ public class SuperAdminController {
 
   @PostMapping("/prompts/{name}/rollback")
   public ResponseEntity<Map<String, Object>> rollbackPrompt(@PathVariable String name) {
-    boolean done = promptVersioningService.rollback(name);
-    if (!done) {
-      return ResponseEntity.status(HttpStatus.NOT_FOUND)
-          .body(Map.of("error", "No audit history found for prompt: " + name));
-    }
-    return ResponseEntity.ok(Map.of("rolledBack", name));
+    // RR-1304 — the endpoint returns 2xx ONLY when the live prompt provably changed. A restore
+    // failure (disk/permission/short-write) is a 500, not a falsely-acknowledged 200.
+    PromptVersioningService.RollbackOutcome outcome = promptVersioningService.rollback(name);
+    return switch (outcome) {
+      case ROLLED_BACK -> ResponseEntity.ok(Map.of("rolledBack", name));
+      case NO_HISTORY ->
+          ResponseEntity.status(HttpStatus.NOT_FOUND)
+              .body(Map.of("error", "No audit history found for prompt: " + name));
+      case RESTORE_FAILED ->
+          ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+              .body(Map.of("error", "Rollback could not be applied for prompt: " + name));
+    };
   }
 
   @GetMapping("/prompts/{name}/history")
