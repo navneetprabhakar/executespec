@@ -580,8 +580,18 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
-  void providerPreferenceOrderFeedsFallbackTieBreakerPenalty() {
-    List<ModelProviderScore> candidates =
+  void providerPreferenceDoesNotChangeMeasuredQuality() {
+    // RR-816: provider preference is a policy tie-breaker, never a quality adjustment. Sonnet's
+    // quality must stay 86.0 regardless of where its provider sits in the preference order; the
+    // preference position is carried separately for the ranking-band tie-break only.
+    List<ModelProviderScore> preferredFirst =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .providerPreferenceOrder(List.of("anthropic", "openai"))
+                .build());
+    List<ModelProviderScore> preferredLast =
         service.buildCandidates(
             ModelProviderCandidateRequest.builder()
                 .taskCategory("BUG_FIX")
@@ -589,8 +599,13 @@ class ModelProviderCandidateServiceTest {
                 .providerPreferenceOrder(List.of("openai", "anthropic"))
                 .build());
 
-    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
-    assertThat(sonnet.qualityScore()).isEqualTo(85.75);
+    ModelProviderScore sonnetFirst = find(preferredFirst, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore sonnetLast = find(preferredLast, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnetFirst.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnetLast.qualityScore()).isEqualTo(86.0);
+    // The preference position is still captured, just kept out of the quality gate.
+    assertThat(sonnetFirst.providerPreferenceOrder()).isEqualTo(0);
+    assertThat(sonnetLast.providerPreferenceOrder()).isEqualTo(1);
   }
 
   private static ModelProviderScore find(

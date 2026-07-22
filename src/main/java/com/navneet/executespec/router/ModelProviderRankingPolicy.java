@@ -120,6 +120,11 @@ public class ModelProviderRankingPolicy {
               .thenComparingLong(ModelProviderScore::latencyP95Ms)
               .thenComparing(
                   Comparator.comparingDouble(ModelProviderScore::qualityScore).reversed())
+              // RR-816: provider preference is applied ONLY here, as a tie-breaker among
+              // effectively-equivalent (quality/cost/latency) candidates inside the eligible band —
+              // a lower preference order wins. It never affects the quality threshold, so
+              // reordering preference cannot make a qualified model ineligible.
+              .thenComparingInt(ModelProviderScore::providerPreferenceOrder)
               .thenComparing(ModelProviderScore::provider)
               .thenComparing(ModelProviderScore::model));
       ordered.addAll(band);

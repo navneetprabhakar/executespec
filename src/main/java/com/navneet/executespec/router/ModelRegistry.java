@@ -1,5 +1,6 @@
 package com.navneet.executespec.router;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -40,17 +41,29 @@ public class ModelRegistry {
     Map<String, String> aliases = getAliases();
     Map<String, List<ModelMatrixProperties.FallbackEntry>> chains = getChains();
 
+    // RR-114 (2026-07-22) configuration safety: an invalid routing/pricing matrix used to only
+    // log.error and let the application start, so production could become ready with a partially
+    // broken matrix and fail only AFTER customer spend began (a missing provider/fallback model
+    // resolving to null, or a stale alias). Every violation is now aggregated and the whole set
+    // fails startup, so the misconfiguration is caught before any dispatch. The billing-critical
+    // free-tier check (RR-115) is one of the aggregated violations rather than a separate throw.
+    List<String> violations = new ArrayList<>();
+
     // 1. Every model referenced in providers matrix must exist in models map
     if (matrixProps.getProviders() != null) {
       for (var entry : matrixProps.getProviders().entrySet()) {
         String provider = entry.getKey();
         var pm = entry.getValue();
         validateModelExists(
-            models, aliases, pm.getPlanning(), "providers." + provider + ".planning");
+            models, aliases, pm.getPlanning(), "providers." + provider + ".planning", violations);
         validateModelExists(
-            models, aliases, pm.getWorkhorse(), "providers." + provider + ".workhorse");
+            models, aliases, pm.getWorkhorse(), "providers." + provider + ".workhorse", violations);
         validateModelExists(
-            models, aliases, pm.getLightweight(), "providers." + provider + ".lightweight");
+            models,
+            aliases,
+            pm.getLightweight(),
+            "providers." + provider + ".lightweight",
+            violations);
       }
     }
 
@@ -59,7 +72,8 @@ public class ModelRegistry {
       for (var entry : chains.entrySet()) {
         String tier = entry.getKey();
         for (var fb : entry.getValue()) {
-          validateModelExists(models, aliases, fb.getModel(), "fallback-chains." + tier);
+          validateModelExists(
+              models, aliases, fb.getModel(), "fallback-chains." + tier, violations);
         }
       }
     }
@@ -69,10 +83,8 @@ public class ModelRegistry {
       for (var entry : aliases.entrySet()) {
         String target = entry.getValue();
         if (!models.containsKey(target)) {
-          log.error(
-              "[ModelRegistry] Legacy alias '{}' → '{}' targets unknown model!",
-              entry.getKey(),
-              target);
+          violations.add(
+              "legacy-alias '" + entry.getKey() + "' → '" + target + "' targets unknown model");
         }
       }
     }
@@ -81,28 +93,37 @@ public class ModelRegistry {
     // there is no safe behavioural fallback. RR-115 (2026-07-21) — a missing/blank/unknown
     // free-tier cell previously fell through to a hardcoded PAID route (gpt-5.4-mini / openai) in
     // freeTierModel()/freeTierProvider(); a configuration omission would then silently move Free
-    // traffic onto a billed provider while the product still labels it Free-tier locked. Fail
-    // startup instead so the misconfiguration is caught before any customer spend.
+    // traffic onto a billed provider while the product still labels it Free-tier locked.
     ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
     if (freeTier == null
         || freeTier.getProvider() == null
         || freeTier.getProvider().isBlank()
         || freeTier.getModel() == null
         || freeTier.getModel().isBlank()) {
-      throw new IllegalStateException(
-          "[ModelRegistry] model-matrix.free-tier.provider and .model are required — Free-tier"
-              + " routing is billing-critical and has no safe fallback (RR-115).");
+      violations.add(
+          "model-matrix.free-tier.provider and .model are required — Free-tier routing is"
+              + " billing-critical and has no safe fallback (RR-115)");
+    } else {
+      String freeCanonical =
+          aliases != null && aliases.containsKey(freeTier.getModel())
+              ? aliases.get(freeTier.getModel())
+              : freeTier.getModel();
+      if (!models.containsKey(freeCanonical)) {
+        violations.add(
+            "free-tier.model '"
+                + freeTier.getModel()
+                + "' is not present in model-matrix.models — unresolvable Free-tier route"
+                + " (RR-115)");
+      }
     }
-    String freeCanonical =
-        aliases != null && aliases.containsKey(freeTier.getModel())
-            ? aliases.get(freeTier.getModel())
-            : freeTier.getModel();
-    if (!models.containsKey(freeCanonical)) {
+
+    if (!violations.isEmpty()) {
       throw new IllegalStateException(
-          "[ModelRegistry] free-tier.model '"
-              + freeTier.getModel()
-              + "' is not present in model-matrix.models — refusing to start with an unresolvable"
-              + " Free-tier route (RR-115).");
+          "[ModelRegistry] refusing to start with an invalid model-matrix ("
+              + violations.size()
+              + " violation(s)) — routing/pricing configuration must be fixed before dispatch"
+              + " (RR-114): "
+              + String.join("; ", violations));
     }
 
     log.info(
@@ -116,15 +137,18 @@ public class ModelRegistry {
       Map<String, ModelMatrixProperties.ModelConfig> models,
       Map<String, String> aliases,
       String modelName,
-      String context) {
+      String context,
+      List<String> violations) {
     if (modelName == null) return;
     String canonical =
         aliases != null && aliases.containsKey(modelName) ? aliases.get(modelName) : modelName;
     if (!models.containsKey(canonical)) {
-      log.error(
-          "[ModelRegistry] Model '{}' referenced in {} not found in model-matrix.models!",
-          modelName,
-          context);
+      violations.add(
+          "model '"
+              + modelName
+              + "' referenced in "
+              + context
+              + " not found in model-matrix.models");
     }
   }
 

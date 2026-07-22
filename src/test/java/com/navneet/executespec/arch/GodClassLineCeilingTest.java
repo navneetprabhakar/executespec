@@ -261,7 +261,10 @@ class GodClassLineCeilingTest {
           "com/navneet/executespec/report/ValidationReportService.java",
           "com/navneet/executespec/reviewer/AccuracyAssessmentService.java",
           "com/navneet/executespec/reviewer/ReviewerAgent.java",
-          "com/navneet/executespec/router/ModelProviderCandidateService.java",
+          // RR-818 (2026-07-22): ModelProviderCandidateService's benchmark-evidence machinery was
+          // extracted to BenchmarkQualityPriorProvider, shrinking it from ~690 to ~460 lines. It is
+          // no longer oversized, so its allowlist entry was removed (the arch test requires stale
+          // entries be dropped rather than banking invisible headroom).
           "com/navneet/executespec/specchat/SpecChatService.java",
           "com/navneet/executespec/sse/RunEvent.java",
           "com/navneet/executespec/state/StateStore.java",

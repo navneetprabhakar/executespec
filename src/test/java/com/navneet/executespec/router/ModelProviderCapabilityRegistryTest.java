@@ -88,7 +88,10 @@ class ModelProviderCapabilityRegistryTest {
   }
 
   @Test
-  void fallbackOrderAppliesSmallTieBreakerPenaltyButDoesNotDominateQuality() {
+  void fallbackOrderIsCarriedAsATieBreakerButNeverAltersMeasuredQuality() {
+    // RR-816: provider-preference order is a policy tie-breaker only — it must NOT be subtracted
+    // from measured quality. Each candidate's quality equals its benchmark evidence regardless of
+    // its preference position; the position is carried on the score for the ranking-band tie-break.
     ModelProviderScore first =
         registry.score(
             signal("anthropic", "sonnet").benchmarkQualityScore(85.0).fallbackOrder(0).build());
@@ -97,7 +100,9 @@ class ModelProviderCapabilityRegistryTest {
             signal("openai", "gpt-5.4").benchmarkQualityScore(86.0).fallbackOrder(4).build());
 
     assertThat(first.qualityScore()).isEqualTo(85.0);
-    assertThat(later.qualityScore()).isEqualTo(85.0);
+    assertThat(later.qualityScore()).isEqualTo(86.0);
+    assertThat(first.providerPreferenceOrder()).isEqualTo(0);
+    assertThat(later.providerPreferenceOrder()).isEqualTo(4);
   }
 
   private static ModelProviderCapabilitySignal.ModelProviderCapabilitySignalBuilder signal(
