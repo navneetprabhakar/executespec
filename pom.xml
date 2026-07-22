@@ -611,14 +611,13 @@
                keys; run via -Pintegration. Default Surefire run = fast unit tests
                only so CI's `mvn package` is bounded to a couple of minutes. -->
           <excludedGroups>e2e,integration,chaos</excludedGroups>
-          <!-- CI-minutes (2026-07-22): run test CLASSES across one JVM fork per core. The suite is
-               ~4,500 fast Mockito unit tests (only 5 @SpringBootTest, no shared DB/ports), so
-               process-level forking cuts wall-clock ~3-4x on the 4-core CI runner with zero tests
-               dropped. `1C` = one fork per available core (4 on ubuntu-latest). Locally override
-               with `-DforkCount=N` to cap RAM (each fork ~0.5-1GB). reuseForks avoids per-class JVM
-               startup. -->
-          <forkCount>1C</forkCount>
-          <reuseForks>true</reuseForks>
+          <!-- CI-minutes (2026-07-22): parallel Surefire forks were TRIED and REVERTED. The win was
+               only ~15s (JaCoCo-skip below is the real saving), and forkCount>1 exposed timing-flaky
+               tests (tight Thread.sleep + deadline assertions race under CPU contention) AND forced
+               10-fork local gates on dev machines. A green-always serial run beats a marginally
+               faster flaky one. If revisited, harden every short-sleep timing test first and pin CI
+               to forkCount matching the runner's dedicated cores. -->
+
           <systemPropertyVariables>
             <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
             <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>

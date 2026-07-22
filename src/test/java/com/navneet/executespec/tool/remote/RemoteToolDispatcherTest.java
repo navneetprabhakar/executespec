@@ -326,7 +326,11 @@ class RemoteToolDispatcherTest {
 
   @Test
   void reconnectRenewsPendingCallDeadline() throws Exception {
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120L);
+    // Timings scaled up (was 120ms deadline / 80+70ms sleeps) so scheduling jitter under a loaded
+    // CI runner cannot race the deadline: renewal margin is now ~800ms, not ~50ms. The renewal
+    // semantics are unchanged — the total elapsed still crosses the ORIGINAL deadline, proving the
+    // reconnect renewed it.
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 2000L);
     dispatcher.register("r1");
     CountDownLatch firstEmission = new CountDownLatch(1);
     AtomicInteger emissions = new AtomicInteger();
@@ -346,11 +350,14 @@ class RemoteToolDispatcherTest {
       Future<String> result =
           executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
       assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
-      Thread.sleep(80L);
+      Thread.sleep(1200L);
       dispatcher.disconnect("r1");
       dispatcher.reconnect("r1");
-      Thread.sleep(70L);
+      Thread.sleep(1200L);
 
+      // t≈2400ms > original 2000ms deadline: without renewal the call would have timed out
+      // (isDone==true); still pending here proves reconnect renewed the deadline (new expiry
+      // ≈3200ms).
       assertThat(result.isDone()).isFalse();
       dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"handoff\"}");
       assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())
