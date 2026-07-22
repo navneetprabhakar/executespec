@@ -324,6 +324,23 @@ public class CodeIndexingService {
         return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
       }
 
+      // RR-641 — the readiness row + workspace name are labelled with `sourceSha`, but the clone
+      // landed the branch's current default HEAD. When the recorded revision is a real commit id,
+      // check it out exactly and verify HEAD before inventorying, so a branch that advanced between
+      // metadata sync and clone cannot publish newer chunks under the older recorded SHA. A
+      // revision
+      // that can no longer be pinned (force-push/rebase) fails the index rather than indexing a
+      // mismatched tree.
+      if (isFullCommitSha(sourceSha)
+          && !workspaceInitService.checkoutExactCommit(cloneWsId, sourceSha)) {
+        stateStore.fail(lease, "SOURCE_REVISION_UNAVAILABLE");
+        log.warn(
+            "code index revision pin failed repo={} sha={}",
+            sourceDisplayName(repo),
+            shortSha(sourceSha));
+        return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+      }
+
       Inventory inventory = inventory(root);
       Map<String, String> indexed =
           codeChunkStore.indexedFileShas(projectId, repo.getId().toString());
@@ -643,6 +660,13 @@ public class CodeIndexingService {
   private static String shortSha(String sha) {
     String safe = sha.replaceAll("[^A-Za-z0-9._-]", "_");
     return safe.substring(0, Math.min(12, safe.length()));
+  }
+
+  /**
+   * RR-641 — a full 40-hex Git commit id is the only revision we can detached-checkout + verify.
+   */
+  private static boolean isFullCommitSha(String sha) {
+    return sha != null && sha.matches("[0-9a-fA-F]{40}");
   }
 
   private static String failureType(Throwable failure) {

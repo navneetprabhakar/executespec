@@ -210,13 +210,26 @@ public class ProjectDocumentService {
                   "ProjectDocumentEmbedding",
                   "PROJECT_DOCUMENT",
                   claimed.getId(),
-                  claimed.getUploadedBy());
+                  claimed.getUploadedBy(),
+                  // RR-676 — renew the fixed 15-minute lease between embedding batches (a document
+                  // may carry up to 500k tokens across many batches) and cancel the embedding the
+                  // moment ownership is lost, so a slow multi-batch call cannot expire its own
+                  // lease
+                  // and then be unable to publish.
+                  (completed, total) -> heartbeatEmbedding(lease));
           if (publishReady(lease, extraction, chunks, embeddings)) {
             log.info(
                 "Semantically indexed project document id {} with {} chunks",
                 documentId,
                 chunks.size());
           }
+          return;
+        } catch (EmbeddingOwnershipLostException ownershipLost) {
+          // A takeover/delete now owns this document; stop without downgrading or retrying.
+          log.info(
+              "Project document {} embedding abandoned — lease lost mid-call: {}",
+              documentId,
+              ownershipLost.getMessage());
           return;
         } catch (EmbeddingUnavailableException policyChanged) {
           log.info(
@@ -370,6 +383,15 @@ public class ProjectDocumentService {
 
   private boolean heartbeat(ProcessingLease lease) {
     return updateLeasedStatus(lease, ProjectDocument.Status.EXTRACTING, null, null, false);
+  }
+
+  /**
+   * RR-676 — lease renewal during embedding. Keeps the status at EMBEDDING (unlike {@link
+   * #heartbeat}, which reasserts EXTRACTING) while extending the lease expiry, and returns whether
+   * we still own a live lease so the embedder can stop on takeover/delete.
+   */
+  private boolean heartbeatEmbedding(ProcessingLease lease) {
+    return updateLeasedStatus(lease, ProjectDocument.Status.EMBEDDING, null, null, false);
   }
 
   boolean publishReady(
