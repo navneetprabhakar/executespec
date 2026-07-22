@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,7 +42,6 @@ class ContractConsumerControllerTest {
   @Mock ProjectRepoRepository projectRepoRepo;
   @Mock ProjectRepoLinkRepository projectRepoLinkRepo;
   @Mock ExecutespecFolderWriter folderWriter;
-  @Mock com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   @Mock ActivityEventEmitter emitter;
   @Mock ObjectProvider<ActivityEventEmitter> emitterProvider;
   @Mock com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
@@ -240,12 +240,66 @@ class ContractConsumerControllerTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
   void composeConsumerYaml_emitsExpectedShape() {
+    // RR-598 — assert on the PARSED document, not on raw substrings: `>=v23` starts with the YAML
+    // block-scalar indicator `>`, so a safe serializer quotes it. The value that round-trips must
+    // still be exactly what was requested.
     String yaml = ContractConsumerController.composeConsumerYaml(contract, ">=v23");
-    assertThat(yaml).contains("contract:");
-    assertThat(yaml).contains("  name: payments-api");
-    assertThat(yaml).contains("  type: OPENAPI");
-    assertThat(yaml).contains("versionConstraint: >=v23");
+    Map<String, Object> parsed =
+        (Map<String, Object>) com.navneet.executespec.util.SafeYamlLoader.load(yaml);
+    Map<String, Object> contractNode = (Map<String, Object>) parsed.get("contract");
+    assertThat(contractNode.get("name")).isEqualTo("payments-api");
+    assertThat(contractNode.get("type")).isEqualTo("OPENAPI");
+    assertThat(contractNode.get("id")).isEqualTo(contractId.toString());
+    assertThat(parsed.get("versionConstraint")).isEqualTo(">=v23");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void composeConsumerYaml_neutralisesYamlInjectionInNameAndConstraint() {
+    // RR-598 — a hostile contract name / version constraint must NOT be able to add keys or change
+    // the document structure. Pre-fix, a name like "x\ninjected: true" or a constraint containing a
+    // newline/colon rewrote the generated .executespec control file.
+    ContractRegistry hostile =
+        ContractRegistry.builder()
+            .id(contractId)
+            .repoId(producerRepoId)
+            .name("evil\ninjectedTop: pwned\ncontract:\n  admin: true")
+            .type(ContractRegistry.ContractType.OPENAPI.name())
+            .currentRegistryVersion(1)
+            .currentContentHash("h")
+            .detectionMethod(ContractRegistry.DetectionMethod.AUTO_FILE.name())
+            .build();
+
+    String yaml =
+        ContractConsumerController.composeConsumerYaml(hostile, "1.0\nrogue: yes # comment");
+    Map<String, Object> parsed =
+        (Map<String, Object>) com.navneet.executespec.util.SafeYamlLoader.load(yaml);
+
+    // Only the two intended top-level keys survive; no injected sibling.
+    assertThat(parsed.keySet()).containsExactlyInAnyOrder("contract", "versionConstraint");
+    assertThat(parsed).doesNotContainKey("injectedTop");
+    assertThat(parsed).doesNotContainKey("rogue");
+    // The malicious name is trapped inside a single scalar value, not parsed as structure.
+    Map<String, Object> contractNode = (Map<String, Object>) parsed.get("contract");
+    assertThat(contractNode.get("name"))
+        .isInstanceOf(String.class)
+        .asString()
+        .contains("injectedTop: pwned")
+        .contains("admin: true");
+    assertThat(contractNode).doesNotContainKey("admin");
+  }
+
+  @Test
+  void sanitizeVersionConstraint_defaultsAndStripsControlChars() {
+    // RR-598 — null/blank → "any"; control characters are removed; the value is length-bounded.
+    assertThat(ContractConsumerController.sanitizeVersionConstraint(null)).isEqualTo("any");
+    assertThat(ContractConsumerController.sanitizeVersionConstraint("   ")).isEqualTo("any");
+    assertThat(ContractConsumerController.sanitizeVersionConstraint("v1\u0000\u0007"))
+        .isEqualTo("v1");
+    assertThat(ContractConsumerController.sanitizeVersionConstraint("a".repeat(500)).length())
+        .isEqualTo(100);
   }
 
   private UsernamePasswordAuthenticationToken fakeAuth() {
