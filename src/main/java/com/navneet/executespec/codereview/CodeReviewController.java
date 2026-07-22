@@ -305,6 +305,9 @@ public class CodeReviewController {
       String triggerSource,
       Integer totalFilesScanned,
       Integer totalLoc,
+      // RR-1696 — coverage of the file-sampling walk: COMPLETE | TRUNCATED_* | null (read as
+      // UNKNOWN), so a possibly-truncated totalFilesScanned/totalLoc is not presented as fact.
+      String scanCoverage,
       Integer staticFindingsCount,
       Integer llmFindingsCount,
       Integer llmFilteredOutCount,
@@ -328,6 +331,7 @@ public class CodeReviewController {
           s.getTriggerSource(),
           s.getTotalFilesScanned(),
           s.getTotalLoc(),
+          s.getScanCoverage(),
           s.getStaticFindingsCount(),
           s.getLlmFindingsCount(),
           s.getLlmFilteredOutCount(),

@@ -163,6 +163,11 @@ public class AgentTask {
   @Column(name = "parent_task_id")
   private String parentTaskId; // null for top-level tasks
 
+  // RR-1446 — zero-based planner-intent order within the plan. Primary DTO sort key so the
+  // approval gate shows the planner's sequence; status is decoration only. Null for legacy rows.
+  @Column(name = "plan_index")
+  private Integer planIndex;
+
   @Column(name = "subtask_index")
   private Integer subtaskIndex; // 1-based index within parent
 
