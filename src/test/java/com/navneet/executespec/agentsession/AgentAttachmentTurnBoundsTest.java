@@ -43,7 +43,8 @@ class AgentAttachmentTurnBoundsTest {
             mock(DocumentExtractor.class),
             mock(InputSanitizer.class),
             mock(ContextSanitizer.class),
-            mock(ActivityAuditService.class));
+            mock(ActivityAuditService.class),
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class));
   }
 
   private static StoredAttachment text(String id, String body) {

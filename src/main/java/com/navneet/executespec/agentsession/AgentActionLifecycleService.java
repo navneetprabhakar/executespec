@@ -134,6 +134,14 @@ class AgentActionLifecycleService {
                   request == null || request.verification() == null
                       ? Map.of()
                       : request.verification()));
+    } catch (AgentEventRecorder.PayloadSerializationException unserializable) {
+      // RR-888 — the terminal ACTION_RESULT slot was NOT consumed (no row was inserted). Surface a
+      // retryable recording error instead of poisoning the first-writer slot, so a corrected retry
+      // can record the real outcome.
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+          "action result payload could not be recorded; retry with a serializable result",
+          unserializable);
     } catch (DataIntegrityViolationException race) {
       // Another JVM can win the partial unique index between our read and insert. Resolve the
       // expected retry to that committed first result instead of leaking a 500 to the reconnecting

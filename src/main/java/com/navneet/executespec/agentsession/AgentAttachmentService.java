@@ -13,6 +13,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentRespo
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.project.rag.DocumentExtractor;
 import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.security.InputSanitizer;
@@ -34,8 +35,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  *   <li>emptiness + size cap;
- *   <li>magic-byte type detection (Tika) against an allow-list — PDF + {@code text/*} + json/xml
- *       only; images/binaries/archives/SVG are rejected (images are a tracked fast-follow);
+ *   <li>magic-byte type detection (Tika) against an allow-list — PDF + {@code text/*} + json/xml;
+ *       binaries/archives/SVG are rejected. Raster images (PNG/JPEG/GIF/WebP) are accepted only
+ *       when the {@code agent.attachments.images.enabled} flag is ON (default OFF, RR-491): an
+ *       image is not text-extracted or sanitized before it reaches a multimodal model, so it is
+ *       fail-closed until vision-side safety scanning exists. When the flag is ON the bytes must
+ *       additionally decode as a real raster (deny-by-default) and are injected as untrusted media
+ *       evidence;
  *   <li>Tika text extraction; empty / too-short extraction is rejected;
  *   <li>{@link InputSanitizer#scan} — throws 400 on prompt-injection / abuse patterns (NFKC +
  *       zero-width strip + base64 re-scan + homoglyph normalization);
@@ -57,6 +63,14 @@ public class AgentAttachmentService {
   private static final int MAX_EXTRACT_CHARS = 50_000;
 
   /**
+   * RR-491 — raster image uploads reach a multimodal model without the text extraction /
+   * InputSanitizer / ContextSanitizer controls applied to documents. They are therefore accepted
+   * only when this flag is explicitly ON. Default OFF (unseeded {@link FeatureFlagService} keys are
+   * false), so the strict document gate is honest again until vision-side safety scanning exists.
+   */
+  static final String IMAGES_FLAG = "agent.attachments.images.enabled";
+
+  /**
    * RR-490 per-turn aggregate bounds. The per-upload 10 MB cap bounded one file, not one turn: the
    * turn request accepted an unbounded id list, and both the text and media paths iterated it
    * without dedupe, so repeating a single valid 10 MB image id a few thousand times expanded into
@@ -76,6 +90,7 @@ public class AgentAttachmentService {
   private final InputSanitizer inputSanitizer;
   private final ContextSanitizer contextSanitizer;
   private final ActivityAuditService auditService;
+  private final FeatureFlagService featureFlags;
   private final Tika tika = new Tika();
 
   /** Validate, extract, sanitize, and store one upload. Throws 400 (audited) on any rejection. */
@@ -113,6 +128,23 @@ public class AgentAttachmentService {
     }
 
     if (isAllowedImage(detected)) {
+      // RR-491 — fail closed unless image support is explicitly enabled, because an image is not
+      // run through the text sanitization gate before a multimodal model sees it.
+      if (featureFlags == null || !featureFlags.isEnabled(IMAGES_FLAG)) {
+        throw reject(
+            sessionId,
+            userId,
+            orgId,
+            filename,
+            "IMAGE_DISABLED",
+            "image attachments are not enabled");
+      }
+      // Deny-by-default: prove the bytes actually decode as a raster of the claimed family. A file
+      // that Tika labels an image but no reader can decode is rejected rather than forwarded raw.
+      if (!decodesAsImage(bytes)) {
+        throw reject(
+            sessionId, userId, orgId, filename, "IMAGE_UNDECODABLE", "image could not be decoded");
+      }
       String attachmentId = UUID.randomUUID().toString();
       store.put(
           StoredAttachment.image(
@@ -324,6 +356,21 @@ public class AgentAttachmentService {
         || m.equals("application/xml")
         || m.equals("application/x-ndjson")
         || isAllowedImage(m);
+  }
+
+  /**
+   * RR-491 — deny-by-default raster validation. Returns true only when a registered ImageIO reader
+   * can decode the bytes into a real image; a null/failed decode (a disguised or corrupt payload)
+   * returns false. This does not strip embedded metadata or perform vision-side content safety —
+   * those remain the reason the flag is fail-closed by default.
+   */
+  private static boolean decodesAsImage(byte[] bytes) {
+    if (bytes == null || bytes.length == 0) return false;
+    try (var in = new java.io.ByteArrayInputStream(bytes)) {
+      return javax.imageio.ImageIO.read(in) != null;
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   private static boolean isAllowedImage(String mime) {
