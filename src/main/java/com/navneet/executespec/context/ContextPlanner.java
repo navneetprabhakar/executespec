@@ -5,7 +5,9 @@ import java.util.List;
 
 import com.navneet.executespec.router.ModelRegistry;
 
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -250,6 +252,32 @@ public class ContextPlanner {
     return provider.trim().toLowerCase(java.util.Locale.ROOT);
   }
 
+  /**
+   * RR-1015 — structurally measure the payload bytes that {@link Message#getText()} does not
+   * expose: tool-response {@code responseData} and assistant tool-call {@code arguments}. Returns 0
+   * for message shapes with no such hidden payload, so the caller keeps its conservative
+   * toString-based estimate for those.
+   */
+  private static long structuralPayloadChars(Message message) {
+    long extra = 0;
+    if (message instanceof ToolResponseMessage trm && trm.getResponses() != null) {
+      for (ToolResponseMessage.ToolResponse response : trm.getResponses()) {
+        if (response == null) continue;
+        extra += length(response.responseData());
+        extra += length(response.name());
+        extra += length(response.id());
+      }
+    } else if (message instanceof AssistantMessage am && am.getToolCalls() != null) {
+      for (AssistantMessage.ToolCall call : am.getToolCalls()) {
+        if (call == null) continue;
+        extra += length(call.arguments());
+        extra += length(call.name());
+        extra += length(call.id());
+      }
+    }
+    return extra;
+  }
+
   static long estimateInputTokens(List<Message> messages, List<ToolCallback> tools) {
     long chars = 0;
     int messageCount = 0;
@@ -259,9 +287,19 @@ public class ContextPlanner {
         messageCount++;
         String text = message.getText();
         if (text != null) chars += text.length();
-        String rendered = message.toString();
-        if (rendered != null && (text == null || rendered.length() > text.length())) {
-          chars += Math.min(rendered.length() - (text == null ? 0 : text.length()), 16_000);
+        // RR-1015 — a ToolResponseMessage's text is empty and an AssistantMessage's tool-call
+        // arguments are absent from getText(); their bytes live only in responseData/arguments.
+        // The old `toString()` extra was capped at 16k chars/message, so a 60KB tool result was
+        // estimated near 4k instead of ~15k tokens and the planner continued into a provider
+        // length rejection. Count those payloads structurally and in full.
+        long structuralExtra = structuralPayloadChars(message);
+        if (structuralExtra > 0) {
+          chars += structuralExtra;
+        } else {
+          String rendered = message.toString();
+          if (rendered != null && (text == null || rendered.length() > text.length())) {
+            chars += Math.min(rendered.length() - (text == null ? 0 : text.length()), 16_000);
+          }
         }
       }
     }

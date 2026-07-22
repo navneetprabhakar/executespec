@@ -7,28 +7,25 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -63,8 +60,19 @@ public class ContextStore {
   /** Key prefix — namespace the store so it can't collide with V1 or other apps. */
   public static final String KEY_PREFIX = "v2:agent-ctx:";
 
+  /**
+   * RR-502 — hard ceiling on one serialized snapshot. The worker intentionally keeps full history,
+   * so repeated/large tool output can inflate a checkpoint without bound; above this cap the
+   * checkpoint is skipped (best-effort durability degrades explicitly) rather than writing an
+   * oversized Redis value and duplicating multi-MiB byte arrays across Redis + disk every save.
+   */
+  static final int MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+
+  /** RR-501 — bounded SCAN/UNLINK batch size so run cleanup never blocks the Redis event loop. */
+  private static final int SCAN_BATCH = 256;
+
   private final StringRedisTemplate redis;
-  private final ObjectMapper objectMapper;
+  private final ContextSnapshotCodec codec;
   private final Metrics metrics;
   private final boolean diskCheckpointEnabled;
 
@@ -86,7 +94,7 @@ public class ContextStore {
       Metrics metrics,
       StringRedisTemplate redis,
       boolean diskCheckpointEnabled) {
-    this.objectMapper = objectMapper;
+    this.codec = new ContextSnapshotCodec(objectMapper);
     this.metrics = metrics;
     this.redis = redis;
     this.diskCheckpointEnabled = diskCheckpointEnabled;
@@ -110,6 +118,20 @@ public class ContextStore {
     if (ctx == null || history == null) return 0;
     String json = serialize(history, iteration, ctx);
     int size = json.getBytes(StandardCharsets.UTF_8).length;
+    if (size > MAX_SNAPSHOT_BYTES) {
+      // RR-502 — refuse to amplify an oversized snapshot into Redis + disk. Skipping a checkpoint
+      // is safe (best-effort durability); the next in-budget save re-establishes recovery state.
+      log.warn(
+          "ContextStore snapshot OVERSIZE run={} task={} iter={} bytes={} cap={} — checkpoint"
+              + " skipped",
+          ctx.runId(),
+          ctx.taskId(),
+          iteration,
+          size,
+          MAX_SNAPSHOT_BYTES);
+      metrics.recordContextSave("skipped_oversize", 0);
+      return 0;
+    }
     boolean redisSaved = false;
     try {
       if (redis != null) {
@@ -232,15 +254,10 @@ public class ContextStore {
     long deleted = 0;
     if (redis != null) {
       try {
-        java.util.Set<String> keys = redis.keys(KEY_PREFIX + runId + ":*");
-        if (keys != null && !keys.isEmpty()) {
-          Long redisDeleted = redis.delete(keys);
-          deleted += redisDeleted == null ? 0 : redisDeleted;
-          log.info(
-              "ContextStore deleteAll run={} keysFound={} keysDeleted={}",
-              runId,
-              keys.size(),
-              redisDeleted);
+        long redisDeleted = scanAndUnlink(KEY_PREFIX + runId + ":*");
+        deleted += redisDeleted;
+        if (redisDeleted > 0) {
+          log.info("ContextStore deleteAll run={} keysDeleted={}", runId, redisDeleted);
         }
       } catch (Exception e) {
         log.warn("ContextStore Redis deleteAll FAILED run={}: {}", runId, e.getMessage());
@@ -274,6 +291,40 @@ public class ContextStore {
       }
     }
     return deleted;
+  }
+
+  /**
+   * RR-501 — enumerate a run's task keys with a bounded, cursor-based SCAN and reclaim them with
+   * non-blocking UNLINK, instead of the blocking {@code KEYS} command. {@code KEYS} scans the whole
+   * keyspace on the single Redis event loop and materializes every match, so a single run
+   * completion could stall auth, SSE, gates, rate limits and unrelated runs as the keyspace grows.
+   * SCAN yields bounded batches; UNLINK frees them off the server's critical path.
+   */
+  private long scanAndUnlink(String matchPattern) {
+    long removed = 0;
+    List<String> batch = new ArrayList<>(SCAN_BATCH);
+    ScanOptions options = ScanOptions.scanOptions().match(matchPattern).count(SCAN_BATCH).build();
+    try (Cursor<String> cursor = redis.scan(options)) {
+      while (cursor.hasNext()) {
+        batch.add(cursor.next());
+        if (batch.size() >= SCAN_BATCH) removed += unlinkBatch(batch);
+      }
+    }
+    removed += unlinkBatch(batch);
+    return removed;
+  }
+
+  private long unlinkBatch(List<String> keys) {
+    if (keys.isEmpty()) return 0;
+    Long count;
+    try {
+      count = redis.unlink(keys);
+    } catch (Exception unlinkUnsupported) {
+      // UNLINK is Redis 4+; fall back to DEL on an older/limited server.
+      count = redis.delete(keys);
+    }
+    keys.clear();
+    return count == null ? 0 : count;
   }
 
   /** True iff a snapshot exists for this context. Cheap probe used by recovery logic. */
@@ -416,6 +467,14 @@ public class ContextStore {
           || snapshot.taskId().isBlank()) {
         return Optional.empty();
       }
+      if (isExpired(snapshot)) {
+        log.warn(
+            "ContextStore snapshot EXPIRED run={} task={} savedAt={}; ignoring",
+            ctx.runId(),
+            ctx.taskId(),
+            snapshot.savedAt());
+        return Optional.empty();
+      }
       return Optional.of(snapshot);
     } catch (Exception e) {
       log.warn(
@@ -427,129 +486,48 @@ public class ContextStore {
     }
   }
 
+  /**
+   * RR-503 — disk checkpoints can outlive Redis (retained/restored workspaces), so recovery must
+   * honour the documented 24h freshness window that only Redis enforced. An unknown or
+   * older-than-{@link #CONTEXT_TTL} snapshot is rejected, so a stale conversation is never
+   * rehydrated against a newer plan/workspace.
+   */
+  private static boolean isExpired(SavedContext snapshot) {
+    Instant savedAt = snapshot == null ? null : snapshot.savedAt();
+    if (savedAt == null || savedAt.toEpochMilli() <= 0L) return true;
+    return savedAt.isBefore(Instant.now().minus(CONTEXT_TTL));
+  }
+
+  /**
+   * RR-504 — derive a collision-resistant checkpoint file name from the FULL UTF-8 task id. The
+   * previous scheme replaced every non-{@code [A-Za-z0-9_.-]} character with {@code _} and
+   * truncated at 160 chars, so distinct planner task ids (for example {@code a/b} vs {@code a?b},
+   * or long ids sharing a 160-char prefix) collided onto one file — one task could then erase
+   * another's restart state. A SHA-256 hex digest is unique per distinct id and always
+   * filesystem-safe; the embedded run/task identity is still validated on load.
+   */
   private static String safeSegment(String value) {
-    String safe = value == null ? "task" : value.replaceAll("[^A-Za-z0-9_.-]", "_");
-    if (safe.isBlank()) safe = "task";
-    return safe.length() <= 160 ? safe : safe.substring(0, 160);
+    String source = value == null || value.isBlank() ? "task" : value;
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      byte[] hash = digest.digest(source.getBytes(StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder(hash.length * 2);
+      for (byte b : hash) {
+        hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+        hex.append(Character.forDigit(b & 0xF, 16));
+      }
+      return hex.toString();
+    } catch (NoSuchAlgorithmException e) {
+      // SHA-256 is guaranteed on every JRE; fall back defensively rather than fail the checkpoint.
+      return Integer.toHexString(source.hashCode());
+    }
   }
 
   private String serialize(List<Message> history, int iteration, ExecutionContext ctx) {
-    ObjectNode root = objectMapper.createObjectNode();
-    root.put("runId", ctx.runId());
-    root.put("taskId", ctx.taskId());
-    root.put("iteration", iteration);
-    root.put("savedAtEpochMs", System.currentTimeMillis());
-    ArrayNode msgs = root.putArray("history");
-    for (Message m : history) {
-      msgs.add(serializeMessage(m));
-    }
-    return root.toString();
-  }
-
-  private ObjectNode serializeMessage(Message m) {
-    ObjectNode n = objectMapper.createObjectNode();
-    if (m instanceof SystemMessage sm) {
-      n.put("type", "system");
-      n.put("text", sm.getText());
-    } else if (m instanceof UserMessage um) {
-      n.put("type", "user");
-      n.put("text", um.getText());
-    } else if (m instanceof AssistantMessage am) {
-      n.put("type", "assistant");
-      n.put("text", am.getText() == null ? "" : am.getText());
-      if (am.getToolCalls() != null && !am.getToolCalls().isEmpty()) {
-        ArrayNode tcs = n.putArray("toolCalls");
-        for (var tc : am.getToolCalls()) {
-          ObjectNode t = tcs.addObject();
-          t.put("id", tc.id() == null ? "" : tc.id());
-          t.put("type", tc.type() == null ? "function" : tc.type());
-          t.put("name", tc.name());
-          t.put("arguments", tc.arguments() == null ? "{}" : tc.arguments());
-        }
-      }
-    } else if (m instanceof ToolResponseMessage trm) {
-      n.put("type", "tool");
-      ArrayNode resps = n.putArray("responses");
-      for (var resp : trm.getResponses()) {
-        ObjectNode r = resps.addObject();
-        r.put("id", resp.id());
-        r.put("name", resp.name() == null ? "" : resp.name());
-        r.put("responseData", resp.responseData() == null ? "" : resp.responseData());
-      }
-    } else {
-      // Unknown message type — store a placeholder so we don't lose the count.
-      n.put("type", "unknown");
-      n.put("class", m.getClass().getName());
-      n.put("text", String.valueOf(m));
-    }
-    return n;
+    return codec.serialize(history, iteration, ctx.runId(), ctx.taskId());
   }
 
   private SavedContext deserialize(String json) throws Exception {
-    JsonNode root = objectMapper.readTree(json);
-    String runId = root.path("runId").asText("");
-    String taskId = root.path("taskId").asText("");
-    int iteration = root.path("iteration").asInt(0);
-    long savedAt = root.path("savedAtEpochMs").asLong(0L);
-    List<Message> history = new ArrayList<>();
-    JsonNode arr = root.path("history");
-    if (arr.isArray()) {
-      for (JsonNode n : arr) {
-        Message m = deserializeMessage(n);
-        if (m != null) history.add(m);
-      }
-    }
-    return SavedContext.builder()
-        .runId(runId)
-        .taskId(taskId)
-        .iteration(iteration)
-        .history(history)
-        .savedAt(Instant.ofEpochMilli(savedAt))
-        .sizeBytes(json.getBytes(StandardCharsets.UTF_8).length)
-        .build();
-  }
-
-  private Message deserializeMessage(JsonNode n) {
-    String type = n.path("type").asText("");
-    return switch (type) {
-      case "system" -> new SystemMessage(n.path("text").asText(""));
-      case "user" -> new UserMessage(n.path("text").asText(""));
-      case "assistant" -> {
-        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
-        JsonNode tcs = n.path("toolCalls");
-        if (tcs.isArray()) {
-          for (JsonNode tc : tcs) {
-            toolCalls.add(
-                new AssistantMessage.ToolCall(
-                    tc.path("id").asText(""),
-                    tc.path("type").asText("function"),
-                    tc.path("name").asText(""),
-                    tc.path("arguments").asText("{}")));
-          }
-        }
-        yield AssistantMessage.builder()
-            .content(n.path("text").asText(""))
-            .toolCalls(toolCalls)
-            .build();
-      }
-      case "tool" -> {
-        List<ToolResponseMessage.ToolResponse> responses = new ArrayList<>();
-        JsonNode rs = n.path("responses");
-        if (rs.isArray()) {
-          for (JsonNode r : rs) {
-            responses.add(
-                new ToolResponseMessage.ToolResponse(
-                    r.path("id").asText(""),
-                    r.path("name").asText(""),
-                    r.path("responseData").asText("")));
-          }
-        }
-        yield ToolResponseMessage.builder().responses(responses).build();
-      }
-      default -> {
-        log.warn("ContextStore unknown message type on load: {}", type);
-        yield null;
-      }
-    };
+    return codec.deserialize(json);
   }
 }

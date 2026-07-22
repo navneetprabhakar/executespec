@@ -152,7 +152,8 @@ public class ProjectChatController {
           principal,
           "project_chat_turn",
           ChatToolPolicy.Capability.SPEND_AI,
-          "DENIED");
+          "DENIED",
+          project.getOrgId());
       throw denied;
     }
     chatSecurityAuditService.record(
@@ -162,7 +163,8 @@ public class ProjectChatController {
         principal,
         "project_chat_turn",
         ChatToolPolicy.Capability.SPEND_AI,
-        "ALLOWED");
+        "ALLOWED",
+        project.getOrgId());
     String message = inputSanitizer.normalize(body.message);
     try {
       inputSanitizer.scan(message);
@@ -174,7 +176,8 @@ public class ProjectChatController {
           principal,
           "project_chat_input",
           ChatToolPolicy.Capability.SPEND_AI,
-          "DENIED");
+          "DENIED",
+          project.getOrgId());
       throw denied;
     }
     ProjectChatMessage reply =
@@ -231,6 +234,12 @@ public class ProjectChatController {
         projectRepo
             .findById(projectId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
+    // RR-593 — evaluate the SUPER_ADMIN global bypass BEFORE the tenant-membership gate. The
+    // standard ProjectAccessGuard grants SUPER_ADMIN globally; the old ordering 403'd platform
+    // operators out of tenants they had not joined before their documented bypass was ever checked.
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
+      return user;
+    }
     // RL-2026-05-056 — honour V175 cross-org ProjectMember access (consistent with
     // ProjectAccessGuard.assertCanRead). A cross-org invitee reaches the project via a
     // ProjectMember row, not org match; the old org-only check 403'd them out of project chat.
@@ -238,9 +247,6 @@ public class ProjectChatController {
     boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, user.getId());
     if (!orgMatch && !isMember) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
-    }
-    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
-      return user;
     }
     String orgId = project.getOrgId() != null ? project.getOrgId() : user.getOrgId();
     String tier =

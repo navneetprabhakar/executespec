@@ -108,7 +108,8 @@ class ProjectChatToolsSecurityTest {
             principal,
             "list_repos",
             com.navneet.executespec.specchat.ChatToolPolicy.Capability.PROJECT_READ,
-            "DENIED");
+            "DENIED",
+            null);
   }
 
   @Test
@@ -133,7 +134,8 @@ class ProjectChatToolsSecurityTest {
             principal,
             "list_repos",
             com.navneet.executespec.specchat.ChatToolPolicy.Capability.PROJECT_READ,
-            "ALLOWED");
+            "ALLOWED",
+            null);
   }
 
   @Test
@@ -183,7 +185,8 @@ class ProjectChatToolsSecurityTest {
             principal,
             "list_repos",
             com.navneet.executespec.specchat.ChatToolPolicy.Capability.PROJECT_READ,
-            "OK");
+            "OK",
+            null);
   }
 
   @Test
