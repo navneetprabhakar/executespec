@@ -464,7 +464,10 @@ export interface ProjectSlackChannelDto {
 // RunEvent object: {type, timestamp, status?, taskId?, message?/line?, relativePath?, ...}.
 export interface RunLogEvent {
   type: string;
-  timestamp?: number;
+  // RR-1381 — persisted replay serializes `RunEvent.timestamp` (an `Instant`) as an ISO-8601
+  // string, not a number. Typing it number-only made `replayEntry` substitute 0 for every
+  // reloaded event, dating them all to 1970. Accept both; `runReplay` normalizes.
+  timestamp?: number | string;
   [k: string]: unknown;
 }
 

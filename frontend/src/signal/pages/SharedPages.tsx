@@ -228,30 +228,48 @@ export function SharedPage() {
     setData(null);
     setProjectSurface(null);
     setErr('');
+    // RR-1331 — public share bearers are confidential; a slow response for token A must never be
+    // painted under token B after the viewer navigates. Gate every setter on a per-effect
+    // generation so an out-of-order or superseded completion is discarded.
+    let cancelled = false;
     const legacyOnly = location.pathname.startsWith('/reports/shared/');
     if (legacyOnly) {
       api
         .getSharedReport(token)
         .then((d) => {
+          if (cancelled) return;
           if (d) setData(d);
           else setErr('Share link expired or revoked.');
         })
-        .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'Failed to load.'));
-      return;
+        .catch((e: unknown) => {
+          if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load.');
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     api
       .getSharedProjectSurface(token)
-      .then(setProjectSurface)
+      .then((s) => {
+        if (!cancelled) setProjectSurface(s);
+      })
       .catch(() => {
+        if (cancelled) return;
         api
           .getSharedReport(token)
           .then((d) => {
+            if (cancelled) return;
             if (d) setData(d);
             else setErr('Share link expired or revoked.');
           })
-          .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'Failed to load.'));
+          .catch((e: unknown) => {
+            if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load.');
+          });
       });
+    return () => {
+      cancelled = true;
+    };
   }, [location.pathname, token]);
 
   if (err) {

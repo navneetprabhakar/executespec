@@ -71,6 +71,47 @@ export function parseErrorMessage(status: number, raw: string): string {
   return STATUS_MESSAGES[status] ?? `Request failed (${status}). Please try again.`;
 }
 
+/**
+ * RR-169 — every shared request now carries a deadline. Before this, `fetchJson`/`fetchText`
+ * issued `fetch` with no timeout signal, so a stalled connection left spinners and mutation
+ * controls pending indefinitely, encouraged duplicate user actions, and retained request/response
+ * resources across navigation. A single default total deadline turns a stall into a typed
+ * timeout `ApiError` (status 0, same sentinel a network failure uses) that callers already branch
+ * on via `isRetryableError`.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Builds an `AbortSignal` that fires after `timeoutMs`, composed with an optional caller signal so
+ * a component that unmounts can still cancel. Uses a manual `AbortController` rather than
+ * `AbortSignal.timeout`/`AbortSignal.any` so it works in every runtime (including the jsdom test
+ * env). Returns the signal plus a `clear()` to release the timer once the request settles.
+ */
+function timeoutSignal(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): {signal: AbortSignal; clear: () => void; timedOut: () => boolean} {
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timer = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
+  const onAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', onAbort, {once: true});
+  }
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+      if (callerSignal) callerSignal.removeEventListener('abort', onAbort);
+    },
+    timedOut: () => didTimeout,
+  };
+}
+
 let refreshInFlight: Promise<boolean> | null = null;
 
 function shouldAttemptRefresh(url: string): boolean {
@@ -137,6 +178,8 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
   // ApiError with `status: 0` (a sentinel callers can branch on for
   // retry UI). Genuine 4xx/5xx responses still reach the original status
   // path.
+  // RR-169: compose a total deadline so a stalled request fails typed instead of hanging forever.
+  const deadline = timeoutSignal(opts?.signal ?? undefined, DEFAULT_REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     const headers = {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers};
@@ -144,29 +187,43 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
       ...opts,
       headers,
       credentials: 'include', // send refresh_token cookie
+      signal: deadline.signal,
     });
   } catch (e) {
+    if (deadline.timedOut()) {
+      throw new ApiError(0, 'The request timed out. Please check your connection and try again.');
+    }
     const reason = e instanceof Error ? e.message : 'unknown';
     throw new ApiError(
       0,
       `Can't reach the server (${reason}). Check your connection and try again.`,
     );
+  } finally {
+    deadline.clear();
   }
   return res;
 }
 
 async function fetchText(url: string): Promise<Response> {
+  // RR-169: same total deadline for plain-text reads.
+  const deadline = timeoutSignal(undefined, DEFAULT_REQUEST_TIMEOUT_MS);
   try {
     return await fetch(BASE + url, {
       headers: {...authHeader()},
       credentials: 'include',
+      signal: deadline.signal,
     });
   } catch (e) {
+    if (deadline.timedOut()) {
+      throw new ApiError(0, 'The request timed out. Please check your connection and try again.');
+    }
     const reason = e instanceof Error ? e.message : 'unknown';
     throw new ApiError(
       0,
       `Can't reach the server (${reason}). Check your connection and try again.`,
     );
+  } finally {
+    deadline.clear();
   }
 }
 

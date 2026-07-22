@@ -24,6 +24,7 @@ import {
   billingUsageSummary,
   invoiceDisplay,
   managedKind,
+  paymentAuditToRow,
   planCardsFrom,
   planMoney,
   PLAN_FEATURES,
@@ -106,7 +107,10 @@ export function IdeBilling() {
       }
       if (p.status === 'fulfilled') {
         const rows = Array.isArray(p.value) ? p.value : p.value.content;
-        setPayments(Array.isArray(rows) ? (rows as PaymentRowLite[]) : []);
+        // RR-359 — map the audit DTO (amountMinor / gatewayProvider / eventType) to the display
+        // row once, rather than casting incompatible fields and rendering every paid invoice as
+        // amount `—` / Pending.
+        setPayments(Array.isArray(rows) ? rows.map(paymentAuditToRow) : []);
       }
       setLoaded(true);
     });

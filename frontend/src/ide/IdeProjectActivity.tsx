@@ -4,6 +4,7 @@ import {IdeLoader} from '@/ide/IdeKit';
 import {LoadError} from '@/ide/LoadError';
 import {useAsyncData} from '@/lib/loadState';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {actorLabel} from '@/ide/projectMoreUtils';
 
 export function IdeProjectActivity() {
   const {projectId = ''} = useParams();
@@ -52,9 +53,7 @@ export function IdeProjectActivity() {
               <span style={{flex: 1, minWidth: 180}}>
                 {String(e.summary || e.description || e.message || '')}
               </span>
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>
-                {String(e.actorName || e.actor || '')}
-              </span>
+              <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>{actorLabel(e)}</span>
             </div>
           ))}
         </div>
