@@ -6,7 +6,6 @@ import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallT
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -137,6 +136,10 @@ public class RunOrchestrator implements RunControlPort {
 
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
+
+  /** RR-034 — bounded final-commit of the run workspace (extracted from this god class). */
+  private final WorkspaceGitCommitService workspaceGitCommitService;
+
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SequentialExecutor executor;
@@ -2798,23 +2801,14 @@ public class RunOrchestrator implements RunControlPort {
    * <p>Best-effort — a failed commit (e.g. nothing to commit, user had a .git/index.lock problem)
    * is logged but doesn't fail the run.
    */
+  /**
+   * RR-034 (2026-07-22, P1) — bounded, kill-on-timeout final commit. The hardened implementation
+   * lives in {@link WorkspaceGitCommitService} so this god class does not grow; see that class for
+   * the rationale (previously the inline version ignored the add wait boolean, never killed a
+   * timed-out process, committed with no timeout, and left the output pipe undrained).
+   */
   private void commitWorkspaceOutputs(String runId, Path workspace) {
-    if (workspace == null || !Files.isDirectory(workspace.resolve(".git"))) return;
-    try {
-      ProcessBuilder addPb =
-          new ProcessBuilder("git", "add", "-A")
-              .directory(workspace.toFile())
-              .redirectErrorStream(true);
-      addPb.start().waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
-      ProcessBuilder commitPb =
-          new ProcessBuilder("git", "commit", "--allow-empty", "-m", "V2 run output for " + runId)
-              .directory(workspace.toFile())
-              .redirectErrorStream(true);
-      int exit = commitPb.start().waitFor();
-      log.info("RunOrchestrator run={} final commit exit={}", runId, exit);
-    } catch (Exception e) {
-      log.warn("RunOrchestrator run={} final commit failed: {}", runId, e.getMessage());
-    }
+    workspaceGitCommitService.commitWorkspaceOutputs(runId, workspace);
   }
 
   // cancel(runId) moved to RunLifecycleService (god-class split inc-6, audit #43).
