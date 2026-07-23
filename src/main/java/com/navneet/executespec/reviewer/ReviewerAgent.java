@@ -229,11 +229,11 @@ public class ReviewerAgent {
         req.skipWiringPass(),
         preReviewBuildError != null);
 
-    // A pass that hits the iteration cap has typically done meaningful fixes
-    // before running out of turns — the workspace is still in a reasonable
-    // state. Only a hard ERROR outcome (LLM failure, tool dispatch crash)
-    // warrants REVIEW_FAILED. ITERATION_LIMIT_EXCEEDED and STOPPED_WITHOUT_COMPLETE
-    // fall through to the final build, whose exit code dictates the verdict.
+    // A reviewer pass is proof only when it reaches completeTask and emits the required verdict.
+    // A green build cannot substitute for an unfinished semantic review: run 1e1762b9 hit the
+    // iteration limit, produced a salvage summary with no verdict, and was incorrectly promoted to
+    // CLEAN because the narrower wiring pass completed. Preserve the deterministic build evidence,
+    // but fail the review protocol closed for every non-COMPLETED outcome.
     PassRun generalRun =
         runPassWithTimeout(
             req,
@@ -246,28 +246,21 @@ public class ReviewerAgent {
     if (!generalRun.workspaceQuiescent()) {
       return abandonedReview(general, null, "general", start);
     }
-    if (general.outcome() == WorkerResult.Outcome.ERROR) {
-      log.warn("ReviewerAgent general pass errored: {}", general.outcome());
-      // RR-275 — do not discard cheap deterministic verification on a provider/tool ERROR. Run the
-      // final build on the frozen workspace and attach its verdict; REVIEW_FAILED is preserved as
-      // an independent signal so downstream sees a real build state, not null/unknown.
+    if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
+      log.warn("ReviewerAgent general pass did not complete: {}", general.outcome());
+      // RR-275 — do not discard cheap deterministic verification when the semantic pass is
+      // unavailable. REVIEW_FAILED remains independent from the frozen workspace build result.
       FinalBuildEvidence fb = runFinalBuild(req);
       return ReviewerResult.builder()
           .overall(ReviewerResult.Overall.REVIEW_FAILED)
           .generalPassOutcome(general)
+          .generalPassSummary(general.completionSummary())
           .finalBuildPassed(fb.passed())
           .finalBuildExitCode(fb.exitCode())
           .finalBuildOutput(fb.output())
           .totalLatencyMs(System.currentTimeMillis() - start)
           .build();
     }
-    if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
-      log.warn(
-          "ReviewerAgent general pass did not call completeTask ({}), "
-              + "continuing to wiring pass with partial work",
-          general.outcome());
-    }
-
     WorkerResult wiring = null;
     if (!req.skipWiringPass()) {
       // Re-capture build state before the wiring pass — the general pass may have already fixed
@@ -289,8 +282,8 @@ public class ReviewerAgent {
       if (!wiringRun.workspaceQuiescent()) {
         return abandonedReview(general, wiring, "wiring", start);
       }
-      if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
-        log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
+      if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
+        log.warn("ReviewerAgent wiring pass did not complete: {}", wiring.outcome());
         // RR-275 — same as the general-pass ERROR branch: keep REVIEW_FAILED but still run the
         // deterministic final build on the frozen workspace so the build verdict is not lost.
         FinalBuildEvidence fb = runFinalBuild(req);
@@ -299,17 +292,12 @@ public class ReviewerAgent {
             .generalPassOutcome(general)
             .generalPassSummary(general.completionSummary())
             .wiringPassOutcome(wiring)
+            .wiringPassSummary(wiring.completionSummary())
             .finalBuildPassed(fb.passed())
             .finalBuildExitCode(fb.exitCode())
             .finalBuildOutput(fb.output())
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
-      }
-      if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
-        log.warn(
-            "ReviewerAgent wiring pass did not call completeTask ({}), "
-                + "falling through to final build",
-            wiring.outcome());
       }
     }
 
@@ -980,6 +968,9 @@ exit=0 — the harness will reject premature completions.
 
   private ReviewerResult.Overall determineOverall(
       WorkerResult general, WorkerResult wiring, boolean buildPassed) {
+    if (!completedReviewPass(general) || (wiring != null && !completedReviewPass(wiring))) {
+      return ReviewerResult.Overall.REVIEW_FAILED;
+    }
     PassVerdict gV = parsePassVerdict(general);
     PassVerdict wV = wiring == null ? PassVerdict.CLEAN : parsePassVerdict(wiring);
     ReviewerResult.Overall raw = determineOverallRaw(gV, wV, general, wiring, buildPassed);
@@ -1010,6 +1001,10 @@ exit=0 — the harness will reject premature completions.
       return ReviewerResult.Overall.CLEAN;
     }
     return raw;
+  }
+
+  private static boolean completedReviewPass(WorkerResult result) {
+    return result != null && result.outcome() == WorkerResult.Outcome.COMPLETED;
   }
 
   /**

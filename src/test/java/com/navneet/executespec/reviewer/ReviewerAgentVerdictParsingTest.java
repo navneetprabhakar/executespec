@@ -88,6 +88,36 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   @Test
+  void unfinished_general_pass_cannot_be_promoted_by_clean_wiring_and_green_build()
+      throws Exception {
+    var g =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
+            .iterations(100)
+            .completionSummary("salvage: best-guess edit produced after iter-limit")
+            .toolCallLog(List.of("editFile(path=app/service.py)"))
+            .build();
+    var w = workerWithSummary("VERDICT: CLEAN\nWiring complete.");
+
+    assertEquals(ReviewerResult.Overall.REVIEW_FAILED, determineOverall(agent(), g, w, true));
+  }
+
+  @Test
+  void unfinished_wiring_pass_cannot_be_promoted_by_clean_general_and_green_build()
+      throws Exception {
+    var g = workerWithSummary("VERDICT: CLEAN\nGeneral review complete.");
+    var w =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+            .iterations(12)
+            .completionSummary("wiring review stopped without verdict")
+            .toolCallLog(List.of())
+            .build();
+
+    assertEquals(ReviewerResult.Overall.REVIEW_FAILED, determineOverall(agent(), g, w, true));
+  }
+
+  @Test
   void noOpBuildExitZeroIsNotVerifiedBuildEvidence() {
     assertEquals(
         false,

@@ -27,8 +27,8 @@ class AccuracyReportTruthPolicyTest {
 
     assertThat(report.getUnknownRequirements()).isEmpty();
     assertThat(report.getPartialRequirements()).hasSize(1);
-    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
-    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(79);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("C");
   }
 
   @Test
@@ -63,8 +63,8 @@ class AccuracyReportTruthPolicyTest {
 
     AccuracyReportTruthPolicy.enforceConsistency(report);
 
-    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
-    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(79);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("C");
   }
 
   @Test
@@ -80,7 +80,7 @@ class AccuracyReportTruthPolicyTest {
 
     AccuracyReportTruthPolicy.enforceConsistency(report);
 
-    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
-    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(69);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("D");
   }
 }

@@ -1064,8 +1064,8 @@ recovers.**
 
 **Release-blocker generated-output audit (2026-07-23).** TDD planning now keeps failing tests and
 implementation in one cohesive task instead of emitting mirrored test-only then implementation-only
-passes. Any accuracy assessment that admits a missing or partial requirement is capped below the A
-band (89/B), and the reviewer/accuracy/test-planner prompts explicitly challenge documented default
+passes. An admitted partial requirement caps accuracy at 79/C; an admitted missing requirement caps
+it at 69/D. The reviewer/accuracy/test-planner prompts explicitly challenge documented default
 startup, persistence fixtures that bypass production wiring, cross-operation idempotency collisions,
 raw internal error leakage, and repeated migration advancement. These checks were added after a
 96/96 self-green generated FastAPI suite failed all four independent acceptance probes.
@@ -1077,6 +1077,13 @@ quality does justify continuation, the target selector prefers the latest execut
 documentation-only tail tasks (while retaining a docs-only fallback). This closes the 2026-07-23
 failure where a timed-out wiring verifier switched providers and reran `README.md` instead of the
 API/service task that contained the defects.
+
+Reviewer evidence is now protocol-complete or failed: any general/wiring pass that does not reach
+`completeTask` returns `REVIEW_FAILED` while retaining deterministic build evidence; a salvage or
+iteration-limit summary can no longer combine with a narrower clean pass into `CLEAN`. At task
+boundaries, a normally completed worker with no failure reason is never classified as provider
+breakdown merely because its success text contains broad phrases such as "API errors"; this prevents
+green tasks from triggering false cross-provider reruns.
 
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 

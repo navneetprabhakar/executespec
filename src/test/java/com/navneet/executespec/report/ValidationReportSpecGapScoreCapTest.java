@@ -14,11 +14,11 @@ class ValidationReportSpecGapScoreCapTest {
   void admitted_partial_requirement_caps_the_headline_score() {
     AccuracyReport accuracy =
         AccuracyReport.builder()
-            .specAdherenceScore(89)
+            .specAdherenceScore(79)
             .partialRequirements(List.of("Release idempotency is not implemented"))
             .build();
 
-    assertEquals(89, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
+    assertEquals(79, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
   }
 
   @Test

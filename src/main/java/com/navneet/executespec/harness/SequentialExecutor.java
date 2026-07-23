@@ -3898,42 +3898,7 @@ to boot — skip it for those.""";
   }
 
   private static boolean providerBehaviorPoor(WorkerResult workerResult, String failureReason) {
-    if (workerResult != null) {
-      if (workerResult.outcome() == WorkerResult.Outcome.ERROR) {
-        return true;
-      }
-      if (countFileWrites(workerResult.toolCallLog()) == 0
-          && providerBreakdownOutcome(workerResult.outcome())) {
-        return true;
-      }
-    }
-    String text =
-        ((failureReason == null ? "" : failureReason)
-                + " "
-                + (workerResult == null || workerResult.finalAssistantText() == null
-                    ? ""
-                    : workerResult.finalAssistantText()))
-            .toLowerCase(Locale.ROOT);
-    return containsAny(
-        text,
-        "llm",
-        "model provider",
-        "provider error",
-        "router",
-        "rate limit",
-        "429",
-        "5xx",
-        "timeout",
-        "connection reset",
-        "api error");
-  }
-
-  private static boolean providerBreakdownOutcome(WorkerResult.Outcome outcome) {
-    return outcome == WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE
-        || outcome == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED
-        || outcome == WorkerResult.Outcome.COMPLETED_BY_STAGNATION
-        || outcome == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED
-        || outcome == WorkerResult.Outcome.ABSOLUTE_DEADLINE_EXCEEDED;
+    return ProviderBehaviorPolicy.isPoor(workerResult, failureReason);
   }
 
   private static boolean blockedByEnvironment(WorkerResult workerResult, String failureReason) {
